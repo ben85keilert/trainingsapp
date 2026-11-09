@@ -230,6 +230,15 @@ def medienverzeichnis() -> Path:
     return datenverzeichnis() / "Medien"
 
 
+def paketmedienverzeichnis() -> Path:
+    """Dateien aus Paketen (U3, Ben 9.11.2026, `docs/plan_paketinhalte.md` §7): Videos, Bilder,
+    Töne und PDFs, je Datei einmal als ``<sha256>.<endung>`` — gleiche Datei aus zwei Paketen
+    liegt nur einmal da; was kein Paket mehr nennt, räumt `data.paketmedien` weg. Inhalt, den
+    eine Autorin bewusst ins Paket legt — nicht die Anhänge an Einträgen (die bleiben privat).
+    """
+    return medienverzeichnis() / "Pakete"
+
+
 def anhaengeverzeichnis() -> Path:
     """Fotos und Videos an Einträgen — die eigene Übungsausführung (`core/anhaenge.py`).
 
@@ -253,6 +262,7 @@ __all__ = [
     "kartenverzeichnis",
     "medienverzeichnis",
     "messungenverzeichnis",
+    "paketmedienverzeichnis",
     "paketordner",
     "streckenverzeichnis",
     "updateverzeichnis",

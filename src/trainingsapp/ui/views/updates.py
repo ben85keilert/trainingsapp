@@ -26,7 +26,8 @@ from collections.abc import Callable
 import flet as ft
 
 from trainingsapp.config import app_version, ist_aktiv
-from trainingsapp.core.pakete import Paket
+from trainingsapp.core.pakete import MAX_PAKET_BYTES, Paket, PaketFehler
+from trainingsapp.core.paketmedien import groesse_text
 from trainingsapp.core.paketquelle import (
     INDEX,
     IndexEintrag,
@@ -54,6 +55,11 @@ from trainingsapp.ui.views.pakete import (
 )
 
 ROUTE = "/einstellungen/updates"
+
+
+#: Größere Pakete (mit Videos, U3) lädt die App nicht von selbst — sie bleiben vorgemerkt, mit
+#: Größe, bis man selbst lädt (Ben, 9.11.2026: „Quelle zeigt die Größe vorher“)
+GROSS_VON_SELBST = 20_000_000
 
 
 def _eintrag_aus_paket(p: Paket) -> IndexEintrag | None:
@@ -95,7 +101,10 @@ async def pruefung_ausfuehren(state: AppState) -> UpdateStand:
     for u in ergebnis.updates:
         # „auto“ spielt alles ein, „klein“ nur, wenn bloß die letzte Stelle steigt (Ben,
         # 9.11.2026), sonst und bei „manuell“ bleibt es vorgemerkt
-        if not von_selbst(u.installiert.update_modus, u.installiert.version, u.eintrag.version):
+        if (
+            not von_selbst(u.installiert.update_modus, u.installiert.version, u.eintrag.version)
+            or u.eintrag.bytes > GROSS_VON_SELBST
+        ):
             offen.append(u)
             continue
         try:
@@ -105,7 +114,7 @@ async def pruefung_ausfuehren(state: AppState) -> UpdateStand:
                 u.eintrag.id, u.eintrag.quelle_url or None, u.installiert.quelle_art
             )
             state.pakete.verfuegbar_loeschen(u.eintrag.id)
-        except (QuellenFehler, sqlite3.Error) as e:
+        except (QuellenFehler, PaketFehler, sqlite3.Error) as e:
             ergebnis.fehler.append(f"{u.eintrag.name}: {e}")
             offen.append(u)
             continue
@@ -319,7 +328,18 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
             f"Version {version_text(p.version)}" if p.version is not None else "ohne Version"
         )
         if p.verfuegbar is not None:
-            teile.append(f"verfügbar: Version {version_text(p.verfuegbar)}")
+            groesse = next(
+                (
+                    u.eintrag.bytes
+                    for u in (state.updates.pruefung.updates if state.updates else [])
+                    if u.eintrag.id == p.id
+                ),
+                0,
+            )
+            teile.append(
+                f"verfügbar: Version {version_text(p.verfuegbar)}"
+                + (f" · {groesse_text(groesse)}" if groesse > MAX_PAKET_BYTES else "")
+            )
         elif p.geprueft is not None:
             teile.append("aktuell")
         eintrag = _eintrag_aus_paket(p)
@@ -362,6 +382,8 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
             teile.append("1 Kurs" if e.kurse == 1 else f"{e.kurse} Kurse")
         if e.version is not None:
             teile.append(f"Version {version_text(e.version)}")
+        if e.bytes > MAX_PAKET_BYTES:  # mit Dateien (U3) — vorher sagen, wie groß
+            teile.append(groesse_text(e.bytes))
         if e.quelle_name:
             teile.append(e.quelle_name)
         return ft.Row(

@@ -132,11 +132,56 @@ sie schreiben — der Kurseditor bringt den Export mit).
 - Auf dem eigenen Gerät bleiben exportierte eigene Übungen eigene Übungen.
 - „Eigene“ und „Eigene Übungen“ sind als Paketname gesperrt.
 
+## Pakete mit Dateien (ZIP, Formatversion 4 — U3, Ben 9.11.2026)
+
+`docs/plan_paketinhalte.md` §7, Entscheidungen F3/F4. Ein Paket kann Videos, Bilder, Töne und
+PDFs mitbringen — an Übungen (`media`), Planübungen (`medien`) und Kurskapiteln (`media`):
+
+- **Datei:** eine ZIP mit `paket.json` (das JSON wie unten, `"version": 4`) und je Datei
+  `medien/<sha256>.<endung>` — der Name *ist* die Prüfsumme. Erlaubt: `jpg`/`jpeg`/`png`/`webp`
+  (Bild), `mp4`/`m4v`/`mov` (Video), `m4a`/`mp3` (Ton), `pdf`. Ein Medium zeigt mit
+  `{ "source": "paket", "uri": "medien/<sha256>.<endung>", "title": "…", "license": "…" }`
+  darauf; die Art folgt der Endung. Ohne Dateien bleibt es JSON (Version 1–3) — ältere Apps
+  lesen eine ZIP nicht („kein JSON“).
+- **Grenzen** (`core/paketmedien.py`): Datei bis 300 MB, ausgepackt bis 400 MB, höchstens 2000
+  Einträge, keine verschlüsselten; `paket.json` bis 5 MB. Gelesen wird nur `paket.json` ganz,
+  jede Datei geht beim Import mit Prüfsumme in die Ablage (`Paketmedium.kopieren`) — stimmt sie
+  nicht, bricht der Import ab, bevor die Datenbank etwas sieht.
+- **Ablage** (`data/paketmedien.py`): `Medien/Pakete/<sha256>.<endung>` neben der Datenbank,
+  jede Datei einmal (zwei Pakete teilen sie); `aufraeumen` löscht nach jedem Import und beim
+  Start, was keine Übung (auch im Papierkorb), kein Plan, Kurs, Paketstand und keine Pläne
+  eines Pakets mehr nennen — „Wieder installieren“ findet sie also, solange das Paket bekannt
+  ist. Nie in Backup, Export der Messungen oder Sync.
+- **Ortsangaben raus** (F4, Grundregel „GPS nie teilen“, `core/bereinigen.py`):
+  `trainingsapp-paket bauen` und der Export in der App bereinigen jede Datei — JPEG ohne
+  Exif/XMP/IPTC und ohne Anhänge hinter dem Bildende, PNG nur mit Bildblöcken, WebP ohne
+  EXIF/XMP, MP4/MOV/M4A mit `udta`/`meta`/`uuid` als `free` (gleiche Größe, Versätze bleiben),
+  MP3 ohne ID3; PDF bleibt. **Was sich nicht sicher bereinigen lässt** (andere Formate, ein Video
+  mit Metadatenspur), **kommt nicht ins Paket**. Bereinigen ist idempotent: Eine saubere Datei
+  behält ihren Namen.
+- **In der App:** Import nimmt `.json`, `.toml` (ohne Dateien) und `.zip` (über den Pfad, nie
+  ganz über die Leitung); die Rückfrage nennt Zahl und Größe der Dateien. Übungsseite, „i“ der
+  Planübung, Material beim Üben und Kurskapitel zeigen sie in einer Zeile
+  (`components/medienliste.py`): Video, Bild, Ton öffnen `…/paketmedium/<datei>`
+  (`views/paketmedium.py`), ein PDF „Öffnen mit …“ (Teilen-Menü). „Übung bearbeiten“ und „Im Plan
+  einstellen“ zeigen sie ohne Adressfeld — nur herausnehmen. Der Export wird eine ZIP, sobald
+  eine gewählte Übung oder ein Plan eine Paketdatei nennt.
+- **TOML mit Dateien** (Inhalte-Repo): `media = [{ datei = "medien/kniebeuge.mp4", title = "…" }]`
+  — Pfad neben der TOML; `trainingsapp-paket pruefen` bereinigt probeweise und meldet Fehler,
+  `bauen` schreibt `uebungspaket_<Name>.zip` (reproduzierbar: feste Zeitstempel, feste
+  Reihenfolge), `index` nennt sie mit `format_version: 4` und Größe. `TRAININGSAPP_PAKETE` liest
+  `.zip` und TOML mit Dateien ebenso.
+- **Quellen:** ein Index darf `.zip`-Pakete nennen (Download bis 300 MB, Prüfsumme wie immer);
+  die Liste zeigt die Größe, und Pakete über 20 MB spielt die App **nicht von selbst** ein — sie
+  bleiben vorgemerkt, bis man sie lädt. *Am Server* (Homepage, Caddy) gehen bisher nur `*.json`
+  durch — `.zip` freizugeben braucht Bens Zustimmung dort (P164).
+
 ## Dateiformat
 
 JSON, UTF-8. Version 1 (Übungen); **Version 2** fügt `kurse[]` hinzu, **Version 3**
-`plaene[]` (Ben, 28.10.2026) — eine Datei ohne Kurse und Pläne wird weiter als Version 1
-geschrieben, ohne Pläne als Version 2; ältere Apps lesen sie:
+`plaene[]` (Ben, 28.10.2026), **Version 4** Dateien (nur in einer ZIP, Abschnitt oben) — eine
+Datei ohne Kurse und Pläne wird weiter als Version 1 geschrieben, ohne Pläne als Version 2;
+ältere Apps lesen sie:
 
 ```json
 {
@@ -201,7 +246,7 @@ Je Übung:
 | `bedingung` | — | **Nur je Planübung** (`plaene[].uebungen[]`, siehe unten) — an der Übung seit 8.11.2026 nicht mehr (Ben: „in Einzelübungen macht das keinen Sinn“); ein `bedingung` an der Übung übergeht die App |
 | `takt` | nein | Der **Takt** der Übung (Ben, 5.11.2026; `docs/plan_taktgeber.md` §2): eine Tabelle `takt = { name = "4-7-8", phasen = [{ name = "ein", dauer_s = 4, art = "ein" }, { name = "halten", dauer_s = 7, art = "halten" }, { name = "aus", dauer_s = 8, art = "aus" }], tempo = 1.0 }` — je Phase `name`, `dauer_s` (Sekunden, auch Zehntel, 0,1–600), `art` (`ein`, `aus`, `halten`, `ab`, `auf`, `frei`; fehlt = `frei`), `klang` (Schlüssel wie beim Timer; fehlt = Vorgabe je Art); am Takt `name`, `tempo` (Faktor 0,5–2, fehlt = 1), `runden` (Zahl; fehlt = endlos), `animation` (`puls`, `kreis`, `kreis_halten`, `box`, `balken`, `welle`; fehlt = nach Phasenzahl), `zaehlt` (Wahrheitswert, „Takt zählt“ — jede volle Runde eine Wiederholung, Zähl-Teil mit Quelle `takt`, seit Teil 2; fehlt = false, die Vorlagen Kniebeuge und Liegestütz haben es an), je Phase wahlweise `bild` (Pfad in der App-Ablage — nur vorbereitet, reist nicht sinnvoll im Paket). Fehlt das Feld oder ist keine Phase brauchbar, hat die Übung keinen Takt; unbrauchbare Phasen fallen weg, Unbekanntes gilt als Vorgabe, das Paket bleibt lesbar — `trainingsapp-paket pruefen` meldet einen falschen Typ als Fehler, einen unbekannten Schlüssel, eine unbekannte Art oder einen unbekannten Klang als Hinweis; ältere Apps übergehen das Feld (keine neue Formatversion). In der App `exercise.takt_json` (Migration 038). Im Drei-Wege-Abgleich ein Feld. Ein Takt je Timer-Abschnitt steht in `timer[].abschnitte[].takt` (gleiches Format) und geht der Übung vor — seit A6 (5.11.2026) auch **je Planübung** in `plaene[].uebungen[]` (fehlt = wie die Übung) |
 | `default_felder` | — | **überlesen** seit 22.10.2026 (P79, C2): Was die Übung hat, bieten alle Pläne an; weniger stellt man in der Planübung ein. Der Export schreibt es nicht mehr |
-| `media[]` | nein | `{kind, source, uri, title, license}`; leere `uri` und `source: "local"` fallen weg. `uri` nur `https://…` oder `mailto:…` — andere Schemata (`http://`, `intent://`, `tel:`, `file://`) verwirft der Import still, die Übung bleibt; die App öffnet außerdem vor jedem Tipp nur solche Adressen (`core/links.py`, auch für Links im Kapiteltext) |
+| `media[]` | nein | `{kind, source, uri, title, license}`; leere `uri` und `source: "local"` fallen weg. `uri` nur `https://…` oder `mailto:…` — andere Schemata (`http://`, `intent://`, `tel:`, `file://`) verwirft der Import still, die Übung bleibt; die App öffnet außerdem vor jedem Tipp nur solche Adressen (`core/links.py`, auch für Links im Kapiteltext). Seit U3 auch **Dateien aus dem Paket**: `source = "paket"`, `uri = "medien/<sha256>.<endung>"` (Abschnitt „Pakete mit Dateien“) |
 | `variante_von` | — | **überlesen** seit 26.10.2026: „Im Verlauf zusammen mit“ (Kopie teilt die Kachel des Originals) ist ausgebaut; der Export schreibt es nicht mehr, `trainingsapp-paket pruefen` prüft es nicht mehr |
 
 Je Kurs (`kurse[]`, Formatversion 2):

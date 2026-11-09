@@ -94,6 +94,7 @@ from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.medienliste import SYMBOLE as MEDIEN_SYMBOLE
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.symbol_blatt import symbol_blatt
 from trainingsapp.ui.components.tagwahl import TagWahl
@@ -978,6 +979,19 @@ def uebung_bearbeiten(
 
     medien_zeilen: list[tuple[ft.TextField, ft.TextField]] = []
     medien_spalte = ft.Column(spacing=6)
+    #: Dateien aus dem Paket (U3) — ohne Adressfeld, nur herausnehmen (ein Update bringt sie
+    #: dann nicht zurück, U1); das Bild der Bewegung (lokal) hat seine eigene Karte
+    paket_medien: list[Media] = [
+        m for m in (uebung.media if uebung else []) if m.source == MediaSource.PAKET
+    ]
+
+    def paket_entferner(m: Media) -> Callable[[], None]:
+        def handler() -> None:
+            paket_medien.remove(m)
+            medien_zeichnen()
+            page.update()
+
+        return handler
 
     def entferner(zeile: tuple[ft.TextField, ft.TextField]) -> Callable[[], None]:
         def handler() -> None:
@@ -989,17 +1003,38 @@ def uebung_bearbeiten(
 
     def medien_zeichnen() -> None:
         medien_spalte.controls = [
-            ft.Row(
-                spacing=6,
-                controls=[
-                    ft.Container(content=titel, expand=2),
-                    ft.Container(content=adresse, expand=3),
-                    ft.IconButton(
-                        ft.Icons.CLOSE, tooltip="Entfernen", on_click=entferner((titel, adresse))
-                    ),
-                ],
-            )
-            for titel, adresse in medien_zeilen
+            *(
+                ft.Row(
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Icon(MEDIEN_SYMBOLE.get(m.kind, ft.Icons.ATTACH_FILE), size=20),
+                        ft.Text(m.title or "Datei aus dem Paket", expand=True),
+                        ft.Text("aus dem Paket", size=11, opacity=0.6),
+                        ft.IconButton(
+                            ft.Icons.CLOSE,
+                            tooltip="Aus der Übung nehmen",
+                            on_click=paket_entferner(m),
+                        ),
+                    ],
+                )
+                for m in paket_medien
+            ),
+            *(
+                ft.Row(
+                    spacing=6,
+                    controls=[
+                        ft.Container(content=titel, expand=2),
+                        ft.Container(content=adresse, expand=3),
+                        ft.IconButton(
+                            ft.Icons.CLOSE,
+                            tooltip="Entfernen",
+                            on_click=entferner((titel, adresse)),
+                        ),
+                    ],
+                )
+                for titel, adresse in medien_zeilen
+            ),
         ]
 
     def zeile_anlegen(medium: Media | None = None) -> None:
@@ -1021,7 +1056,8 @@ def uebung_bearbeiten(
         page.update()
 
     for m in uebung.media if uebung else []:
-        zeile_anlegen(m)
+        if m.source == MediaSource.URL:  # nur Links — nicht das Bild der Bewegung (T6)
+            zeile_anlegen(m)
 
     # -- Timer (Ben, 17.10.2026) -------------------------------------------------
     # Die eigenen Profile der Übung, im Formular gehalten: „Abbrechen“ verwirft auch hier.
@@ -1558,7 +1594,7 @@ def uebung_bearbeiten(
             if (adresse.value or "").strip()
         ]
         # Das Bild der Bewegung (T6) bleibt als Medium neben den Videos
-        ziel.media = mit_bewegungsbild(videos, bewegung_stand["bild"])
+        ziel.media = mit_bewegungsbild([*paket_medien, *videos], bewegung_stand["bild"])
         return ziel
 
     def stand() -> tuple[Any, ...]:
@@ -1582,6 +1618,7 @@ def uebung_bearbeiten(
             bild_stand["key"],
             bild_stand["bild"],
             [(t.value or "", a.value or "") for t, a in medien_zeilen],
+            [m.uri for m in paket_medien],
             [p.als_dict() for p in timer_liste],
             bool(uhr_schalter.value),
             bool(zaehlt_schalter.value),

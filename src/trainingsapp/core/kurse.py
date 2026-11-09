@@ -51,6 +51,7 @@ from .models import (
     medium_aus_dict,
     new_id,
 )
+from .paketmedien import medium_aus_paket
 from .result_spec import FieldSpec, FieldType, vorrat_feld
 from .tagesbilanz import menge_text, mengen
 from .takt import AUS, Takt
@@ -270,6 +271,10 @@ def _medien_lesen(roh: Any) -> list[Media]:
     out: list[Media] = []
     for e in roh if isinstance(roh, list) else []:
         m = medium_aus_dict(dict(e) if isinstance(e, Mapping) else None)
+        if m is not None and m.source == MediaSource.PAKET:  # eine Datei aus dem Paket (U3)
+            if (aus_paket := medium_aus_paket(dict(e))) is not None:
+                out.append(aus_paket)
+            continue
         if m is None or m.source == MediaSource.LOCAL or not links.erlaubt(m.uri):
             continue
         if m.kind == MediaKind.AUDIO:
@@ -798,6 +803,10 @@ def medien_from_list(roh: Any) -> list[Media]:
             art = MediaKind(d.get("kind", "video"))
             quelle = MediaSource(d.get("source", "url"))
         except ValueError:
+            continue
+        if quelle == MediaSource.PAKET:  # eine Datei aus dem Paket (U3)
+            if (aus_paket := medium_aus_paket(d)) is not None:
+                ergebnis.append(aus_paket)
             continue
         if not uri or quelle == MediaSource.LOCAL or not links.erlaubt(uri):
             continue

@@ -63,6 +63,7 @@ from .kurse import (
     verweise_als_position,
 )
 from .models import Exercise, Media, MediaKind, MediaSource, Plan, jetzt
+from .paketmedien import Paketmedium, ist_paketmedium, medium_aus_paket
 from .paketversion import version_zahl
 from .result_spec import VORLAGEN, ResultSpec, basis_key
 from .takt import Takt
@@ -71,9 +72,9 @@ from .zaehlen import SensorWahl
 
 #: Kennung im Feld ``format`` — andere JSON-Dateien (Messungen) sind kein Paket
 FORMAT = "trainingsapp-uebungspaket"
-#: Höchste Formatversion, die diese App liest — 2 seit es Kurse gibt (``kurse``);
-#: eine Datei ohne Kurse wird weiter als Version 1 geschrieben
-FORMAT_VERSION = 3
+#: Höchste Formatversion, die diese App liest — 2 seit es Kurse gibt (``kurse``), 3 mit
+#: Plänen, 4 mit Dateien (ZIP, U3); eine Datei ohne Kurse wird weiter als Version 1 geschrieben
+FORMAT_VERSION = 4
 
 #: Namensraum der UUIDv5-IDs — derselbe wie für den Seed vor den Paketen.
 #: Einmal gewählt, nie ändern, sonst bekäme jede Übung eine neue ID.
@@ -320,6 +321,13 @@ class Paketinhalt:
     kurse: list[Kurs] = field(default_factory=list)
     #: Pläne des Pakets (Formatversion 3)
     plaene: list[PaketPlan] = field(default_factory=list)
+    #: Dateien der Paketdatei (ZIP, Formatversion 4, U3): Name ``medien/<sha256>.<endung>`` →
+    #: Datei — leer bei JSON und TOML (`core/paketdatei.py`)
+    medien: dict[str, Paketmedium] = field(default_factory=dict)
+
+    def medien_namen(self) -> set[str]:
+        """Die Paketdateien, die Übungen, Pläne und Kurse nennen (U3)."""
+        return paketmedien_in(self.uebungen, self.kurse, self.plaene)
 
 
 def paket_id(name: str) -> str:
@@ -803,6 +811,8 @@ def _medium(roh: Any) -> Media | None:
         art = MediaKind(roh.get("kind", "video"))
     except ValueError:
         raise ValueError(f"Medium „{uri}“: unbekannte Art oder Quelle") from None
+    if quelle == MediaSource.PAKET:  # eine Datei aus dem Paket (U3) — jede Art, auch Ton
+        return medium_aus_paket(roh)
     if art == MediaKind.AUDIO:
         raise ValueError(f"Medium „{uri}“: Ton gibt es nur an Kurskapiteln")
     if not uri or quelle == MediaSource.LOCAL or not links.erlaubt(uri):
@@ -1071,6 +1081,28 @@ def kurs_aus_stand(kurs_id: str, paket: str, standard: dict[str, Any]) -> Kurs:
     return _kurs_lesen({**standard, "id": kurs_id}, paket, {})
 
 
+def paketmedien_in(
+    uebungen: Iterable[Exercise],
+    kurse: Iterable[Kurs] = (),
+    plaene: Iterable[PaketPlan] = (),
+) -> set[str]:
+    """Die Paketdateien (``medien/<sha256>.<endung>``), die Übungen, Kapitel und Planübungen
+    nennen — auch die Planübungen in Kapiteln.
+
+    >>> u = Exercise(media=[Media(source=MediaSource.PAKET, uri="medien/" + "a" * 64 + ".mp4")])
+    >>> [n[-8:] for n in paketmedien_in([u])]
+    ['aaaa.mp4']
+    """
+    medien: list[Media] = [m for u in uebungen for m in u.media]
+    vorlagen: list[PlanVorlage] = [p.vorlage for p in plaene]
+    for k in kurse:
+        for kap in k.kapitel:
+            medien.extend(kap.media)
+            vorlagen.extend(kap.plaene)
+    medien.extend(m for v in vorlagen for item in v.items for m in item.medien)
+    return {m.uri for m in medien if ist_paketmedium(m)}
+
+
 def paket_bauen(
     paket: Paket,
     uebungen: list[Exercise],
@@ -1083,7 +1115,8 @@ def paket_bauen(
     """Die Paketdatei als Wörterbuch — `paket_json` macht Bytes daraus.
 
     Ohne Kurse bleibt die Datei Formatversion 1, ohne Pläne höchstens 2 — ältere Apps
-    lesen sie weiter.
+    lesen sie weiter. Mit Dateien aus dem Paket (U3) ist sie Version 4 — sie gehört dann in
+    eine ZIP (`core.paketdatei.paket_zip`).
 
     >>> u = Exercise(name="Baum", typen=["Qigong"])
     >>> zurueck = paket_lesen(paket_bauen(Paket(id="p1", name="Qigong"), [u])).uebungen[0]
@@ -1107,7 +1140,13 @@ def paket_bauen(
         kopf["neuigkeiten"] = paket.neuigkeiten
     roh: dict[str, Any] = {
         "format": FORMAT,
-        "version": 3 if plaene else 2 if kurse else 1,
+        "version": 4
+        if paketmedien_in(uebungen, kurse or [], plaene or [])
+        else 3
+        if plaene
+        else 2
+        if kurse
+        else 1,
         "paket": kopf,
         "exercises": [{"id": u.id, **stand(u)} for u in uebungen],
     }
@@ -1142,14 +1181,17 @@ _UMLAUTE = str.maketrans(
 )
 
 
-def dateiname(paket: Paket) -> str:
-    """Ein Dateiname, den jedes Ziel (Cloud, E-Mail, Dateimanager) verträgt.
+def dateiname(paket: Paket, endung: str = "json") -> str:
+    """Ein Dateiname, den jedes Ziel (Cloud, E-Mail, Dateimanager) verträgt — ``endung``
+    ``zip`` für ein Paket mit Dateien (U3).
 
     >>> dateiname(Paket(id="x", name="Qigong für Anfänger"))
     'uebungspaket_Qigong_fuer_Anfaenger.json'
+    >>> dateiname(Paket(id="x", name="Knie"), "zip")
+    'uebungspaket_Knie.zip'
     """
     teil = re.sub(r"[^A-Za-z0-9-]+", "_", paket.name.translate(_UMLAUTE)).strip("_")
-    return f"uebungspaket_{teil or 'export'}.json"
+    return f"uebungspaket_{teil or 'export'}.{endung}"
 
 
 __all__ = [

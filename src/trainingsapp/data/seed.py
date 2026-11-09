@@ -30,10 +30,12 @@ Spalte, um sich wiederzuerkennen.
 from __future__ import annotations
 
 import sqlite3
+import tempfile
 import tomllib
 from pathlib import Path
 
 from ..core.models import Exercise
+from ..core.paketdatei import paket_oeffnen, toml_oeffnen
 from ..core.pakete import (
     GRUNDAUSSTATTUNG,
     NAMENSRAUM,
@@ -45,6 +47,7 @@ from ..core.pakete import (
 from ..core.result_spec import VORLAGEN, ResultSpec
 from .db import transaktion
 from .pakete import PaketRepo, Status
+from .paketmedien import Paketablage
 
 SEED_DATEI = Path(__file__).parent / "seed" / "standard.toml"
 
@@ -112,7 +115,9 @@ def seed_einspielen(con: sqlite3.Connection, datei: Path = SEED_DATEI) -> int:
     return ergebnis.anzahl(Status.NEU)
 
 
-def pakete_aus_ordner(con: sqlite3.Connection, ordner: Path | None) -> list[str]:
+def pakete_aus_ordner(
+    con: sqlite3.Connection, ordner: Path | None, ablage: Paketablage | None = None
+) -> list[str]:
     """Entwicklungs-Loader (``TRAININGSAPP_PAKETE``, `config.paketordner`).
 
     Jede ``.toml``/``.json`` im Ordner wird beim Start wie ein Import eingespielt —
@@ -128,23 +133,32 @@ def pakete_aus_ordner(con: sqlite3.Connection, ordner: Path | None) -> list[str]
         return []
     if not ordner.is_dir():
         return [f"Paketordner nicht gefunden: {ordner}"]
-    pakete = PaketRepo(con)
+    pakete = PaketRepo(con, ablage)
     meldungen: list[str] = []
-    dateien = sorted(p for p in ordner.iterdir() if p.is_file() and p.suffix in (".toml", ".json"))
+    dateien = sorted(
+        p for p in ordner.iterdir() if p.is_file() and p.suffix in (".toml", ".json", ".zip")
+    )
     for datei in dateien:
-        try:
-            inhalt = seed_inhalt(datei)
-        except PaketFehler as fehler:
-            meldungen.append(str(fehler))
-            continue
-        vorher = pakete.laden(inhalt.paket.id)
-        if vorher is not None and not vorher.aktiv:
-            continue
-        try:
-            with transaktion(con):
-                pakete.importieren(inhalt, aktualisieren=True, neue_tags_oben=False)
-        except sqlite3.Error as fehler:
-            meldungen.append(f"{datei.name}: {fehler}")
+        # Mit Ablage nimmt eine TOML ihre Dateien mit (``datei = "…"``, bereinigt — U3)
+        with tempfile.TemporaryDirectory() as arbeit:
+            try:
+                if datei.suffix == ".toml" and ablage is not None:
+                    inhalt = toml_oeffnen(datei, Path(arbeit))
+                elif datei.suffix == ".zip":
+                    inhalt = paket_oeffnen(datei)
+                else:
+                    inhalt = seed_inhalt(datei)
+            except PaketFehler as fehler:
+                meldungen.append(str(fehler))
+                continue
+            vorher = pakete.laden(inhalt.paket.id)
+            if vorher is not None and not vorher.aktiv:
+                continue
+            try:
+                with transaktion(con):
+                    pakete.importieren(inhalt, aktualisieren=True, neue_tags_oben=False)
+            except (sqlite3.Error, PaketFehler) as fehler:
+                meldungen.append(f"{datei.name}: {fehler}")
     return meldungen
 
 

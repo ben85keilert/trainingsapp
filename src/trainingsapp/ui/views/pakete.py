@@ -31,17 +31,27 @@ Regeln: `data/pakete.py`; Format: `core/pakete.py`; beides in
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import sqlite3
+import tempfile
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import flet as ft
 
-from trainingsapp.config import medienverzeichnis
+from trainingsapp.config import datenverzeichnis, medienverzeichnis
 from trainingsapp.core.kurse import Kurs
 from trainingsapp.core.models import Exercise, Plan
+from trainingsapp.core.paketdatei import (
+    medien_fuer_export,
+    medien_umbenennen,
+    paket_oeffnen,
+    paket_zip,
+)
 from trainingsapp.core.pakete import (
     GRUNDAUSSTATTUNG,
     Paket,
@@ -52,7 +62,7 @@ from trainingsapp.core.pakete import (
     name_pruefen,
     paket_id,
     paket_json,
-    paket_lesen,
+    paketmedien_in,
     paketplan_aus,
 )
 from trainingsapp.core.paketquelle import DATEI, fremde_identitaet
@@ -66,7 +76,7 @@ from trainingsapp.ui.components.neu_laden import neu_laden_blatt
 from trainingsapp.ui.components.paket_link import import_blatt
 from trainingsapp.ui.components.paketvergleich import vergleich_blatt
 from trainingsapp.ui.components.uebungsbild import uebungsbild
-from trainingsapp.ui.components.weitergeben import weitergeben
+from trainingsapp.ui.components.weitergeben import datei_weitergeben, weitergeben
 from trainingsapp.ui.state import AppState
 
 
@@ -347,8 +357,11 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
 
     async def datei_importieren() -> None:
         try:
+            # Nur im Browser die Bytes — sonst den Pfad: eine ZIP mit Videos (U3) gehört nicht
+            # ganz über die Leitung
             dateien = await ft.FilePicker().pick_files(
-                dialog_title="Übungspaket wählen (.json)", with_data=True
+                dialog_title="Übungspaket wählen (.json, .zip, .toml)",
+                with_data=bool(getattr(page, "web", False)),
             )
         except Exception as fehler:  # am Rechner fehlt etwa zenity
             melden(f"Dateiauswahl nicht möglich: {fehler}")
@@ -356,18 +369,15 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
         if not dateien:
             return  # abgebrochen
         datei = dateien[0]
-        daten = datei.bytes
-        if daten is None and datei.path:
-            try:
-                daten = Path(datei.path).read_bytes()
-            except OSError as fehler:
-                melden(f"Die Datei ließ sich nicht lesen: {fehler}")
-                return
-        if daten is None:
-            melden("Die Datei ließ sich nicht lesen.")
-            return
+        name = Path(datei.name)
         try:
-            inhalt = paket_lesen(daten, name_vorgabe=Path(datei.name).stem)
+            if datei.path:
+                inhalt = paket_oeffnen(Path(datei.path), name.stem, endung=name.suffix)
+            elif datei.bytes is not None:
+                inhalt = paket_oeffnen(datei.bytes, name.stem, endung=name.suffix)
+            else:
+                melden("Die Datei ließ sich nicht lesen.")
+                return
         except PaketFehler as fehler:
             page.show_dialog(
                 ft.AlertDialog(
@@ -997,6 +1007,48 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
 # ---------------------------------------------------------------------------
 
 
+def export_zip(
+    state: AppState, paket: Paket, uebungen: list[Exercise], plaene: list[PaketPlan]
+) -> tuple[Path, list[str]]:
+    """Die Exportdatei mit den Paketdateien (U3) unter ``Export/`` — ZIP, oder JSON, wenn
+    keine Datei übrig blieb. Läuft im Hintergrund (`asyncio.to_thread`); ältere Exporte im
+    Ordner fallen weg. ``(Datei, Meldungen)``."""
+    ablage = state.pakete.ablage
+    ordner = datenverzeichnis() / "Export"
+    ordner.mkdir(parents=True, exist_ok=True)
+    for alt in ordner.glob("uebungspaket_*.zip"):
+        alt.unlink(missing_ok=True)
+    namen = paketmedien_in(uebungen, [], plaene)
+    with tempfile.TemporaryDirectory() as arbeit:
+        dateien, umbenennung, meldungen = medien_fuer_export(
+            namen,
+            (lambda n: ablage.pfad(n)) if ablage is not None else (lambda _n: None),
+            Path(arbeit),
+        )
+        uebungen_neu = [replace(u, media=medien_umbenennen(u.media, umbenennung)) for u in uebungen]
+        plaene_neu = [
+            replace(
+                pp,
+                vorlage=replace(
+                    pp.vorlage,
+                    items=[
+                        replace(i, medien=medien_umbenennen(i.medien, umbenennung))
+                        for i in pp.vorlage.items
+                    ],
+                ),
+            )
+            for pp in plaene
+        ]
+        json_daten = paket_json(paket, uebungen_neu, plaene=plaene_neu or None)
+        if not dateien:
+            ziel = ordner / dateiname(paket)
+            ziel.write_bytes(json_daten)
+            return ziel, meldungen
+        ziel = ordner / dateiname(paket, "zip")
+        paket_zip(ziel, json_daten, dateien)
+        return ziel, meldungen
+
+
 def paket_export_view(
     page: ft.Page, state: AppState, basis: str = "/pakete", auswahl: str | None = None
 ) -> ft.View:
@@ -1138,12 +1190,36 @@ def paket_export_view(
         )
         auswahl_liste = [u for u in uebungen if u.id in gewaehlt]
         plan_liste = [paketplan_aus(p) for p in plaene if p.id in gewaehlte_plaene]
-        await weitergeben(
-            page,
-            dateiname(paket),
-            paket_json(paket, auswahl_liste, plaene=plan_liste or None),
-            "application/json",
-        )
+        if not paketmedien_in(auswahl_liste, [], plan_liste):
+            await weitergeben(
+                page,
+                dateiname(paket),
+                paket_json(paket, auswahl_liste, plaene=plan_liste or None),
+                "application/json",
+            )
+            return
+        # Mit Dateien aus Paketen (U3): eine ZIP — jede Datei noch einmal bereinigt, im
+        # Hintergrund (Videos), dann über das Teilen-Menü
+        knopf.disabled = True
+        knopf.content = "Dateien werden vorbereitet …"
+        with contextlib.suppress(Exception):
+            page.update()
+        try:
+            ziel, meldungen = await asyncio.to_thread(
+                export_zip, state, paket, auswahl_liste, plan_liste
+            )
+        except (OSError, ValueError) as fehler:
+            meldungen, ziel = [f"Export fehlgeschlagen: {fehler}"], None
+        finally:
+            knopf.disabled = False
+            auffrischen()
+            with contextlib.suppress(Exception):
+                page.update()
+        if ziel is not None:
+            mime = "application/zip" if ziel.suffix == ".zip" else "application/json"
+            await datei_weitergeben(page, ziel, ziel.name, mime)
+        if meldungen:
+            page.show_dialog(ft.SnackBar(ft.Text(" ".join(sorted(set(meldungen))))))
 
     knopf.on_click = exportieren
     karten = [gruppe(t, m) for t, m in gruppen]

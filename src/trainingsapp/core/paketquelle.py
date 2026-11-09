@@ -26,6 +26,7 @@ import hashlib
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -34,6 +35,7 @@ from typing import Any, Final
 
 from .models import jetzt
 from .netz import OEFFNER, verschluesselt
+from .paketdatei import paket_oeffnen
 from .pakete import (
     FORMAT,
     GRUNDAUSSTATTUNG,
@@ -41,8 +43,8 @@ from .pakete import (
     Paket,
     PaketFehler,
     Paketinhalt,
-    paket_lesen,
 )
+from .paketmedien import MAX_ZIP_BYTES
 from .paketversion import version_zahl
 
 #: Kennung und Version des Index — `paket_werkzeug.index` schreibt genau das
@@ -187,12 +189,31 @@ def index_lesen(daten: Any, quelle_url: str) -> tuple[str, list[IndexEintrag]]:
     return name, eintraege
 
 
-def _laden(url: str) -> bytes:
-    """Holt bis zu `MAX_PAKET_BYTES` + 1 — mehr liest niemand; Weiterleitungen nur auf
+def _laden(url: str, grenze: int = MAX_PAKET_BYTES) -> bytes:
+    """Holt bis zu ``grenze`` + 1 Bytes — mehr liest niemand; Weiterleitungen nur auf
     https:// (`netz.OEFFNER`, A9)."""
     anfrage = urllib.request.Request(url, headers={"User-Agent": "trainingsapp-pakete"})
     with OEFFNER.open(anfrage, timeout=_ZEITLIMIT_S) as antwort:
-        return antwort.read(MAX_PAKET_BYTES + 1)
+        return antwort.read(grenze + 1)
+
+
+def _laden_gross(url: str) -> bytes:
+    """Wie `_laden`, für eine Paketdatei mit Dateien (ZIP, U3) — bis `MAX_ZIP_BYTES`."""
+    return _laden(url, grenze=MAX_ZIP_BYTES)
+
+
+def ist_zip(url: str) -> bool:
+    """Zeigt der Link auf ein Paket mit Dateien (``.zip``, U3)?
+
+    >>> ist_zip("https://x.org/pakete/knie.zip?v=2"), ist_zip("https://x.org/p.json")
+    (True, False)
+    """
+    return urllib.parse.urlsplit(url).path.lower().endswith(".zip")
+
+
+def _holer(url: str, laden: Callable[[str], bytes], gross: bool) -> Callable[[str], bytes]:
+    """Der eingebaute Lader liest für eine ZIP mehr; ein übergebener (Tests) bleibt."""
+    return _laden_gross if gross and laden is _laden else laden
 
 
 def _holen(url: str, laden: Callable[[str], bytes]) -> bytes:
@@ -349,11 +370,12 @@ def datei_eintrag(
     """Ein direkter Link auf eine Paketdatei als Eintrag wie aus einem Index (Ben,
     28.10.2026: „eine URL importieren, die updatefähig ist“) — Prüfsumme der geladenen
     Datei, ``quelle_url`` = der Link selbst. Wirft `QuellenFehler`."""
-    daten = _holen(url, laden)
-    if len(daten) > MAX_PAKET_BYTES:
+    gross = ist_zip(url)
+    daten = _holen(url, _holer(url, laden, gross))
+    if len(daten) > (MAX_ZIP_BYTES if gross else MAX_PAKET_BYTES):
         raise QuellenFehler("Die Paketdatei ist zu groß.")
     try:
-        inhalt = paket_lesen(daten)
+        inhalt = paket_oeffnen(daten)
     except PaketFehler as e:
         raise QuellenFehler(str(e)) from e
     eintrag = IndexEintrag(
@@ -391,6 +413,8 @@ def link_lesen(url: str, laden: Callable[[str], bytes] = _laden) -> tuple[str, A
     """
     if (fehler := url_pruefen(url)) is not None:
         raise QuellenFehler(fehler)
+    if ist_zip(url):  # ein Paket mit Dateien (U3) — kein Index
+        return "paket", datei_eintrag(url, laden)
     daten = _holen(url, laden)
     try:
         roh = json.loads(daten) if len(daten) <= MAX_PAKET_BYTES else None
@@ -408,14 +432,16 @@ def link_lesen(url: str, laden: Callable[[str], bytes] = _laden) -> tuple[str, A
 
 
 def paket_laden(eintrag: IndexEintrag, laden: Callable[[str], bytes] = _laden) -> Paketinhalt:
-    """Die Paketdatei eines Eintrags holen, Prüfsumme und Inhalt prüfen."""
-    daten = _holen(eintrag.url, laden)
-    if len(daten) > MAX_PAKET_BYTES:
+    """Die Paketdatei eines Eintrags holen, Prüfsumme und Inhalt prüfen — JSON oder ZIP mit
+    Dateien (U3, bis `MAX_ZIP_BYTES`)."""
+    gross = ist_zip(eintrag.url) or eintrag.bytes > MAX_PAKET_BYTES
+    daten = _holen(eintrag.url, _holer(eintrag.url, laden, gross))
+    if len(daten) > (MAX_ZIP_BYTES if gross else MAX_PAKET_BYTES):
         raise QuellenFehler("Die Paketdatei ist zu groß.")
     if hashlib.sha256(daten).hexdigest() != eintrag.sha256:
         raise QuellenFehler("Die Prüfsumme stimmt nicht — die Datei ist nicht die aus dem Index.")
     try:
-        inhalt = paket_lesen(daten)
+        inhalt = paket_oeffnen(daten)
     except PaketFehler as e:
         raise QuellenFehler(str(e)) from e
     if inhalt.paket.id != eintrag.id:

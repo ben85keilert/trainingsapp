@@ -138,6 +138,7 @@ from trainingsapp.ui.views.pakete import (
     paket_view,
     pakete_view,
 )
+from trainingsapp.ui.views.paketmedium import paketmedium_view
 from trainingsapp.ui.views.papierkorb import archiv_view, papierkorb_view
 from trainingsapp.ui.views.plan import einzel_plan, plan_view
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
@@ -758,8 +759,15 @@ def main(page: ft.Page) -> None:
         was der Stapel braucht. Unbekannte IDs enden beim letzten gültigen Element."""
         ablage.clear()
         teile = navigation.teile(route)  # "/plan/abc" → ["plan", "abc"]
+        # Dateien aus Paketen (U3) legen sich wie Anhänge über jede Ansicht
+        if "paketmedium" in teile:
+            i = teile.index("paketmedium")
+            stapel(teile[:i])
+            if len(teile) > i + 1:
+                medium_basis, medium_name = "/" + "/".join(teile[:i]), teile[i + 1]
+                ablegen(lambda: paketmedium_view(page, state, medium_basis, medium_name))
         # Anhänge (Foto, Video) legen sich wie der Timer über jede Ansicht
-        if "anhang" in teile:
+        elif "anhang" in teile:
             i = teile.index("anhang")
             stapel(teile[:i])
             anhang_routen("/" + "/".join(teile[:i]), teile[i + 1 :])

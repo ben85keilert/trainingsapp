@@ -186,7 +186,13 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   **Anweisungen je Planübung** (`plan_item.description`/`media_json`, Migration 046, Paketfeld
   `beschreibung`/`medien`) in „Im Plan einstellen“ und im „i“, beim Üben der Knopf **Material**
   (`core/material.py`, `components/material.py`) — **solange das Blatt offen ist, steht die Uhr
-  dieser Übung** (`einheit_ui.uhr_fuer_material_anhalten`), Schließen lässt sie weiterlaufen. Paketmanager: Jede
+  dieser Übung** (`einheit_ui.uhr_fuer_material_anhalten`), Schließen lässt sie weiterlaufen. **Pakete mit
+  Dateien** (U3, 9.11.2026): ZIP (Formatversion 4) mit `paket.json` und
+  `medien/<sha256>.<endung>`, Medium `source = "paket"` (Migration 047), Ablage
+  `Medien/Pakete/` neben der Datenbank (`data/paketmedien.py`, räumt auf), Lesen/Schreiben
+  `core/paketdatei.py` (auch TOML mit `datei = "…"`), **jede Datei vor dem Weitergeben ohne
+  Ortsangaben** (`core/bereinigen.py` — was nicht sicher geht, kommt nicht ins Paket), Anzeige
+  `components/medienliste.py` und `…/paketmedium/<datei>`. Paketmanager: Jede
   Paketübung trägt ihren Paketstand (`package_standard_json`) für „Auf Paketstand setzen“;
   Entfernen legt die Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück;
   **Deaktivieren** (Migration 017) versteckt alles, ohne zu löschen; was beim Update aus

@@ -35,6 +35,7 @@ import json
 import re
 import sqlite3
 import sys
+import tempfile
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -47,6 +48,13 @@ from trainingsapp.core.bedingung import bedingung_pruefen
 from trainingsapp.core.kurse import Kapitel, Kurs, PlanVorlage, VorlageItem
 from trainingsapp.core.links import erlaubt as links_erlaubt
 from trainingsapp.core.models import Exercise, Plan
+from trainingsapp.core.paketdatei import (
+    dateien_einbinden,
+    medienlisten,
+    paket_oeffnen,
+    paket_zip,
+    toml_oeffnen,
+)
 from trainingsapp.core.pakete import (
     FELDNAMEN,
     NAMENSRAUM,
@@ -58,6 +66,7 @@ from trainingsapp.core.pakete import (
     paket_lesen,
     stand,
 )
+from trainingsapp.core.paketmedien import medium_aus_paket
 from trainingsapp.core.paketquelle import (
     INDEX_FORMAT,
     INDEX_VERSION,
@@ -270,11 +279,28 @@ def pruefen(
                 fehler.extend(f"{wo_pe}: bedingung: {x}" for x in f_bed)
                 hinweise.extend(f"{wo_pe}: bedingung: {x}" for x in h_bed)
             hinweise.extend(f"{wo_pe}: {x}" for x in _planmedien_pruefen(pe.get("medien")))
+    if datei.suffix == ".toml" and _nennt_dateien(roh):
+        with tempfile.TemporaryDirectory() as arbeit:
+            try:
+                dateien = dateien_einbinden(roh, datei.parent, Path(arbeit))
+            except PaketFehler as f:
+                fehler.append(f"Dateien: {f}")
+            else:
+                groesse = sum(p.stat().st_size for p in dateien.values())
+                hinweise.append(
+                    f"{len(dateien)} Datei(en), bereinigt {groesse / 1e6:.1f} MB — "
+                    "`bauen` schreibt eine ZIP (Formatversion 4)"
+                )
     if inhalt.paket.version is None:
         hinweise.append("Kopf ohne `version` — ohne sie erkennt kein Gerät ein Update")
     for treffer in wortliste_pruefen(roh, wortliste):
         (fehler if streng else hinweise).append(f"Wortliste: {treffer}")
     return fehler, hinweise
+
+
+def _nennt_dateien(roh: dict[str, Any]) -> bool:
+    """Nennt die TOML Dateien (``datei = "…"``)?"""
+    return any(isinstance(e, dict) and "datei" in e for liste in medienlisten(roh) for e in liste)
 
 
 def _planmedien_pruefen(roh: Any) -> list[str]:
@@ -292,6 +318,12 @@ def _planmedien_pruefen(roh: Any) -> list[str]:
         return ["medien: keine Liste — fällt weg"]
     out: list[str] = []
     for e in roh:
+        if isinstance(e, dict) and "datei" in e:
+            continue  # eine Datei neben der TOML — prüft `dateien_einbinden`
+        if isinstance(e, dict) and e.get("source") == "paket":
+            if not medium_aus_paket(e):
+                out.append(f"medien: „{e.get('uri')}“ ist kein Name einer Paketdatei")
+            continue
         uri = str(e.get("uri") or "").strip() if isinstance(e, dict) else ""
         if not isinstance(e, dict) or not uri:
             out.append("medien: ein Eintrag ohne Adresse fällt weg")
@@ -330,21 +362,39 @@ def quelle_pruefen(
 
 
 def bauen(datei: Path, ziel: Path) -> Path:
-    """Schreibt die JSON-Paketdatei (Austauschformat) nach ``ziel`` und gibt den Pfad zurück."""
-    inhalt: Paketinhalt = seed_inhalt(datei)
+    """Schreibt die Paketdatei nach ``ziel`` und gibt den Pfad zurück — JSON, oder eine ZIP
+    (Formatversion 4), wenn die TOML Dateien nennt (``datei = "…"``, U3): jede bereinigt
+    (`core/bereinigen.py`), benannt nach ihrer Prüfsumme. Wirft `PaketFehler`."""
     ziel.mkdir(parents=True, exist_ok=True)
-    pfad = ziel / dateiname(inhalt.paket)
-    # ohne Zeitstempel: derselbe Quelltext ergibt dieselbe Datei und Prüfsumme (K28)
-    pfad.write_bytes(
-        paket_json(
+    with tempfile.TemporaryDirectory() as arbeit:
+        if datei.suffix == ".toml":
+            inhalt: Paketinhalt = toml_oeffnen(datei, Path(arbeit))
+        else:
+            inhalt = paket_oeffnen(datei)
+        # ohne Zeitstempel: derselbe Quelltext ergibt dieselbe Datei und Prüfsumme (K28)
+        json_daten = paket_json(
             inhalt.paket,
             inhalt.uebungen,
             inhalt.kurse,
             mit_zeitstempel=False,
             plaene=inhalt.plaene or None,
         )
-    )
-    return pfad
+        namen = inhalt.medien_namen()
+        if not namen:
+            pfad = ziel / dateiname(inhalt.paket)
+            pfad.write_bytes(json_daten)
+            return pfad
+        if fehlen := sorted(namen - set(inhalt.medien)):
+            raise PaketFehler(f"Dateien fehlen: {', '.join(fehlen)}")
+        dateien: dict[str, Path] = {}
+        for name in namen:  # aus der ZIP bzw. der Arbeitskopie in eine Datei
+            pfad_ = Path(arbeit) / ("z_" + name.removeprefix("medien/"))
+            if not pfad_.is_file():
+                inhalt.medien[name].kopieren(pfad_)
+            dateien[name] = pfad_
+        pfad = ziel / dateiname(inhalt.paket, "zip")
+        paket_zip(pfad, json_daten, dateien)
+        return pfad
 
 
 def index(
@@ -372,7 +422,7 @@ def index(
     pakete: list[dict[str, Any]] = []
     for datei in dateien:
         daten = datei.read_bytes()
-        inhalt = seed_inhalt(datei)
+        inhalt = paket_oeffnen(datei)  # JSON, TOML oder ZIP (U3)
         sha256 = hashlib.sha256(daten).hexdigest()
         pakete.append(
             {
@@ -388,7 +438,13 @@ def index(
                 "plaene": len(inhalt.plaene),
                 "neuigkeiten": inhalt.paket.neuigkeiten,
                 "veroeffentlicht": bekannt.get(sha256) or datetime.now(UTC).date().isoformat(),
-                "format_version": 3 if inhalt.plaene else 2 if inhalt.kurse else 1,
+                "format_version": 4
+                if inhalt.medien
+                else 3
+                if inhalt.plaene
+                else 2
+                if inhalt.kurse
+                else 1,
                 "signatur": None,
             }
         )
@@ -687,7 +743,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("dateien", nargs="+", type=Path)
     p.add_argument("--wortliste", type=Path, help="Begriffe, die in Texten nichts verloren haben")
     p.add_argument("--streng", action="store_true", help="Treffer der Wortliste sind Fehler")
-    b = sub.add_parser("bauen", help="JSON-Paketdateien schreiben")
+    b = sub.add_parser("bauen", help="Paketdateien schreiben (JSON, mit Dateien ZIP)")
     b.add_argument("dateien", nargs="+", type=Path)
     b.add_argument("--ziel", type=Path, default=Path("dist"))
     i = sub.add_parser("index", help="Index einer Paketquelle schreiben")
@@ -727,7 +783,11 @@ def main(argv: list[str] | None = None) -> int:
             if fehler:
                 print(f"{datei}: nicht gebaut — " + "; ".join(fehler))
                 return 1
-            print(bauen(datei, args.ziel))
+            try:
+                print(bauen(datei, args.ziel))
+            except PaketFehler as bau_fehler:
+                print(f"{datei}: nicht gebaut — {bau_fehler}")
+                return 1
         return 0
     if args.befehl == "quelle":
         zeilen, fehler = quelle_pruefen(args.url)

@@ -124,7 +124,7 @@ def test_migration_038_takt(tmp_path) -> None:
         (jetzt, jetzt),
     )
     con.commit()
-    assert migrieren(con) == 46
+    assert migrieren(con) == 47
     zeile = con.execute("SELECT takt_json FROM exercise WHERE id = 'u'").fetchone()
     assert zeile["takt_json"] == "{}"
     uebung = ExerciseRepo(con).laden("u")
@@ -1095,7 +1095,7 @@ def test_migration_028_planuebung_folgt(tmp_path) -> None:
             (f"i{nr}", nr, ziel, felder),
         )
     con.commit()
-    assert migrieren(con) == 46
+    assert migrieren(con) == 47
     zeilen = {
         r["id"]: (r["target_json"], r["fields_json"])
         for r in con.execute("SELECT id, target_json, fields_json FROM plan_item")
@@ -1150,7 +1150,7 @@ def test_migration_037_beschleunigung(tmp_path) -> None:
         )
     con.commit()
 
-    assert migrieren(con) == 46
+    assert migrieren(con) == 47
     zeile = con.execute("SELECT acc_json FROM exercise WHERE id = 'u'").fetchone()
     assert zeile["acc_json"] == "{}"
     uebung = ExerciseRepo(con).laden("u")
@@ -2030,7 +2030,7 @@ def test_migration_030_uebernimmt_vergebene_titel(tmp_path) -> None:
             )
         )
     con.commit()
-    assert migrieren(con) == 46
+    assert migrieren(con) == 47
     liste = hrv.titel_liste(ich.id)
     assert [t.name for t in liste] == ["Abends", "Morgens"]
     assert liste[1].zuletzt == datetime(2026, 10, 2, tzinfo=UTC)

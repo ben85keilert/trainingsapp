@@ -48,12 +48,13 @@ from trainingsapp.core.kurse import (
     stand_text,
     status,
 )
-from trainingsapp.core.models import Exercise, Media, MediaKind, Plan
+from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.core.plaene import erledigte, tage_text
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
+from trainingsapp.ui.components.medienliste import medium_zeile
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.katalog import trainieren_knopf
@@ -65,12 +66,6 @@ _STATUS: dict[str, tuple[ft.IconData, str]] = {
     AKTUELL: (ft.Icons.PLAY_CIRCLE_OUTLINE, "jetzt dran"),
     OFFEN: (ft.Icons.CIRCLE_OUTLINED, "offen"),
     GESPERRT: (ft.Icons.LOCK_OUTLINE, "gesperrt"),
-}
-
-_MEDIEN_SYMBOL: dict[MediaKind, ft.IconData] = {
-    MediaKind.VIDEO: ft.Icons.PLAY_CIRCLE_OUTLINE,
-    MediaKind.IMAGE: ft.Icons.IMAGE_OUTLINED,
-    MediaKind.AUDIO: ft.Icons.HEADPHONES_OUTLINED,
 }
 
 
@@ -409,12 +404,6 @@ def kapitel_view(
             )
         )
 
-    def medium_oeffner(medium: Media) -> Callable[[], Awaitable[None]]:
-        async def handler() -> None:
-            await link_oeffnen(page, browser, medium.uri)
-
-        return handler
-
     async def link(e: ft.Event[ft.Markdown]) -> None:
         """Markdown-Link im Kapiteltext — ``e.data`` ist die Adresse aus dem Paket (S1)."""
         ziel = str(getattr(e, "data", "") or "")
@@ -436,17 +425,8 @@ def kapitel_view(
         bloecke.append(
             karte(
                 titel("Zum Ansehen und Anhören"),
-                *[
-                    ft.ListTile(
-                        leading=ft.Icon(_MEDIEN_SYMBOL.get(m.kind, ft.Icons.LINK)),
-                        title=ft.Text(m.title or m.uri),
-                        subtitle=ft.Text(m.uri, size=11, opacity=0.6) if m.title else None,
-                        trailing=ft.Icon(ft.Icons.OPEN_IN_NEW, size=18, opacity=0.6),
-                        on_click=medium_oeffner(m),
-                        content_padding=ft.Padding.only(left=0, right=0),
-                    )
-                    for m in medien
-                ],
+                # Links und Dateien aus dem Paket (U3) — eine Zeile wie überall
+                *[medium_zeile(page, state, m, browser=browser) for m in medien],
             )
         )
 

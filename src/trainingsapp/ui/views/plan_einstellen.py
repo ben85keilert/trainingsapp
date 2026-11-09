@@ -45,7 +45,15 @@ from trainingsapp.core import varianten as var
 from trainingsapp.core import zaehlen as zl
 from trainingsapp.core.bedingung import Bedingung
 from trainingsapp.core.links import erlaubt as link_erlaubt
-from trainingsapp.core.models import Exercise, Media, MediaKind, Plan, PlanItem, new_id
+from trainingsapp.core.models import (
+    Exercise,
+    Media,
+    MediaKind,
+    MediaSource,
+    Plan,
+    PlanItem,
+    new_id,
+)
 from trainingsapp.core.parameter import chips_sortiert
 from trainingsapp.core.result_spec import (
     FieldSpec,
@@ -83,6 +91,7 @@ from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.medienliste import SYMBOLE as MEDIEN_SYMBOLE
 from trainingsapp.ui.components.planstand import schild
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.takt_blatt import SYMBOL as TAKT_SYMBOL
@@ -261,6 +270,26 @@ def plan_einstellen(
     def links_zeichnen() -> None:
         zeilen: list[ft.Control] = []
         for z in links_stand:
+            medium = z["medium"]
+            if isinstance(medium, Media) and medium.source == MediaSource.PAKET:
+                # Eine Datei aus dem Paket (U3): ohne Adressfeld, nur herausnehmen
+                zeilen.append(
+                    ft.Row(
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Icon(MEDIEN_SYMBOLE.get(medium.kind, ft.Icons.ATTACH_FILE), size=20),
+                            ft.Text(medium.title or "Datei aus dem Paket", expand=True),
+                            ft.Text("aus dem Paket", size=11, opacity=0.6),
+                            ft.IconButton(
+                                ft.Icons.CLOSE,
+                                tooltip="Aus der Planübung nehmen",
+                                on_click=link_entferner(z),
+                            ),
+                        ],
+                    )
+                )
+                continue
 
             def titel_aendern(e: Any, z: dict[str, Any] = z) -> None:
                 z["titel"] = e.control.value or ""
@@ -324,7 +353,11 @@ def plan_einstellen(
         return medien
 
     def links_pruefen() -> str | None:
-        falsch = [m.uri for m in links_lesen() if not link_erlaubt(m.uri)]
+        falsch = [
+            m.uri
+            for m in links_lesen()
+            if m.source != MediaSource.PAKET and not link_erlaubt(m.uri)
+        ]
         links_fehler.value = f"Nur https-Adressen: {falsch[0]}" if falsch else ""
         links_fehler.visible = bool(falsch)
         return links_fehler.value or None

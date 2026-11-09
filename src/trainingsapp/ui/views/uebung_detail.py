@@ -32,7 +32,7 @@ from trainingsapp.core import zaehlen as zl
 from trainingsapp.core.beschreibung import abschnitte
 from trainingsapp.core.models import (
     Exercise,
-    Media,
+    MediaSource,
     Plan,
     PlanItem,
     new_id,
@@ -56,7 +56,7 @@ from trainingsapp.core.uebung_timer import (
 from trainingsapp.ui.components.dialoge import Nachher, meldung
 from trainingsapp.ui.components.hilfe import text_dialog
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.links import oeffnen as link_oeffnen
+from trainingsapp.ui.components.medienliste import medium_zeile
 from trainingsapp.ui.components.paketvergleich import vergleich_blatt
 from trainingsapp.ui.components.planstand import stand_zeile
 from trainingsapp.ui.components.uebungsbild import uebungsbild
@@ -362,9 +362,7 @@ def _varianten(liste: list[var.Variante]) -> ft.Control:
     return ft.Row(wrap=True, spacing=6, run_spacing=6, controls=[etikett(v) for v in liste])
 
 
-def _anweisungen(
-    item: PlanItem, oeffner: Callable[[Media], Callable[[], object]]
-) -> list[ft.Control]:
+def _anweisungen(page: Any, state: AppState, item: PlanItem, browser: Any) -> list[ft.Control]:
     """Die Anweisungen der Planübung (U2, F6: „Erklärungen beim i“) — Abschnitte, darunter Videos
     und Links; leer ohne."""
     zeilen: list[ft.Control] = []
@@ -375,19 +373,7 @@ def _anweisungen(
             zeilen.append(ft.Text(a.name, size=13, weight=ft.FontWeight.W_600, opacity=0.8))
         if a.text:
             zeilen.append(ft.Text(a.text))
-    for m in item.media:
-        if not m.uri:
-            continue
-        zeilen.append(
-            ft.ListTile(
-                leading=ft.Icon(ft.Icons.PLAY_CIRCLE_OUTLINE),
-                title=ft.Text(m.title or m.uri),
-                subtitle=ft.Text(m.uri, size=11, opacity=0.6) if m.title else None,
-                trailing=ft.Icon(ft.Icons.OPEN_IN_NEW, size=18, opacity=0.6),
-                on_click=oeffner(m),
-                content_padding=ft.Padding.only(left=0, right=0),
-            )
-        )
+    zeilen.extend(medium_zeile(page, state, m, browser=browser) for m in item.media if m.uri)
     if zeilen:
         zeilen.insert(
             0,
@@ -547,12 +533,6 @@ def uebung_detail(
     """
     geloescht = uebung.deleted_at is not None
 
-    def oeffner(medium: Media) -> Callable[[], object]:
-        async def handler() -> None:
-            await link_oeffnen(page, browser, medium.uri)
-
-        return handler
-
     def gehe_zu(ziel: str) -> Callable[[], object]:
         async def handler() -> None:
             await page.push_route(ziel)
@@ -668,16 +648,11 @@ def uebung_detail(
         vorgabe = uebung.result_spec.format_shorthand(uebung.default_target)
         verwendungen.append(ft.Text(f"Vorgabe für Pläne: Ziel {vorgabe}", size=12, opacity=0.7))
 
+    # Links und Dateien aus dem Paket (U3) — das Bild der Bewegung (T6, lokal) nicht
     videos: list[ft.Control] = [
-        ft.ListTile(
-            leading=ft.Icon(ft.Icons.PLAY_CIRCLE_OUTLINE),
-            title=ft.Text(m.title or m.uri),
-            subtitle=ft.Text(m.uri, size=11, opacity=0.6) if m.title else None,
-            trailing=ft.Icon(ft.Icons.OPEN_IN_NEW, size=18, opacity=0.6),
-            on_click=oeffner(m),
-        )
+        medium_zeile(page, state, m, browser=browser)
         for m in uebung.media
-        if m.uri and str(m.source) != "local"  # das Bild der Bewegung (T6) ist kein Link
+        if m.uri and m.source != MediaSource.LOCAL
     ]
 
     abschnitte: list[ft.Control] = []
@@ -710,7 +685,7 @@ def uebung_detail(
                 plan,
                 item,
                 gehe_zu(einstellen) if einstellen else None,
-                _anweisungen(item, oeffner),
+                _anweisungen(page, state, item, browser),
             )
         )
     abschnitte += [

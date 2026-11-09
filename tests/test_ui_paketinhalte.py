@@ -241,7 +241,7 @@ async def test_material_haelt_die_uhr_an_und_laesst_sie_weiterlaufen(umgebung) -
     assert not lauf.laeuft
     await _sekunden(state, uhr, gurt, 20)
     assert round(lauf.vergangen_s()) == 10
-    blatt.on_dismiss(None)  # zu — die Uhr läuft weiter
+    await blatt.on_dismiss(None)  # zu — die Uhr läuft weiter
     assert lauf.laeuft
     await _sekunden(state, uhr, gurt, 5)
     # Noch einmal: „Uhr weiter“ von Hand, danach ändert Schließen nichts
@@ -251,7 +251,7 @@ async def test_material_haelt_die_uhr_an_und_laesst_sie_weiterlaufen(umgebung) -
     _daten(blatt, "uhr_weiter").on_click()
     assert lauf.laeuft and "Die Uhr läuft weiter." in _texte(blatt)
     lauf.pause()  # die Person hält sie selbst an — Schließen startet sie nicht wieder
-    blatt.on_dismiss(None)
+    await blatt.on_dismiss(None)
     assert not lauf.laeuft
     lauf.abbrechen()
     await _sekunden(state, uhr, gurt, 2)
@@ -284,7 +284,7 @@ async def test_material_im_fokus(umgebung) -> None:
     assert isinstance(knopf, ft.IconButton) and "PDF" in knopf.tooltip
     knopf.on_click()
     assert not state.einheit.timer.lauf.laeuft
-    seite.dialoge[-1].on_dismiss(None)
+    await seite.dialoge[-1].on_dismiss(None)
     assert state.einheit.timer.lauf.laeuft
     state.einheit.timer.lauf.abbrechen()
     await _sekunden(state, uhr, gurt, 2)

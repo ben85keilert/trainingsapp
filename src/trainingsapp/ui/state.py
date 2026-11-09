@@ -28,6 +28,7 @@ from trainingsapp.config import (
     datenverzeichnis,
     medienverzeichnis,
     messungenverzeichnis,
+    paketmedienverzeichnis,
     paketordner,
     streckenverzeichnis,
 )
@@ -94,6 +95,7 @@ from trainingsapp.data.hf_cache import HfCacheRepo
 from trainingsapp.data.hf_profil import ProfilwertRepo, RechenAusnahmeRepo
 from trainingsapp.data.kurse import KursRepo
 from trainingsapp.data.pakete import PaketRepo
+from trainingsapp.data.paketmedien import Paketablage
 from trainingsapp.data.repositories import (
     DayNoteRepo,
     ExerciseRepo,
@@ -404,6 +406,12 @@ class AppState:
     #: Links öffnen (Flet-Dienst `UrlLauncher`), setzt `app.main()` — für das Material beim
     #: Üben (`components/material.py`), das keine Ansicht mit eigenem Dienst hat
     browser: Any = None
+    #: Titel der Paketdateien, die gerade geöffnet werden (Dateiname → Titel) — die Route
+    #: ``…/paketmedium/<datei>`` trägt nur den Namen (`views/paketmedium.py`, U3)
+    paketmedium_titel: dict[str, str] = field(default_factory=dict)
+    #: Die Uhr, die für das Material angehalten ist, während eine Paketdatei offen ist — sie
+    #: läuft weiter, wenn man aus der Ansicht zurückgeht (`components/material.py`)
+    material_lauf: Any = None
     #: Diagnosemodus (`docs/plan_diagnosemodus.md`): der rote Punkt in ``page.overlay``
     #: (`components.diagnose_punkt`) und die Marken-Leiste (offen oder zum Knopf eingeklappt)
     diagnose_punkt: Any = None
@@ -552,8 +560,17 @@ class AppState:
         Oberfläche aufrufbar.
         """
         con = oeffnen(db_pfad if db_pfad is not None else datenbankpfad())
+        # Dateien aus Paketen (U3) neben der Datenbank — im Betrieb `paketmedienverzeichnis()`;
+        # mit eigener Datenbank (Tests, Werkzeug) nie im echten Datenverzeichnis
+        ablage = Paketablage(
+            con,
+            paketmedienverzeichnis()
+            if db_pfad is None
+            else Path(db_pfad).parent / "Medien" / "Pakete",
+        )
         neu = seed_einspielen(con)
-        paketfehler = pakete_aus_ordner(con, paketordner())  # nur mit TRAININGSAPP_PAKETE
+        # nur mit TRAININGSAPP_PAKETE
+        paketfehler = pakete_aus_ordner(con, paketordner(), ablage)
         datenformat_aktualisieren(con)
         profile = SubjectRepo(con)
         einstellungen = SettingRepo(con)
@@ -580,9 +597,11 @@ class AppState:
         einheiten = EinheitRepo(con)
         with contextlib.suppress(sqlite3.Error):
             einheiten.abgebrochene_schliessen()  # Prozess-Tod in einer Einheit
-        pakete = PaketRepo(con)
+        pakete = PaketRepo(con, ablage)
         vorgabe = einstellungen.lesen(SettingRepo.PAKET_UPDATES, AUTO)
         pakete.update_vorgabe = vorgabe if vorgabe in UPDATE_MODI else AUTO
+        with contextlib.suppress(Exception):  # Aufräumen kostet nie den Start
+            pakete.aufraeumen()
         return cls(
             con=con,
             uebungen=ExerciseRepo(con),

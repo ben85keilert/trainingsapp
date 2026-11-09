@@ -101,14 +101,19 @@ def tagesgrenzen(tag: date) -> tuple[datetime, datetime]:
 class MediaKind(StrEnum):
     VIDEO = "video"
     IMAGE = "image"
-    #: Nur an Kurskapiteln (`core/kurse.py`) — `exercise_media` kennt nur Video und Bild
+    #: Als Link nur an Kurskapiteln (`core/kurse.py`); als Datei aus einem Paket überall (U3)
     AUDIO = "audio"
+    #: Ein Dokument aus einem Paket — Material beim Üben (U3, F6)
+    PDF = "pdf"
 
 
 class MediaSource(StrEnum):
     URL = "url"  # online, wird bei Bedarf geladen und gecacht
     ASSET = "asset"  # mit der App ausgeliefert
     LOCAL = "local"  # vom Nutzer aufgenommen, app-privates Verzeichnis
+    #: Eine Datei aus einem Paket (U3, Migration 047): ``uri`` = ``medien/<sha256>.<endung>``,
+    #: abgelegt unter `config.paketmedienverzeichnis()` (`data/paketmedien.py`)
+    PAKET = "paket"
 
 
 @dataclass(slots=True)

@@ -132,7 +132,10 @@ Feld bzw. je Abschnitt (der Vergleich aus `plan_paketversionen.md` §4).
   `medien/<sha256>.<endung>`. Ohne Medien bleibt es JSON (ältere Apps lesen sie weiter; eine
   ZIP lehnen sie mit „Das Paket ist neuer als diese App“ ab).
 - **Ein Medium im Paket:** `{kind, quelle: "paket", datei, sha256, bytes, titel, lizenz}` —
-  an Übung, Ergänzung, Planübung oder Kurskapitel.
+  an Übung, Ergänzung, Planübung oder Kurskapitel. *Gebaut (U3):* mit den Schlüsseln, die
+  Medien schon hatten — `{ source = "paket", uri = "medien/<sha256>.<endung>", title, license }`;
+  Prüfsumme steckt im Namen, die Größe in der ZIP, die Art folgt der Endung. Ältere Apps lehnen
+  eine ZIP mit „kein JSON“ ab.
 - **Ablage:** `Medien/Pakete/<sha256>.<endung>` — gleiche Datei nur einmal, gelöscht, wenn kein
   installiertes Paket sie mehr nennt. Eigene Medien bleiben, wo sie sind.
 - **Grenzen:** Paket bis etwa 300 MB, Quelle zeigt die Größe vorher und fragt bei mobilen Daten
@@ -287,7 +290,7 @@ für JSON-Pakete schon vor U3.
 |---|---|
 | U1 | **gebaut 9.11.2026 (0.3.74):** `core/abgleich.py` (je Abschnitt, je Medium, Hinweise, Vergleich, übernehmen), Migration 045 `package_hints_json`, `PaketRepo.hinweise/vergleich/paketfassung_uebernehmen`, `components/paketvergleich.py` im Paketmanager und auf der Übungsseite |
 | U2 | **gebaut 9.11.2026 (0.3.75):** Migration 046 (`plan_item.description`, `media_json`), Paketfeld `beschreibung`/`medien` je Planübung (keine neue Formatversion), `core.pakete.plan_abgleichen` (je Feld, je Planübung `übung#n`, IDs bleiben), `PaketRepo.plan_neu_laden`/`plan_wieder_anlegen`/`paketplaene_im_profil`, `KursRepo.kapitelplan_neu_laden`/`kurs_neu_laden`, `core/material.py` + `components/material.py` (Knopf neben dem „i“ und im Fokus, Uhr hält an), `components/neu_laden.py` (Plan-Editor), Karte „Pläne“ im Paketmanager, „Kurs neu laden …“ im Kursmenü, Karte „Anweisungen“ in „Im Plan einstellen“ (`components/abschnitt_editor.py`, auch in „Übung bearbeiten“), Anweisungen im „i“ |
-| U3 | offen |
+| U3 | **gebaut 9.11.2026 (0.3.76):** Migration 047 (`exercise_media` mit `pdf`/`audio` und Quelle `paket`), `core/paketmedien.py` (Namen, Grenzen, `Paketmedium` mit Prüfsumme), `core/bereinigen.py` (JPEG/PNG/WebP/MP4/MOV/M4A/MP3 ohne Ortsangaben, PDF bleibt, sonst abgelehnt), `core/paketdatei.py` (JSON/TOML/ZIP öffnen, TOML mit `datei`, Export-Bereinigung, reproduzierbare ZIP), `data/paketmedien.py` (Ablage, Aufräumen), Import/Export/Quellen (ZIP bis 300 MB, über 20 MB nicht von selbst), `components/medienliste.py`, `views/paketmedium.py`; Server-Freigabe für `.zip` offen (P164) |
 | U4 | offen |
 | U5 | offen |
 | U6 | offen |

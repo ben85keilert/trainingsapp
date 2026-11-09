@@ -15,24 +15,17 @@ gestartet werden.“
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.material import BILD, LINK, PDF, TON, Material, art, material_von
-from trainingsapp.core.models import Exercise, Media, PlanItem
+from trainingsapp.core.material import Material, material_von
+from trainingsapp.core.models import Exercise, PlanItem
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.blatt import blatt_spalte
-from trainingsapp.ui.components.dialoge import schliessen
-from trainingsapp.ui.components.links import oeffnen as link_oeffnen
-
-#: Je Art das Symbol in der Liste
-SYMBOLE: dict[str, ft.IconData] = {
-    PDF: ft.Icons.PICTURE_AS_PDF_OUTLINED,
-    BILD: ft.Icons.IMAGE_OUTLINED,
-    TON: ft.Icons.HEADPHONES_OUTLINED,
-    LINK: ft.Icons.LINK,
-}
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
+from trainingsapp.ui.components.medienliste import medium_zeile
 
 
 def material_knopf(
@@ -72,7 +65,8 @@ def material_blatt(
     angehalten = einheit_ui.uhr_fuer_material_anhalten(
         state, uebung.id, item.id if item is not None else None
     )
-    stand = {"von_hand": False}
+    stand = {"von_hand": False, "uebergeben": False}
+    nachher = Nachher()
     uhr_text = ft.Text("Die Uhr steht, solange du hier bist.", size=13, expand=True)
     uhr_knopf = ft.TextButton("Uhr weiter", icon=ft.Icons.PLAY_ARROW, data="uhr_weiter")
 
@@ -97,12 +91,14 @@ def material_blatt(
         ),
     )
 
-    def oeffner(medium: Media) -> Any:
-        async def handler(_e: Any = None) -> None:
-            if state.browser is not None:
-                await link_oeffnen(page, state.browser, medium.uri)
-
-        return handler
+    def uebergeben(gehen: Callable[[], Awaitable[None]]) -> None:
+        """Eine Paketdatei hat ihre eigene Ansicht (U3): erst das Blatt zu — Dialoge über einem
+        Neuaufbau verwaisen —, die Uhr bleibt angehalten, bis man von dort zurückkommt."""
+        stand["uebergeben"] = True
+        if angehalten is not None and not stand["von_hand"]:
+            state.material_lauf = angehalten
+        nachher.danach(gehen)
+        schliessen(blatt)
 
     inhalt: list[ft.Control] = [
         ft.Row(
@@ -121,23 +117,14 @@ def material_blatt(
             inhalt.append(ft.Text(a.name, size=13, weight=ft.FontWeight.W_600, opacity=0.8))
         if a.text:
             inhalt.append(ft.Text(a.text, selectable=True))
-    for medium in m.medien:
-        inhalt.append(
-            ft.ListTile(
-                leading=ft.Icon(SYMBOLE.get(art(medium), ft.Icons.PLAY_CIRCLE_OUTLINE)),
-                title=ft.Text(medium.title or medium.uri),
-                subtitle=ft.Text(medium.uri, size=11, opacity=0.6) if medium.title else None,
-                trailing=ft.Icon(ft.Icons.OPEN_IN_NEW, size=18, opacity=0.6),
-                on_click=oeffner(medium),
-                content_padding=ft.Padding.only(left=0, right=0),
-                data=("medium", medium.uri),
-            )
-        )
+    inhalt.extend(medium_zeile(page, state, x, uebergeben=uebergeben) for x in m.medien)
 
-    def beim_schliessen(_e: Any = None) -> None:
-        """Die Uhr läuft weiter, wenn sie für das Material stand und niemand sie anfasste."""
-        if angehalten is not None and not stand["von_hand"]:
+    async def beim_schliessen(_e: Any = None) -> None:
+        """Die Uhr läuft weiter, wenn sie für das Material stand und niemand sie anfasste —
+        außer eine Paketdatei ist jetzt offen (dann beim Zurückkommen von dort)."""
+        if angehalten is not None and not stand["von_hand"] and not stand["uebergeben"]:
             einheit_ui.uhr_fortsetzen(page, state, angehalten)
+        await nachher.bei_schliessen()
 
     blatt: ft.BottomSheet = ft.BottomSheet(
         scrollable=True,

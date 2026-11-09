@@ -65,6 +65,7 @@ from ..core.models import TAG_REGION, TAG_TYP, Exercise, MediaSource, Plan, Plan
 from ..core.pakete import (
     FELDNAMEN,
     Paket,
+    PaketFehler,
     Paketinhalt,
     PaketPlan,
     aus_stand,
@@ -79,9 +80,11 @@ from ..core.pakete import (
     zusammenfuehren_mit_hinweisen,
 )
 from ..core.pakete import abweichungen as _abweichungen
+from ..core.paketmedien import MediumFehler, groesse_text
 from ..core.paketversion import AUTO, UPDATE_MODI
 from .db import transaktion
 from .kurse import KursRepo
+from .paketmedien import Paketablage
 from .repositories import ExerciseRepo, PlanRepo
 
 
@@ -132,6 +135,11 @@ class Vorschau:
     #: Plan → neuer Paketstand, wo das Update der eigenen Fassung nichts brachte (U2) — der
     #: Import schreibt nur den Stand, nicht den Plan
     plan_staende: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Paketdateien (U3): wie viele neu in die Ablage kämen und wie groß sie sind; welche das
+    #: Paket nennt, die aber weder in der Datei noch auf dem Gerät liegen
+    medien_neu: int = 0
+    medien_bytes: int = 0
+    medien_fehlen: list[str] = field(default_factory=list)
 
     def anzahl(self, *stati: Status) -> int:
         return sum(1 for s in self.status.values() if s in stati)
@@ -209,6 +217,12 @@ class Vorschau:
             zeilen.append("Neue Typen: " + ", ".join(self.neue_typen))
         if self.neue_regionen:
             zeilen.append("Neue Regionen: " + ", ".join(self.neue_regionen))
+        if n := self.medien_neu:
+            dateien = "1 Datei" if n == 1 else f"{n} Dateien"
+            zeilen.append(f"{dateien} (Videos, Bilder, PDFs) — {groesse_text(self.medien_bytes)}")
+        if n := len(self.medien_fehlen):
+            dateien = "1 Datei fehlt" if n == 1 else f"{n} Dateien fehlen"
+            zeilen.append(f"{dateien} — sie kommen mit der ZIP-Datei des Pakets")
         return zeilen
 
 
@@ -232,8 +246,11 @@ class Uebungsstand:
 class PaketRepo:
     """Der Paketmanager: installieren, entfernen, zurücksetzen (Migrationen 014, 015)."""
 
-    def __init__(self, con: sqlite3.Connection) -> None:
+    def __init__(self, con: sqlite3.Connection, ablage: Paketablage | None = None) -> None:
         self.con = con
+        #: Wohin die Dateien der Pakete kommen (U3) — ohne Ablage legt der Import keine
+        #: Dateien ab (Werkzeug, Tests), die Einträge bleiben trotzdem
+        self.ablage = ablage
         #: Update-Modus neu installierter Pakete — „Für alle Pakete“ in Updates
         #: (`core/paketversion.py`); die App setzt ihn aus den Einstellungen
         self.update_vorgabe: str = AUTO
@@ -703,7 +720,21 @@ class PaketRepo:
     def vorschau(self, inhalt: Paketinhalt, subject_id: str | None = None) -> Vorschau:
         """Was ein Import dieses Pakets täte — ohne etwas zu schreiben. ``subject_id``: das
         Profil, in dem die Pläne des Pakets landen (ohne: Pläne bleiben außen vor)."""
-        return self._planen(inhalt, aktualisieren=True, subject_id=subject_id)[0]
+        vorschau = self._planen(inhalt, aktualisieren=True, subject_id=subject_id)[0]
+        self._medien_planen(inhalt, vorschau)
+        return vorschau
+
+    def _medien_planen(self, inhalt: Paketinhalt, vorschau: Vorschau) -> list[str]:
+        """Welche Dateien der Import in die Ablage legt (U3) — und in der Vorschau, wie viele,
+        wie groß und welche fehlen."""
+        if self.ablage is None:
+            return []
+        namen = inhalt.medien_namen()
+        neu = sorted(n for n in namen if n in inhalt.medien and not self.ablage.vorhanden(n))
+        vorschau.medien_neu = len(neu)
+        vorschau.medien_bytes = sum(inhalt.medien[n].groesse for n in neu)
+        vorschau.medien_fehlen = self.ablage.fehlende(namen, inhalt.medien)
+        return neu
 
     def importieren(
         self,
@@ -736,6 +767,13 @@ class PaketRepo:
         )
         if vorschau.installiert is None and not vorschau.zu_tun:
             return vorschau
+        # Erst die Dateien (U3): Scheitert eine (Prüfsumme), bleibt die Datenbank, wie sie war
+        if self.ablage is not None:
+            for name in self._medien_planen(inhalt, vorschau):
+                try:
+                    self.ablage.einlegen(inhalt.medien[name])
+                except (MediumFehler, OSError) as fehler:
+                    raise PaketFehler(f"Eine Datei des Pakets ist kaputt: {fehler}") from fehler
         repo = ExerciseRepo(self.con)
         kurse = KursRepo(self.con)
         plaene = PlanRepo(self.con)
@@ -795,7 +833,17 @@ class PaketRepo:
                     "WHERE id = ? AND package_id = ? AND package_dropped_at IS NOT NULL",
                     (k.id, inhalt.paket.id),
                 )
+        self.aufraeumen()  # Dateien alter Fassungen, die nichts mehr nennt
         return vorschau
+
+    def aufraeumen(self) -> int:
+        """Paketdateien löschen, die nichts mehr nennt (U3) — wie viele."""
+        if self.ablage is None:
+            return 0
+        try:
+            return self.ablage.aufraeumen()
+        except OSError:
+            return 0
 
     def herkunft_nachtragen(self, inhalt: Paketinhalt) -> int:
         """Übungen des Pakets von vor den Paketen bekommen ihre Herkunft (Migration 014).

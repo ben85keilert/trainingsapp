@@ -38,7 +38,8 @@ from trainingsapp.core.paketquelle import (
     pruefen,
     url_pruefen,
 )
-from trainingsapp.core.paketversion import UPDATE_MODI, version_text, von_selbst
+from trainingsapp.core.paketstufe import MITTEL, STUFE_TEXT, automatisch, stufen_text
+from trainingsapp.core.paketversion import MANUELL, UPDATE_MODI, version_text
 from trainingsapp.core.update import UpdateFehler, ist_neuer, neuestes_release
 from trainingsapp.data.repositories import SettingRepo
 from trainingsapp.ui import app_update
@@ -99,16 +100,26 @@ async def pruefung_ausfuehren(state: AppState) -> UpdateStand:
         state.pakete.verfuegbar_setzen(ei.id, ei.version or 0, ei.url, ei.sha256, ei.neuigkeiten)
     offen: list = []
     for u in ergebnis.updates:
-        # „auto“ spielt alles ein, „klein“ nur, wenn bloß die letzte Stelle steigt (Ben,
-        # 9.11.2026), sonst und bei „manuell“ bleibt es vorgemerkt
-        if (
-            not von_selbst(u.installiert.update_modus, u.installiert.version, u.eintrag.version)
-            or u.eintrag.bytes > GROSS_VON_SELBST
-        ):
+        # Die Stufe kommt aus dem Unterschied, nicht aus der Nummer (U6, F8 c): „Alle“ spielt
+        # kleine und mittlere ein, große fragen; „Kleine“ nur kleine; „Manuell“ nichts.
+        # Geladen wird nur, was von selbst kommen könnte — und nichts über 20 MB
+        modus = u.installiert.update_modus
+        if modus == MANUELL or u.eintrag.bytes > GROSS_VON_SELBST:
             offen.append(u)
             continue
         try:
             inhalt = await asyncio.to_thread(paket_laden, u.eintrag)
+        except QuellenFehler as e:
+            ergebnis.fehler.append(f"{u.eintrag.name}: {e}")
+            offen.append(u)
+            continue
+        stufe = state.pakete.stufe(inhalt)  # die Datenbank im Event-Loop
+        if stufe is not None:
+            stand.stufen[u.eintrag.id] = stufe
+        if not automatisch(modus, stufe.stufe if stufe is not None else MITTEL):
+            offen.append(u)
+            continue
+        try:
             state.pakete.importieren(inhalt, subject_id=state.profil.id)
             state.pakete.quelle_setzen(
                 u.eintrag.id, u.eintrag.quelle_url or None, u.installiert.quelle_art
@@ -324,6 +335,7 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
 
     def paket_zeile(p: Paket) -> ft.Control:
         teile = ["deaktiviert"] if p.deaktiviert else []
+        stufe = None
         teile.append(
             f"Version {version_text(p.version)}" if p.version is not None else "ohne Version"
         )
@@ -336,9 +348,11 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
                 ),
                 0,
             )
+            stufe = state.updates.stufen.get(p.id) if state.updates else None
             teile.append(
                 f"verfügbar: Version {version_text(p.verfuegbar)}"
                 + (f" · {groesse_text(groesse)}" if groesse > MAX_PAKET_BYTES else "")
+                + (f" · {STUFE_TEXT[stufe.stufe]}" if stufe is not None else "")
             )
         elif p.geprueft is not None:
             teile.append("aktuell")
@@ -348,7 +362,8 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
             rechts.append(
                 ft.IconButton(
                     ft.Icons.DOWNLOAD,
-                    tooltip=f"Version {version_text(p.verfuegbar)} einspielen",
+                    tooltip=f"Version {version_text(p.verfuegbar)} einspielen"
+                    + (f" — {stufen_text(stufe.gruende)}" if stufe is not None else ""),
                     on_click=installierer(eintrag),
                 )
             )
@@ -515,11 +530,13 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
                             ft.Text("Updates von selbst einspielen — für alle Pakete", size=13),
                             fuer_alle_wahl,
                             hinweis(
-                                "„Alle“ spielt jedes Update beim Start ein, „Kleine“ nur, wenn "
-                                "bloß die letzte Stelle der Version steigt (0.0.4 → 0.0.5) — "
-                                "größere und „Manuell“ merkt die App vor, der Pfeil holt sie "
-                                "mit Vorschau. Je Paket lässt es sich unten anders einstellen. "
-                                "Was du an Übungen geändert hast, bleibt bei jedem Update."
+                                "Wie groß ein Update ist, sieht die App am Unterschied: klein "
+                                "(Symbol, Timer, Chips), mittel (Texte, neue Übungen), groß "
+                                "(etwas fällt weg). „Alle“ spielt kleine und mittlere beim "
+                                "Start ein, „Kleine“ nur kleine — große und „Manuell“ merkt die "
+                                "App vor, der Pfeil holt sie mit Vorschau. Je Paket lässt es "
+                                "sich unten anders einstellen. Was du an Übungen geändert hast, "
+                                "bleibt bei jedem Update."
                             ),
                             *([paket_zeile(p) for p in installierte] or [hinweis("Kein Paket.")]),
                         ),

@@ -73,9 +73,12 @@ from trainingsapp.core.paketquelle import (
     INDEX_VERSION,
     QuellenFehler,
     index_laden,
+    link_lesen,
     paket_laden,
 )
 from trainingsapp.core.paketquelle import _laden as netz_laden
+from trainingsapp.core.paketstufe import STUFE_TEXT, mindestens, stufen_text, version_reicht
+from trainingsapp.core.paketstufe import stufe as paket_stufe
 from trainingsapp.core.paketversion import version_text
 from trainingsapp.core.result_spec import VORLAGEN
 from trainingsapp.core.takt import takt_pruefen
@@ -341,6 +344,48 @@ def _planmedien_pruefen(roh: Any) -> list[str]:
         elif not links_erlaubt(uri):
             out.append(f"medien: „{uri}“ fällt weg (nur https-Adressen)")
     return out
+
+
+def gegen_pruefen(
+    datei: Path, gegen: str, laden: Callable[[str], bytes] | None = None
+) -> tuple[list[str], list[str]]:
+    """``(Fehler, Hinweise)``: Passt die Version von ``datei`` zur Stufe ihres Unterschieds zur
+    veröffentlichten Fassung ``gegen`` (eine Datei, ein Link auf eine Paketdatei oder ein Index —
+    U6, `core/paketstufe.py`)? Eine zu kleine Nummer ist ein Fehler („Kniebeuge fällt weg →
+    mindestens 2.0.0, steht 1.4.0“)."""
+    laden = laden or netz_laden
+    with tempfile.TemporaryDirectory() as arbeit:
+        try:
+            neu = (
+                toml_oeffnen(datei, Path(arbeit))
+                if datei.suffix == ".toml"
+                else paket_oeffnen(datei)
+            )
+            if Path(gegen).is_file():
+                alt = paket_oeffnen(Path(gegen))
+            else:
+                art, wert = link_lesen(gegen, laden)
+                if art == "paket":
+                    alt = wert[1]
+                else:
+                    eintrag = next((e for e in wert[1] if e.id == neu.paket.id), None)
+                    if eintrag is None:
+                        return [], [
+                            f"„{neu.paket.name}“ steht noch nicht in {gegen} — die erste Fassung"
+                        ]
+                    alt = paket_laden(eintrag, laden)
+        except (PaketFehler, QuellenFehler) as f:
+            return [f"--gegen: {f}"], []
+    s = paket_stufe(alt, neu)
+    if not version_reicht(alt.paket.version, neu.paket.version, s.stufe):
+        return [
+            f"{STUFE_TEXT[s.stufe]} ({stufen_text(s.gruende)}) → mindestens "
+            f"{mindestens(alt.paket.version, s.stufe)}, steht {version_text(neu.paket.version)}"
+        ], []
+    return [], [
+        f"gegen {version_text(alt.paket.version)}: {STUFE_TEXT[s.stufe]}"
+        + (f" ({stufen_text(s.gruende)})" if s.gruende else "")
+    ]
 
 
 def quelle_pruefen(
@@ -751,8 +796,12 @@ def _symbole() -> list[str] | None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="trainingsapp-paket", description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="befehl", required=True)
-    p = sub.add_parser("pruefen", help="Paketdateien prüfen (TOML oder JSON)")
+    p = sub.add_parser("pruefen", help="Paketdateien prüfen (TOML, JSON oder ZIP)")
     p.add_argument("dateien", nargs="+", type=Path)
+    p.add_argument(
+        "--gegen",
+        help="die veröffentlichte Fassung (Datei, Link oder Index): Stufe und Version prüfen",
+    )
     p.add_argument("--wortliste", type=Path, help="Begriffe, die in Texten nichts verloren haben")
     p.add_argument("--streng", action="store_true", help="Treffer der Wortliste sind Fehler")
     b = sub.add_parser("bauen", help="Paketdateien schreiben (JSON, mit Dateien ZIP)")
@@ -779,6 +828,9 @@ def main(argv: list[str] | None = None) -> int:
         schlecht = 0
         for datei in args.dateien:
             fehler, hinweise = pruefen(datei, symbole, begriffe, args.streng)
+            if args.gegen and not fehler:
+                f_gegen, h_gegen = gegen_pruefen(datei, args.gegen)
+                fehler, hinweise = fehler + f_gegen, hinweise + h_gegen
             for text in hinweise:
                 print(f"{datei}: Hinweis: {text}")
             for text in fehler:

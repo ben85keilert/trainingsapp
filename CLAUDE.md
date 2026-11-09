@@ -240,9 +240,11 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   APK-Link im Browser, nur Android). `core/paketquelle.py`
   fragt **Paketquellen** (Index-JSON per HTTPS, Format von `trainingsapp-paket index`,
   SHA-256 geprüft, Signaturfeld reserviert). Paketversionen „X.Y.Z“ reisen als Zahl
-  X·10000 + Y·100 + Z (`core/paketversion.py`, ältere Apps vergleichen weiter); Modus je Paket
-  Alle · **Kleine** (nur die letzte Stelle steigt, Ben 9.11.2026) · Manuell, „Für alle Pakete“
-  unter Updates. `ui/views/updates.py` macht beides beim Start
+  X·10000 + Y·100 + Z (`core/paketversion.py`, ältere Apps vergleichen weiter); die **Stufe**
+  eines Updates kommt aus dem Unterschied, nicht aus der Nummer (U6, `core/paketstufe.py`: groß
+  = etwas fällt weg, mittel = Neues/Texte/Medien, klein = Vorgaben); Modus je Paket **Alle**
+  (klein + mittel von selbst, groß fragt) · **Kleine** · Manuell, „Für alle Pakete“ unter
+  Updates; `trainingsapp-paket pruefen --gegen` lehnt eine zu kleine Nummer ab. `ui/views/updates.py` macht beides beim Start
   (abschaltbar, einmaliger Hinweis — jede neue Netzverbindung in Solo braucht Schalter,
   Hinweis und einen Nachtrag in `docs/recht/40_toms.md`, `80_store_freigaben.md`,
   `build/solo.toml`), spielt Pakete im Modus „auto“ ein und hängt das Label unter das

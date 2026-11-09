@@ -187,10 +187,10 @@ Noch offen (im Katalog, `docs/offene_fragen.md`, P31–P35):
 |---|---|---|
 | 0 | Diese Datei; Katalog: Entscheidungen, offene Punkte, Arbeit neben A1 | 17.10.2026 (A16, P31–P35) |
 | 1 | K6: Seed setzt bei höherer installierter Version aus | gebaut 17.10.2026, nach v0.2.2 — auf den Geräten mit dem nächsten Release |
-| 2 | Format: `version` als Text im TOML, Zahl und `versionsname` in JSON und Index (`paket_lesen`, `paket_bauen`, `paket_werkzeug.index`, `core/paketquelle`) | offen |
-| 3 | Stufe aus dem Unterschied (`core/pakete`); Verhalten je Stufe bei Import, Quelle und Seed; Eingabe in zwei Teilen und Links je `uri` abgleichen; zurückgehaltene patch-Felder merken (Migration); K1 | offen |
-| 4 | Oberfläche: Nachfrage bei major mit Vorschau und Kontext, Hinweis nach minor, Vergleich je Feld in der Übung, „neu im Paket“ neben „von dir geändert“ | offen |
-| 5 | Werkzeug: `pruefen --gegen`; im Inhalte-Repo `veroeffentlichen.sh` und Regel 4 seiner CLAUDE.md | offen |
+| 2 | Format: `version` als Text im TOML, Zahl und `versionsname` in JSON und Index (`paket_lesen`, `paket_bauen`, `paket_werkzeug.index`, `core/paketquelle`) | gebaut 9.11.2026 (0.3.73) ohne `versionsname`: „X.Y.Z“ wird zur Zahl, angezeigt als „X.Y.Z“ (`core/paketversion.py`) |
+| 3 | Stufe aus dem Unterschied (`core/pakete`); Verhalten je Stufe bei Import, Quelle und Seed; Eingabe in zwei Teilen und Links je `uri` abgleichen; zurückgehaltene patch-Felder merken (Migration); K1 | gebaut 9.11.2026: Stufe `core/paketstufe.py` (U6, 0.3.79) mit Bens F8 (c) statt „patch nie an vorhandene Übungen“ — der Drei-Wege-Abgleich gilt für jede Stufe, Eigenes bleibt; Links und Abschnitte je Eintrag, Hinweise „Paket hat Neues“ (U1, 0.3.74, Migration 045); K1 seit S1 |
+| 4 | Oberfläche: Nachfrage bei major mit Vorschau und Kontext, Hinweis nach minor, Vergleich je Feld in der Übung, „neu im Paket“ neben „von dir geändert“ | gebaut 9.11.2026: Vergleich und „neu im Paket“ (U1), Stufe und Gründe in Liste und Vorschau (U6), Label unter dem Zahnrad nach automatischem Einspielen |
+| 5 | Werkzeug: `pruefen --gegen`; im Inhalte-Repo `veroeffentlichen.sh` und Regel 4 seiner CLAUDE.md | `pruefen --gegen` gebaut 9.11.2026 (U6); im Inhalte-Repo (privat) offen |
 
 Tests: `tests/test_pakete.py` (Stufe, Abgleich, Links), `tests/test_paketquelle.py` (Zahl und
 Name im Index, Verhalten je Stufe), `tests/test_paket_werkzeug.py` (`--gegen`),

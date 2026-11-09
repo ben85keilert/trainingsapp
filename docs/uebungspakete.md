@@ -232,8 +232,8 @@ Schlüssel, beim Empfänger bleibt es derselbe Plan.
   `paketdatei/<Übung>` bzw. `planpaketdatei/<Planübung>` (`core.anhaenge.Ziel`).
 - **Exportieren und teilen:** Die App schlägt die Version vor — die erste 1.0.0; ist der
   Inhalt seit der letzten Fassung gleich (`inhalt_sha`, ohne Version, Neuigkeiten,
-  Zeitstempel), dieselbe; sonst eine Stufe höher: **klein** (letzte Stelle — Empfänger mit
-  „Kleine automatisch“ holen sie von selbst), **mittel** oder **groß**. Geschrieben wird JSON
+  Zeitstempel), dieselbe; sonst eine Stufe höher: **klein**, **mittel** oder **groß** (die
+  Empfänger sehen die Stufe ohnehin am Unterschied, U6). Geschrieben wird JSON
   oder, mit Dateien, eine ZIP (`core.paketdatei.export_schreiben`, Dateien im Hintergrund, die
   Datenbank im Event-Loop), weitergegeben über das Teilen-Menü; gemerkt werden Version und
   Prüfsumme der Fassung.
@@ -502,10 +502,18 @@ kann (`core/paketquelle.py`).
   zwei Quellen dasselbe Paket, zählt die erste; nur aktive Pakete bekommen Updates,
   nie nach unten. Ein Paket, das es hier nicht gibt, erscheint unter „Neu in den
   Quellen“ zum Installieren.
-- **Modus je Paket:** **Alle automatisch** (`auto`, Vorgabe) spielt ein Update beim Start
-  ein, **Kleine automatisch** (`klein`, Ben 9.11.2026) nur, wenn bloß die letzte Stelle der
-  Version steigt (0.0.4 → 0.0.5, `core.paketversion.nur_klein`), **Manuell** merkt es nur vor
-  (`package.available_*`) — der Pfeil holt Vorgemerktes mit der Vorschau des Datei-Imports.
+- **Stufe aus dem Unterschied** (U6, Ben 9.11.2026, F8 c, `core/paketstufe.py`): Die App lädt
+  ein Update (nicht bei „Manuell“, nicht über 20 MB) und vergleicht es mit dem gespeicherten
+  Paketstand — **groß**: etwas fällt weg (Übung, Kurs, Kapitel, Plan, Ergänzung), ein Kapitel
+  wandert oder wird dazwischengeschoben, eine Kapitelbedingung oder Freischaltung ändert sich;
+  **mittel**: etwas kommt dazu, Texte, Medien, Felder der Eingabe, Pläne; **klein**: nur
+  Vorgaben (Chips, Ziel, Timer, Symbol, Typen, Regionen, Takt, Plan-Vorlagen). Die Nummer
+  entscheidet nichts — das Werkzeug hält sie ehrlich (`trainingsapp-paket pruefen --gegen
+  <Datei|Link|Index>`: „Wandsitz fällt weg → mindestens 2.0.0, steht 1.4.1“).
+- **Modus je Paket:** **Alle** (`auto`, Vorgabe) spielt kleine und mittlere Updates beim Start
+  ein und merkt große vor, **Kleine** (`klein`) nur kleine, **Manuell** merkt alles nur vor
+  (`package.available_*`) — der Pfeil holt Vorgemerktes mit der Vorschau des Datei-Imports; die
+  Liste nennt die Stufe, der Pfeil ihre Gründe, die Vorschau beides.
   Unter Updates setzt **„Für alle Pakete“** (Alle · Kleine · Manuell) jedes installierte Paket
   und die Vorgabe für neu installierte (Einstellung `paket_update_modus`); je Paket lässt es
   sich dort und im Paketmanager anders wählen, ein Update lässt den Modus stehen. Was man an

@@ -82,6 +82,8 @@ from ..core.pakete import (
 )
 from ..core.pakete import abweichungen as _abweichungen
 from ..core.paketmedien import MediumFehler, groesse_text
+from ..core.paketstufe import Stufe
+from ..core.paketstufe import stufe as paket_stufe
 from ..core.paketversion import AUTO, UPDATE_MODI
 from .db import transaktion
 from .kurse import KursRepo
@@ -405,6 +407,17 @@ class PaketRepo:
         if not (uebungen or kurse or plaene or ergaenzungen):
             return None
         return Paketinhalt(paket, uebungen, kurse, plaene, ergaenzungen=ergaenzungen)
+
+    def stufe(self, inhalt: Paketinhalt) -> Stufe | None:
+        """Wie groß ein Update auf ``inhalt`` wäre (U6, `core/paketstufe.py`) — verglichen mit
+        dem gespeicherten Paketstand; ``None``, wenn das Paket nicht installiert ist."""
+        installiert = self.laden(inhalt.paket.id)
+        if installiert is None or installiert.entfernt is not None:
+            return None
+        alt = self.inhalt(inhalt.paket.id)
+        if alt is None:
+            return None
+        return paket_stufe(alt, inhalt)
 
     def kurse(self, paket_id: str) -> list[Kurs]:
         """Die Kurse eines Pakets, die in der Liste stehen (nicht entfernt)."""

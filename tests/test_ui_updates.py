@@ -257,38 +257,77 @@ def test_label_unter_dem_zahnrad(page, state) -> None:
     assert knopf.content == "Updates verfügbar: 1 Paket"
 
 
-def test_kleine_updates_von_selbst_groessere_vorgemerkt(page, state, monkeypatch) -> None:
-    """Ben, 9.11.2026: automatisch nur, „wenn die Version nur im 0.0.X-Bereich angehoben
-    wurde“ — 0.0.4 → 0.0.5 kommt von selbst, 0.0.5 → 0.1.0 bleibt vorgemerkt."""
-    inhalt = paket_lesen(qigong(4))
+def test_stufe_aus_dem_unterschied_entscheidet(page, state, monkeypatch) -> None:
+    """U6 (Ben, 9.11.2026, F8 c): Die Stufe kommt aus dem Unterschied, nicht aus der Nummer —
+    „Kleine“ spielt nur kleine Änderungen ein (Symbol, Timer …), „Alle“ auch mittlere (Texte,
+    neue Übungen); eine große (eine Übung fällt weg) wird nur vorgemerkt, mit Grund."""
+
+    def fassung(
+        version: int,
+        symbol: str = "self_improvement",
+        text: str = "Knie weich.",
+        mit_lotus: bool = True,
+    ) -> dict:
+        uebungen = [
+            {
+                "key": "baum",
+                "name": "Baum",
+                "description": text,
+                "spec": "halten",
+                "icon_key": symbol,
+            }
+        ]
+        if mit_lotus:
+            uebungen.append({"key": "lotus", "name": "Lotus", "description": "Sitzen."})
+        return {"paket": {"name": "Qigong", "version": version}, "exercises": uebungen}
+
+    inhalt = paket_lesen(fassung(4))
     state.pakete.importieren(inhalt)
     pid = inhalt.paket.id
     state.pakete.update_modus_setzen(pid, "klein")
     monkeypatch.setattr(updates, "neuestes_release", lambda: None)
     state.paketquellen_setzen(["https://x/i"])
 
-    def anbieten(version, datei: str) -> None:
-        eintrag = IndexEintrag(pid, "Qigong", version, f"https://x/{datei}", "", 0, "https://x/i")
+    def anbieten(roh: dict) -> None:
+        version = roh["paket"]["version"]
+        eintrag = IndexEintrag(
+            pid, "Qigong", version, f"https://x/q{version}.json", "", 0, "https://x/i"
+        )
         jetzt = state.pakete.laden(pid)  # vorher laden: im Thread kein SQLite
         monkeypatch.setattr(
             updates,
             "pruefen",
             lambda q, i, laden=None: Pruefung(updates=[PaketUpdate(eintrag, jetzt)]),
         )
-        monkeypatch.setattr(
-            updates, "paket_laden", lambda e, laden=None: paket_lesen(qigong(version))
-        )
+        monkeypatch.setattr(updates, "paket_laden", lambda e, laden=None: paket_lesen(roh))
 
-    anbieten(5, "q5.json")  # nur die letzte Stelle
+    anbieten(fassung(5, symbol="spa"))  # nur das Symbol: klein
     stand = asyncio.run(updates.pruefung_ausfuehren(state))
     assert [v for _, _, v in stand.eingespielt] == [5] and state.pakete.laden(pid).version == 5
-    anbieten(100, "q100.json")  # 0.1.0 — größer
+    anbieten(fassung(6, symbol="spa", text="Knie ganz weich."))  # ein Text: mittel
     stand = asyncio.run(updates.pruefung_ausfuehren(state))
-    assert stand.eingespielt == [] and [u.eintrag.version for u in stand.pruefung.updates] == [100]
-    p = state.pakete.laden(pid)
-    assert p.version == 5 and p.verfuegbar == 100
+    assert stand.eingespielt == [] and state.pakete.laden(pid).verfuegbar == 6
+    assert stand.stufen[pid].stufe == "mittel"
     ansicht = updates.updates_view(page, state, ft.UrlLauncher())
-    assert any("verfügbar: Version 0.1.0" in t for t in texte(ansicht))
+    assert any("verfügbar: Version 0.0.6 · mittlere Änderung" in t for t in texte(ansicht))
+    # „Alle“: mittel kommt von selbst …
+    state.pakete.update_modus_setzen(pid, "auto")
+    anbieten(fassung(6, symbol="spa", text="Knie ganz weich."))
+    stand = asyncio.run(updates.pruefung_ausfuehren(state))
+    assert [v for _, _, v in stand.eingespielt] == [6]
+    # … groß fragt nach (eine Übung fällt weg) — auch wenn die Nummer nur klein steigt
+    anbieten(fassung(7, symbol="spa", text="Knie ganz weich.", mit_lotus=False))
+    stand = asyncio.run(updates.pruefung_ausfuehren(state))
+    assert stand.eingespielt == [] and stand.stufen[pid].gruende == ["„Lotus“ fällt weg"]
+    ansicht = updates.updates_view(page, state, ft.UrlLauncher())
+    assert any("verfügbar: Version 0.0.7 · große Änderung" in t for t in texte(ansicht))
+    pfeil = next(
+        c
+        for v in ansicht.controls
+        for c in alle(v)
+        if isinstance(c, ft.IconButton) and c.icon == ft.Icons.DOWNLOAD
+    )
+    assert "„Lotus“ fällt weg" in pfeil.tooltip
 
 
 def test_fuer_alle_pakete_und_neue(page, state) -> None:

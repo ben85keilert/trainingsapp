@@ -9,9 +9,10 @@ sind, und ältere Apps vergleichen weiter richtig. Eine bisherige Version 4 ist 
 Quelle (TOML, JSON) darf „X.Y.Z“ stehen — gelesen wird es zur Zahl (`version_zahl`), angezeigt
 wird „X.Y.Z“ (`version_text`). Vertrag: `docs/uebungspakete.md`.
 
-Der Update-Modus je Paket (`Paket.update_modus`): **auto** — jedes Update beim Start
-einspielen; **klein** — nur, wenn bloß die letzte Stelle steigt, größere merkt die App vor;
-**manuell** — nur vormerken.
+Der Update-Modus je Paket (`Paket.update_modus`) — seit U6 (Ben 9.11.2026, F8 c) nach der
+**Stufe aus dem Unterschied**, nicht nach der Nummer (`core.paketstufe.automatisch`): **auto**
+(„Alle“) — kleine und mittlere Updates kommen beim Start von selbst, große fragen nach;
+**klein** („Kleine“) — nur kleine; **manuell** — nur vormerken.
 """
 
 from __future__ import annotations
@@ -78,36 +79,6 @@ def version_text(zahl: int | None) -> str:
     return ".".join(str(t) for t in version_teile(zahl))
 
 
-def nur_klein(alt: int | None, neu: int | None) -> bool:
-    """Steigt nur die letzte Stelle — 0.0.4 → 0.0.5, 1.2.3 → 1.2.9?
-
-    >>> nur_klein(4, 5), nur_klein(10203, 10209)
-    (True, True)
-    >>> nur_klein(4, 100), nur_klein(10203, 10300), nur_klein(10203, 20000)
-    (False, False, False)
-    >>> nur_klein(None, 5), nur_klein(5, 5), nur_klein(5, 4)
-    (False, False, False)
-    """
-    if alt is None or neu is None or neu <= alt:
-        return False
-    return version_teile(alt)[:2] == version_teile(neu)[:2]
-
-
-def von_selbst(modus: str, alt: int | None, neu: int | None) -> bool:
-    """Spielt die App dieses Update beim Prüfen von selbst ein? Sonst merkt sie es vor.
-
-    >>> von_selbst(AUTO, 4, 100), von_selbst(KLEIN, 4, 5), von_selbst(KLEIN, 4, 100)
-    (True, True, False)
-    >>> von_selbst(MANUELL, 4, 5), von_selbst("unbekannt", 4, 5)
-    (False, False)
-    """
-    if modus == AUTO:
-        return True
-    if modus == KLEIN:
-        return nur_klein(alt, neu)
-    return False
-
-
 __all__ = [
     "AUTO",
     "KLEIN",
@@ -115,9 +86,7 @@ __all__ = [
     "MODUS_TEXT",
     "STELLE",
     "UPDATE_MODI",
-    "nur_klein",
     "version_teile",
     "version_text",
     "version_zahl",
-    "von_selbst",
 ]

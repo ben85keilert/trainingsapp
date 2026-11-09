@@ -59,6 +59,7 @@ from trainingsapp.core.pakete import (
     paketplan_aus,
 )
 from trainingsapp.core.paketquelle import DATEI, fremde_identitaet
+from trainingsapp.core.paketstufe import GROSS, KEINE, STUFE_TEXT, stufen_text
 from trainingsapp.core.paketversion import MODUS_TEXT, UPDATE_MODI, version_text
 from trainingsapp.data.pakete import ARCHIV, KATALOG, PAPIERKORB, Status, Uebungsstand, Vorschau
 from trainingsapp.ui.components.dialoge import Nachher
@@ -173,8 +174,9 @@ def entfallene_dialog(
 
 
 def update_modus_wahl(state: AppState, paket: Paket, *, breite: int = 190) -> ft.Dropdown:
-    """Wie Updates dieses Pakets kommen: alle automatisch, kleine automatisch (nur die letzte
-    Stelle steigt — 0.0.4 → 0.0.5, Ben 9.11.2026) oder manuell — `core/paketversion.py`."""
+    """Wie Updates dieses Pakets kommen: „Alle“ (kleine und mittlere von selbst, große
+    fragen), „Kleine“ (nur kleine) oder manuell — die Stufe aus dem Unterschied (U6,
+    `core/paketstufe.py`)."""
 
     def gewaehlt(ev: ft.Event[ft.Dropdown]) -> None:
         if ev.control.value in UPDATE_MODI:
@@ -228,7 +230,7 @@ def import_rueckfrage(
             ergebnis = state.pakete.importieren(inhalt, subject_id=state.profil.id)
             if danach is not None:
                 danach()
-        except sqlite3.Error as fehler:  # Datenbank voll, gesperrt …
+        except (sqlite3.Error, PaketFehler) as fehler:  # Datenbank voll; Datei kaputt (U3)
             page.pop_dialog()
             page.show_dialog(ft.SnackBar(ft.Text(f"Nicht importiert: {fehler}")))
             return
@@ -275,6 +277,18 @@ def import_rueckfrage(
     if inhalt.paket.beschreibung:
         zeilen.append(ft.Text(inhalt.paket.beschreibung, size=13, italic=True))
     zeilen += [ft.Text(f"• {z}") for z in vorschau.zusammenfassung()]
+    # Wie groß das Update ist — aus dem Unterschied (U6): bei einer großen Änderung warum
+    stufe = state.pakete.stufe(inhalt) if not wieder else None
+    if stufe is not None and stufe.stufe != KEINE:
+        zeilen.append(
+            ft.Text(
+                f"{STUFE_TEXT[stufe.stufe].capitalize()}: {stufen_text(stufe.gruende)}",
+                size=12,
+                opacity=0.8,
+                weight=ft.FontWeight.W_600 if stufe.stufe == GROSS else None,
+                data="stufe",
+            )
+        )
     if zusatz:
         zeilen.append(hinweis(zusatz))
     # Offen für alle (Ben, 15.10.2026) — aber nie still: Gibt sich die Datei als
@@ -285,7 +299,9 @@ def import_rueckfrage(
         zeilen.append(ft.Text(warnung, weight=ft.FontWeight.W_600, color=ft.Colors.ERROR))
     if vorschau.anzahl(Status.GEAENDERT, Status.ZURUECK):
         zeilen.append(hinweis("Einträge im Verlauf bleiben, wie sie sind."))
-    if not vorschau.zu_tun:
+    # Ein Paket nur mit Ergänzungen (U5) schreibt keine eigene Übung — es gibt trotzdem etwas
+    etwas = vorschau.zu_tun or bool(inhalt.ergaenzungen)
+    if not etwas:
         zeilen.append(ft.Text("Es gibt nichts zu importieren.", weight=ft.FontWeight.W_600))
     knopf = "Wieder installieren" if wieder else "Importieren"
     return ft.AlertDialog(
@@ -299,7 +315,7 @@ def import_rueckfrage(
             ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
             ft.FilledButton(knopf, icon=ft.Icons.DOWNLOAD, on_click=ausfuehren),
         ]
-        if vorschau.zu_tun
+        if etwas
         else [ft.TextButton("OK", on_click=lambda: page.pop_dialog())],
     )
 

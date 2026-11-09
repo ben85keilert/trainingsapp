@@ -314,7 +314,7 @@ def eigenes_paket_view(page: Any, state: AppState, basis: str, paket_id: str) ->
             inhalt += [
                 ft.Text(
                     f"Seit Version {version_text(ep.version)} geändert. Wie groß ist die "
-                    "Änderung? Kleine Änderungen holen sich Geräte mit „Kleine automatisch“ "
+                    "Änderung? Die Geräte sehen es selbst am Unterschied — die Nummer sagt es "
                     "von selbst.",
                     size=13,
                 ),

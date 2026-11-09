@@ -179,6 +179,8 @@ class UpdateStand:
     app: Release | None = None
     #: Pakete, die automatisch eingespielt wurden (Modus „auto“): (ID, Name, Version)
     eingespielt: list[tuple[str, str, int | None]] = field(default_factory=list)
+    #: Wie groß jedes vorgemerkte Update ist (U6, `core/paketstufe.py`) — Paket-ID → Stufe
+    stufen: dict[str, Any] = field(default_factory=dict)
 
     def schluessel(self) -> dict[str, str]:
         """Je Neuigkeit ein Schlüssel mit Stand — so zeigt das Label jede nur einmal."""
@@ -828,8 +830,9 @@ class AppState:
         self.einstellungen.setzen(SettingRepo.UPDATE_PRUEFUNG, "1" if an else "0")
 
     def paket_updates(self) -> str:
-        """„Für alle Pakete“ in Updates (Ben, 9.11.2026): ``auto`` (Vorgabe), ``klein`` (nur,
-        wenn bloß die letzte Stelle steigt) oder ``manuell`` — `core/paketversion.py`."""
+        """„Für alle Pakete“ in Updates (Ben, 9.11.2026): ``auto`` (Vorgabe — kleine und
+        mittlere Updates von selbst), ``klein`` (nur kleine) oder ``manuell`` — die Stufe aus
+        dem Unterschied (`core/paketstufe.py`)."""
         wert = self.einstellungen.lesen(SettingRepo.PAKET_UPDATES, AUTO)
         return wert if wert in UPDATE_MODI else AUTO
 

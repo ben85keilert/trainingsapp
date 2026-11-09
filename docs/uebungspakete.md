@@ -22,7 +22,7 @@ Tabelle `package` und Spalte `exercise.package_id` seit Migration 014,
 |---|---|
 | Liste | importieren, exportieren; installierte Pakete („16 Übungen · 2 geändert · 1 nicht mehr im Paket · Version 2 · 31 kB · 48 MB Fotos/Videos“, deaktivierte ausgegraut), eigene Übungen, entfernte Pakete mit „Wieder installieren“ |
 | ein Paket | seine Übungen mit Stand („wie im Paket“, „geändert: Beschreibung, Parameter“, „nicht mehr im Paket“, im Archiv/Papierkorb) und seine Kurse; „Auf Paketstand“ je Übung oder „Alle auf Paketstand“; „Deaktivieren“/„Aktivieren“; „Paket entfernen“; Export; Karte „Nicht mehr im Paket“ mit „Entscheiden“ |
-| eine Übung | „Paket „…“, geändert“ hinter der Beschreibung; unten „Auf Paketstand zurücksetzen“ |
+| eine Übung | „Paket „…“, geändert“ hinter der Beschreibung; unten im Abschnitt „Paket“ „Mit dem Paket vergleichen“ (je Feld, Abschnitt und Medium übernehmen, „Ganz auf Paketstand“) |
 
 **Paketstand.** Jede Übung eines Pakets trägt ihre Standardwerte aus dem Paket
 (`package_standard_json`, genau die Felder des Dateiformats unten: Name, Beschreibung,
@@ -41,6 +41,17 @@ dessen, was vom Paket kam. Kommt eine neue Fassung, gilt je Feld
 neue Wert; abweichend, also selbst geändert → bleibt. Der gespeicherte Paketstand wird
 trotzdem der neue; „geändert: Beschreibung“ zeigt danach, wo „Auf Paketstand“ Neues
 brächte. Lokale Fotos und Videos bleiben ohnehin.
+
+**Je Abschnitt und je Medium** (U1, Ben 9.11.2026, `docs/plan_paketinhalte.md` §6,
+`core/abgleich.py`): Die Beschreibung gleicht die App **je Abschnitt** ab (`## Name`, Schlüssel
+der Name ohne Groß/klein), die Medien **je Eintrag** (Schlüssel die Adresse) — ein eigener
+Abschnitt oder Link hält keine Korrektur des Pakets mehr fern. Unberührtes bleibt wörtlich. Wo
+das Paket eine neue Fassung hat, die eigene aber blieb, merkt die App einen **Hinweis**
+(`exercise.package_hints_json`, Migration 045): „· Paket hat Neues“ im Paketmanager, „Das Paket
+hat neue Fassungen“ in der Übung. **„Mit dem Paket vergleichen“** (Paketmanager je Übung,
+Übungsseite → Paket) zeigt je Feld, Abschnitt und Medium Paket und eigene Fassung mit
+**„Paketfassung übernehmen“** (`PaketRepo.paketfassung_uebernehmen`); unten **„Ganz auf
+Paketstand“** — der harte Reset (zweiter Tipp bestätigt).
 
 **Nicht mehr im Paket** (Migration 017). Fehlt eine Übung oder ein Kurs in der neuen
 Fassung, löscht die App nichts: Sie markiert sie (`package_dropped_at`) und fragt —

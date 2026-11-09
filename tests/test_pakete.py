@@ -15,6 +15,7 @@ import uuid
 
 import pytest
 
+from trainingsapp.core.abgleich import Hinweis
 from trainingsapp.core.models import (
     TAG_REGION,
     TAG_TYP,
@@ -1402,3 +1403,76 @@ def test_paketversion_x_y_z_wird_zur_zahl() -> None:
         roh["paket"]["version"] = falsch
         with pytest.raises(PaketFehler, match=r"X\.Y\.Z"):
             paket_lesen(roh)
+
+
+def test_update_je_abschnitt_hinweis_und_uebernehmen(con) -> None:
+    """U1 (Ben, 9.11.2026, `docs/plan_paketinhalte.md` §6): Ein eigener Abschnitt hält keine
+    Korrektur mehr fern; wo beide geändert haben, bleibt die eigene Fassung mit Hinweis —
+    „Paketfassung übernehmen“ holt sie je Abschnitt; „Auf Paketstand“ räumt alles auf."""
+    pakete = PaketRepo(con)
+    repo = ExerciseRepo(con)
+    roh = qigong()
+    roh["exercises"][0]["description"] = (
+        "Knie weich, Scheitel nach oben.\n## Atmen\nruhig in den Bauch"
+    )
+    inhalt = paket_lesen(roh)
+    pakete.importieren(inhalt)
+    baum = repo.laden(inhalt.uebungen[0].id)
+    # Eigene Fassung: der Atem-Abschnitt geändert, ein eigener Abschnitt dazu
+    baum.description = (
+        "Knie weich, Scheitel nach oben.\n## Atmen\ntief und langsam\n## Für Ben\nmorgens"
+    )
+    repo.speichern(baum)
+
+    # Das Paket korrigiert den Anfang und den Atem-Abschnitt und bringt einen neuen
+    roh = qigong(version=2)
+    roh["exercises"][0]["description"] = (
+        "Knie weich, Scheitel zur Decke.\n## Atmen\nruhig in den Bauch, Schultern locker"
+        "\n## Wie lange\n5 Minuten"
+    )
+    vorschau = pakete.importieren(paket_lesen(roh))
+    assert vorschau.hinweise[baum.id] == [Hinweis("description", "atmen")]
+    baum = repo.laden(baum.id)
+    assert baum.description == (
+        "Knie weich, Scheitel zur Decke.\n## Atmen\ntief und langsam\n## Wie lange\n5 Minuten"
+        "\n## Für Ben\nmorgens"
+    )
+    assert pakete.hinweise(baum.id) == [Hinweis("description", "atmen")]
+    unterschiede = pakete.vergleich(baum.id)
+    assert [(u.titel, u.uebernehmbar) for u in unterschiede] == [
+        ("Beschreibung › Atmen", True),
+        ("Beschreibung › Für Ben", False),
+    ]
+    # Paketfassung des Abschnitts übernehmen: der eigene Abschnitt bleibt, der Hinweis geht
+    assert pakete.paketfassung_uebernehmen(baum.id, "description", "atmen")
+    baum = repo.laden(baum.id)
+    assert "ruhig in den Bauch, Schultern locker" in baum.description
+    assert baum.description.endswith("## Für Ben\nmorgens")
+    assert pakete.hinweise(baum.id) == []
+    # Auf Paketstand: alles wie im Paket, keine Hinweise
+    assert pakete.zuruecksetzen([baum.id]) == 1
+    assert pakete.vergleich(baum.id) == []
+
+
+def test_update_medien_je_eintrag(con) -> None:
+    """Ein eigener Link hält keinen neuen Link des Pakets mehr fern (U1)."""
+    pakete = PaketRepo(con)
+    repo = ExerciseRepo(con)
+    roh = qigong()
+    roh["exercises"][0]["media"] = [{"kind": "video", "uri": "https://x.org/a", "title": "A"}]
+    inhalt = paket_lesen(roh)
+    pakete.importieren(inhalt)
+    baum = repo.laden(inhalt.uebungen[0].id)
+    baum.media = [*baum.media, Media(uri="https://x.org/mein", title="Mein Video")]
+    repo.speichern(baum)
+    roh = qigong(version=2)
+    roh["exercises"][0]["media"] = [
+        {"kind": "video", "uri": "https://x.org/a", "title": "A"},
+        {"kind": "video", "uri": "https://x.org/neu", "title": "Neu"},
+    ]
+    pakete.importieren(paket_lesen(roh))
+    assert [m.uri for m in repo.laden(baum.id).media] == [
+        "https://x.org/a",
+        "https://x.org/neu",
+        "https://x.org/mein",
+    ]

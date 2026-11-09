@@ -232,12 +232,15 @@ Was du selbst anlegst oder kopierst, ist eine **eigene Übung** und gehört zu
 keinem Paket — ein Import ändert sie nie.
 
 Ein **Import** legt neue Übungen an und bringt die Übungen desselben Pakets auf
-den Stand der Datei; was du an ihnen geändert hast, geht dabei verloren. Fehlende
-Typen und Regionen kommen mit. Einträge im Verlauf bleiben immer, wie sie sind.
+den Stand der Datei — was du an ihnen geändert hast, **bleibt**: die Beschreibung je
+Abschnitt, Videos je Eintrag, alles andere je Feld. Fehlende Typen und Regionen kommen
+mit. Einträge im Verlauf bleiben immer, wie sie sind.
 
-**Auf Paketstand setzen** — Jede Übung eines Pakets kennt ihren Stand aus dem
-Paket. Hast du sie geändert, steht hinter der Beschreibung „geändert“; unten in
-der Übung holst du den Paketstand zurück, im Paketmanager auch für alle.
+**Mit dem Paket vergleichen** — Jede Übung eines Pakets kennt ihren Stand aus dem
+Paket. Hast du sie geändert, steht hinter der Beschreibung „geändert“; unten in der
+Übung (und im Paketmanager) zeigt „Mit dem Paket vergleichen“ je Abschnitt und Feld
+beide Fassungen: **Paketfassung übernehmen** holt einen Teil, **Ganz auf Paketstand**
+alles. „Neu im Paket“ markiert, wo ein Update deine Fassung behalten hat.
 
 **Entfernen** — Im Paketmanager entfernst du ein Paket wieder: Seine Übungen
 kommen in den Papierkorb und verschwinden aus den Plänen, Einträge bleiben.

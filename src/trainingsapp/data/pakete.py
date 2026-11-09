@@ -59,9 +59,11 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from ..core.abgleich import Hinweis, Unterschied, hinweise_lesen, uebernehmen, unterschiede
 from ..core.kurse import Kurs, ablauf_aufloesen, verweise_aufloesen
 from ..core.models import TAG_REGION, TAG_TYP, Exercise, MediaSource, Plan, PlanItem, jetzt, new_id
 from ..core.pakete import (
+    FELDNAMEN,
     Paket,
     Paketinhalt,
     PaketPlan,
@@ -72,7 +74,8 @@ from ..core.pakete import (
     plan_id,
     plan_stand,
     stand,
-    zusammenfuehren,
+    stand_normieren,
+    zusammenfuehren_mit_hinweisen,
 )
 from ..core.pakete import abweichungen as _abweichungen
 from ..core.paketversion import AUTO, UPDATE_MODI
@@ -123,6 +126,8 @@ class Vorschau:
     #: Plan-Schlüssel → Status (Formatversion 3, nur mit Profil): `EIGENE` = von der Person
     #: geändert, bleibt; `GELOESCHT` = im Papierkorb bzw. endgültig weg, bleibt weg
     plaene: dict[str, Status] = field(default_factory=dict)
+    #: Übung → wo das Paket eine neue Fassung hat, die eigene aber bleibt (U1, 9.11.2026)
+    hinweise: dict[str, list[Hinweis]] = field(default_factory=dict)
 
     def anzahl(self, *stati: Status) -> int:
         return sum(1 for s in self.status.values() if s in stati)
@@ -682,6 +687,7 @@ class PaketRepo:
                 _lokales_behalten(neu, alt)
                 neu.archived = alt.archived
                 self._standard_setzen(uebung_id, stand(neu))
+                self._hinweise_schreiben(uebung_id, [])  # ganz auf Paketstand: nichts offen
                 if stand(neu) == stand(alt):
                     continue
                 repo.speichern(neu)
@@ -759,6 +765,7 @@ class PaketRepo:
                     )
             for uebung_id, standard in staende.items():
                 self._standard_setzen(uebung_id, standard)
+                self._hinweise_nachziehen(uebung_id, vorschau.hinweise.get(uebung_id, []))
             # Nicht mehr im Paket: markieren, nicht löschen — die Person entscheidet
             for uebung_id in vorschau.entfallen:
                 self.con.execute(
@@ -959,7 +966,11 @@ class PaketRepo:
                     # Drei-Wege-Abgleich (Ben, 16.10.2026): Was die Person geändert
                     # hat, bleibt; der Paketstand (``staende``) wird trotzdem der neue —
                     # „geändert“ zeigt danach, wo „Auf Paketstand“ Neues brächte.
-                    gemischt = zusammenfuehren(self.standard(u.id), stand(alt), soll)
+                    gemischt, hinweise = zusammenfuehren_mit_hinweisen(
+                        self.standard(u.id), stand(alt), soll
+                    )
+                    if hinweise:
+                        vorschau.hinweise[u.id] = hinweise
                     if gemischt != soll:
                         try:
                             gemischt_ziel = aus_stand(u.id, paket.id, gemischt)
@@ -1026,6 +1037,88 @@ class PaketRepo:
             r["name"].casefold(): (r["name"], r["kind"])
             for r in self.con.execute("SELECT name, kind FROM tag")
         }
+
+    # -- Hinweise und Vergleich (U1, `docs/plan_paketinhalte.md` §6) -------------------
+
+    def _hinweise_roh(self, uebung_id: str) -> list[Hinweis]:
+        r = self.con.execute(
+            "SELECT package_hints_json FROM exercise WHERE id = ?", (uebung_id,)
+        ).fetchone()
+        if r is None or not r[0]:
+            return []
+        try:
+            return hinweise_lesen(json.loads(r[0]))
+        except ValueError:
+            return []
+
+    def _hinweise_schreiben(self, uebung_id: str, hinweise: list[Hinweis]) -> None:
+        text = (
+            json.dumps([h.als_liste() for h in dict.fromkeys(hinweise)], ensure_ascii=False)
+            if hinweise
+            else None
+        )
+        self.con.execute(
+            "UPDATE exercise SET package_hints_json = ? WHERE id = ?", (text, uebung_id)
+        )
+
+    def _noch_abweichend(self, uebung_id: str) -> set[tuple[str, str]] | None:
+        """(Feld, Teil), wo die Übung vom Paketstand abweicht — ``None`` ohne Stand."""
+        standard = self.standard(uebung_id)
+        u = ExerciseRepo(self.con).laden(uebung_id, mit_geloeschten=True)
+        if standard is None or u is None:
+            return None
+        return {
+            (x.feld, x.teil) for x in unterschiede(stand(u), stand_normieren(standard), FELDNAMEN)
+        }
+
+    def _hinweise_nachziehen(self, uebung_id: str, neue: list[Hinweis]) -> None:
+        """Nach einem Update: die neuen Hinweise dazu, alte bleiben, solange die Übung dort
+        noch vom Paketstand abweicht."""
+        offen = self._noch_abweichend(uebung_id)
+        if offen is None:
+            return
+        alle = [*self._hinweise_roh(uebung_id), *neue]
+        self._hinweise_schreiben(uebung_id, [h for h in alle if (h.feld, h.teil) in offen])
+
+    def hinweise(self, uebung_id: str) -> list[Hinweis]:
+        """Wo das Paket eine neue Fassung hat, die eigene aber blieb — nur, was noch abweicht."""
+        offen = self._noch_abweichend(uebung_id)
+        if not offen:
+            return []
+        return [h for h in self._hinweise_roh(uebung_id) if (h.feld, h.teil) in offen]
+
+    def vergleich(self, uebung_id: str) -> list[Unterschied] | None:
+        """Wo die eigene Fassung vom Paketstand abweicht — je Feld, Abschnitt der
+        Beschreibung und Medium (`core.abgleich.unterschiede`); ``None`` ohne Paketstand."""
+        standard = self.standard(uebung_id)
+        u = ExerciseRepo(self.con).laden(uebung_id, mit_geloeschten=True)
+        if standard is None or u is None or u.package_id is None:
+            return None
+        return unterschiede(stand(u), stand_normieren(standard), FELDNAMEN)
+
+    def paketfassung_uebernehmen(self, uebung_id: str, feld: str, teil: str = "") -> bool:
+        """Die Paketfassung eines Feldes (bei der Beschreibung eines Abschnitts, bei Medien
+        eines Eintrags) in die Übung holen — der Rest bleibt, eigene Fotos und lokale Videos
+        auch. ``True``, wenn sich etwas geändert hat."""
+        repo = ExerciseRepo(self.con)
+        alt = repo.laden(uebung_id, mit_geloeschten=True)
+        standard = self.standard(uebung_id)
+        if alt is None or alt.package_id is None or standard is None:
+            return False
+        neu_stand = uebernehmen(stand(alt), stand_normieren(standard), feld, teil)
+        if neu_stand == stand(alt):
+            return False
+        try:
+            neu = aus_stand(uebung_id, alt.package_id, neu_stand)
+        except (KeyError, TypeError, ValueError):
+            return False
+        with transaktion(self.con):
+            _tags_angleichen(neu, self._bekannte_tags())
+            _lokales_behalten(neu, alt)
+            neu.archived = alt.archived
+            repo.speichern(neu)
+            self._hinweise_nachziehen(uebung_id, [])
+        return True
 
     def _standard_setzen(self, uebung_id: str, standard: dict[str, Any]) -> None:
         text = json.dumps(standard, ensure_ascii=False, sort_keys=True)

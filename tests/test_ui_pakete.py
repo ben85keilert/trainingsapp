@@ -184,15 +184,45 @@ def test_paketmanager_auf_standard_entfernen_wieder_installieren(page, state) ->
     ansicht = paket_view(page, state, "/pakete", state.pakete.laden(GRUNDAUSSTATTUNG))
     assert ansicht.route == f"/pakete/{GRUNDAUSSTATTUNG}"
     assert "geändert: Beschreibung" in texte(ansicht)
-    zurueck = next(
+    # Je Übung der Vergleich (U1, 9.11.2026): je Feld bzw. Abschnitt „Paketfassung
+    # übernehmen“, unten „Ganz auf Paketstand“ mit zweitem Tipp
+    vergleich = next(
         c
         for v in ansicht.controls
         for c in alle(v)
-        if isinstance(c, ft.IconButton) and c.icon == ft.Icons.RESTORE
+        if isinstance(c, ft.IconButton) and c.icon == ft.Icons.COMPARE_ARROWS
     )
-    zurueck.on_click()  # erst die Rückfrage
+    vergleich.on_click()
+    blatt = dialoge[-1]
+    assert isinstance(blatt, ft.BottomSheet)
+    eintraege = [
+        c
+        for c in alle(blatt)
+        if isinstance(c, ft.Container) and isinstance(c.data, tuple) and c.data[0] == "unterschied"
+    ]
+    assert eintraege and eintraege[0].data[1] == "description"
+    uebernehmen = next(
+        c
+        for c in alle(eintraege[0])
+        if isinstance(c, ft.FilledTonalButton) and c.content == "Paketfassung übernehmen"
+    )
+    uebernehmen.on_click()
+    assert state.uebungen.laden(wade.id).description != "Meine Fassung"
+    # Noch einmal eigene Fassung — dann der harte Reset: erst fragen, dann zurück
+    wade = state.uebungen.laden(wade.id)
+    wade.description = "Meine Fassung"
+    state.uebungen.speichern(wade)
+    vergleich.on_click()
+    blatt = dialoge[-1]
+    ganz = next(
+        c
+        for c in alle(blatt)
+        if isinstance(c, ft.OutlinedButton) and c.data == "ganz_auf_paketstand"
+    )
+    ganz.on_click()  # erst die Rückfrage im Knopf
     assert state.uebungen.laden(wade.id).description == "Meine Fassung"
-    dialoge[-1].actions[1].on_click()
+    assert ganz.content == "Wirklich? Eigenes geht verloren"
+    ganz.on_click()
     assert state.uebungen.laden(wade.id).description != "Meine Fassung"
 
     entfernen = next(

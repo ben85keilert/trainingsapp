@@ -48,6 +48,7 @@ from typing import Any
 
 from . import ablauf as ab
 from . import links
+from .abgleich import Hinweis, abgleichen
 from .kurse import (
     BEDINGUNGEN,
     FREISCHALTUNGEN,
@@ -915,17 +916,37 @@ def zusammenfuehren(
     ('Baum stehen', 'Meine Fassung', 'park')
     >>> zusammenfuehren(None, nutzer, soll) == soll
     True
+
+    Seit dem 9.11.2026 die Beschreibung **je Abschnitt** und die Medien **je Eintrag**
+    (`core/abgleich.py`, `docs/plan_paketinhalte.md` §6) — ein eigener Abschnitt hält keine
+    Korrektur des Pakets mehr fern:
+
+    >>> basis = {"name": "Baum", "description": "Knie weich."}
+    >>> nutzer = {"name": "Baum", "description": "Knie weich.\\n## Für mich\\nlangsam"}
+    >>> soll = {"name": "Baum", "description": "Knie weich, Blick geradeaus."}
+    >>> print(zusammenfuehren(basis, nutzer, soll)["description"])
+    Knie weich, Blick geradeaus.
+    ## Für mich
+    langsam
+    """
+    return zusammenfuehren_mit_hinweisen(basis, nutzer, soll)[0]
+
+
+def zusammenfuehren_mit_hinweisen(
+    basis: dict[str, Any] | None, nutzer: dict[str, Any], soll: dict[str, Any]
+) -> tuple[dict[str, Any], list[Hinweis]]:
+    """`zusammenfuehren` und die **Hinweise**: wo das Paket eine neue Fassung hat, die eigene
+    aber blieb (je Feld, Abschnitt der Beschreibung oder Medium).
+
+    >>> basis = {"name": "Baum", "description": "Knie weich."}
+    >>> nutzer = {"name": "Baum", "description": "Meine Fassung"}
+    >>> soll = {"name": "Baum", "description": "Knie weich, Blick geradeaus."}
+    >>> zusammenfuehren_mit_hinweisen(basis, nutzer, soll)[1]
+    [Hinweis(feld='description', teil='')]
     """
     if basis is None:
-        return dict(soll)
-    basis = stand_normieren(basis)
-    ergebnis: dict[str, Any] = {}
-    for feld in FELDNAMEN:
-        geaendert = nutzer.get(feld) != basis.get(feld)
-        wert = nutzer.get(feld) if geaendert else soll.get(feld)
-        if wert is not None:
-            ergebnis[feld] = wert
-    return ergebnis
+        return dict(soll), []
+    return abgleichen(stand_normieren(basis), nutzer, soll, FELDNAMEN)
 
 
 def kurs_stand(k: Kurs) -> dict[str, Any]:
@@ -1078,4 +1099,5 @@ __all__ = [
     "stand_tag_nachziehen",
     "uebung_id",
     "zusammenfuehren",
+    "zusammenfuehren_mit_hinweisen",
 ]

@@ -176,7 +176,9 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `exercise.package_id` = Herkunft, `NULL` = eigene Übung (auch Kopien). Ein Import
   aktualisiert nur die Übungen desselben Pakets — **was die Person geändert hat, bleibt**
   (Ben, 16.10.2026: Drei-Wege-Abgleich je Feld gegen den Paketstand,
-  `core/pakete.zusammenfuehren`); eigene Übungen ändert er nie. Paketmanager: Jede
+  `core/pakete.zusammenfuehren`; seit 9.11.2026 die Beschreibung **je Abschnitt** und Medien
+  **je Eintrag**, `core/abgleich.py`, mit Hinweisen und „Mit dem Paket vergleichen“ —
+  `docs/plan_paketinhalte.md`, Stufen U1–U7); eigene Übungen ändert er nie. Paketmanager: Jede
   Paketübung trägt ihren Paketstand (`package_standard_json`) für „Auf Paketstand setzen“;
   Entfernen legt die Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück;
   **Deaktivieren** (Migration 017) versteckt alles, ohne zu löschen; was beim Update aus

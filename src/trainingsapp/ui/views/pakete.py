@@ -61,6 +61,7 @@ from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.paket_link import import_blatt
+from trainingsapp.ui.components.paketvergleich import vergleich_blatt
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.state import AppState
@@ -703,6 +704,9 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
             info = "Paketstand unbekannt — die Paketdatei erneut importieren"
         elif z.abweichungen:
             info = "geändert: " + ", ".join(z.abweichungen)
+            # Wo ein Update die eigene Fassung behielt (U1, 9.11.2026)
+            if state.pakete.hinweise(z.uebung.id):
+                info += " · Paket hat Neues"
         else:
             info = "wie im Paket"
         info += {ARCHIV: "  ·  im Archiv", PAPIERKORB: "  ·  im Papierkorb"}.get(z.ort, "")
@@ -737,10 +741,15 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
                         ],
                     ),
                 ),
+                # Vergleich je Feld und Abschnitt mit „Paketfassung übernehmen“ und dem harten
+                # Reset (U1, Ben 9.11.2026, `components/paketvergleich.py`)
                 ft.IconButton(
-                    ft.Icons.RESTORE,
-                    tooltip="Auf Paketstand setzen",
-                    on_click=zuruecksetzer([z]),
+                    ft.Icons.COMPARE_ARROWS,
+                    tooltip="Mit dem Paket vergleichen",
+                    on_click=lambda _e=None, u=z.uebung: page.show_dialog(
+                        vergleich_blatt(page, state, u, danach=state.neu_zeichnen)
+                    ),
+                    data=("vergleich", z.uebung.id),
                 )
                 if z.geaendert and not z.entfallen
                 else ft.Container(width=40),

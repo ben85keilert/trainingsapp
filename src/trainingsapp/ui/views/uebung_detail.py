@@ -57,6 +57,7 @@ from trainingsapp.ui.components.dialoge import Nachher, meldung
 from trainingsapp.ui.components.hilfe import text_dialog
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
+from trainingsapp.ui.components.paketvergleich import vergleich_blatt
 from trainingsapp.ui.components.planstand import stand_zeile
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.varianten import etikett
@@ -701,6 +702,7 @@ def uebung_detail(
         ),
     ]
     if paket is not None and geaendert:
+        neu_im_paket = state.pakete.hinweise(uebung.id)
         abschnitte.append(
             _abschnitt(
                 "Paket",
@@ -711,7 +713,26 @@ def uebung_detail(
                             f"Weicht vom Paket „{paket.name}“ ab: {', '.join(geaendert)}.",
                             size=13,
                         ),
-                        # Zurückgesetzt wird unter „Übung bearbeiten“ (Ben, 7.11.2026)
+                        *(
+                            [
+                                ft.Text(
+                                    "Das Paket hat neue Fassungen — deine sind geblieben.",
+                                    size=13,
+                                    color=ft.Colors.PRIMARY,
+                                )
+                            ]
+                            if neu_im_paket
+                            else []
+                        ),
+                        # Je Feld und Abschnitt vergleichen und übernehmen, oder ganz zurück
+                        # (U1, Ben 9.11.2026, `components/paketvergleich.py`)
+                        ft.TextButton(
+                            "Mit dem Paket vergleichen",
+                            icon=ft.Icons.COMPARE_ARROWS,
+                            on_click=lambda _e=None: page.show_dialog(
+                                vergleich_blatt(page, state, uebung, danach=state.neu_zeichnen)
+                            ),
+                        ),
                     ],
                 ),
             )

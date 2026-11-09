@@ -7,6 +7,10 @@
     <!-- Android 12+: das eigene Update ohne Rückfrage (normale Berechtigung, keine Abfrage).
          Fehlt eine Voraussetzung, fragt Android doch — dann kostet es einen Tipp. -->
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <!-- Automatik: von selbst nur im WLAN laden (isActiveNetworkMetered) und danach
+         „aktualisiert, antippen zum Öffnen" melden (flet_ble fragt die Erlaubnis ohnehin) -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application>
         <!-- Ergebnis der Installationssitzung; nicht exportiert — nur die eigene
@@ -14,5 +18,19 @@
         <receiver
             android:name="de.praxisebert.flet_installieren.InstallErgebnis"
             android:exported="false" />
+        <!-- Der Wecker der Automatik: schickt die vorbereitete Sitzung ab, wenn die App eine
+             Minute nicht benutzt wurde -->
+        <receiver
+            android:name="de.praxisebert.flet_installieren.SpaeterInstallieren"
+            android:exported="false" />
+        <!-- Nach dem Update: „aktualisiert, antippen zum Öffnen". MY_PACKAGE_REPLACED schickt
+             nur das System, das auch nicht exportierte Empfänger erreicht -->
+        <receiver
+            android:name="de.praxisebert.flet_installieren.NachUpdate"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

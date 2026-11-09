@@ -181,6 +181,46 @@ class EinheitRepo:
                 paare.append((str(d["von"]), str(d["nach"])))
         return Counter(paare)
 
+    def tore_offen(self, subject_id: str, plan_id: str, seit: datetime | None = None) -> set[str]:
+        """Die Knoten eines Plans, die schon einmal mit erfüllter Pflicht verlassen wurden — aus
+        ``plan/kante`` aller Einheiten des Profils, die ab ``seit`` begannen (die Freischaltungen
+        wurden zurückgesetzt); ``pflicht_offen`` (Überspringen) öffnet kein Tor (P167)."""
+        sql = (
+            "SELECT x.daten_json FROM einheit_ereignis x JOIN einheit e ON e.id = x.einheit_id "
+            "WHERE e.subject_id = ? AND e.deleted_at IS NULL AND x.quelle = 'plan' "
+            "AND x.art = 'kante'"
+        )
+        werte: list[str] = [subject_id]
+        if seit is not None:
+            sql += " AND e.started_at >= ?"
+            werte.append(iso_utc(seit))
+        offen: set[str] = set()
+        for r in self.con.execute(sql, werte):
+            d = json.loads(r["daten_json"] or "{}")
+            if d.get("plan") == plan_id and d.get("von") and not d.get("pflicht_offen"):
+                offen.add(str(d["von"]))
+        return offen
+
+    def plan_ereignisse(self, subject_id: str, seit: datetime) -> list[Ereignis]:
+        """Die ``plan/…``-Ereignisse aller Einheiten, die ab ``seit`` begannen — in ihrer
+        Reihenfolge (Einheit für Einheit), für die Stelle zum Fortsetzen (`core.ablauf.
+        fortsetzung`, P166)."""
+        return [
+            Ereignis(
+                float(r["t_s"]),
+                r["quelle"],
+                r["art"],
+                r["text"],
+                json.loads(r["daten_json"] or "{}"),
+            )
+            for r in self.con.execute(
+                "SELECT x.* FROM einheit_ereignis x JOIN einheit e ON e.id = x.einheit_id "
+                "WHERE e.subject_id = ? AND e.deleted_at IS NULL AND e.started_at >= ? "
+                "AND x.quelle = 'plan' ORDER BY e.started_at, x.nr",
+                (subject_id, iso_utc(seit)),
+            )
+        ]
+
     def beteiligungen(self, einheit_id: str) -> list[Beteiligung]:
         return [
             self._beteiligung(r)

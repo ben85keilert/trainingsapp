@@ -52,6 +52,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import ablauf as ab
 from trainingsapp.core import tagesfelder as tf
 from trainingsapp.core import varianten as var
 from trainingsapp.core.anhaenge import Anhang
@@ -66,7 +67,7 @@ from trainingsapp.core.models import (
     lokaler_tag,
 )
 from trainingsapp.core.plaene import anzahl_je_uebung, auspraegung_vorgabe, warum_nicht
-from trainingsapp.core.plan_durchlauf import dauer_text_gesamt, schritte_fuer
+from trainingsapp.core.plan_durchlauf import dauer_text_gesamt, schritte_fuer, startet_als_workout
 from trainingsapp.core.standards import mit_plan_spec
 from trainingsapp.core.tag import (
     FERTIG,
@@ -84,6 +85,7 @@ from trainingsapp.core.tag import (
 )
 from trainingsapp.core.verlauf import MONATE, WOCHENTAGE_LANG, montag
 from trainingsapp.core.zaehlen import ENDE_ABGEHAKT
+from trainingsapp.ui import plan_ablauf as plan_ablauf_ui
 from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
@@ -107,7 +109,6 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang import anhang_route
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.nachtragen import nachtragen_knopf, nachtragen_route
-from trainingsapp.ui.views.workout import workout_route
 from trainingsapp.ui.views.ziele import plan_ziele, ziele_fuer
 
 WOCHENTAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
@@ -466,6 +467,45 @@ def tagesansicht(
 
         return handler
 
+    def als_liste(plan: Plan) -> Callable[[], Any]:
+        """„Übungen ansehen“ bei einem Workout-Plan: die Liste — für diese Sitzung (P169)."""
+
+        async def handler() -> None:
+            state.plan_als_plan.add(plan.id)
+            await page.push_route(f"/plan/{plan.id}")
+
+        return handler
+
+    def start_knoepfe(plan: Plan, text: str = "Start") -> list[ft.Control]:
+        """„Start“ öffnet den Plan wie „Trainieren“ (P169: Workout mit Schalter oder Ablauf, sonst
+        die Liste); bei einem Workout daneben „Übungen ansehen“ = die Liste."""
+
+        async def los() -> None:
+            if startet_als_workout(plan):  # „Start“/„Fortsetzen“ meint das Workout, auch wenn
+                state.plan_als_plan.discard(plan.id)  # vorhin „Liste“ gewählt war
+            await page.push_route(f"/plan/{plan.id}")
+
+        knoepfe: list[ft.Control] = [ft.FilledButton(text, icon=ft.Icons.PLAY_ARROW, on_click=los)]
+        if startet_als_workout(plan):
+            knoepfe.append(ft.TextButton("Übungen ansehen", on_click=als_liste(plan)))
+        return knoepfe
+
+    def ablauf_stand(plan: Plan) -> tuple[str, str]:
+        """Ein Plan mit Ablauf wird durchgearbeitet (P166): kein „Weiter mit der ersten offenen“,
+        sondern dort, wo das Workout heute vorzeitig endete — Text und Knopf."""
+        fort = plan_ablauf_ui.fortsetzung_heute(state, plan)
+        if fort is None:
+            return "Workout mit Abzweigen", "Start"
+        item = next((it for it in plan.items if it.id == fort.bei), None)
+        frage = plan.ablauf.frage(fort.bei)
+        if item is not None:
+            name = daten().name(item.exercise_id)
+        else:
+            name = frage.text if frage is not None else "?"
+        nr = ab.nummern([it.id for it in plan.items]).get(fort.bei)
+        text = f"Fortsetzen bei {nr} · {name}" if nr else f"Fortsetzen bei {name}"
+        return text, "Fortsetzen"
+
     def weiter(plan: Plan, item: PlanItem) -> Callable[[], Any]:
         """„Weiter mit …“: den Plan öffnen, bei dieser Übung (Ben, 18.10.2026: „nicht ganz
         nach oben in den Plan“) — der Plan zeigt sie (`AppState.plan_ziel`)."""
@@ -739,11 +779,11 @@ def tagesansicht(
         d = daten()
         plan = k.plan
         schritte = schritte_fuer(plan, d.katalog)
-        mit_ablauf = any(s.profil is not None for s in schritte)
-        if k.zustand == NEU:
+        mit_timer = any(s.profil is not None for s in schritte)
+        if k.zustand == NEU or plan.ablauf.an:
             n = len(plan.items)
             teile = [f"{n} {'Übung' if n == 1 else 'Übungen'}"]
-            if mit_ablauf:
+            if mit_timer:
                 teile.append(f"mit Timer, {dauer_text_gesamt(schritte)}")
         else:
             teile = [k.stand_text()]
@@ -780,16 +820,14 @@ def tagesansicht(
             )
         ]
         if k.zustand == NEU:
-            start = workout_route(plan) if mit_ablauf else f"/plan/{plan.id}"
-            inhalt.append(
-                ft.Row(
-                    spacing=4,
-                    controls=[
-                        ft.FilledButton("Start", icon=ft.Icons.PLAY_ARROW, on_click=oeffner(start)),
-                        ft.TextButton("Übungen ansehen", on_click=oeffner(f"/plan/{plan.id}")),
-                    ],
-                )
-            )
+            inhalt.append(ft.Row(spacing=4, controls=start_knoepfe(plan)))
+        elif plan.ablauf.an:
+            # Durcharbeiten statt abarbeiten (P166): keine „Noch offen“-Chips
+            text, knopf = ablauf_stand(plan)
+            inhalt += [
+                ft.Text(text, size=14, weight=ft.FontWeight.W_500),
+                ft.Row(spacing=4, controls=start_knoepfe(plan, knopf)),
+            ]
         else:
             naechste = k.offen[0]
             inhalt += [
@@ -1346,10 +1384,10 @@ def tagesansicht(
     def anstehen_zeile(k: Plankarte) -> ft.Control:
         """Zeitleiste: ein Plan, der ansteht — eine Zeile mit Stand und ▶."""
         plan = k.plan
-        if k.zustand == NEU:
-            mit_ablauf = any(s.profil is not None for s in schritte_fuer(plan, daten().katalog))
-            start = workout_route(plan) if mit_ablauf else f"/plan/{plan.id}"
-            knopf = ft.FilledButton("Start", icon=ft.Icons.PLAY_ARROW, on_click=oeffner(start))
+        if k.zustand == NEU or plan.ablauf.an:
+            # Wie „Trainieren“ (P169); mit Ablauf dort weiter, wo das Workout heute endete (P166)
+            text = ablauf_stand(plan)[1] if plan.ablauf.an and k.zustand != NEU else "Start"
+            knopf = start_knoepfe(plan, text)[0]
         else:
             knopf = ft.FilledButton(
                 "Weiter", icon=ft.Icons.PLAY_ARROW, on_click=weiter(plan, k.offen[0])

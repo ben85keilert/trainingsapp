@@ -323,3 +323,71 @@ async def test_mehrere_freie_wege_fragen_vor_dem_weiter(umgebung) -> None:
     await _sekunden(state, uhr, gurt, 1)
     assert teil.schritt.name == "Dehnung Beine"
     assert teil.ergebnisse[iw] == "uebersprungen"  # der zweite Wandsitz — ohne Eintrag
+
+
+async def test_durcharbeiten_freischalten_und_fortsetzen(umgebung) -> None:
+    """Ben, 9.11.2026 (P166–P169): Ein Plan mit Ablauf öffnet als Workout und wird durchgearbeitet;
+    in der Liste ist nur frei, was keine Pflicht versperrt — erfüllt ein Workout sie, ist es frei;
+    nach einem Abbruch steht heute „Fortsetzen bei …“ da."""
+    from trainingsapp.core.plan_durchlauf import startet_als_workout
+    from trainingsapp.ui import einheit as einheit_ui
+    from trainingsapp.ui.views.plan import plan_view
+
+    state, uhr, gurt = umgebung
+    w = _uebung(state, "Wandsitz", 10, skala=True)
+    k = _uebung(state, "Kniebeuge", None)
+    d = _uebung(state, "Dehnung Beine", None)
+    plan = Plan(name="Tor", subject_id=state.profil.id)
+    plan.items = [PlanItem(exercise_id=u.id) for u in (w, k, d)]
+    iw, ik, id_ = (i.id for i in plan.items)
+    plan.ablauf = Ablauf(True, iw, (Kante(iw, ik, ab.SKALA, 5, pflicht=True), Kante(ik, id_)))
+    state.plaene.speichern(plan)
+    plan = state.plaene.laden(plan.id)
+    assert startet_als_workout(plan) and not plan.workout
+    seite = Seite()
+    route = f"/plan/{plan.id}/workout"
+
+    # Vorher gesperrt: Kniebeuge und Dehnung liegen hinter der Pflicht des Wandsitzes
+    sperre = plan_ablauf.gesperrt(state, plan)
+    assert set(sperre) == {ik, id_}
+    assert plan_ablauf.frei_nach(plan, sperre[ik], {iw: "Wandsitz"}) == (
+        "frei nach 1 · Wandsitz · Skala ≥ 5"
+    )
+    liste = plan_view(seite, state, plan)
+    assert any(getattr(x, "data", None) == "modus_wahl" for x in _alle(liste))
+    assert "Kniebeuge" not in _texte(liste)  # nur Freies ist zu üben
+    vorher = workout_view(seite, state, plan, route=route)
+    assert not [x for x in _alle(vorher) if isinstance(x, ft.Checkbox)]  # keine Häkchen (P166)
+    assert any("frei nach 1 · Wandsitz · Skala ≥ 5" in t for t in _texte(vorher))
+    assert "Als Plan üben" not in _knoepfe(vorher)
+
+    # Workout: Skala 6 erfüllt die Pflicht, weiter zur Kniebeuge — dann ⏹
+    _knoepfe(vorher)["Workout starten"].on_click()
+    teil = plan_ablauf.laufender(state, plan.id)[1]
+    await _sekunden(state, uhr, gurt, 10)
+    teil.antworten(6)
+    teil.weiter()
+    await _sekunden(state, uhr, gurt, 2)
+    assert teil.schritt.item_id == ik
+    einheit_ui.alle_beenden(state)
+    for _ in range(5):
+        await ruhe()
+    assert plan_ablauf.laufender(state, plan.id) is None
+
+    # Frei geworden — und heute geht es bei der Kniebeuge weiter
+    assert plan_ablauf.gesperrt(state, plan) == {}
+    assert plan_ablauf.fortsetzung_heute(state, plan) == ab.Fortsetzung(ik, iw)
+    state.plan_ablaeufe.pop(plan.id, None)  # das Start-Bild statt „Danach“
+    nochmal = workout_view(seite, state, plan, route=route)
+    knoepfe = _knoepfe(nochmal)
+    assert "Von vorn" in knoepfe
+    knoepfe["Fortsetzen bei 2 · Kniebeuge"].on_click(object())
+    teil = plan_ablauf.laufender(state, plan.id)[1]
+    assert teil.schritt.item_id == ik and teil.durchlauf == 1
+
+    # Freischaltungen zurücksetzen: wieder gesperrt (die Einheit von eben zählt nicht mehr)
+    einheit_ui.alle_beenden(state)
+    for _ in range(5):
+        await ruhe()
+    state.plaene.freischaltung_zuruecksetzen(plan.id)
+    assert set(plan_ablauf.gesperrt(state, plan)) == {ik, id_}

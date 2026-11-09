@@ -288,3 +288,77 @@ def test_ueberspringen_ueber_den_gewaehlten_weg() -> None:
     _lauf(teil, uhr, 3)
     teil.ueberspringen(teil.kanten_stand()[1].kante)
     assert teil.schritt.item_id == "p" and teil.ergebnisse["w"] == "uebersprungen"
+
+
+# -- Durcharbeiten (Ben, 9.11.2026, P166/P167) -------------------------------------------------
+
+
+def test_regulaere_kante_steht_in_der_zeitleiste() -> None:
+    """Auch die Kante, die von selbst geht, steht als ``plan/kante`` da — daraus liest die Liste,
+    welche Tore offen sind."""
+    a = ab.kette(["w", "k"])
+    teil, uhr = _baustein(a)
+    out = _lauf(teil, uhr, 10)
+    kanten = [e for e in out if (e.quelle, e.art) == ("plan", "kante")]
+    assert [(e.daten["von"], e.daten["nach"]) for e in kanten] == [("w", "k")]
+    assert "pflicht_offen" not in kanten[0].daten
+
+
+def test_ueberspringen_einer_pflicht_oeffnet_kein_tor() -> None:
+    a = Ablauf(True, "w", (Kante("w", "k", ab.WDH, 12, pflicht=True),))
+    teil, uhr = _baustein(a)
+    out = _lauf(teil, uhr, 3)
+    teil.ueberspringen()
+    out += teil.takt(uhr[0])
+    (kante,) = [e for e in out if (e.quelle, e.art) == ("plan", "kante")]
+    assert kante.daten["pflicht_offen"] is True and teil.schritt.item_id == "k"
+    # Erfüllt die Pflicht (12 Wdh.), steht kein „pflicht_offen“ an der Kante
+    teil2, uhr2 = _baustein(a)
+    teil2.wdh_setzen(12)
+    out2 = _lauf(teil2, uhr2, 10)
+    (kante2,) = [e for e in out2 if (e.quelle, e.art) == ("plan", "kante")]
+    assert "pflicht_offen" not in kante2.daten
+
+
+def test_vorzeitiges_ende_merkt_die_stelle_und_fortsetzen_kennt_zurueck() -> None:
+    """⏹ mitten in der Dehnung (Einschub): ``plan/ende`` sagt ``bei`` = Dehnung, ``vorher`` =
+    Wandsitz; fortgesetzt führt „◀ zurück“ zur Kniebeuge, der nächsten des Wandsitzes."""
+    a = Ablauf(
+        True,
+        "w",
+        (Kante("w", "k"), Kante("w", "d", text="krampft"), Kante("d", ab.ZURUECK), Kante("k", "p")),
+    )
+    teil, uhr = _baustein(a)
+    out = _lauf(teil, uhr, 10)  # zwei freie Wege: es wird gefragt
+    teil.kante_gehen(teil.kanten_stand()[1].kante)  # „krampft“
+    out += _lauf(teil, uhr, 2)
+    assert teil.schritt.item_id == "d"
+    out += teil.beenden(uhr[0])
+    (ende,) = [e for e in out if (e.quelle, e.art) == ("plan", "ende")]
+    assert (ende.daten["bei"], ende.daten["vorher"]) == ("d", "w")
+    assert ab.fortsetzung(out, "p1") == ab.Fortsetzung("d", "w")
+
+    uhr2 = [0.0]
+    weiter = PlanAblaufBaustein(
+        "p1", "Rumpf", _schritte(), uebergang=HART, workout=True, ablauf=a, erste="d", vorher="w"
+    )
+    weiter.uhr_uebernehmen(lambda: uhr2[0])
+    weiter.starten(0.0)
+    assert weiter.schritt.item_id == "d" and weiter.durchlauf == 1
+    weiter.gemacht()  # Dehnung ohne Timer: „Fertig“ → ◀ zurück → die nächste des Wandsitzes
+    weiter.takt(uhr2[0])
+    assert weiter.schritt.item_id == "k"
+
+
+def test_ende_nach_fertiger_uebung_setzt_mit_der_naechsten_fort() -> None:
+    """Weich in der Überzeit: die Übung war fertig (sie wird eingetragen) — fortgesetzt wird mit
+    der nächsten; bis zum Ende durchgelaufen gibt es keine Stelle."""
+    a = ab.kette(["w", "k"])
+    teil, uhr = _baustein(a, WEICH)
+    out = _lauf(teil, uhr, 11)
+    assert teil.phase == UEBERZEIT
+    out += teil.beenden(uhr[0])
+    assert ab.fortsetzung(out, "p1") == ab.Fortsetzung("k", "w")
+    durch, uhr3 = _baustein(ab.kette(["w"]))
+    alles = _lauf(durch, uhr3, 10)
+    assert durch.phase == FERTIG and ab.fortsetzung(alles, "p1") is None

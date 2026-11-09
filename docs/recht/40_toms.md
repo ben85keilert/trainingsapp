@@ -55,6 +55,15 @@
   wird abgelehnt. Berechtigungen `REQUEST_INSTALL_PACKAGES` (Android fragt einmal je App)
   und `UPDATE_PACKAGES_WITHOUT_USER_ACTION` (ab Android 12 ohne Rückfrage je Update).
   Nie, solange eine Messung, Einheit, ein Training oder Timer läuft.
+  **Von selbst** (seit 9.11.2026, Schalter „Updates der App von selbst installieren“ unter
+  Einstellungen → Updates, Vorgabe an, beim ersten Mal ein Hinweis mit „Ausschalten“): Findet
+  die Prüfung beim Start ein neueres Release, lädt die App es nur im WLAN (Android meldet das
+  Netz als nicht getaktet, `ACCESS_NETWORK_STATE`) — dieselbe Verbindung wie auf Tipp, nichts
+  geht zusätzlich hinaus. Installiert wird erst, wenn die App eine Minute im Hintergrund war,
+  kein Formular offen ist und nichts läuft (Wecker von Android, nicht exakt). Danach eine
+  Benachrichtigung „aktualisiert, antippen zum Öffnen“ (nur nach Updates aus der App, ohne
+  Ton). Scheitert ein Release (fremde Signatur, Android lehnt ab), versucht die App es nicht
+  wieder von selbst.
 - **Geräte-Backup** (seit 20.10.2026, Sicherheitsdurchsicht S4): Androids Auto Backup
   sichert nichts aus der App, solange die Person es nicht unter Einstellungen →
   Geräte-Backup einschaltet (Vorgabe aus; GPS-Strecken nur mit zweitem Schalter).

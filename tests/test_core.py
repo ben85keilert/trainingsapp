@@ -270,7 +270,7 @@ def test_hrv_bewertung_ist_ein_benannter_schalter(monkeypatch) -> None:
 
 def test_migration_erzeugt_das_schema(tmp_path) -> None:
     con = oeffnen(tmp_path / "test.db")
-    assert schema_version(con) == 50
+    assert schema_version(con) == 51
 
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     for erwartet in (
@@ -307,8 +307,8 @@ def test_migration_ist_wiederholbar(tmp_path) -> None:
     """Ein zweiter Lauf darf nichts tun und nicht scheitern."""
     pfad = tmp_path / "test.db"
     con = oeffnen(pfad)
-    assert migrieren(con) == 50
-    assert migrieren(con) == 50
+    assert migrieren(con) == 51
+    assert migrieren(con) == 51
     con.close()
 
 
@@ -334,7 +334,7 @@ def test_kaputte_migration_laesst_nichts_zurueck(tmp_path) -> None:
     with pytest.raises(RuntimeError, match="999_kaputt"):
         migrieren(con, ordner)
     assert not con.in_transaction
-    assert schema_version(con) == 50  # alle echten Migrationen, die kaputte nicht
+    assert schema_version(con) == 51  # alle echten Migrationen, die kaputte nicht
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "halb" not in tabellen
     # Repariert läuft sie durch — der nächste Start scheitert nicht an „schon vorhanden"

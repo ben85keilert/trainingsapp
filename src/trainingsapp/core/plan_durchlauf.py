@@ -103,6 +103,20 @@ def schritte_fuer(plan: Plan, katalog: Mapping[str, Exercise]) -> list[Schritt]:
     return schritte
 
 
+def startet_als_workout(plan: Plan) -> bool:
+    """Öffnet „Trainieren“ den Plan als Workout? Mit dem Schalter „Workout“ und immer mit einem
+    gezeichneten Ablauf (Ben, 9.11.2026, P169: der Ablauf hat Vorrang, die Liste ist einen Tipp
+    entfernt) — sonst die Liste.
+
+    >>> from trainingsapp.core.ablauf import Ablauf
+    >>> startet_als_workout(Plan(name="a")), startet_als_workout(Plan(name="b", workout=True))
+    (False, True)
+    >>> startet_als_workout(Plan(name="c", ablauf=Ablauf(an=True)))
+    True
+    """
+    return bool(plan.workout or plan.ablauf.an)
+
+
 def dauer_text_gesamt(schritte: list[Schritt]) -> str:
     """Wie lange die Timer zusammen laufen — ohne Pausen zwischen den Übungen.
 
@@ -112,4 +126,4 @@ def dauer_text_gesamt(schritte: list[Schritt]) -> str:
     return dauer_text(sum(s.profil.gesamt_s() for s in schritte if s.profil is not None))
 
 
-__all__ = ["Schritt", "dauer_text_gesamt", "schritte_fuer"]
+__all__ = ["Schritt", "dauer_text_gesamt", "schritte_fuer", "startet_als_workout"]

@@ -54,6 +54,7 @@ from trainingsapp.ui.components.hilfe import WORKOUT_MD
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.modus_wahl import WORKOUT, modus_wahl
 from trainingsapp.ui.components.srpe import srpe_zeile
 from trainingsapp.ui.components.takt_blatt import takt_anbringen
 from trainingsapp.ui.components.uebungsbild import uebungsbild
@@ -133,6 +134,10 @@ def workout_view(
         return frozenset(erledigte(plan.items, anzahl))
 
     def ohne() -> set[str]:
+        """Was heute schon gemacht ist, bleibt draußen — nur der Reihe nach. Mit Ablauf wird der
+        Pfad durchgearbeitet, egal was heute schon war (Ben, 9.11.2026, P166)."""
+        if gezeichnet:
+            return set()
         if wahl["ohne"] is None:
             wahl["ohne"] = {s.item_id for s in schritte if s.item_id in heute_erledigt()}
         return set(wahl["ohne"])
@@ -188,14 +193,19 @@ def workout_view(
                     page, state, uebung_lauf.kontext_fuer(u, plan, item), uebung=u, item=item
                 )
 
-    def starten() -> None:
+    def starten(fort: ab.Fortsetzung | None = None) -> None:
+        """Los — ``fort``: dort weiter, wo das Workout heute vorzeitig endete (P166)."""
+        extra = {"erste": fort.bei, "vorher": fort.vorher or None} if fort is not None else {}
         try:
-            plan_ablauf.starten(page, state, plan, **optionen())
+            plan_ablauf.starten(page, state, plan, **optionen(), **extra)
         except (RuntimeError, ValueError) as fehler:
             melden(str(fehler))
             return
         wahl["noch_einmal"] = False
         zum_fokus()
+
+    def von_vorn(_e: object = None) -> None:
+        starten()
 
     def zum_fokus() -> None:
         """Vom Start-Bild des Workout-Plans (Route ``/plan/<id>``) in den Fokus über dem Plan —
@@ -216,7 +226,7 @@ def workout_view(
             melden(str(fehler))
 
     def als_plan() -> None:
-        """„Als Plan üben“: der Plan wie im Modus Standard — für diese Sitzung."""
+        """„Liste“ (früher „Als Plan üben“, P169): der Plan als Liste — für diese Sitzung."""
         state.plan_als_plan.add(plan.id)
         if route == f"/plan/{plan.id}":
             state.neu_zeichnen()
@@ -237,17 +247,25 @@ def workout_view(
 
     # -- Vorher (C1) ------------------------------------------------------------------------
 
-    def schritt_zeile(n: int, s: Schritt) -> ft.Control:
+    def schritt_zeile(n: int, s: Schritt, gesperrt_text: str = "") -> ft.Control:
+        """Eine Zeile im Start-Bild — der Reihe nach mit dem Häkchen „Heute erledigt“, mit Ablauf
+        ohne (durcharbeiten, P166), dafür mit 🔒, was noch eine Pflicht versperrt (P168)."""
         u = katalog.get(s.uebung_id)
         weg = s.item_id in ohne()
+        vorn: list[ft.Control] = (
+            []
+            if gezeichnet
+            else [ft.Checkbox(value=weg, on_change=umschalten(s), tooltip="Heute erledigt")]
+        )
+        unter = bedingung_text(s) if not gesperrt_text else f"{bedingung_text(s)} · {gesperrt_text}"
         return ft.Container(
             padding=ft.Padding.symmetric(horizontal=6, vertical=4),
-            on_click=umschalten(s),
+            on_click=None if gezeichnet else umschalten(s),
             content=ft.Row(
                 spacing=10,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
-                    ft.Checkbox(value=weg, on_change=umschalten(s), tooltip="Heute erledigt"),
+                    *vorn,
                     ft.Text(str(nummern.get(s.item_id, n)), size=12, opacity=0.55, width=18),
                     uebungsbild(
                         state, u.icon_key if u else None, u.image_path if u else None, groesse=28
@@ -262,12 +280,12 @@ def workout_view(
                                 weight=ft.FontWeight.W_500,
                                 opacity=0.5 if weg else 1,
                             ),
-                            ft.Text(bedingung_text(s), size=12, opacity=0.6),
+                            ft.Text(unter, size=12, opacity=0.6),
                         ],
                     ),
                     *(
                         [ft.Icon(ft.Icons.LOCK_OUTLINE, size=18, opacity=0.6, tooltip="Pflicht")]
-                        if s.bedingung.hart
+                        if s.bedingung.hart or gesperrt_text
                         else []
                     ),
                 ],
@@ -276,7 +294,8 @@ def workout_view(
 
     def vorher() -> list[ft.Control]:
         uebergang = uebergang_fuer(state, plan)
-        teile: list[ft.Control] = []
+        # Workout · Liste (P169): oben, an derselben Stelle wie in der Liste
+        teile: list[ft.Control] = [modus_wahl(WORKOUT, zur_liste=als_plan, zum_workout=neu_bauen)]
         if plan_ablauf.hrv_moeglich(state):
             teile.append(
                 ft.Container(
@@ -380,7 +399,7 @@ def workout_view(
         if not uebungen:
             teile.append(hinweis("Der Plan hat keine Übung — im Plan-Editor hinzufügen."))
         elif gezeichnet:
-            teile.append(ablauf_liste())
+            teile.append(ablauf_liste(plan_ablauf.gesperrt(state, plan)))
             teile.append(
                 ft.OutlinedButton(
                     "Ablaufbild",
@@ -401,24 +420,39 @@ def workout_view(
             )
         if uebungen:
             alles_weg = not offen()
-            teile.append(
-                ft.FilledButton(
-                    "Noch einmal" if alles_weg else "Workout starten",
-                    icon=ft.Icons.PLAY_ARROW,
-                    height=52,
-                    on_click=starten,
-                    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26)),
+            rund = ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26))
+            fort = plan_ablauf.fortsetzung_heute(state, plan) if gezeichnet else None
+            if fort is not None:
+                # Heute vorzeitig beendet: dort weiter — oder von vorn (Ben, 9.11.2026, P166)
+                bei = schritt_fuer(fort.bei)
+                name = bei.anzeigename if bei is not None else "?"
+                nr = nummern.get(fort.bei)
+                teile.append(
+                    ft.FilledButton(
+                        f"Fortsetzen bei {nr} · {name}" if nr else f"Fortsetzen bei {name}",
+                        icon=ft.Icons.PLAY_ARROW,
+                        height=52,
+                        on_click=lambda _e: starten(fort),
+                        style=rund,
+                        data="fortsetzen",
+                    )
                 )
-            )
-            teile.append(
-                ft.Row(
-                    spacing=8,
-                    controls=[
-                        ft.OutlinedButton("Bereitstellen", on_click=bereitstellen, expand=True),
-                        ft.OutlinedButton("Als Plan üben", on_click=als_plan, expand=True),
-                    ],
+                teile.append(
+                    ft.OutlinedButton(
+                        "Von vorn", icon=ft.Icons.RESTART_ALT, on_click=von_vorn, style=rund
+                    )
                 )
-            )
+            else:
+                teile.append(
+                    ft.FilledButton(
+                        "Noch einmal" if alles_weg and not gezeichnet else "Workout starten",
+                        icon=ft.Icons.PLAY_ARROW,
+                        height=52,
+                        on_click=von_vorn,
+                        style=rund,
+                    )
+                )
+            teile.append(ft.OutlinedButton("Bereitstellen", on_click=bereitstellen))
         if einheit_ui.laeuft(state) is not None:
             teile.append(hinweis("Es läuft schon eine Einheit — erst oben mit ⏹ beenden."))
         return teile
@@ -428,9 +462,16 @@ def workout_view(
     def schritt_fuer(item_id: str) -> Schritt | None:
         return next((s for s in schritte if s.item_id == item_id), None)
 
-    def ablauf_liste() -> ft.Control:
+    def ablauf_liste(sperre: dict[str, ab.Kante]) -> ft.Control:
         """Die Schritte nach dem Ablauf: erst, was vom Start aus drankommt (nummeriert nach dem
-        Hauptpfad), darunter „Bei Bedarf“ mit dem, was sie ruft (§3.3, der Rückblick)."""
+        Hauptpfad), darunter „Bei Bedarf“ mit dem, was sie ruft (§3.3, der Rückblick); 🔒 mit
+        „frei nach …“, was in der Liste noch gesperrt ist (``sperre``, P168)."""
+        namen_ = {s.item_id: s.anzeigename for s in schritte}
+
+        def gesperrt_text(item_id: str) -> str:
+            k = sperre.get(item_id)
+            return plan_ablauf.frei_nach(plan, k, namen_) if k is not None else ""
+
         reihenfolge = ab.hauptpfad(plan.ablauf, ids)
         erreichbar = ab.von_selbst(plan.ablauf, ids)
         rest = [i for i in ids if i in erreichbar and i not in reihenfolge]
@@ -438,7 +479,7 @@ def workout_view(
         for n, item_id in enumerate([*reihenfolge, *rest], start=1):
             s = schritt_fuer(item_id)
             if s is not None and s.frage is None:
-                zeilen.append(schritt_zeile(n, s))
+                zeilen.append(schritt_zeile(n, s, gesperrt_text(item_id)))
         bedarf = [i for i in ids if i not in erreichbar]
         if bedarf:
             zeilen.append(
@@ -470,9 +511,16 @@ def workout_view(
                                     controls=[
                                         ft.Text(s.name, size=15, weight=ft.FontWeight.W_500),
                                         ft.Text(
-                                            ("kommt dran: " + " · ".join(rufer))
-                                            if rufer
-                                            else "niemand ruft sie",
+                                            (
+                                                ("kommt dran: " + " · ".join(rufer))
+                                                if rufer
+                                                else "niemand ruft sie"
+                                            )
+                                            + (
+                                                f" · {gesperrt_text(item_id)}"
+                                                if gesperrt_text(item_id)
+                                                else ""
+                                            ),
                                             size=12,
                                             opacity=0.6,
                                         ),

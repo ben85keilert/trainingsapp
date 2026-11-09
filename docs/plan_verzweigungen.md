@@ -448,6 +448,47 @@ Ben, nach dem zweiten Gerätetest — sechs Punkte, alle gebaut:
    („Überspringen — wie geht es weiter?“, „Doch nicht überspringen“, `ueberspringen(kante)`).
    Die Unterzeile nennt sonst eindeutig, was danach kommt („danach Kniebeuge“).
 
+### 8.10 Durcharbeiten, Fortsetzen, Freischalten (9.11.2026, P166–P169)
+
+Ben: „Wenn es einen nicht-linearen Plan gibt, versucht die App an mehreren Stellen die offenen
+Übungen abzuarbeiten. Das ist aber nicht der Sinn des Übens mit Zweigen und Bedingungen. Wichtig
+ist das Durcharbeiten. Wenn ein nicht-lineares Workout an einer Stelle beendet wurde, kann es
+gerne dort wieder fortgesetzt werden. Möchte man die anderen Übungen mitmachen, wechselt man in
+den Listenmodus, wenn diese freigeschaltet sind (harte Bedingungen) … wie bei einem Kurs.“ —
+Vorschlag P166–P169, „Vorschläge passen alle, bau das alles“.
+
+1. **Durcharbeiten** (P166): Mit Ablauf läuft das Workout den Pfad ab dem Start — „heute schon
+   gemacht“ zählt nicht (`plan_ablauf.bereitstellen` ignoriert ``ohne``, das Start-Bild hat keine
+   Häkchen, die Heute-Karte keine „Noch offen“-Chips und kein „Weiter mit der ersten offenen“).
+2. **Fortsetzen** (P166, nur heute): Endet ein Workout vorzeitig (⏹, Abbrechen), schreibt
+   `PlanAblaufBaustein.beenden` die Stelle in ``plan/ende`` (``bei``, ``vorher`` für ``◀
+   zurück``; was noch lief, kommt noch einmal, was fertig war, geht mit seiner regulären Kante
+   weiter). `core.ablauf.fortsetzung` liest sie aus den ``plan/…``-Ereignissen des Tages
+   (`EinheitRepo.plan_ereignisse`; ohne ``plan/ende`` — die App wurde beendet — bei der zuletzt
+   begonnenen). Start-Bild: **„Fortsetzen bei 2 · Kniebeuge“** und „Von vorn“; Heute-Karte:
+   „Fortsetzen bei …“ mit Knopf. Neu: auch ein Abbruch mitten in der Übung schreibt ``plan/ende``
+   (vorher nur in der Überzeit).
+3. **Freischalten** (P167): Ein Knoten mit einer Pflicht-Kante (Auslöser nicht „frei“) ist ein
+   **Tor** (`core.ablauf.tore`); hinaus geht es erst mit erfüllter Pflicht. In der Liste ist
+   frei, was von einer Wurzel (Start, Knoten ohne Weg hinein) erreichbar ist, ohne durch ein
+   geschlossenes Tor zu gehen (`core.ablauf.gesperrt`). Offen ist ein Tor, sobald ein Workout es
+   einmal verlassen hat, ohne zu überspringen — jede genommene Kante steht als ``plan/kante`` in
+   der Zeitleiste, jetzt auch die reguläre, die von selbst geht; Überspringen trägt
+   ``pflicht_offen`` (`EinheitRepo.tore_offen`). Dauerhaft wie ein Kurs; **„Freischaltungen
+   zurücksetzen …“** unter dem Ablaufbild setzt `plan.freischaltung_seit` (Migration 051) —
+   es zählen nur Einheiten danach.
+4. **Gesperrt in der Liste** (P168): Wischen, Pfeile und „Weiter mit …“ kennen nur Freies; das
+   Gesamtplan-Blatt zeigt Gesperrtes mit 🔒 und „frei nach 1 · Wandsitz · Skala ≥ 5“, ohne Tipp;
+   Anweisungen und Material erscheinen erst, wenn frei. Im Start-Bild des Workouts steht dasselbe
+   „frei nach …“ an der Zeile.
+5. **Trainieren** (P169): `core.plan_durchlauf.startet_als_workout` — Schalter „Workout“ oder ein
+   Ablauf öffnet das Workout (Routing `ui/app.py`, Heute-Karte „Start“; ein Timer allein macht
+   kein Workout mehr). Oben in Workout-Start und Liste der Umschalter **Workout · Liste**
+   (`components/modus_wahl.py`), er ersetzt „Als Plan üben“ und ▶ „Als Workout“ in der Leiste.
+   Unter Uhren zeigt der Schalter „Workout — mit Abzweigen immer“ (an, nicht schaltbar).
+   „Start“/„Fortsetzen“ auf Heute öffnen das Workout auch nach einem „Liste“ in der Sitzung;
+   „Übungen ansehen“ daneben öffnet die Liste.
+
 ## 9. Entscheidungen (Ergänzung)
 
 - **P113** Name des Reiters: „Ablauf“ (Vorschlag) statt „Verlauf“ (belegt durch Kurven/Tagebuch)?

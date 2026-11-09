@@ -86,7 +86,7 @@ from trainingsapp.ui.components.hilfe import TIMER_EDITOR_MD
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
+from trainingsapp.ui.components.takt_anzeige import ZeitMitTakt, takt_gross
 from trainingsapp.ui.components.takt_blatt import (
     SYMBOL as TAKT_SYMBOL,
 )
@@ -230,16 +230,17 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
     laufend = lauf.begonnen and not lauf.fertig and not lauf.abgebrochen
 
     abschnitt_text = ft.Text(size=24, weight=ft.FontWeight.W_600, text_align=ft.TextAlign.CENTER)
-    zeit_text = ft.Text(size=84, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER)
+    # Takt · Zeit in einer Zeile (Ben, 9.11.2026: „nebeneinander, den Takt etwas kleiner als die
+    # Uhrzeit“) — dieselbe Form wie im Fokus und in der laufenden Uhr der Übung; antippen → groß
+    uhr = ZeitMitTakt(84, on_takt=lambda: takt_gross(page, state, lauf))
     fortschritt = ft.ProgressBar(value=0, bar_height=8, border_radius=4)
     stand_text = ft.Text(size=13, opacity=0.75, text_align=ft.TextAlign.CENTER)
     haupt_knopf = ft.FilledButton(
         height=56, style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=28))
     )
     ablauf = ft.Column(spacing=2)
-    # Taktgeber (`docs/plan_taktgeber.md` §5): die Animation unter der Zeit, der Tempo-Regler
-    # für jetzt, die Zeile mit dem gewählten Takt — einmal gebaut, je Tick nachgezogen
-    takt_anzeige = TaktAnzeige(groesse=200)
+    # Taktgeber (`docs/plan_taktgeber.md` §5): die Animation neben der Zeit (`uhr`), der
+    # Tempo-Regler für jetzt, die Zeile mit dem gewählten Takt — einmal gebaut, je Tick nachgezogen
     tempo_regler = TempoRegler(state, TAKT_KEY, lauf)
     takt_text = ft.Text(size=12, opacity=0.75, text_align=ft.TextAlign.CENTER)
 
@@ -290,7 +291,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         fortschritt.visible = not lauf.vorwaerts
         if lauf.vorwaerts:  # die Stoppuhr (Ben, 18.10.2026): vorwärts, ohne Abschnitte
             abschnitt_text.value = profil.anzeigename
-            zeit_text.value = lauf.anzeige()
+            zeit = lauf.anzeige()
             if stand.fertig:
                 stand_text.value = "fertig"
             elif stand.laeuft:
@@ -301,13 +302,13 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                 stand_text.value = "zählt vorwärts, bis du „Fertig“ tippst"
         elif stand.fertig:
             abschnitt_text.value = "Fertig"
-            zeit_text.value = "0:00"
+            zeit = "0:00"
             fortschritt.value = 1.0
             stand_text.value = f"{profil.anzeigename} · {dauer_text(profil.gesamt_s())}"
         else:
             abschnitt_text.value = stand.name or f"Abschnitt {stand.index + 1}"
             # Vor dem Start die volle Dauer, danach aufgerundet (0:01 bis zuletzt)
-            zeit_text.value = dauer_text(-(-stand.rest_s // 1))
+            zeit = dauer_text(-(-stand.rest_s // 1))
             fortschritt.value = stand.anteil
             teile = []
             if len(profil.alle_teile()) > 1:
@@ -335,7 +336,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         ablauf.controls = [] if lauf.vorwaerts else ablauf_zeilen(stand)
         takt = lauf.takt_aktuell(stand.nummer) if not stand.fertig else None
         lage = lauf.takt_lage()
-        takt_anzeige.nachziehen(lauf.takt_effektiv() if lage else None, lage)  # mit Tempo
+        uhr.nachziehen(zeit, lauf.takt_effektiv() if lage else None, lage)  # mit Tempo
         tempo_regler.nachziehen(lage is not None)
         takt_text.value = f"Takt: {takt.anzeigename} · {takt.kurztext()}" if takt else ""
         takt_text.visible = bool(takt_text.value) and lage is None
@@ -693,15 +694,12 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             karte(
                 abschnitt_text,
                 # Ein Tipp auf die Zeit stellt einen Timer ohne Ablauf (P79 D4)
-                ft.Container(
-                    content=zeit_text,
-                    on_click=None if laufend else zeit_stellen,
-                    tooltip=None if laufend else "Zeit stellen",
-                    border_radius=16,
+                uhr.zeile(
+                    on_zeit=None if laufend else zeit_stellen,
+                    zeit_tooltip=None if laufend else "Zeit stellen",
                 ),
                 fortschritt,
                 stand_text,
-                takt_anzeige.control,
                 tempo_regler.control,
                 takt_text,
                 ft.Container(height=4),

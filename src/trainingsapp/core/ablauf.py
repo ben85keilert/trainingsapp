@@ -841,6 +841,127 @@ def pruefung(ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str]) -> 
     return out
 
 
+# -- Durcharbeiten: Freischalten und Fortsetzen (Ben, 9.11.2026, P166–P168) ----------------------
+#
+# Ein Plan mit Ablauf wird im Workout **durchgearbeitet**, nicht abgearbeitet: der Pfad ab dem
+# Start, egal was heute schon gemacht ist. Wer andere Übungen mitmachen will, wechselt in die
+# Liste — dort ist frei, was keine Pflicht mehr versperrt, wie die Kapitel eines Kurses.
+
+
+def tore(ablauf: Ablauf) -> set[str]:
+    """Knoten mit einer **Pflicht**-Kante — ein *Tor*: hinaus geht es erst, wenn die Pflicht
+    erfüllt ist (`kanten_pruefen` sperrt bis dahin auch die anderen Wege).
+
+    Eine Pflicht ohne Auslöser (frei) ist immer erfüllt und sperrt nichts — kein Tor.
+
+    >>> a = Ablauf(True, "a", (Kante("a", "b", WDH, 12, pflicht=True),
+    ...                         Kante("b", "c", pflicht=True)))
+    >>> sorted(tore(a))
+    ['a']
+    """
+    return {k.von for k in ablauf.kanten if k.pflicht and k.ausloeser != FREI}
+
+
+def gesperrt(ablauf: Ablauf, items: Sequence[str], offen: Iterable[str]) -> dict[str, Kante]:
+    """Was in der Liste noch gesperrt ist — je Knoten die Pflicht-Kante des ersten noch
+    geschlossenen Tors davor („frei nach: Kniebeuge · 20 Wdh.“, P167/P168).
+
+    Frei ist, was von einer **Wurzel** (Start, Knoten ohne Weg hinein) erreichbar ist, ohne durch
+    ein geschlossenes Tor zu gehen; ``offen`` sind die Tore, deren Pflicht schon einmal erfüllt
+    war (`data.einheiten.EinheitRepo.tore_offen`). Was von keiner Wurzel aus erreichbar ist,
+    liegt hinter keiner Pflicht und bleibt frei. Ohne eingeschalteten Ablauf: nichts.
+
+    >>> a = Ablauf(True, "a", (Kante("a", "b", WDH, 20, pflicht=True), Kante("a", "c"),
+    ...                         Kante("b", "d"), Kante("c", ENDE)))
+    >>> {k: v.von for k, v in gesperrt(a, ["a", "b", "c", "d", "e"], set()).items()}
+    {'b': 'a', 'c': 'a', 'd': 'a'}
+    >>> gesperrt(a, ["a", "b", "c", "d"], {"a"}), gesperrt(replace(a, an=False), ["a"], ())
+    ({}, {})
+    """
+    if not ablauf.an:
+        return {}
+    knoten = [*items, *(f.id for f in ablauf.fragen)]
+    bekannt = set(knoten)
+    hinein = {k.nach for k in ablauf.kanten if k.nach != k.von}
+    start = ablauf.startknoten(items)
+    zu = tore(ablauf) - set(offen)
+
+    def weiter(von: Iterable[str], gesehen: set[str], halt: set[str]) -> list[str]:
+        """Breitensuche ab ``von``; aus ``halt`` geht es nicht weiter — die Neuen in Reihenfolge."""
+        neu: list[str] = []
+        warte = deque(von)
+        while warte:
+            k = warte.popleft()
+            if k in halt:
+                continue
+            for kante in ablauf.von(k):
+                if kante.nach in bekannt and kante.nach not in gesehen:
+                    gesehen.add(kante.nach)
+                    neu.append(kante.nach)
+                    warte.append(kante.nach)
+        return neu
+
+    wurzeln = [k for k in knoten if k == start or k not in hinein]
+    frei = set(wurzeln)
+    weiter(wurzeln, frei, zu)
+    grund: dict[str, Kante] = {}
+    for tor in [k for k in knoten if k in zu and k in frei]:
+        pflicht = next(k for k in ablauf.von(tor) if k.pflicht and k.ausloeser != FREI)
+        for k in weiter([tor], frei | set(grund), set()):
+            grund[k] = pflicht
+    return {k: grund[k] for k in knoten if k in grund}
+
+
+@dataclass(frozen=True, slots=True)
+class Fortsetzung:
+    """Wo ein vorzeitig beendetes Workout weitergeht (P166) — ``vorher``: woher es dorthin kam,
+    damit ein ``◀ zurück`` dort noch weiß, wohin."""
+
+    bei: str
+    vorher: str = ""
+
+
+def fortsetzung(ereignisse: Iterable[Any], plan_id: str) -> Fortsetzung | None:
+    """Die Stelle zum Fortsetzen aus der Zeitleiste — ``ereignisse`` in ihrer Reihenfolge
+    (`core.einheit.Ereignis`: ``quelle``, ``art``, ``daten``). Es zählt das letzte Workout des
+    Plans: endete es mit ``bei`` (``plan/ende``, `devices.plan_ablauf`), geht es dort weiter;
+    ohne ``bei`` war es durch; ohne Ende (die App wurde beendet) bei der zuletzt begonnenen.
+
+    >>> from types import SimpleNamespace as E
+    >>> start = E(quelle="plan", art="start", daten={"plan": "p", "workout": True})
+    >>> schritt = lambda k: E(quelle="plan", art="uebung_start", daten={"plan": "p",
+    ...                                                                "planuebung": k})
+    >>> ende = lambda **d: E(quelle="plan", art="ende", daten={"plan": "p", "workout": True, **d})
+    >>> fortsetzung([start, schritt("a"), schritt("b"), ende(bei="b", vorher="a")], "p")
+    Fortsetzung(bei='b', vorher='a')
+    >>> fortsetzung([start, schritt("a"), ende()], "p") is None
+    True
+    >>> fortsetzung([start, schritt("a"), schritt("b")], "p")
+    Fortsetzung(bei='b', vorher='a')
+    >>> fortsetzung([start, schritt("a"), ende(bei="a"), start, schritt("a"), ende()], "p")
+    """
+    stand: Fortsetzung | None = None
+    laeuft = False
+    knoten: list[str] = []
+    for e in ereignisse:
+        daten = getattr(e, "daten", None) or {}
+        if getattr(e, "quelle", "") != "plan" or daten.get("plan") != plan_id:
+            continue
+        art = getattr(e, "art", "")
+        if art == "start" and daten.get("workout"):
+            laeuft, knoten, stand = True, [], None
+        elif art in ("uebung_start", "frage") and laeuft and daten.get("planuebung"):
+            knoten.append(str(daten["planuebung"]))
+        elif art == "ende" and laeuft:
+            laeuft = False
+            bei = daten.get("bei")
+            stand = Fortsetzung(str(bei), str(daten.get("vorher") or "")) if bei else None
+    if laeuft and knoten:
+        vorher = next((k for k in reversed(knoten[:-1]) if k != knoten[-1]), "")
+        return Fortsetzung(knoten[-1], vorher)
+    return stand
+
+
 # -- Zeichnen ------------------------------------------------------------------------------------
 
 
@@ -1226,6 +1347,7 @@ __all__ = [
     "ZEIT",
     "ZURUECK",
     "Ablauf",
+    "Fortsetzung",
     "Frage",
     "Kante",
     "KanteStand",
@@ -1237,7 +1359,9 @@ __all__ = [
     "bedarf",
     "bedingung_aus_kante",
     "erreichbar",
+    "fortsetzung",
     "freie_lage",
+    "gesperrt",
     "hat_verzweigung",
     "hauptpfad",
     "hauptwege_spiegeln",
@@ -1258,6 +1382,7 @@ __all__ = [
     "pruefung",
     "regulaere",
     "sekunden_text",
+    "tore",
     "von_selbst",
     "wahl_offen",
     "warnungen",

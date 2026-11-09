@@ -92,6 +92,7 @@ class PlanAblaufBaustein:
         uebergang: str | None = None,
         workout: bool = False,
         ablauf: ab.Ablauf | None = None,
+        vorher: str | None = None,
     ) -> None:
         """``pause_ohne_timer``: nach einer Übung ohne Timer auf „Weiter“ warten (sonst gleich
         die nächste) — gilt nur, wenn nicht ohnehin ``weiter_automatisch``. ``erste``: die
@@ -104,7 +105,10 @@ class PlanAblaufBaustein:
         Klammer ``plan/start`` … ``plan/ende`` (Spur ``workout`` in der Messung).
 
         ``ablauf`` (G2): der gezeichnete Ablauf — nur mit ``an`` wirksam; dann bestimmen seine
-        Kanten den Weg, ``erste`` geht vor seinem Startknoten."""
+        Kanten den Weg, ``erste`` geht vor seinem Startknoten.
+
+        ``vorher`` (Fortsetzen, P166): woher das unterbrochene Workout zu ``erste`` kam — steht
+        vorn im Verlauf, damit ``◀ zurück`` auch nach dem Fortsetzen weiß, wohin."""
         if not schritte:
             raise ValueError("Ein Ablauf ohne Übung")
         if uebergang not in (None, HART, WEICH):
@@ -128,6 +132,8 @@ class PlanAblaufBaustein:
         #: die Schritte in der Reihenfolge, in der sie liefen (Index je Durchlauf) — für
         #: ``◀ zurück`` und die Zählung der Durchläufe
         self.verlauf: list[int] = []
+        #: woher ein fortgesetztes Workout kam (P166) — nur für ``◀ zurück``, kein Durchlauf
+        self._vorher = self._index(vorher) if vorher else None
         #: die Selbsteinschätzung im laufenden Schritt (Skala-Kanten, Fragen) — je Durchlauf
         self.skala_wert: float | None = None
         #: was der Zähl-Teil im laufenden Schritt zählte — setzt die Ansicht (`wdh_setzen`)
@@ -292,7 +298,7 @@ class PlanAblaufBaustein:
             return None
         if not kante.zurueck:
             return self._ziel(kante.nach)
-        return self._zurueck(len(self.verlauf) - 1, kante.wiederholen)
+        return self._zurueck(len(self._weg()) - 1, kante.wiederholen)
 
     def hat(self, knoten: str) -> bool:
         """Läuft dieser Knoten in diesem Workout mit (nicht heute ausgelassen)?"""
@@ -326,12 +332,17 @@ class PlanAblaufBaustein:
             return self._ziel(kante.nach, gesehen | {knoten})
         return None
 
+    def _weg(self) -> list[int]:
+        """Der Verlauf fürs ``◀ zurück`` — nach dem Fortsetzen mit der Stelle davor (P166)."""
+        return ([self._vorher] if self._vorher is not None else []) + self.verlauf
+
     def _zurueck(self, pos: int, wiederholen: bool) -> int | None:
         """Von der Stelle ``pos`` im Verlauf einen Schritt zurück (höchstens so viele Stufen,
         wie der Verlauf lang ist — ein ``zurück`` im ``zurück`` wandert weiter)."""
-        hier = self.verlauf[pos] if 0 <= pos < len(self.verlauf) else self.k
+        weg = self._weg()
+        hier = weg[pos] if 0 <= pos < len(weg) else self.k
         for p in range(pos - 1, -1, -1):
-            vorher = self.verlauf[p]
+            vorher = weg[p]
             if vorher == hier:
                 continue
             if wiederholen:
@@ -377,21 +388,7 @@ class PlanAblaufBaustein:
             return
         jetzt = self._uhr()
         ziel = self.kante_ziel(kante)
-        self._ausstehend.append(
-            Ereignis(
-                jetzt - self._t0,
-                "plan",
-                "kante",
-                kante.text or kante.ausloeser_text(),
-                {
-                    "plan": self.plan_id,
-                    "planuebung": self.schritt.item_id,
-                    "von": self.schritt.item_id,
-                    "nach": self.schritte[ziel].item_id if ziel is not None else ab.ENDE,
-                    "kante": kante.text,
-                },
-            )
-        )
+        self._ausstehend.append(self._kante_ereignis(jetzt, kante, ziel))
         if ziel is None:
             self._ende_gewollt = True
         if self.phase == PAUSE:
@@ -530,8 +527,10 @@ class PlanAblaufBaustein:
         return self.timer is not None and self.timer.lauf.laeuft_roh
 
     def beenden(self, jetzt: float) -> list[Ereignis]:
-        """Die Einheit endet mitten im Ablauf: die laufende Übung endet ohne Eintrag."""
+        """Die Einheit endet mitten im Ablauf: die laufende Übung endet ohne Eintrag. Gezeichnet
+        merkt sich ``plan/ende``, wo es weitergeht (``bei``, P166)."""
         out = self.takt(jetzt)
+        bei = self._fortsetzen_bei()
         if self.phase == UEBERZEIT and self._t0 is not None:
             # Weich und die Einheit endet: die Übung war fertig — eintragen, mit Überzeit
             self._ende_eintragen(jetzt, "fertig")
@@ -540,10 +539,10 @@ class PlanAblaufBaustein:
                 out += self._uebungs_timer(self.timer.beenden(jetzt))
             self._ausstehend.append(self._ende_ereignis(jetzt, "beendet"))
             self.ergebnisse.setdefault(self.schritt.item_id, "beendet")
-            self.phase = FERTIG
+        # Auch mitten in der Übung schließt ``plan/ende`` das Workout — mit der Stelle (P166)
         if self.phase != FERTIG and self._t0 is not None:
             self.phase = FERTIG
-            self._ausstehend.append(self._plan_ende(jetzt))
+            self._ausstehend.append(self._plan_ende(jetzt, bei))
         return out + self._abholen()
 
     async def abschliessen_async(self, stoppen: bool = True) -> PlanAblaufBaustein:
@@ -573,6 +572,9 @@ class PlanAblaufBaustein:
         if self.phase == PAUSE:
             gezeichnet = self.ablauf is not None and not ziel
             n = self.naechster if gezeichnet else self.ziel_index(ziel)
+            st = self._regulaere_kante() if gezeichnet else None
+            if n is not None and st is not None:
+                self._ausstehend.append(self._kante_ereignis(jetzt, st.kante, n))
             if n is not None:
                 self._beginnen(n, jetzt)
 
@@ -663,6 +665,7 @@ class PlanAblaufBaustein:
             "uebersprungen",
             self.schritte[ziel].item_id if ziel is not None else None,
             zwingend=True,
+            kante=kante,
         )
 
     # -- intern ---------------------------------------------------------------------------
@@ -700,11 +703,52 @@ class PlanAblaufBaustein:
             daten["ueber_s"] = round(ueber, 1)  # weich: die Überzeit geht in den Eintrag
         return Ereignis(jetzt - self._t0, "plan", "uebung_ende", uebung_ende_text(s.name), daten)
 
-    def _plan_ende(self, jetzt: float) -> Ereignis:
+    def _kante_ereignis(self, jetzt: float, kante: ab.Kante, ziel: int | None) -> Ereignis:
+        """``plan/kante`` — mit ``pflicht_offen``, wenn der Knoten verlassen wird, ohne dass seine
+        Pflicht erfüllt ist (Überspringen): dann öffnet das Tor nichts in der Liste (P167)."""
+        assert self._t0 is not None
+        daten: dict[str, Any] = {
+            "plan": self.plan_id,
+            "planuebung": self.schritt.item_id,
+            "von": self.schritt.item_id,
+            "nach": self.schritte[ziel].item_id if ziel is not None else ab.ENDE,
+            "kante": kante.text,
+        }
+        if any(st.kante.pflicht and not st.erfuellt for st in self.kanten_stand()):
+            daten["pflicht_offen"] = True
+        return Ereignis(
+            jetzt - self._t0, "plan", "kante", kante.text or kante.ausloeser_text(), daten
+        )
+
+    def _fortsetzen_bei(self) -> tuple[str, str] | None:
+        """Wo ein vorzeitig beendetes Workout weitergeht (P166) — ``(bei, vorher)``; ``None``
+        ohne gezeichneten Ablauf oder wenn als Nächstes das Ende käme. Was noch lief (auch
+        wartend), kommt noch einmal; was fertig ist (weich in der Überzeit, die Pause), geht mit
+        seiner regulären Kante weiter — bei mehreren gleichwertigen Wegen wird dort gefragt."""
+        if self.ablauf is None or self._t0 is None or self.phase == FERTIG:
+            return None
+        hier = self.schritt.item_id
+        frueher = [self.schritte[i].item_id for i in self._weg()[:-1]]
+        vorher = next((k for k in reversed(frueher) if k != hier), "")
+        fertig = self.phase == PAUSE or (self.phase == UEBERZEIT and self._weg_frei())
+        if not fertig or self.wahl_noetig:
+            return hier, vorher
+        if self.schritt.frage is None and not self.ablauf.von(hier):
+            return None  # keine Kante: das Workout war hier zu Ende
+        st = self._regulaere_kante()
+        if st is None:
+            return hier, vorher
+        n = self.kante_ziel(st.kante)
+        return (self.schritte[n].item_id, hier) if n is not None else None
+
+    def _plan_ende(self, jetzt: float, bei: tuple[str, str] | None = None) -> Ereignis:
+        """``plan/ende`` — ``bei``: das Workout endete vorzeitig, hier geht es weiter (P166)."""
         assert self._t0 is not None
         daten: dict[str, Any] = {"plan": self.plan_id}
         if self.workout:
             daten["workout"] = True
+        if bei is not None:
+            daten["bei"], daten["vorher"] = bei
         return Ereignis(jetzt - self._t0, "plan", "ende", self.name, daten)
 
     def _ende_eintragen(self, jetzt: float, grund: str) -> None:
@@ -752,11 +796,21 @@ class PlanAblaufBaustein:
         )
 
     def _beenden(
-        self, jetzt: float, grund: str, ziel: str | None = None, *, zwingend: bool = False
+        self,
+        jetzt: float,
+        grund: str,
+        ziel: str | None = None,
+        *,
+        zwingend: bool = False,
+        kante: ab.Kante | None = None,
     ) -> None:
         """Der Schritt endet mit ``grund`` und es geht weiter: zu ``ziel`` (eine Planübung), sonst
         linear zur nächsten, gezeichnet über die reguläre Kante. Ist im gezeichneten Ablauf kein
-        Weg frei, endet nichts — der Schritt wartet (``zwingend``: trotzdem enden, Überspringen)."""
+        Weg frei, endet nichts — der Schritt wartet (``zwingend``: trotzdem enden, Überspringen).
+
+        Gezeichnet steht die genommene Kante als ``plan/kante`` in der Zeitleiste — auch die
+        reguläre, die von selbst geht (P167: daraus liest die Liste, welche Tore offen sind);
+        ``kante``: die Kante, über die ``ziel`` gewählt wurde (Überspringen)."""
         assert self._t0 is not None
         ohne_timer = self.schritt.profil is None
         if self.ablauf is None:
@@ -775,6 +829,9 @@ class PlanAblaufBaustein:
                 self._grund_wartend = grund
                 return
             naechster = self.kante_ziel(st.kante) if st is not None else None
+            kante = st.kante if st is not None else None
+        if kante is not None and self.ablauf is not None:
+            self._ausstehend.append(self._kante_ereignis(jetzt, kante, naechster))
         self._ende_eintragen(jetzt, grund)  # in der Pause gibt es keinen Timer (Laufleiste, ⏸)
         self._ende_gewollt = False
         self.wartet = False

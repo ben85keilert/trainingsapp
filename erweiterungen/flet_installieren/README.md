@@ -17,11 +17,22 @@ Android eingespielt wird. Das geht nur in der gebauten Android-App.
 - **Android beendet die App beim Installieren** und öffnet sie danach nicht von selbst.
   Wann installiert wird (nie während einer Messung), entscheidet die App
   (`trainingsapp/ui/app_update.py`).
+- **Automatik** (`Selbstupdate.kt`): `vorbereiten` schreibt die APK in eine Sitzung, ohne
+  sie abzuschicken; `spaeter` stellt einen Wecker (`AlarmManager`, nicht exakt), dessen
+  Empfänger `SpaeterInstallieren` sie abschickt — nur, wenn die App dann weder zu sehen ist
+  noch einen Vordergrunddienst hat (Messung, Training, Timer). Python braucht es dazu nicht;
+  Android friert Apps im Hintergrund ohnehin nach Sekunden ein. Vor dem Abschicken steht die
+  erwartete Version in den SharedPreferences, und `NachUpdate` (`MY_PACKAGE_REPLACED`) meldet
+  „aktualisiert, antippen zum Öffnen“ — nach einem Update aus dem Browser nicht. Fragt
+  Android doch nach, während die App nicht zu sehen ist, kommt die Rückfrage als
+  Benachrichtigung (aus dem Hintergrund darf keine Activity starten).
 - **Nicht für Google Play:** Dort darf sich eine App nicht selbst aktualisieren. Eine
   Play-Fassung bindet diese Erweiterung nicht ein (`docs/recht/80_store_freigaben.md`).
 
-Python: `FletInstallieren` (Service) mit `stand`, `erlauben`, `pruefen`, `installieren`
-und dem Ereignis `on_ergebnis` (Codes von `PackageInstaller.STATUS_*`); `verfuegbar(page)`.
+Python: `FletInstallieren` (Service) mit `stand`, `erlauben`, `pruefen`, `installieren`,
+für die Automatik `vorbereiten`, `abschicken`, `spaeter`, `nicht_spaeter`, `verwerfen`,
+`benachrichtigung_erlauben`, und dem Ereignis `on_ergebnis` (Codes von
+`PackageInstaller.STATUS_*`); `verfuegbar(page)`.
 Laden, Prüfsumme und Texte zu den Codes liegen flet-frei in `trainingsapp/core/update.py`.
 
 Eingebunden wie flet_hochladen: `pyproject.toml` der App (`dependencies`,

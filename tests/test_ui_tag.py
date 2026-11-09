@@ -8,7 +8,7 @@ P72), alle Einträge einer Übung an einem beliebigen Tag.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -167,7 +167,9 @@ def test_start_oeffnet_plan_oder_ablauf_und_fertig_ist_eine_zeile(page, state) -
     assert len(starts) == 2
     for knopf in starts:
         asyncio.run(knopf.on_click())
-    assert page.routen == [f"/plan/{ohne.id}", f"/plan/{mit.id}/workout"]
+    # „Start“ öffnet wie „Trainieren“ (P169, Ben 9.11.2026): die Route entscheidet — Workout mit
+    # dem Schalter „Workout“ oder einem Ablauf, sonst die Liste; ein Timer allein macht kein Workout
+    assert page.routen == [f"/plan/{ohne.id}", f"/plan/{mit.id}"]
     texte = _texte(ansicht)
     assert any("mit Timer" in t for t in texte)
     assert any(t.startswith("1 von 1 erledigt") for t in texte)
@@ -468,7 +470,7 @@ def test_karte_ohne_pfeil_weiter_springt_zur_offenen_uebung(page, state) -> None
     plan = _plan(state, "liegestuetzen", "kniebeuge", "wandsitz")
     neu = tagesansicht(page, state, state.heute())
     assert not _symbole(neu, ft.Icons.CHEVRON_RIGHT)
-    assert _knopf(neu, "Übungen ansehen")
+    assert _knopf(neu, "Start")  # eine Liste: „Start“ öffnet sie schon (P169)
     _eintragen(state, plan.id, "liegestuetzen", {"reps": [15]})
     unterwegs = tagesansicht(page, state, state.heute())
     assert not _symbole(unterwegs, ft.Icons.CHEVRON_RIGHT)
@@ -567,3 +569,39 @@ def test_weiter_zur_ersten_uebung_beginnt_oben(page, state) -> None:
     state.plan_ziel = plan.items[0].id
     plan_view(page, state, state.plaene.laden(plan.id))
     assert route not in state.scroll_offsets
+
+
+def test_plan_mit_ablauf_auf_heute_fortsetzen_statt_noch_offen(page, state) -> None:
+    """Ben, 9.11.2026 (P166/P169): Ein Plan mit Ablauf öffnet als Workout — daneben „Übungen
+    ansehen“ (die Liste); hat das Workout heute vorzeitig geendet, steht „Fortsetzen bei …“ da,
+    keine „Noch offen“-Chips."""
+    from trainingsapp.core import ablauf as ab
+    from trainingsapp.core.einheit import Ereignis
+
+    plan = _plan(state, "kniebeuge", "wandsitz")
+    a, b = (it.id for it in plan.items)
+    state.plaene.ablauf_setzen(plan.id, ab.kette([a, b]))
+    plan = state.plaene.laden(plan.id)
+    neu = tagesansicht(page, state, state.heute())
+    asyncio.run(_knopf(neu, "Übungen ansehen").on_click())
+    assert plan.id in state.plan_als_plan and page.routen[-1] == f"/plan/{plan.id}"
+
+    # Ein Workout von heute, abgebrochen bei der zweiten Übung
+    einheit_id = "e-heute"
+    state.einheiten.einheit_beginnen(einheit_id, state.profil.id, datetime.now(UTC), "Workout")
+    daten = {"plan": plan.id, "workout": True}
+    state.einheiten.ereignisse_schreiben(
+        einheit_id,
+        [
+            (0, Ereignis(0.0, "plan", "start", plan.name, daten)),
+            (1, Ereignis(0.0, "plan", "uebung_start", "", {**daten, "planuebung": a})),
+            (2, Ereignis(9.0, "plan", "uebung_start", "", {**daten, "planuebung": b})),
+            (3, Ereignis(12.0, "plan", "ende", plan.name, {**daten, "bei": b, "vorher": a})),
+        ],
+    )
+    _eintragen(state, plan.id, "kniebeuge", {"reps": [10]})
+    unterwegs = tagesansicht(page, state, state.heute())
+    texte = _texte(unterwegs)
+    assert "Fortsetzen bei 2 · Wandsitz" in texte and "Noch offen:" not in texte
+    asyncio.run(_knopf(unterwegs, "Fortsetzen").on_click())
+    assert page.routen[-1] == f"/plan/{plan.id}" and plan.id not in state.plan_als_plan

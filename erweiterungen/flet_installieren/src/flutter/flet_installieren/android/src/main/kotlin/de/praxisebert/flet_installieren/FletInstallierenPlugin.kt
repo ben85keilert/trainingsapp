@@ -1,14 +1,14 @@
 package de.praxisebert.flet_installieren
 
+import android.Manifest
 import android.app.Activity
-import android.app.PendingIntent
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.content.pm.Signature
+import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -24,20 +24,27 @@ import java.io.FileInputStream
 import java.security.MessageDigest
 
 private const val KANAL = "flet_installieren"
-internal const val AKTION_ERGEBNIS = "de.praxisebert.flet_installieren.ERGEBNIS"
+private const val ANFRAGE_BENACHRICHTIGUNG = 7303
 
 /**
  * Die App installiert ihr eigenes Update (trainingsapp, Katalog A8 Stufe 2): eine geladene
  * APK über den `PackageInstaller` von Android.
  *
  * Methoden (Dart → Kotlin, Kanal „flet_installieren"):
- * - `stand` → {sdk, darf, still, paket, version_code, version_name, installiert_von}
- *   — `darf`: „Unbekannte Apps installieren" ist für diese App erlaubt (ab Android 8 je App);
- *   `still`: Android 12+, das Update kann ohne Rückfrage laufen.
+ * - `stand` → {sdk, darf, still, paket, version_code, version_name, installiert_von,
+ *   getaktet, benachrichtigen, vorbereitet} — `darf`: „Unbekannte Apps installieren" ist für
+ *   diese App erlaubt (ab Android 8 je App); `still`: Android 12+, das Update kann ohne
+ *   Rückfrage laufen; `getaktet`: das Netz kostet (mobile Daten); `vorbereitet`: Nummer der
+ *   vorbereiteten Sitzung oder -1.
  * - `erlauben` öffnet die Seite der Einstellungen, auf der man das erlaubt.
  * - `pruefen` {pfad} → {paket, eigenes_paket, version_code, version_name, eigener_code,
  *   signatur, gleiche_signatur} — liest die APK, ohne sie zu installieren.
  * - `installieren` {pfad} → Nummer der Sitzung; das Ergebnis kommt später als Ereignis.
+ * - Automatik (`Selbstupdate`): `vorbereiten` {pfad} → {sitzung, version_code,
+ *   version_name} schreibt die Sitzung, ohne sie abzuschicken; `abschicken` schickt sie jetzt
+ *   ab; `spaeter` {sekunden} stellt den Wecker, der sie abschickt, `nicht_spaeter` nimmt ihn
+ *   zurück; `verwerfen` räumt alles weg; `benachrichtigung_erlauben` fragt Android 13+ nach
+ *   der Erlaubnis für Benachrichtigungen.
  *
  * Ereignis (Kotlin → Dart): `ergebnis` {status, meldung, sitzung} mit den Codes von
  * `PackageInstaller.STATUS_*`. Bei -1 (Rückfrage) zeigt das Plugin selbst den Dialog von
@@ -73,6 +80,7 @@ class FletInstallierenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, A
         k.setMethodCallHandler(this)
         kanal = k
         aktiv = this
+        Selbstupdate.beimStart(binding.applicationContext)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -110,16 +118,51 @@ class FletInstallierenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, A
             "stand" -> result.success(stand(ctx))
             "erlauben" -> erlauben(ctx, result)
             "pruefen" -> imHintergrund(result) { pruefen(ctx, pfad(call)) }
-            "installieren" -> {
+            "vorbereiten", "installieren" -> {
                 if (beschaeftigt) {
                     result.error("belegt", "Es wird schon installiert", null)
                     return
                 }
                 beschaeftigt = true
+                val sofort = call.method == "installieren"
                 imHintergrund(result, { beschaeftigt = false }) {
-                    sitzungSchreiben(ctx, File(pfad(call)))
+                    val v = vorbereiten(ctx, File(pfad(call)))
+                    if (sofort) {
+                        val id = v["sitzung"] as Int
+                        Selbstupdate.abschicken(ctx, id)
+                        id
+                    } else {
+                        v
+                    }
                 }
             }
+            "abschicken" -> {
+                val id = Selbstupdate.vorbereitet(ctx)
+                if (id < 0) {
+                    result.error("keine", "Keine vorbereitete Sitzung", null)
+                    return
+                }
+                imHintergrund(result) {
+                    Selbstupdate.weckerAbbestellen(ctx)
+                    Selbstupdate.abschicken(ctx, id)
+                    id
+                }
+            }
+            "spaeter" -> {
+                val s = (call.argument<Number>("sekunden") ?: 60).toLong()
+                Selbstupdate.weckerStellen(ctx, s)
+                result.success(Selbstupdate.vorbereitet(ctx) >= 0)
+            }
+            "nicht_spaeter" -> {
+                Selbstupdate.weckerAbbestellen(ctx)
+                result.success(null)
+            }
+            "verwerfen" -> imHintergrund(result) {
+                Selbstupdate.weckerAbbestellen(ctx)
+                Selbstupdate.verwerfen(ctx)
+                null
+            }
+            "benachrichtigung_erlauben" -> result.success(benachrichtigungErlauben(ctx))
             else -> result.notImplemented()
         }
     }
@@ -138,10 +181,30 @@ class FletInstallierenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, A
             "darf" to darf,
             "still" to (Build.VERSION.SDK_INT >= 31),
             "paket" to ctx.packageName,
-            "version_code" to eigen?.let { versionCode(it) },
+            "version_code" to eigen?.let { Selbstupdate.versionCode(it) },
             "version_name" to eigen?.versionName,
             "installiert_von" to installer(ctx),
+            "getaktet" to getaktet(ctx),
+            "benachrichtigen" to Selbstupdate.benachrichtigungenAn(ctx),
+            "vorbereitet" to Selbstupdate.vorbereitet(ctx),
         )
+    }
+
+    /** Kostet das Netz (mobile Daten, Hotspot)? Ohne Netz ebenfalls ``true``. */
+    private fun getaktet(ctx: Context): Boolean =
+        ctx.getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered ?: true
+
+    /** Android 13+: um die Erlaubnis für Benachrichtigungen bitten (sonst fehlt „aktualisiert").
+     * Antwort: sind sie jetzt schon an? */
+    private fun benachrichtigungErlauben(ctx: Context): Boolean {
+        val an = Selbstupdate.benachrichtigungenAn(ctx)
+        val a = activity
+        if (!an && a != null && Build.VERSION.SDK_INT >= 33 &&
+            a.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            a.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), ANFRAGE_BENACHRICHTIGUNG)
+        }
+        return an
     }
 
     /** Die Seite „Unbekannte Apps installieren" für diese App (ab Android 8). */
@@ -168,7 +231,7 @@ class FletInstallierenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, A
         val datei = File(pfad)
         require(datei.isFile) { "Keine Datei: $pfad" }
         val pm = ctx.packageManager
-        val apk = archivInfo(pm, pfad, signaturFlag())
+        val apk = Selbstupdate.archivInfo(pm, pfad, signaturFlag())
             ?: throw IllegalArgumentException("Android kann die APK nicht lesen")
         val eigen = eigeneInfo(ctx)
         val fremde = aktuelleSigner(apk).map { fingerabdruck(it) }.toSet()
@@ -176,9 +239,9 @@ class FletInstallierenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, A
         return mapOf(
             "paket" to apk.packageName,
             "eigenes_paket" to (apk.packageName == ctx.packageName),
-            "version_code" to versionCode(apk),
+            "version_code" to Selbstupdate.versionCode(apk),
             "version_name" to apk.versionName,
-            "eigener_code" to eigen?.let { versionCode(it) },
+            "eigener_code" to eigen?.let { Selbstupdate.versionCode(it) },
             "signatur" to fremde.sorted().joinToString(" "),
             // null: unbekannt (eine Seite ohne lesbare Signatur) — dann entscheidet Android
             "gleiche_signatur" to if (fremde.isEmpty() || eigene.isNullOrEmpty()) null else fremde == eigene,
@@ -187,18 +250,24 @@ class FletInstallierenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, A
 
     // -- Installieren ----------------------------------------------------------------------
 
-    /** Schreibt die APK in eine Sitzung des PackageInstallers und schickt sie ab. */
-    private fun sitzungSchreiben(ctx: Context, datei: File): Int {
+    /** Die APK in eine Sitzung schreiben und merken — abgeschickt wird sie mit
+     * `Selbstupdate.abschicken` (sofort oder vom Wecker). */
+    private fun vorbereiten(ctx: Context, datei: File): Map<String, Any?> {
         require(datei.isFile) { "Keine Datei: ${datei.path}" }
+        val apk = Selbstupdate.archivInfo(ctx.packageManager, datei.path, 0)
+            ?: throw IllegalArgumentException("Android kann die APK nicht lesen")
+        Selbstupdate.weckerAbbestellen(ctx)
+        // Reste früherer Versuche (abgebrochen, App beendet, älteres Release) wegräumen
+        Selbstupdate.verwerfen(ctx)
+        val id = sitzungSchreiben(ctx, datei)
+        val code = Selbstupdate.versionCode(apk)
+        Selbstupdate.merken(ctx, id, code, apk.versionName)
+        return mapOf("sitzung" to id, "version_code" to code, "version_name" to apk.versionName)
+    }
+
+    /** Schreibt die APK in eine neue Sitzung des PackageInstallers (ohne sie abzuschicken). */
+    private fun sitzungSchreiben(ctx: Context, datei: File): Int {
         val installer = ctx.packageManager.packageInstaller
-        // Reste früherer Versuche (abgebrochen, App beendet) wegräumen
-        for (alt in installer.mySessions) {
-            try {
-                installer.abandonSession(alt.sessionId)
-            } catch (e: Exception) {
-                // schon weg — egal
-            }
-        }
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
         params.setAppPackageName(ctx.packageName)
         params.setSize(datei.length())
@@ -214,14 +283,6 @@ class FletInstallierenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, A
                         sitzung.fsync(aus)
                     }
                 }
-                // Ausdrücklich an den eigenen Empfänger (nicht exportiert): Android 14 lässt
-                // eine veränderliche PendingIntent nur mit festem Ziel zu, und der Installer
-                // muss Status und Rückfrage hineinschreiben können (FLAG_MUTABLE).
-                val absicht = Intent(ctx, InstallErgebnis::class.java).setAction(AKTION_ERGEBNIS)
-                val flags = PendingIntent.FLAG_UPDATE_CURRENT or
-                    (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
-                val rueckmeldung = PendingIntent.getBroadcast(ctx, id, absicht, flags)
-                sitzung.commit(rueckmeldung.intentSender)
             } catch (e: Exception) {
                 sitzung.abandon()
                 throw e
@@ -277,7 +338,7 @@ class FletInstallierenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, A
     }
 
     private fun eigeneInfo(ctx: Context): PackageInfo? = try {
-        paketInfo(ctx.packageManager, ctx.packageName, signaturFlag())
+        Selbstupdate.paketInfo(ctx.packageManager, ctx.packageName, signaturFlag())
     } catch (e: PackageManager.NameNotFoundException) {
         null
     }
@@ -297,26 +358,6 @@ class FletInstallierenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, A
     private fun signaturFlag(): Int =
         if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
 
-    @Suppress("DEPRECATION")
-    private fun paketInfo(pm: PackageManager, name: String, flags: Int): PackageInfo =
-        if (Build.VERSION.SDK_INT >= 33) {
-            pm.getPackageInfo(name, PackageManager.PackageInfoFlags.of(flags.toLong()))
-        } else {
-            pm.getPackageInfo(name, flags)
-        }
-
-    @Suppress("DEPRECATION")
-    private fun archivInfo(pm: PackageManager, pfad: String, flags: Int): PackageInfo? =
-        if (Build.VERSION.SDK_INT >= 33) {
-            pm.getPackageArchiveInfo(pfad, PackageManager.PackageInfoFlags.of(flags.toLong()))
-        } else {
-            pm.getPackageArchiveInfo(pfad, flags)
-        }
-
-    @Suppress("DEPRECATION")
-    private fun versionCode(info: PackageInfo): Long =
-        if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
-
     /** Wer die APK jetzt signiert: bei einem Schlüssel der letzte der Rotationsgeschichte. */
     @Suppress("DEPRECATION")
     private fun aktuelleSigner(info: PackageInfo): List<Signature> {
@@ -334,44 +375,4 @@ class FletInstallierenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, A
     private fun fingerabdruck(s: Signature): String =
         MessageDigest.getInstance("SHA-256").digest(s.toByteArray())
             .joinToString(":") { "%02X".format(it) }
-}
-
-/**
- * Nimmt das Ergebnis einer Installationssitzung entgegen (im Manifest, nicht exportiert —
- * nur die eigene PendingIntent erreicht ihn). Bei -1 zeigt er die Rückfrage von Android.
- */
-class InstallErgebnis : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != AKTION_ERGEBNIS) {
-            return
-        }
-        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
-        var meldung = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
-        val sitzung = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
-        val plugin = FletInstallierenPlugin.aktiv
-        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
-            val rueckfrage = rueckfrage(intent)
-            try {
-                if (rueckfrage == null) {
-                    meldung = "Android hat keine Rückfrage geschickt"
-                } else if (plugin != null) {
-                    plugin.bestaetigen(context, rueckfrage)
-                } else {
-                    rueckfrage.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(rueckfrage)
-                }
-            } catch (e: Exception) {
-                meldung = "Rückfrage nicht zu zeigen: ${e.message ?: e}"
-            }
-        }
-        plugin?.melden(status, meldung, sitzung)
-    }
-
-    @Suppress("DEPRECATION")
-    private fun rueckfrage(intent: Intent): Intent? =
-        if (Build.VERSION.SDK_INT >= 33) {
-            intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
-        } else {
-            intent.getParcelableExtra(Intent.EXTRA_INTENT)
-        }
 }

@@ -109,6 +109,7 @@ from trainingsapp.core.plaene import (
     vorkommen,
     ziel_ohne_kontext,
 )
+from trainingsapp.core.plan_durchlauf import startet_als_workout
 from trainingsapp.core.result_spec import (
     FieldSpec,
     FieldType,
@@ -137,6 +138,7 @@ from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.material import material_knopf
+from trainingsapp.ui.components.modus_wahl import LISTE, modus_wahl
 from trainingsapp.ui.components.neu_laden import herkunft, neu_laden_blatt
 from trainingsapp.ui.components.plan_reiter import plan_reiter
 from trainingsapp.ui.components.planblatt import PlanZeile, gesamtplan_blatt
@@ -404,10 +406,16 @@ def plan_view(
     mehrfach = {i.exercise_id for i in plan.items if stelle[i.id] > 1}
     #: Die Nummer einer Planübung = ihre Stelle in der Liste, wie im Ablauf (Frage 5)
     nummern = ab.nummern([it.id for it in plan.items])
+    # Mit Ablauf ist in der Liste nur frei, was keine noch nicht erfüllte Pflicht versperrt —
+    # wie die Kapitel eines Kurses (Ben, 9.11.2026, P167/P168); Gesperrtes steht nur im
+    # Gesamtplan-Blatt, mit Schloss und „frei nach …“
+    ueben = not bearbeiten and nachtrag is None and not einzel
+    sperre = plan_ablauf_ui.gesperrt(state, plan) if ueben else {}
+    frei_items = [it for it in plan.items if it.id not in sperre]
     # Welche Übung der Block zeigt (7.11.2026): das einmalige Ziel („Weiter mit …“), sonst die
     # zuletzt gezeigte dieses Plans, sonst die erste heute offene, sonst die erste. Einzelübung
     # und Nachtrag haben genau einen Block und lassen die Wahl des Plans in Ruhe.
-    ids = [item.id for item in plan.items]
+    ids = [item.id for item in frei_items]
     navigierbar = nachtrag is None and not einzel and not bearbeiten and len(ids) > 1
     if state.plan_ziel in ids and not bearbeiten and nachtrag is None:
         gezeigt_id: str | None = state.plan_ziel
@@ -2312,14 +2320,14 @@ def plan_view(
     # -- Eine Übung je Bild (7.11.2026): gezeigte Übung, Wechseln, Gesamtplan ---------------
 
     def gezeigt() -> tuple[int, PlanItem] | None:
-        """Die gezeigte Planübung mit ihrem Index — ``None`` ohne Übungen."""
-        if not plan.items:
+        """Die gezeigte Planübung mit ihrem Index unter den freien — ``None`` ohne Übungen."""
+        if not frei_items:
             return None
         gesucht = state.plan_gezeigt.get(plan.id) if navigierbar else gezeigt_id
-        for i, item in enumerate(plan.items):
+        for i, item in enumerate(frei_items):
             if item.id == gesucht:
                 return i, item
-        return 0, plan.items[0]
+        return 0, frei_items[0]
 
     def wechseln(item_id: str) -> None:
         """Zu dieser Planübung — der Block wird in derselben Liste ersetzt, die Beobachter
@@ -2362,12 +2370,12 @@ def plan_view(
     def navigation_zeile(index: int) -> ft.Control:
         """‹ vorige · k/n · nächste › (`components/planpfeile.py`) — nach einer erledigten
         Übung ist der nächste Pfeil betont."""
-        naechste_da = index < len(plan.items) - 1
+        naechste_da = index < len(frei_items) - 1
         return pfeilzeile(
-            plan.items,
+            frei_items,
             index,
             name_von=name_von,
-            betont=plan.items[index].id in fertig_ids and naechste_da,
+            betont=frei_items[index].id in fertig_ids and naechste_da,
             wechsler=lambda it: wechsler(it.id),
             gesamtplan=gesamtplan_zeigen,
         )
@@ -2479,6 +2487,16 @@ def plan_view(
             if u is None:
                 zeilen.append(PlanZeile(item.id, "(Übung nicht mehr vorhanden)", fehlt=True))
                 continue
+            if item.id in sperre:
+                zeilen.append(
+                    PlanZeile(
+                        item.id,
+                        u.name,
+                        gesperrt=plan_ablauf_ui.frei_nach(plan, sperre[item.id], namen_im_plan()),
+                        bild=uebungsbild(state, u.icon_key, u.image_path, groesse=28),
+                    )
+                )
+                continue
             mit_spec = uebung_fuer(item)
             e = laufende(state, u, item)
             zeilen.append(
@@ -2505,10 +2523,24 @@ def plan_view(
         )
 
     def zum_workout() -> None:
-        """▶ „Als Workout“ (7.11.2026, `docs/plan_workout.md`): der Plan läuft von vorn bis
-        hinten — für heute, auch ohne den Schalter am Plan."""
+        """„Workout“ (7.11.2026, `docs/plan_workout.md`; seit P169 der Umschalter oben): der Plan
+        läuft von vorn bis hinten — für heute, auch ohne den Schalter am Plan. Öffnet der Plan
+        ohnehin als Workout, kommt das Start-Bild an diese Stelle statt darüber."""
         state.plan_als_plan.discard(plan.id)
-        page.run_task(page.push_route, f"/plan/{plan.id}/workout")
+        if startet_als_workout(plan) and route == f"/plan/{plan.id}":
+            state.neu_zeichnen()
+        else:
+            page.run_task(page.push_route, f"/plan/{plan.id}/workout")
+
+    def namen_im_plan() -> dict[str, str]:
+        return {it.id: name_von(it) for it in plan.items}
+
+    def uebmodus_zeile() -> ft.Control:
+        """Workout · Liste oben (P169) — nicht, solange das Workout läuft (dann steht dort, wo es
+        ist, mit dem Weg zurück in den Fokus)."""
+        if not ueben or not plan.items or plan_ablauf_ui.laufender(state, plan.id) is not None:
+            return ft.Container(visible=False)
+        return modus_wahl(LISTE, zur_liste=lambda: None, zum_workout=zum_workout)
 
     kopf: list[ft.Control]
     if bearbeiten:
@@ -2660,18 +2692,8 @@ def plan_view(
     elif einzel:
         aktionen = [timer_knopf(page, state, "plan"), hilfe_knopf(page, thema="plan")]
     else:
+        # „Als Workout“ ist der Umschalter Workout · Liste oben geworden (P169)
         aktionen = [
-            *(
-                []
-                if bearbeiten
-                else [
-                    ft.IconButton(
-                        ft.Icons.PLAYLIST_PLAY,
-                        tooltip="Als Workout — von vorn bis hinten",
-                        on_click=zum_workout,
-                    ),
-                ]
-            ),
             timer_knopf(page, state, "plan"),
             hilfe_knopf(page, thema="notation" if bearbeiten else "plan"),
             ft.IconButton(
@@ -2693,7 +2715,7 @@ def plan_view(
                 ft.Column(
                     expand=True,
                     spacing=0,
-                    controls=[workout_hinweis(), pfeile_halter, liste],
+                    controls=[workout_hinweis(), uebmodus_zeile(), pfeile_halter, liste],
                 )
             )
         ],

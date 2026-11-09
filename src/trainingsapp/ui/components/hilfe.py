@@ -386,6 +386,16 @@ Gibt es **mehrere gleichwertige Wege** (mehrere freie, oder mehrere, deren Bedin
 ist), fragt das Workout oben **„Wie geht es weiter?“** — hart wie weich, nach „Fertig“, am Ende
 der Zeit und beim Überspringen; vorher geht es nicht weiter.
 
+**Durcharbeiten** (mit Abzweigen): Das Workout folgt dem Pfad ab dem Start — was heute schon
+gemacht ist, zählt nicht. Endet es vorzeitig (⏹, Abbrechen), merkt es sich die Stelle: heute
+steht im Start-Bild und auf „Heute“ **„Fortsetzen bei …“**, daneben „Von vorn“.
+
+**Workout · Liste** oben wechselt den Modus. „Trainieren“ öffnet einen Plan mit Abzweigen (oder
+mit dem Schalter „Workout“) als Workout. In der **Liste** übst du frei — mit Abzweigen nur, was
+schon **freigeschaltet** ist: Was hinter einer **Pflicht** liegt, ist gesperrt (🔒 „frei nach …“),
+bis ein Workout die Pflicht einmal erfüllt hat, wie die Kapitel eines Kurses. Zurücksetzen geht
+im Reiter „Ablauf“.
+
 **Zurück** aus dem Workout führt in den Plan — die Uhr läuft weiter, oben „Fokus“ führt zurück.
 
 Läuft eine Aufnahme, wird das Workout ein Abschnitt in ihr — die Übungen liegen darin.
@@ -419,6 +429,11 @@ sagt „Weiter, wenn …“ unter „Einstellen“, wann es weitergeht — sonst
   ein Kreis aus Wegen, die von selbst gehen.
 
 Übungen, die nur über einen Abzweig erreichbar sind, kommen **bei Bedarf** dran — nie von selbst.
+
+**Freischalten:** Ein Plan mit Abzweigen öffnet mit „Trainieren“ als Workout und wird dort
+durchgearbeitet. In der **Liste** ist nur frei, was keine noch nicht erfüllte **Pflicht**
+versperrt; jede Pflicht, die ein Workout einmal erfüllt, schaltet frei, was dahinter liegt.
+**Freischaltungen zurücksetzen …** (unter dem Bild) sperrt es wieder — Einträge bleiben.
 """
 
 TIMER_EDITOR_MD = """\

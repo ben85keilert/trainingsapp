@@ -139,7 +139,8 @@ def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
         padding=ft.Padding.only(left=16, right=16, top=10, bottom=4),
         content=ft.Text(
             "Antippen = bearbeiten (Übungen, Ziele, aktiv, Wochentage). "
-            "„Trainieren“ nimmt den Plan für heute auf und öffnet ihn zum Üben.",
+            "„Trainieren“ nimmt den Plan für heute auf und öffnet ihn zum Üben — mit Abzweigen "
+            "als Workout, oben wechselt „Workout · Liste“.",
             size=12,
             opacity=0.6,
         ),

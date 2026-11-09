@@ -219,3 +219,30 @@ def _symbolknopf(wurzel, icon, tipp: str):
         for x in _alle(wurzel)
         if isinstance(x, ft.IconButton) and x.icon == icon and x.tooltip == tipp
     )
+
+
+def _wie_flet(handler) -> None:
+    """Ruft einen Handler so wie Flet: Hat er einen Parameter, bekommt er das Event."""
+    import inspect
+
+    if len(inspect.signature(handler).parameters) == 0:
+        handler()
+    else:
+        handler(object())  # ein Event — der Handler darf es nicht für etwas anderes halten
+
+
+def test_abschnitt_hinzufuegen_mit_event(umgebung) -> None:
+    """Regression (Ben, 9.11.2026): „+ Abschnitt“ im Uhrenplan stürzte mit „unsupported operand
+    type(s) for -: 'Event' and 'int'“ ab — der Handler nahm das Event für den Teil-Index."""
+    state, plan, _kniebeuge, _katze = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    ansicht = plan_uhren_view(Seite(), state, plan, basis)
+    item = plan.items[0]
+    _wie_flet(_knopf(ansicht, "+ Abschnitt").on_click)
+    kopie = TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer).eigen
+    assert kopie is not None
+    assert [a.name for a in kopie.abschnitte] == ["Bewegung", "Pause", "Pause"]
+    # Runden ± (Fabrik mit Vorgaben) verträgt das Event ebenso
+    ansicht = plan_uhren_view(Seite(), state, state.plaene.laden(plan.id), basis)
+    _wie_flet(_symbolknopf(ansicht, ft.Icons.ADD, "Eine Runde mehr").on_click)
+    assert TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer).eigen.runden == 4

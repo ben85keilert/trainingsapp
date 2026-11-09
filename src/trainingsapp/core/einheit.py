@@ -216,6 +216,13 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         "nach",
         "kante",
         "frage",
+        # Durcharbeiten (Ben, 9.11.2026, P166/P167): ``pflicht_offen`` an ``plan/kante`` — der
+        # Knoten wurde verlassen, ohne dass seine Pflicht erfüllt war (Überspringen), das Tor ist
+        # damit nicht offen; ``bei``/``vorher`` an ``plan/ende`` — hier geht ein vorzeitig
+        # beendetes Workout weiter, und woher es dorthin kam (für „◀ zurück“)
+        "pflicht_offen",
+        "bei",
+        "vorher",
         # Teile
         "teil",
         "rolle",

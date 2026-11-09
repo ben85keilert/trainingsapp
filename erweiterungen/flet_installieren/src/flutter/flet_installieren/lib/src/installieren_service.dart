@@ -6,7 +6,9 @@ import 'package:flutter/services.dart';
 /// ihr eigenes Update. Die Arbeit macht die Kotlin-Klasse `FletInstallierenPlugin`
 /// (Kanal „flet_installieren"); hier wird nur durchgereicht.
 ///
-/// Methoden (Python → Dart): `stand`, `erlauben`, `pruefen` {pfad}, `installieren` {pfad}.
+/// Methoden (Python → Dart): `stand`, `erlauben`, `pruefen` {pfad}, `installieren` {pfad};
+/// für die Automatik `vorbereiten` {pfad}, `abschicken`, `spaeter` {sekunden},
+/// `nicht_spaeter`, `verwerfen`, `benachrichtigung_erlauben`.
 /// Ereignis (Dart → Python): `ergebnis` {status, meldung, sitzung}.
 class FletInstallierenService extends FletService {
   FletInstallierenService({required super.control});
@@ -29,21 +31,12 @@ class FletInstallierenService extends FletService {
     return null;
   }
 
+  /// Reicht jede Methode an Kotlin weiter — welche es gibt, steht dort
+  /// (`FletInstallierenPlugin`); eine unbekannte endet dort mit „not implemented".
   Future<dynamic> _invoke(String name, dynamic args) async {
-    final a = (args as Map?) ?? const {};
-    switch (name) {
-      case "stand":
-        return _karte(await _kanal.invokeMethod<Map>("stand"));
-      case "erlauben":
-        return _kanal.invokeMethod<bool>("erlauben");
-      case "pruefen":
-        return _karte(
-            await _kanal.invokeMethod<Map>("pruefen", {"pfad": a["pfad"]}));
-      case "installieren":
-        return _kanal.invokeMethod<int>("installieren", {"pfad": a["pfad"]});
-      default:
-        throw Exception("Unbekannte Methode: $name");
-    }
+    final a = Map<String, dynamic>.from((args as Map?) ?? const {});
+    final antwort = await _kanal.invokeMethod<dynamic>(name, a);
+    return antwort is Map ? _karte(antwort) : antwort;
   }
 
   static Map<String, dynamic> _karte(Map? m) =>

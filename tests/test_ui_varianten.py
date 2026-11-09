@@ -247,7 +247,13 @@ def test_ohne_varianten_keine_zeile_aber_das_etikett(page, state) -> None:
     state.uebungen.speichern(u)
     plan, item = _plan(state, state.uebungen.laden(u.id))
     ansicht = plan_view(page, state, plan)
-    assert not [x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton)]
+    # Kein Varianten-Umschalter — nur Workout · Liste oben (P169)
+    assert not [
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.SegmentedButton)
+        and {s.value for s in x.segments} != {"workout", "liste"}
+    ]
     etiketten = [
         x for x in _alle(ansicht) if isinstance(x, ft.IconButton) and x.tooltip == "Variante"
     ]

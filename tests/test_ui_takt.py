@@ -7,6 +7,7 @@ das Soll im Kopf des Live-Vollbilds."""
 from __future__ import annotations
 
 import asyncio
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -24,7 +25,7 @@ from trainingsapp.core.takt import (  # noqa: E402
     lage,
 )
 from trainingsapp.core.timer import Abschnitt, TimerLauf, TimerProfil  # noqa: E402
-from trainingsapp.ui.components.takt_anzeige import TaktAnzeige  # noqa: E402
+from trainingsapp.ui.components.takt_anzeige import TaktAnzeige, ZeitMitTakt  # noqa: E402
 from trainingsapp.ui.components.takt_blatt import (  # noqa: E402
     TempoRegler,
     takt_anbringen,
@@ -482,7 +483,61 @@ def test_reiter_timer_mit_takt_anzeige_und_knopf(state) -> None:
         if isinstance(x, ft.Row) and any(isinstance(y, ft.Slider) for y in x.controls)
     )
     assert "ein" in _texte(ansicht)
+    # Takt und Zeit nebeneinander (Ben, 9.11.2026), nicht untereinander
+    zeile = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Row)
+        and "ein" in _texte(x)
+        and any(re.fullmatch(r"\d+:\d\d", t) for t in _texte(x))
+    )
+    assert zeile.alignment == ft.MainAxisAlignment.CENTER
     assert lauf_fuer(state, state.timer_profil()) is lauf
+
+
+def test_takt_und_zeit_in_einer_zeile() -> None:
+    """Ben, 9.11.2026: Takt neben der Zeit, etwas kleiner als sie — überall dieselbe Zeile."""
+    uhr = ZeitMitTakt(84)
+    zeile = uhr.zeile()
+    assert zeile.controls[0] is uhr.takt_platz and uhr.takt_platz.content is uhr.takt.control
+    assert zeile.controls[1].controls[0] is uhr.zeit_text
+    assert uhr.takt.groesse == 84 and not uhr.takt.klein
+    t = VORLAGEN["atmung_4_6"]
+    uhr.nachziehen("1:30:00", None, None)  # ohne Takt: die Zeit allein, volle Größe
+    assert uhr.zeit_text.value == "1:30:00" and uhr.zeit_text.size == 84
+    assert uhr.takt.control.visible is False
+    uhr.nachziehen("1:30:00", t, lage(t, 1.0))  # neben dem Takt wird sie kleiner
+    assert uhr.takt.control.visible and uhr.zeit_text.size == 63
+    uhr.nachziehen("12:34", t, lage(t, 1.0))
+    assert uhr.zeit_text.size == 84 and uhr.takt.name_text.value == "ein"
+    uhr.takt_platz.visible = False  # die Ebene „Takt“ im Fokus aus
+    uhr.nachziehen("1:30:00", t, lage(t, 1.0))
+    assert uhr.zeit_text.size == 84
+    # Daneben, was der Aufrufer bringt; antippen → ``on_takt``, die Zeit → ``on_zeit``
+    getippt: list[str] = []
+    rechts = ft.IconButton(ft.Icons.LAYERS_OUTLINED)
+    fokus = ZeitMitTakt(64, on_takt=lambda: getippt.append("takt"))
+    zeile = fokus.zeile(unter=[ft.Text("Satz 1")], rechts=[rechts], on_zeit=lambda: None)
+    assert zeile.controls[-1] is rechts and zeile.controls[1].expand
+    fokus.takt.control.on_click()
+    assert getippt == ["takt"] and fokus.takt.control.tooltip == "Takt groß zeigen"
+    # In der Übung (40): die kompakte Form, der Text neben dem Kreis
+    klein = ZeitMitTakt(40)
+    assert klein.takt.klein and klein.takt.groesse == 40
+    klein.nachziehen("0:30", t, lage(t, 1.0))
+    assert klein.takt.control.visible and klein.takt.rest_text.value == "3 s"
+
+
+@pytest.mark.parametrize("g", [40, 64, 84, 120, 200])
+def test_welle_passt_in_die_flaeche(g: int) -> None:
+    """Die Säulen der Welle füllen die Fläche, ohne über sie hinaus zu ragen — auch klein."""
+    welle = Takt(VORLAGEN["atmung_4_6"].phasen, animation=ANIMATION_WELLE)
+    anzeige = TaktAnzeige(groesse=g, klein=g < 56)
+    anzeige.nachziehen(welle, lage(welle, 1.0))
+    reihe = anzeige.flaeche.content.controls[1]
+    breite = sum(w.width for w in anzeige.wellen) + (len(anzeige.wellen) - 1) * reihe.spacing
+    assert breite <= g + 1e-6
+    assert all(s.height <= g for s in reihe.controls)
 
 
 def test_einstellung_vibration_und_vollbild_soll(state) -> None:

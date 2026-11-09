@@ -15,12 +15,19 @@ ganze Phase (``animate_scale`` mit der Phasendauer, ``EASE_IN_OUT``); der Ticker
 Phasenwechsel nur neue Zielwerte und je Tick die Texte und Füllstände — **kein Control wird je
 Tick neu gebaut** (V1-Regel; `TaktAnzeige.nachziehen`). Die Rechnung (welche Animation, Lage,
 Rate) kommt aus `core.takt`; hier wird nur gezeichnet.
+
+**Takt · Zeit in einer Zeile** (Ben, 9.11.2026: „nebeneinander, den Takt etwas kleiner als die
+Uhrzeit, vereinheitlicht mit den anderen Timern“): `ZeitMitTakt` ist die eine Form für die
+Timer-Seite, den Fokus (Übung und Workout) und die laufende Uhr in der Übung — links der Takt,
+so hoch wie die Schrift der Zeit (`NEBEN_DER_ZEIT`), daneben die Zeit; ohne Takt steht die Zeit
+allein. Ein Tipp auf den Takt zeigt ihn groß (`takt_gross`).
 """
 
 from __future__ import annotations
 
+import contextlib
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import flet as ft
@@ -42,6 +49,7 @@ from trainingsapp.core.takt import (
     rate_text,
     tempo_text,
 )
+from trainingsapp.ui.components.dialoge import schliessen
 
 #: Farbe je Art: ein kühl, aus warm, halten neutral, Bewegung in der Übungsfarbe, frei tertiär
 FARBEN: dict[str, str] = {
@@ -56,6 +64,13 @@ FARBE_FREI = ft.Colors.TERTIARY
 GROSS, KLEIN = 1.0, 0.55
 #: Stützstellen der Welle
 WELLE_N = 32
+#: Neben der Zeit ist die Takt-Fläche so groß wie die Schrift der Zeit — der Kreis (0,8 davon,
+#: ausgeatmet 0,44) bleibt etwas kleiner als die Ziffern zusammen (Ben, 9.11.2026)
+NEBEN_DER_ZEIT = 1.0
+#: Kleinere Flächen zeigen Name und Restsekunden neben dem Kreis statt darin (`klein`)
+KLEIN_UNTER = 56
+#: Zeiten mit Stunden („1:30:00“) werden neben dem Takt um ein Viertel kleiner
+LANG_FAKTOR = 0.75
 
 
 def farbe(art: str) -> str:
@@ -91,39 +106,51 @@ class TaktAnzeige:
         self._phase: tuple[int, int] | None = None
         self._skala = KLEIN
         self._welle_punkt = -1
+        # Name und Restsekunden in der Mitte wachsen mit der Fläche bis 18/34 (ab 120 px) —
+        # neben der Zeit ist sie kleiner (`NEBEN_DER_ZEIT`)
         self.name_text = ft.Text(
-            size=12 if klein else 18, weight=ft.FontWeight.W_600, text_align=ft.TextAlign.CENTER
+            size=12 if klein else min(18, max(11, round(groesse * 0.15))),
+            weight=ft.FontWeight.W_600,
+            text_align=ft.TextAlign.CENTER,
         )
         self.rest_text = ft.Text(
-            size=14 if klein else 34, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER
+            size=14 if klein else min(34, max(16, round(groesse * 0.28))),
+            weight=ft.FontWeight.BOLD,
+            text_align=ft.TextAlign.CENTER,
         )
-        self.unten_text = ft.Text(size=12, opacity=0.75, text_align=ft.TextAlign.CENTER)
-        self.flaeche = ft.Container(
-            width=None if klein else groesse,
-            height=groesse,
-            alignment=ft.Alignment.CENTER,
+        # Runde · Rate · Tempo: etwa so breit wie die Fläche (bricht eher um, als die Zeit
+        # daneben zu verschieben) — „Runde 12 · 6,0/min“ passt in eine Zeile
+        self.unten_text = ft.Text(
+            size=11 if klein or groesse < 100 else 12,
+            opacity=0.75,
+            text_align=ft.TextAlign.START if klein else ft.TextAlign.CENTER,
+            width=None if klein else max(groesse + 24, 108),
         )
+        self.flaeche = ft.Container(width=groesse, height=groesse, alignment=ft.Alignment.CENTER)
+        # Keine Kinder mit ``expand``: die Anzeige steht auch in einer Zeile neben der Zeit
+        # (`ZeitMitTakt`), dort wäre ihre Breite unbegrenzt
         self.control = ft.Container(
             visible=False,
             on_click=on_click,
+            tooltip="Takt groß zeigen" if on_click is not None else None,
             border_radius=16,
-            padding=ft.Padding.symmetric(horizontal=6, vertical=4),
+            padding=ft.Padding.symmetric(horizontal=4, vertical=2),
             content=ft.Row(
-                spacing=10,
+                spacing=8,
+                tight=True,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
                     self.flaeche,
                     ft.Column(
                         spacing=0,
                         tight=True,
-                        expand=True,
                         controls=[self.name_text, self.rest_text, self.unten_text],
                     ),
                 ],
             )
             if klein
             else ft.Column(
-                spacing=4,
+                spacing=2,
                 tight=True,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[self.flaeche, self.unten_text],
@@ -187,12 +214,7 @@ class TaktAnzeige:
                 ft.Container(content=balken[3], top=mitte_y, left=2.5 - breite / 2),
             ]
             teile = [*self.rahmen, *teile]
-        return ft.Stack(
-            width=g if not self.klein else self.groesse,
-            height=g,
-            alignment=ft.Alignment.CENTER,
-            controls=teile,
-        )
+        return ft.Stack(width=g, height=g, alignment=ft.Alignment.CENTER, controls=teile)
 
     def _puls_bauen(self) -> ft.Control:
         g = self.groesse
@@ -235,14 +257,22 @@ class TaktAnzeige:
 
     def _welle_bauen(self) -> ft.Control:
         g = self.groesse
-        hoehe = g * (0.4 if self.klein else 0.6)
+        if self.klein:
+            hoehe = g * 0.4
+        else:
+            # Name und Restsekunden darüber, die Welle im Rest der Fläche (höchstens 0,6)
+            mitte = 1.25 * ((self.name_text.size or 0) + (self.rest_text.size or 0))
+            hoehe = max(min(g * 0.6, g - mitte - 8), g * 0.3)
+        # Die Säulen füllen genau die Breite der Fläche
+        abstand = 2 if g >= 160 else 1 if g >= 64 else 0
+        breite = max((g - (WELLE_N - 1) * abstand) / WELLE_N, 1)
         self.wellen = []
         saeulen: list[ft.Control] = []
         for k in range(WELLE_N):
             # Eine Sinuslinie über die Runde: oben = eingeatmet, unten = ausgeatmet
             y = 0.5 - 0.5 * math.cos(2 * math.pi * k / WELLE_N)
             punkt = ft.Container(
-                width=max(g / WELLE_N - 2, 2),
+                width=breite,
                 height=6,
                 border_radius=3,
                 bgcolor=ft.Colors.with_opacity(0.3, ft.Colors.ON_SURFACE),
@@ -261,7 +291,7 @@ class TaktAnzeige:
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 self._mitte(),
-                ft.Row(spacing=2, alignment=ft.MainAxisAlignment.CENTER, controls=saeulen),
+                ft.Row(spacing=abstand, alignment=ft.MainAxisAlignment.CENTER, controls=saeulen),
             ],
         )
 
@@ -351,4 +381,97 @@ class TaktAnzeige:
                 self._welle_punkt = punkt
 
 
-__all__ = ["FARBEN", "TaktAnzeige", "farbe"]
+class ZeitMitTakt:
+    """**Takt · Zeit in einer Zeile** — die eine Form, wo eine Uhr mit Takt läuft (Ben,
+    9.11.2026): Timer-Seite, Fokus (Übung und Workout), laufende Uhr in der Übung.
+
+    Links der Takt, etwas kleiner als die Zeit (Fläche = Schriftgröße × `NEBEN_DER_ZEIT`; unter
+    `KLEIN_UNTER` die kompakte Form mit dem Text neben dem Kreis), rechts die Zeit. Ohne Takt
+    steht die Zeit allein. Eine Zeit mit Stunden wird neben dem Takt kleiner (`LANG_FAKTOR`), damit
+    die Zeile nicht überläuft. Einmal gebaut; `nachziehen` setzt je Tick nur Werte (V1).
+    ``on_takt``: ein Tipp auf den Takt (meist `takt_gross`).
+    """
+
+    def __init__(self, groesse: int, *, on_takt: Callable[[], Any] | None = None) -> None:
+        self.groesse = groesse
+        self.zeit_text = ft.Text(
+            size=groesse,
+            weight=ft.FontWeight.BOLD,
+            text_align=ft.TextAlign.CENTER,
+            no_wrap=True,
+        )
+        flaeche = round(groesse * NEBEN_DER_ZEIT)
+        self.takt = TaktAnzeige(flaeche, klein=flaeche < KLEIN_UNTER, on_click=on_takt)
+        #: Hülle des Takts — der Fokus blendet hier die Ebene „Takt“ aus
+        self.takt_platz = ft.Container(content=self.takt.control)
+
+    def zeile(
+        self,
+        *,
+        unter: Sequence[ft.Control] = (),
+        rechts: Sequence[ft.Control] = (),
+        mitte: bool = True,
+        on_zeit: Callable[[], Any] | None = None,
+        zeit_tooltip: str | None = None,
+    ) -> ft.Row:
+        """Die Zeile: Takt, die Zeit (mit ``unter`` darunter), dann ``rechts``. ``mitte``: Takt
+        und Zeit zusammen in der Mitte — mit ``rechts`` die Zeit mittig im Platz dazwischen —,
+        sonst links. ``on_zeit``: ein Tipp auf die Zeit (Timer-Seite: Zeit stellen)."""
+        zeit: ft.Control = self.zeit_text
+        if on_zeit is not None:
+            zeit = ft.Container(
+                content=self.zeit_text, on_click=on_zeit, tooltip=zeit_tooltip, border_radius=16
+            )
+        return ft.Row(
+            spacing=16 if mitte and not rechts else 12,
+            alignment=ft.MainAxisAlignment.CENTER if mitte else ft.MainAxisAlignment.START,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                self.takt_platz,
+                ft.Column(
+                    expand=bool(rechts) or not mitte,
+                    spacing=0,
+                    tight=True,
+                    horizontal_alignment=(
+                        ft.CrossAxisAlignment.CENTER if mitte else ft.CrossAxisAlignment.START
+                    ),
+                    controls=[zeit, *unter],
+                ),
+                *rechts,
+            ],
+        )
+
+    def nachziehen(self, zeit: str, takt: Takt | None, lage: Lage | None) -> None:
+        """Zeit und Takt — ``takt`` ist der wirksame (mit Tempo), ohne ``lage`` kein Takt."""
+        self.zeit_text.value = zeit
+        self.takt.nachziehen(takt, lage)
+        neben = bool(self.takt.control.visible and self.takt_platz.visible)
+        lang = neben and len(zeit) > len("12:34")
+        self.zeit_text.size = round(self.groesse * LANG_FAKTOR) if lang else self.groesse
+
+
+def takt_gross(page: Any, state: Any, lauf: Any) -> None:
+    """Die Takt-Anzeige groß (ein Tipp auf die kleine neben der Zeit): ein Dialog, der im Takt
+    des Tickers nachzieht und sich beim Schließen wieder abmeldet."""
+    anzeige = TaktAnzeige(groesse=240)
+
+    def nachziehen() -> None:
+        lage = lauf.takt_lage()
+        anzeige.nachziehen(lauf.takt_effektiv() if lage else None, lage)  # mit Tempo
+        with contextlib.suppress(Exception):
+            anzeige.control.update()
+
+    def zu(_e: object = None) -> None:
+        state.timer_beobachter.pop("takt_gross", None)
+
+    nachziehen()
+    state.timer_beobachter["takt_gross"] = nachziehen
+    dialog: ft.AlertDialog = ft.AlertDialog(
+        on_dismiss=zu,
+        content=ft.Container(width=300, content=anzeige.control, alignment=ft.Alignment.CENTER),
+        actions=[ft.TextButton("Schließen", on_click=lambda: schliessen(dialog))],
+    )
+    page.show_dialog(dialog)
+
+
+__all__ = ["FARBEN", "TaktAnzeige", "ZeitMitTakt", "farbe", "takt_gross"]

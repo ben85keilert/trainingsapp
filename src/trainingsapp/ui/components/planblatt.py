@@ -34,6 +34,8 @@ class PlanZeile:
     bild: ft.Control | None = None
     #: Die Übung gibt es nicht mehr — Zeile ohne Tipp
     fehlt: bool = False
+    #: Noch gesperrt (Ablauf, P168): „frei nach …“ — Zeile mit Schloss, ohne Tipp
+    gesperrt: str = ""
 
 
 def gesamtplan_blatt(
@@ -73,6 +75,10 @@ def gesamtplan_blatt(
             zeichen.append(
                 ft.Icon(ft.Icons.SENSORS, size=20, color=ft.Colors.PRIMARY, tooltip="Sensor zählt")
             )
+        if z.gesperrt:
+            zeichen.append(
+                ft.Icon(ft.Icons.LOCK_OUTLINE, size=20, opacity=0.6, tooltip="Noch gesperrt")
+            )
         if z.erledigt:
             zeichen.append(
                 ft.Icon(
@@ -82,19 +88,20 @@ def gesamtplan_blatt(
                     tooltip="Heute erledigt",
                 )
             )
-        unten = " · ".join(t for t in (z.ziel, z.zusatz) if t)
+        unten = z.gesperrt or " · ".join(t for t in (z.ziel, z.zusatz) if t)
+        stumm = z.fehlt or bool(z.gesperrt)
         kacheln.append(
             ft.ListTile(
                 leading=z.bild,
                 title=ft.Text(
                     z.name,
                     weight=ft.FontWeight.W_600 if z.item_id == gezeigt else None,
-                    opacity=0.5 if z.fehlt else 1.0,
+                    opacity=0.5 if stumm else 1.0,
                 ),
                 subtitle=ft.Text(unten, size=12) if unten else None,
                 trailing=ft.Row(tight=True, spacing=4, controls=zeichen) if zeichen else None,
                 selected=z.item_id == gezeigt,
-                on_click=None if z.fehlt else waehler(z.item_id),
+                on_click=None if stumm else waehler(z.item_id),
                 content_padding=ft.Padding.only(left=4, right=4),
             )
         )

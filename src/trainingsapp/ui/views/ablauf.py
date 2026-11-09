@@ -812,6 +812,38 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         vernebelt.clear()
         neu_zeichnen()
 
+    def zuruecksetzen_fragen(_e: Any = None) -> None:
+        """„Freischaltungen zurücksetzen …“ (P167): was eine erfüllte Pflicht in der Liste
+        freigab, ist wieder gesperrt — wie ein Kurs von vorn; Einträge bleiben."""
+
+        def ja(_e: Any = None) -> None:
+            state.plaene.freischaltung_zuruecksetzen(plan.id)
+            schliessen(dialog)
+            neu_zeichnen()
+
+        dialog: ft.AlertDialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Freischaltungen zurücksetzen?"),
+            content=ft.Text(
+                "Was hinter einer Pflicht liegt, ist in der Liste wieder gesperrt, bis das Workout "
+                "die Pflicht erneut erfüllt. Einträge und Messungen bleiben."
+            ),
+            actions=[
+                ft.TextButton("Abbrechen", on_click=lambda _e: schliessen(dialog)),
+                ft.FilledButton("Zurücksetzen", on_click=ja),
+            ],
+        )
+        with contextlib.suppress(Exception):
+            page.show_dialog(dialog)
+
+    def freigeschaltet(p: Plan) -> bool:
+        """Hat ein Workout schon ein Tor geöffnet (seit dem letzten Zurücksetzen)?"""
+        tore = ab.tore(p.ablauf)
+        if not tore or state.einheiten is None:
+            return False
+        seit = state.plaene.freischaltung_seit(p.id)
+        return bool(tore & state.einheiten.tore_offen(state.profil.id, p.id, seit))
+
     def werkzeuge(p: Plan) -> list[ft.Control]:
         ids = [it.id for it in p.items]
         hinweise = ab.pruefung(p.ablauf, ids, knoten_namen(state, p))
@@ -825,6 +857,14 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         ]
         if vernebelt:
             teile.append(ft.TextButton("Alles zeigen", on_click=alles_zeigen))
+        if freigeschaltet(p):
+            teile.append(
+                ft.TextButton(
+                    "Freischaltungen zurücksetzen …",
+                    icon=ft.Icons.LOCK_RESET,
+                    on_click=zuruecksetzen_fragen,
+                )
+            )
         if hinweise:
             teile.append(
                 ft.TextButton(

@@ -55,8 +55,7 @@ from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKon
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.components import zaehlen
-from trainingsapp.ui.components.dialoge import schliessen
-from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
+from trainingsapp.ui.components.takt_anzeige import ZeitMitTakt, takt_gross
 from trainingsapp.ui.components.takt_blatt import TempoRegler, takt_anbringen, takt_knopf
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 
@@ -398,16 +397,16 @@ def _laufend(
         if isinstance(teil, UebungBaustein)
         else []
     )
-    zeit = ft.Text(size=40, weight=ft.FontWeight.BOLD)
     oben = ft.Text(size=14, opacity=0.85, expand=True)
     pause = ft.OutlinedButton(height=48, style=ft.ButtonStyle(shape=ECKEN))
-    # Taktgeber (§5): klein neben der Zeit, antippen → groß; der Tempo-Regler für jetzt
+    # Takt · Zeit in einer Zeile wie auf der Timer-Seite und im Fokus (Ben, 9.11.2026): der Takt
+    # klein links, antippen → groß; der Tempo-Regler für jetzt
     key = (
         schluessel_fuer(teil.kontext.uebung_id, teil.kontext.item_id)
         if isinstance(teil, UebungBaustein)
         else "uhr"
     )
-    takt_klein = TaktAnzeige(groesse=56, klein=True, on_click=lambda: takt_gross(page, state, lauf))
+    uhr = ZeitMitTakt(40, on_takt=lambda: takt_gross(page, state, lauf))
     tempo_regler = TempoRegler(state, key, lauf)
     # Takt für jetzt auch im Lauf — wie auf der Timer-Seite (K2)
     takt_wahl = takt_knopf(
@@ -427,9 +426,8 @@ def _laufend(
 
     def beschriften() -> None:
         stand = lauf.stand()
-        zeit.value = lauf.anzeige()
         lage = lauf.takt_lage()
-        takt_klein.nachziehen(lauf.takt_effektiv() if lage else None, lage)  # mit Tempo
+        uhr.nachziehen(lauf.anzeige(), lauf.takt_effektiv() if lage else None, lage)  # mit Tempo
         tempo_regler.nachziehen(lage is not None)
         name = lauf.profil.anzeigename
         if not lauf.vorwaerts and not stand.fertig:
@@ -505,8 +503,7 @@ def _laufend(
                         ),
                     ],
                 ),
-                zeit,
-                takt_klein.control,
+                uhr.zeile(mitte=False),
                 tempo_regler.control,
                 *zaehl_zeilen,
                 ft.Row(
@@ -545,30 +542,6 @@ def _laufend(
 def schluessel_fuer(uebung_id: str, item_id: str | None) -> str:
     """`schluessel` aus den IDs — für die laufende Uhr, die nur den Kontext kennt."""
     return item_id if item_id is not None else uebung_id
-
-
-def takt_gross(page: Any, state: Any, lauf: Any) -> None:
-    """Die Takt-Anzeige groß (ein Tipp auf die kleine): ein Dialog, der im Takt des Tickers
-    nachzieht und sich beim Schließen wieder abmeldet."""
-    anzeige = TaktAnzeige(groesse=240)
-
-    def nachziehen() -> None:
-        lage = lauf.takt_lage()
-        anzeige.nachziehen(lauf.takt_effektiv() if lage else None, lage)  # mit Tempo
-        with contextlib.suppress(Exception):
-            anzeige.control.update()
-
-    def zu(_e: object = None) -> None:
-        state.timer_beobachter.pop("takt_gross", None)
-
-    nachziehen()
-    state.timer_beobachter["takt_gross"] = nachziehen
-    dialog: ft.AlertDialog = ft.AlertDialog(
-        on_dismiss=zu,
-        content=ft.Container(width=300, content=anzeige.control, alignment=ft.Alignment.CENTER),
-        actions=[ft.TextButton("Schließen", on_click=lambda: schliessen(dialog))],
-    )
-    page.show_dialog(dialog)
 
 
 def _symbol(p: TimerProfil) -> ft.IconData:

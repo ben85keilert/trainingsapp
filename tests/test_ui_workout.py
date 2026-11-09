@@ -72,6 +72,12 @@ def _knopf(c, text: str):
     raise AssertionError(f"kein Knopf {text!r}")
 
 
+def _modus(c) -> ft.SegmentedButton:
+    """Der Umschalter Workout · Liste (P169)."""
+    halter = next(x for x in _alle(c) if getattr(x, "data", None) == "modus_wahl")
+    return halter.content
+
+
 def _plan(state) -> Plan:
     hold = vorrat_feld("hold")
     profil = TimerProfil(id="satz", name="Satz 10 s", abschnitte=[Abschnitt("Satz", 10)])
@@ -113,7 +119,12 @@ async def test_workout_start_weich_ueberzeit_weiter_und_ende(umgebung) -> None:
     assert (
         "0:10 Satz · weiter, wenn Zeit ab" in texte and "nur abhaken · „Weiter“ von Hand" in texte
     )
-    uebergang = next(x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton))
+    # Der erste Umschalter ist Workout · Liste (P169), der zweite hart/weich
+    uebergang = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.SegmentedButton) and x.selected[0] in (HART, WEICH)
+    )
     assert uebergang.selected == [WEICH] and uebergang_fuer(state, plan) == WEICH
     uebergang.selected = [HART]
     uebergang.on_change(SimpleNamespace(control=uebergang))
@@ -171,8 +182,9 @@ async def test_workout_start_weich_ueberzeit_weiter_und_ende(umgebung) -> None:
 
 
 def test_workout_plan_schalter_und_als_plan(tmp_path, monkeypatch) -> None:
-    """Der Schalter am Plan merkt sich Workout und Übergang; „Als Plan üben“ gilt für die
-    Sitzung; der Plan hat ▶ „Als Workout“ in der Leiste und im Gesamtplan-Blatt."""
+    """Der Schalter am Plan merkt sich Workout und Übergang; oben wechselt „Workout · Liste“
+    (P169, ersetzt „Als Plan üben“ und ▶ „Als Workout“ in der Leiste) — die Liste gilt für die
+    Sitzung."""
     monkeypatch.setenv("TRAININGSAPP_DATA_DIR", str(tmp_path))
     state = AppState.starten(tmp_path / "app.db")
     try:
@@ -182,14 +194,21 @@ def test_workout_plan_schalter_und_als_plan(tmp_path, monkeypatch) -> None:
         assert plan.workout and plan.uebergang_hart and uebergang_fuer(state, plan) == HART
         seite = Seite()
         ansicht = workout_view(seite, state, plan, route=f"/plan/{plan.id}")
-        _knopf(ansicht, "Als Plan üben").on_click()
+        umschalter = _modus(ansicht)
+        assert umschalter.selected == ["workout"]
+        umschalter.selected = ["liste"]
+        umschalter.on_change(SimpleNamespace(control=umschalter))
         assert plan.id in state.plan_als_plan
         plan_seite = plan_view(seite, state, plan)
-        knopf = next(
+        assert not [
             a
             for a in plan_seite.appbar.actions
             if getattr(a, "icon", None) == ft.Icons.PLAYLIST_PLAY
-        )
-        assert knopf.tooltip.startswith("Als Workout")
+        ]
+        zurueck = _modus(plan_seite)
+        assert zurueck.selected == ["liste"]
+        zurueck.selected = ["workout"]
+        zurueck.on_change(SimpleNamespace(control=zurueck))
+        assert plan.id not in state.plan_als_plan
     finally:
         state.schliessen()

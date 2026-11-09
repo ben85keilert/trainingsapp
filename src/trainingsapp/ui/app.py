@@ -83,6 +83,7 @@ from trainingsapp.core import varianten
 from trainingsapp.core.anhaenge import AUDIO, Ziel, ziel_lesen
 from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
+from trainingsapp.core.plan_durchlauf import startet_als_workout
 from trainingsapp.core.result_spec import ResultSpec
 from trainingsapp.core.timer import EINMAL
 from trainingsapp.ui import app_update, ausrichtung, navigation
@@ -468,9 +469,10 @@ def main(page: ft.Page) -> None:
             for sichern in list(state.vor_dem_verlassen.values()):
                 with suppress(Exception):
                     sichern()
-        # Zurück von „Unbekannte Apps installieren“: das Update geht von selbst weiter
-        if vorn and state.installieren is not None:
-            page.run_task(app_update.weiter_nach_erlauben, state)
+        # Das App-Update (A8): zurück von „Unbekannte Apps installieren“ geht es von selbst
+        # weiter; in den Hintergrund stellt die Automatik den Wecker, zurück nimmt sie ihn
+        if state.installieren is not None:
+            page.run_task(app_update.lebenszyklus, page, state, vorn)
 
     page.on_app_lifecycle_state_change = lebenszyklus
     # Dienste sind Controls ohne Darstellung; sie müssen an der Seite hängen.
@@ -598,7 +600,7 @@ def main(page: ft.Page) -> None:
         # Übungsmodus landen, die Uhr läuft weiter“)
         laeuft_workout = plan_ablauf_ui.laufender(state, plan.id) is not None
         if (
-            plan.workout
+            startet_als_workout(plan)  # Schalter „Workout“ oder ein Ablauf (P169)
             and plan.id not in state.plan_als_plan
             and len(teile) == 2
             and not laeuft_workout

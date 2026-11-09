@@ -257,7 +257,12 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   in der Karte „App“ — `core.update.apk_laden` (nur von den Releases des Repos, Größe und
   SHA-256 aus GitHubs `digest`), Ablauf `ui/app_update.py`, Installieren über die Erweiterung
   `erweiterungen/flet_installieren` (`PackageInstaller`, ab Android 12 ohne Rückfrage; nie,
-  solange etwas läuft — Android beendet die App dabei). Nicht für eine Fassung in Google Play.
+  solange etwas läuft — Android beendet die App dabei). **Automatik** (Schalter
+  `AppState.app_update_auto`, Vorgabe an, einmaliger Hinweis): nach der Prüfung im WLAN laden,
+  Sitzung vorbereiten (nicht abschicken), beim Verlassen der App einen Wecker der Erweiterung
+  stellen, der sie nach `app_update.WARTEN_S` abschickt — nie mit offenem Formular, laufendem
+  Vordergrunddienst oder sichtbarer App; danach Benachrichtigung über `MY_PACKAGE_REPLACED`.
+  Nicht für eine Fassung in Google Play.
 
 - **Diagnosemodus** (Ben, 4.11.2026, `docs/plan_diagnosemodus.md`, Vertrag §14): in den
   Einstellungen angeboten, je Messung gestartet (Sensorblatt mit Vorabtest), roter Punkt oben
@@ -337,7 +342,12 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   beim Zeichnen; **mehrere gleichwertige Wege — erst fragen**, hart wie weich
   (`core.ablauf.wahl_offen`, `PlanAblaufBaustein.wahl_noetig`, Karte „Wie geht es weiter?“);
   der Workout-Fokus liegt über dem Plan (`/plan/<id>/workout`, Zurück = Plan, Hinweis „Workout
-  läuft“).
+  läuft“). **Durcharbeiten statt abarbeiten** (Ben, 9.11.2026, §8.10, P166–P169): mit Ablauf zählt
+  „heute gemacht“ nie, ein vorzeitig beendetes Workout setzt heute fort (`plan/ende` mit `bei`,
+  `core.ablauf.fortsetzung`); in der Liste ist nur frei, was keine nie erfüllte Pflicht versperrt
+  (`core.ablauf.gesperrt`, Tore aus `plan/kante`, Migration 051 zum Zurücksetzen) — wie ein
+  Kurs; „Trainieren“ öffnet so einen Plan als Workout (`plan_durchlauf.startet_als_workout`),
+  oben wechselt **Workout · Liste** (`components/modus_wahl.py`).
 
 - **Uhr und Fokus beim Üben** (Ben, 8.11.2026 spät, Vertrag `docs/plan_uhr_fokus.md`, Stand §9):
   Die Uhr-Zeile ist `Uhr ▾ · Zeit · Takt · ▶` (`components/uhr.py`); **▶ öffnet den Fokus**

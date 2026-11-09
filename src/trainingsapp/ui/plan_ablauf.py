@@ -9,6 +9,10 @@ läuft weiter.
 
 Ben, 18.10.2026: Was heute schon gemacht ist, bleibt draußen — vorher abgehakt, auf Wunsch
 wieder mitgenommen (``ohne``); begonnen werden kann mit jeder Übung (``erste``).
+
+Ben, 9.11.2026 (P166–P168): Ein Plan **mit Ablauf** wird durchgearbeitet — ohne ``ohne``, ab dem
+Start oder dort, wo das letzte Workout heute vorzeitig endete (`fortsetzung_heute`); in der Liste
+ist nur frei, was keine noch nicht erfüllte Pflicht versperrt (`gesperrt`).
 """
 
 from __future__ import annotations
@@ -18,10 +22,11 @@ from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
+from trainingsapp.core import ablauf as ab
 from trainingsapp.core import zaehlen as zl
 from trainingsapp.core import zaehlen_eintrag as ze
 from trainingsapp.core.einheit import AUSFUEHRUNG_SCHLUESSEL, Ereignis
-from trainingsapp.core.models import Plan, SessionEntry, lokaler_tag
+from trainingsapp.core.models import Plan, SessionEntry, lokaler_tag, tagesgrenzen
 from trainingsapp.core.plan_durchlauf import schritte_fuer
 from trainingsapp.core.result_spec import basis_key
 from trainingsapp.core.standards import mit_plan_spec
@@ -67,6 +72,40 @@ def hrv_moeglich(state: Any) -> bool:
     )
 
 
+def fortsetzung_heute(state: Any, plan: Plan) -> ab.Fortsetzung | None:
+    """Wo das Workout dieses Plans heute weitergeht (P166) — nur mit Ablauf, nur heute, nur wenn
+    es vorzeitig endete und die Stelle noch im Plan steht; ``None``, solange es läuft."""
+    if not plan.ablauf.an or state.einheiten is None or laufender(state, plan.id) is not None:
+        return None
+    seit = tagesgrenzen(state.heute())[0]
+    f = ab.fortsetzung(state.einheiten.plan_ereignisse(state.profil.id, seit), plan.id)
+    knoten = {it.id for it in plan.items} | {fr.id for fr in plan.ablauf.fragen}
+    if f is None or f.bei not in knoten:
+        return None
+    return f if not f.vorher or f.vorher in knoten else ab.Fortsetzung(f.bei)
+
+
+def gesperrt(state: Any, plan: Plan) -> dict[str, ab.Kante]:
+    """Die Planübungen, die in der Liste noch gesperrt sind (P167/P168) — je die Pflicht-Kante
+    davor; leer ohne Ablauf. Offen ist ein Tor, sobald seine Pflicht einmal erfüllt war (seit
+    dem letzten „Freischaltungen zurücksetzen“)."""
+    if not plan.ablauf.an or state.einheiten is None:
+        return {}
+    seit = state.plaene.freischaltung_seit(plan.id)
+    offen = state.einheiten.tore_offen(state.profil.id, plan.id, seit)
+    alle = ab.gesperrt(plan.ablauf, [it.id for it in plan.items], offen)
+    return {k: v for k, v in alle.items() if any(it.id == k for it in plan.items)}
+
+
+def frei_nach(plan: Plan, kante: ab.Kante, namen: dict[str, str]) -> str:
+    """„frei nach 1 · Kniebeuge · 20 Wdh.“ — was eine gesperrte Planübung freischaltet."""
+    nummer = ab.nummern([it.id for it in plan.items]).get(kante.von)
+    frage = plan.ablauf.frage(kante.von)
+    name = frage.text if frage is not None else namen.get(kante.von, "?")
+    vorn = f"{nummer} · {name}" if nummer else name
+    return f"frei nach {vorn} · {kante.ausloeser_text()}"
+
+
 def bereitstellen(
     page: Any,
     state: Any,
@@ -76,6 +115,7 @@ def bereitstellen(
     hrv_beenden: bool | None = None,
     ohne: Collection[str] = (),
     erste: str | None = None,
+    vorher: str | None = None,
     uebergang: str | None = None,
     workout: bool = False,
 ) -> Einheitslauf:
@@ -86,14 +126,17 @@ def bereitstellen(
 
     ``hrv_beenden``: wenn der Ablauf fertig ist, die HRV-Messung beenden (``True``) oder
     weiterlaufen lassen; ``None`` = Vorgabe (endet, wenn sie mit dem Ablauf begann).
-    ``ohne``: Planübungen, die nicht drankommen (heute schon gemacht, abgehakt);
-    ``erste``: die Planübung, mit der er beginnt.
+    ``ohne``: Planübungen, die nicht drankommen (heute schon gemacht, abgehakt) — mit Ablauf
+    nie, der wird durchgearbeitet (P166); ``erste``: die Planübung, mit der er beginnt;
+    ``vorher``: woher ein fortgesetztes Workout dorthin kam (für ``◀ zurück``).
 
     Raises:
         ValueError: Der Plan hat keine Übung — oder keine bleibt übrig.
         RuntimeError: Es läuft schon eine Einheit.
     """
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
+    if plan.ablauf.an:
+        ohne = ()  # durcharbeiten, nicht abarbeiten (P166)
     schritte = [s for s in schritte_fuer(plan, katalog) if s.item_id not in set(ohne)]
     teil = PlanAblaufBaustein(
         plan.id,
@@ -105,6 +148,7 @@ def bereitstellen(
         uebergang=uebergang,
         workout=workout,
         ablauf=plan.ablauf,  # G2: der gezeichnete Ablauf, wenn eingeschaltet
+        vorher=vorher,
     )
     e = einheit_ui.teil_bereitstellen(page, state, teil)
     state.plan_ablaeufe[plan.id] = e.id
@@ -304,6 +348,9 @@ __all__ = [
     "bereitstellen",
     "eingetragen",
     "ergebnis_der_einheit",
+    "fortsetzung_heute",
+    "frei_nach",
+    "gesperrt",
     "hrv_moeglich",
     "laufender",
     "nach_der_uebung",

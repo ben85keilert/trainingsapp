@@ -776,6 +776,14 @@ class SettingRepo:
     UPDATES_GESEHEN = "updates_gesehen"
     #: "1" = der einmalige Hinweis, dass die App beim Start Quellen fragt, wurde gezeigt
     HINWEIS_UPDATES = "hinweis_updates_gesehen"
+    #: "1" (Vorgabe) = App-Updates von selbst laden (nur WLAN) und installieren, wenn die App
+    #: eine Minute nicht benutzt wurde (Katalog A8, Ben 9.11.2026, `ui/app_update.py`)
+    APP_UPDATE_AUTO = "app_update_automatisch"
+    #: "1" = der einmalige Hinweis zur Automatik wurde gezeigt
+    HINWEIS_APP_UPDATE = "hinweis_app_update_automatisch"
+    #: Tag eines Releases, das von selbst scheiterte (fremde Signatur, Android lehnte ab) —
+    #: die Automatik lässt es aus, von Hand geht es weiter
+    APP_UPDATE_AUSLASSEN = "app_update_auslassen"
     #: Farbprofil, Hell/Dunkel, Verlauf (JSON, `core.darstellung`) — **je Profil**:
     #: Schlüssel `darstellung:<profil-id>`, damit man am Hintergrund sieht, wer dran ist
     DARSTELLUNG = "darstellung"
@@ -1193,6 +1201,23 @@ class PlanRepo:
                 "UPDATE plan SET workout = ?, uebergang_hart = ?, updated_at = ?, "
                 "revision = revision + 1 WHERE id = ?",
                 (int(workout), int(uebergang_hart), jetzt().isoformat(), plan_id),
+            )
+
+    def freischaltung_seit(self, plan_id: str) -> datetime | None:
+        """Ab wann die Freischaltungen des Plans zählen (Migration 051, P167) — ``None``: alle."""
+        r = self.con.execute(
+            "SELECT freischaltung_seit FROM plan WHERE id = ?", (plan_id,)
+        ).fetchone()
+        return datetime.fromisoformat(r[0]) if r is not None and r[0] else None
+
+    def freischaltung_zuruecksetzen(self, plan_id: str) -> None:
+        """„Freischaltungen zurücksetzen“: was die Liste freigab, ist wieder gesperrt — die
+        Einträge und die Zeitleiste bleiben, es zählt nur, was ab jetzt geschieht."""
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE plan SET freischaltung_seit = ?, updated_at = ?, "
+                "revision = revision + 1 WHERE id = ?",
+                (iso_utc(jetzt()), jetzt().isoformat(), plan_id),
             )
 
     def plan_takt_setzen(self, plan_id: str, takt: Takt | None) -> None:

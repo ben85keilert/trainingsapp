@@ -34,7 +34,7 @@ from trainingsapp.ui.components import zaehl_stand
 from trainingsapp.ui.components.bewegungsbild import Bildfolge, bewegung_im_fokus
 from trainingsapp.ui.components.karte import hinweis
 from trainingsapp.ui.components.kurve import Reihe, kurve
-from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
+from trainingsapp.ui.components.takt_anzeige import ZeitMitTakt, takt_gross
 from trainingsapp.ui.components.takt_blatt import TempoRegler
 from trainingsapp.ui.farben import FARBEN
 from trainingsapp.ui.state import (
@@ -177,14 +177,16 @@ class Fokus:
         umgeschaltet); ``key``: Schlüssel der Uhr für den Tempo-Regler (`uhr.schluessel`)."""
         self.page, self.state, self.uebung, self.item, self.key = page, state, uebung, item, key
         self.neu_zeichnen = neu_zeichnen
-        # Zeit und Takt in einer Zeile (Ben, 8.11.2026 spät) — die Zeit etwas kleiner
-        self.zeit_text = ft.Text(
-            size=64, weight=ft.FontWeight.W_600, text_align=ft.TextAlign.CENTER
-        )
+        # Zeit und Takt in einer Zeile (Ben, 8.11.2026 spät) — die Zeit etwas kleiner als auf
+        # der Timer-Seite, der Takt etwas kleiner als die Zeit, dieselbe Form wie dort und in der
+        # laufenden Uhr der Übung (Ben, 9.11.2026: `ZeitMitTakt`); antippen → groß
+        self.uhr = ZeitMitTakt(64, on_takt=self._takt_gross)
+        self.zeit_text = self.uhr.zeit_text
         self.stand_text = ft.Text(size=15, opacity=0.8, text_align=ft.TextAlign.CENTER)
         self.balken_platz = ft.Container()
-        self.takt_anzeige = TaktAnzeige(groesse=120)
-        self.takt_platz = ft.Container(content=self.takt_anzeige.control)
+        self.takt_platz = self.uhr.takt_platz
+        #: Der Lauf der letzten Abfrage — für den großen Takt
+        self._lauf: Any = None
         #: Die Ebenen als Menü neben der Zeit (statt vier Chips) — je Eintrag ein Haken
         self._ebenen_eintraege: dict[str, ft.PopupMenuItem] = {}
         self.tempo_platz = ft.Container()
@@ -235,6 +237,10 @@ class Fokus:
         self._zone_sekunden: dict[str, float] = {}
         self._zone_zuletzt: float | None = None
         self._ton_zuletzt = 0.0
+
+    def _takt_gross(self) -> None:
+        if self._lauf is not None:
+            takt_gross(self.page, self.state, self._lauf)
 
     # -- Ebenen ----------------------------------------------------------------------------
 
@@ -340,21 +346,9 @@ class Fokus:
         self.ebenen_anwenden()
         return [
             # Takt · Zeit (mit Stand) · Material · Ebenen — eine Zeile (8.11.2026 spät)
-            ft.Row(
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    self.takt_platz,
-                    ft.Column(
-                        expand=True,
-                        spacing=0,
-                        tight=True,
-                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                        controls=[self.zeit_text, self.stand_text],
-                    ),
-                    *([material] if material is not None else []),
-                    knopf,
-                ],
+            self.uhr.zeile(
+                unter=[self.stand_text],
+                rechts=[*([material] if material is not None else []), knopf],
             ),
             self.balken_platz,
             self.tempo_platz,
@@ -375,17 +369,20 @@ class Fokus:
 
     def nachziehen(self, e: Einheitslauf, lauf: Any) -> None:
         """Zeit, Stand, Balken, Takt, Bildfolge, HF, Kurven und Sätze — jede Abfrage."""
+        self._lauf = lauf
         stand = lauf.stand()
         folge = lauf.profil.folge()
         zaehlend = [n for n, (*_, a) in enumerate(folge) if a.zaehlt]
         ueber = lauf.ueber_s() if hasattr(lauf, "ueber_s") else 0.0
-        if ueber > 0:
-            # Weicher Übergang im Workout: nach Ablauf zählt die Zeit ins Minus weiter
-            self.zeit_text.value = f"−{dauer_text(int(ueber))}"
-            self.zeit_text.color = ft.Colors.TERTIARY
-        else:
-            self.zeit_text.value = lauf.anzeige()  # bei der Stoppuhr vorwärts (18.10.2026)
-            self.zeit_text.color = None
+        lage = lauf.takt_lage()
+        # Weicher Übergang im Workout: nach Ablauf zählt die Zeit ins Minus weiter; sonst
+        # vorwärts bei der Stoppuhr (18.10.2026)
+        self.uhr.nachziehen(
+            f"−{dauer_text(int(ueber))}" if ueber > 0 else lauf.anzeige(),
+            lauf.takt_effektiv() if lage else None,
+            lage,
+        )
+        self.zeit_text.color = ft.Colors.TERTIARY if ueber > 0 else None
         teile = ["über der Zeit"] if ueber > 0 else [stand.name or "Abschnitt"]
         if stand.nummer in zaehlend:
             teile.append(f"Satz {zaehlend.index(stand.nummer) + 1} von {len(zaehlend)}")
@@ -402,8 +399,6 @@ class Fokus:
             else:
                 anteile.append((a, -1.0 if not stand.fertig else 1.0))
         self.balken_platz.content = None if lauf.vorwaerts else balken(anteile, hoehe=12)
-        lage = lauf.takt_lage()
-        self.takt_anzeige.nachziehen(lauf.takt_effektiv() if lage else None, lage)
         if isinstance(self.tempo_platz.content, ft.Row):
             self.tempo_platz.content.visible = lage is not None
         if self.bildfolge is not None:

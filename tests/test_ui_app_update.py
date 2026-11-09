@@ -1,5 +1,5 @@
-"""Das App-Update in der App laden und installieren (`ui/app_update.py`, A8 Stufe 2;
-Ben, 9.11.2026). Nur mit flet — die Erweiterung ist eine Attrappe."""
+"""Das App-Update in der App laden und installieren (`ui/app_update.py`, A8 Stufe 2 und
+Automatik; Ben, 9.11.2026). Nur mit flet — die Erweiterung ist eine Attrappe."""
 
 from __future__ import annotations
 
@@ -22,6 +22,8 @@ from trainingsapp.ui.app_update import (  # noqa: E402
     GELADEN,
     INSTALLIEREN,
     LADEN,
+    VORBEREITET,
+    WARTEN_S,
     UpdateLauf,
 )
 
@@ -33,6 +35,8 @@ class Dienst:
 
     def __init__(self, *, darf: bool = True, pruefung: dict | None = None) -> None:
         self.darf = darf
+        self.still = True
+        self.getaktet = False
         self.pruefung = pruefung or {
             "eigenes_paket": True,
             "gleiche_signatur": True,
@@ -41,12 +45,22 @@ class Dienst:
         }
         self.installiert: list[str] = []
         self.erlaubt = 0
+        self.vorbereitet = -1  # Nummer der vorbereiteten Sitzung (Automatik)
+        self.abgeschickt = 0
+        self.wecker: list[int | None] = []  # spaeter(s) → s, nicht_spaeter → None
+        self.verworfen = 0
+        self.benachrichtigung = 0
 
     async def pruefen(self, pfad: str) -> dict[str, Any]:
         return self.pruefung
 
     async def stand(self) -> dict[str, Any]:
-        return {"darf": self.darf, "still": True}
+        return {
+            "darf": self.darf,
+            "still": self.still,
+            "getaktet": self.getaktet,
+            "vorbereitet": self.vorbereitet,
+        }
 
     async def erlauben(self) -> bool:
         self.erlaubt += 1
@@ -56,19 +70,90 @@ class Dienst:
         self.installiert.append(pfad)
         return 7
 
+    async def vorbereiten(self, pfad: str) -> dict[str, Any]:
+        self.vorbereitet = 11
+        return {"sitzung": 11, "version_code": 386, "version_name": "0.3.71"}
+
+    async def abschicken(self) -> int:
+        if self.vorbereitet < 0:
+            raise RuntimeError("Keine vorbereitete Sitzung")
+        self.abgeschickt += 1
+        self.vorbereitet = -1
+        return 11
+
+    async def spaeter(self, sekunden: int) -> bool:
+        self.wecker.append(sekunden)
+        return self.vorbereitet >= 0
+
+    async def nicht_spaeter(self) -> None:
+        self.wecker.append(None)
+
+    async def verwerfen(self) -> None:
+        self.verworfen += 1
+        self.vorbereitet = -1
+
+    async def benachrichtigung_erlauben(self) -> bool:
+        self.benachrichtigung += 1
+        return True
+
+
+class Zustand(SimpleNamespace):
+    """Was `ui/app_update.py` vom `AppState` braucht — Einstellungen im Speicher."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            installieren=Dienst(),
+            app_update=None,
+            app_update_beobachter=None,
+            vor_dem_verlassen={},
+            messlauf=None,
+            einheit=None,
+            gps_test=None,
+            timer=None,
+            im_vordergrund=True,
+            updates=None,
+            auto=True,
+            hinweis_gesehen=True,
+            auslassen="",
+        )
+
+    def app_update_auto(self) -> bool:
+        return self.auto
+
+    def app_update_auto_setzen(self, an: bool) -> None:
+        self.auto = an
+
+    def app_update_hinweis_gesehen(self) -> bool:
+        return self.hinweis_gesehen
+
+    def app_update_hinweis_merken(self) -> None:
+        self.hinweis_gesehen = True
+
+    def app_update_auslassen(self) -> str:
+        return self.auslassen
+
+    def app_update_auslassen_setzen(self, tag: str) -> None:
+        self.auslassen = tag
+
 
 @pytest.fixture
-def state():
-    return SimpleNamespace(
-        installieren=Dienst(),
-        app_update=None,
-        app_update_beobachter=None,
-        vor_dem_verlassen={},
-        messlauf=None,
-        einheit=None,
-        gps_test=None,
-        timer=None,
-    )
+def state() -> Zustand:
+    return Zustand()
+
+
+class Seite(SimpleNamespace):
+    """Seite mit Ansichten und gezeigten Dialogen."""
+
+    def __init__(self, *views: Any) -> None:
+        super().__init__(views=list(views), dialoge=[])
+
+    def show_dialog(self, d: Any) -> None:
+        self.dialoge.append(d)
+
+
+@pytest.fixture
+def seite() -> Seite:
+    return Seite(SimpleNamespace(route="/", can_pop=False))  # die Startseite hält Zurück an
 
 
 @pytest.fixture
@@ -181,6 +266,8 @@ def _texte(wurzel: Any) -> list[str]:
         knopf = ft.FilledButton | ft.FilledTonalButton | ft.TextButton
         if isinstance(c, knopf) and isinstance(c.content, str):
             gefunden.append(c.content)
+        if isinstance(c, ft.Switch) and isinstance(c.label, str):
+            gefunden.append(c.label)
         for name in ("content", "controls"):
             kind = getattr(c, name, None)
             for k in kind if isinstance(kind, list) else [kind]:
@@ -198,6 +285,7 @@ def _texte(wurzel: Any) -> list[str]:
         (LADEN, "Abbrechen"),
         (GELADEN, "Installieren"),
         (ERLAUBEN, "Erlauben"),
+        (VORBEREITET, "Jetzt installieren"),
         (INSTALLIEREN, "gleich"),
         (FEHLER, "Noch einmal"),
     ],
@@ -236,11 +324,13 @@ def test_updates_seite_bietet_installieren_auf_android(tmp_path) -> None:
         texte = [t for c in ansicht.controls for t in _texte(c)]
         assert "Laden und installieren" in texte
         assert "Im Browser laden" in texte
-        # Ohne Erweiterung (flet run, Web): wie bisher über den Browser
+        assert "Updates der App von selbst installieren" in texte  # der Schalter
+        # Ohne Erweiterung (flet run, Web): wie bisher über den Browser, ohne Automatik
         s.installieren = None
         ansicht = updates.updates_view(page, s, ft.UrlLauncher())
         texte = [t for c in ansicht.controls for t in _texte(c)]
         assert "Herunterladen" in texte and "Laden und installieren" not in texte
+        assert "Updates der App von selbst installieren" not in texte
     finally:
         s.schliessen()
 
@@ -248,3 +338,190 @@ def test_updates_seite_bietet_installieren_auf_android(tmp_path) -> None:
 def test_lauf_ist_ein_datensatz() -> None:
     lauf = UpdateLauf(RELEASE)
     assert (lauf.phase, lauf.pfad, lauf.abbrechen) == (BEREIT, None, False)
+
+
+# -- Automatik ---------------------------------------------------------------------------
+
+
+def _mit_release(state: Zustand) -> Zustand:
+    state.updates = SimpleNamespace(app=RELEASE)
+    return state
+
+
+def test_automatik_laedt_und_bereitet_vor(state, seite, geladen) -> None:
+    asyncio.run(app_update.automatisch(seite, _mit_release(state)))
+    lauf = state.app_update
+    assert lauf.phase == VORBEREITET and lauf.automatisch
+    assert "eine Minute" in lauf.meldung
+    dienst = state.installieren
+    assert dienst.vorbereitet == 11
+    assert (dienst.installiert, dienst.abgeschickt, dienst.wecker) == ([], 0, [])  # App vorn
+
+
+def test_automatik_beim_laden_schon_im_hintergrund(state, seite, geladen) -> None:
+    state.im_vordergrund = False
+    asyncio.run(app_update.automatisch(seite, _mit_release(state)))
+    assert state.installieren.wecker == [WARTEN_S]
+
+
+@pytest.mark.parametrize(
+    "bedingung",
+    [
+        "schalter aus",
+        "mobile daten",
+        "vor android 12",
+        "nicht erlaubt",
+        "ausgelassen",
+        "kein release",
+    ],
+)
+def test_automatik_nur_wenn_alles_passt(state, seite, geladen, bedingung) -> None:
+    _mit_release(state)
+    dienst = state.installieren
+    if bedingung == "schalter aus":
+        state.auto = False
+    elif bedingung == "mobile daten":
+        dienst.getaktet = True
+    elif bedingung == "vor android 12":
+        dienst.still = False
+    elif bedingung == "nicht erlaubt":
+        dienst.darf = False
+    elif bedingung == "ausgelassen":
+        state.auslassen = RELEASE.tag
+    else:
+        state.updates = SimpleNamespace(app=None)
+    asyncio.run(app_update.automatisch(seite, state))
+    assert geladen == []
+    assert state.app_update is None or state.app_update.phase == BEREIT
+
+
+def test_automatik_erst_nach_dem_hinweis(state, seite, geladen) -> None:
+    state.hinweis_gesehen = False
+    asyncio.run(app_update.automatisch(seite, _mit_release(state)))
+    assert geladen == [] and len(seite.dialoge) == 1
+    dialog = seite.dialoge[0]
+    texte = [a.content for a in dialog.actions]
+    assert texte == ["Ausschalten", "Verstanden"]
+    assert "WLAN" in dialog.content.value
+    asyncio.run(dialog.actions[1].on_click())  # Verstanden
+    assert state.hinweis_gesehen and state.installieren.benachrichtigung == 1
+    assert state.app_update.phase == VORBEREITET
+
+
+def test_hinweis_ausschalten(state, seite, geladen) -> None:
+    state.hinweis_gesehen = False
+    asyncio.run(app_update.automatisch(seite, _mit_release(state)))
+    seite.dialoge[0].actions[0].on_click()  # Ausschalten
+    assert state.hinweis_gesehen and not state.auto
+    assert geladen == []
+
+
+def _vorbereitet(state: Zustand, seite: Seite) -> UpdateLauf:
+    asyncio.run(app_update.automatisch(seite, _mit_release(state)))
+    assert state.app_update.phase == VORBEREITET
+    return state.app_update
+
+
+def test_wecker_beim_verlassen_und_zurueck(state, seite, geladen) -> None:
+    _vorbereitet(state, seite)
+    asyncio.run(app_update.lebenszyklus(seite, state, False))
+    asyncio.run(app_update.lebenszyklus(seite, state, True))
+    assert state.installieren.wecker == [WARTEN_S, None]
+
+
+def test_kein_wecker_waehrend_etwas_laeuft(state, seite, geladen, monkeypatch) -> None:
+    _vorbereitet(state, seite)
+    monkeypatch.setattr(
+        app_update, "laufendes", lambda s: [Laufend("Timer", "Planke 0:30", "Timer")]
+    )
+    asyncio.run(app_update.lebenszyklus(seite, state, False))
+    assert state.installieren.wecker == []
+
+
+def test_kein_wecker_mit_offenem_formular(state, geladen) -> None:
+    formular = Seite(
+        SimpleNamespace(route="/", can_pop=False),
+        SimpleNamespace(route="/uebung/1/bearbeiten", can_pop=False),
+    )
+    _vorbereitet(state, formular)
+    assert app_update.formular_offen(formular)
+    asyncio.run(app_update.lebenszyklus(formular, state, False))
+    assert state.installieren.wecker == []
+    # Nur Seiten, die Zurück nicht anhalten: kein Formular
+    assert not app_update.formular_offen(Seite(SimpleNamespace(route="/", can_pop=False)))
+    assert not app_update.formular_offen(Seite(SimpleNamespace(route="/x", can_pop=True)))
+
+
+def test_jetzt_installieren_schickt_die_sitzung_ab(state, seite, geladen) -> None:
+    lauf = _vorbereitet(state, seite)
+    gesichert: list[int] = []
+    state.vor_dem_verlassen["notiz"] = lambda: gesichert.append(1)
+    asyncio.run(app_update.installieren(state, lauf))
+    dienst = state.installieren
+    assert (dienst.abgeschickt, dienst.installiert, gesichert) == (1, [], [1])
+    assert lauf.phase == INSTALLIEREN
+
+
+def test_jetzt_installieren_ohne_sitzung_schreibt_neu(state, seite, geladen) -> None:
+    lauf = _vorbereitet(state, seite)
+    state.installieren.vorbereitet = -1  # Android hat die Sitzung verworfen (Neustart)
+    asyncio.run(app_update.installieren(state, lauf))
+    assert state.installieren.installiert == [str(geladen[0])]
+    assert lauf.phase == INSTALLIEREN
+
+
+def test_schalter_aus_verwirft_die_sitzung(state, seite, geladen) -> None:
+    lauf = _vorbereitet(state, seite)
+    asyncio.run(app_update.automatik_umschalten(seite, state, False))
+    assert not state.auto and state.installieren.verworfen == 1
+    assert lauf.phase == GELADEN  # die Datei bleibt für „Installieren“
+    asyncio.run(app_update.lebenszyklus(seite, state, False))
+    assert state.installieren.wecker == []
+
+
+def test_schalter_an_legt_gleich_los(state, seite, geladen) -> None:
+    state.auto, state.hinweis_gesehen = False, False
+    asyncio.run(app_update.automatik_umschalten(seite, _mit_release(state), True))
+    assert state.auto and state.hinweis_gesehen  # eingeschaltet = gelesen, kein Dialog
+    assert seite.dialoge == [] and state.installieren.benachrichtigung == 1
+    assert state.app_update.phase == VORBEREITET
+
+
+def test_fremde_apk_von_selbst_wird_ausgelassen(state, seite, geladen) -> None:
+    state.installieren.pruefung = {"eigenes_paket": True, "gleiche_signatur": False}
+    asyncio.run(app_update.automatisch(seite, _mit_release(state)))
+    assert state.app_update.phase == FEHLER and state.auslassen == RELEASE.tag
+    asyncio.run(app_update.automatisch(seite, state))  # beim nächsten Start: nicht noch einmal
+    assert len(geladen) == 1
+
+
+def test_netzfehler_von_selbst_wird_nicht_ausgelassen(state, seite, monkeypatch, tmp_path) -> None:
+    def kaputt(*a, **k):
+        raise UpdateFehler("HTTP 500")
+
+    monkeypatch.setattr(app_update, "apk_laden", kaputt)
+    monkeypatch.setattr(app_update, "updateverzeichnis", lambda: tmp_path)
+    asyncio.run(app_update.automatisch(seite, _mit_release(state)))
+    assert state.app_update.phase == FEHLER and state.auslassen == ""
+
+
+def test_android_lehnt_ab_von_selbst_wird_ausgelassen(state, seite, geladen) -> None:
+    lauf = _vorbereitet(state, seite)
+    app_update.ergebnis(state, 3, "INSTALL_FAILED_ABORTED")
+    assert lauf.phase == GELADEN and state.auslassen == RELEASE.tag
+
+
+def test_einstellungen_im_app_state(tmp_path) -> None:
+    from trainingsapp.ui.state import AppState
+
+    s = AppState.starten(tmp_path / "app.db")
+    try:
+        assert s.app_update_auto() and not s.app_update_hinweis_gesehen()
+        assert s.app_update_auslassen() == ""
+        s.app_update_auto_setzen(False)
+        s.app_update_hinweis_merken()
+        s.app_update_auslassen_setzen("v0.3.81")
+        assert not s.app_update_auto() and s.app_update_hinweis_gesehen()
+        assert s.app_update_auslassen() == "v0.3.81"
+    finally:
+        s.schliessen()

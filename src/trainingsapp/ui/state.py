@@ -828,6 +828,29 @@ class AppState:
     def update_pruefung_setzen(self, an: bool) -> None:
         self.einstellungen.setzen(SettingRepo.UPDATE_PRUEFUNG, "1" if an else "0")
 
+    def app_update_auto(self) -> bool:
+        """App-Updates von selbst laden und installieren (Katalog A8, Ben 9.11.2026)? Vorgabe
+        an — geladen nur im WLAN, installiert, wenn die App eine Minute nicht benutzt wurde
+        und nichts läuft (`ui/app_update.py`)."""
+        return self.einstellungen.lesen(SettingRepo.APP_UPDATE_AUTO, "1") == "1"
+
+    def app_update_auto_setzen(self, an: bool) -> None:
+        self.einstellungen.setzen(SettingRepo.APP_UPDATE_AUTO, "1" if an else "0")
+
+    def app_update_hinweis_gesehen(self) -> bool:
+        """Wurde der einmalige Hinweis zur Automatik gezeigt (oder sie selbst eingeschaltet)?"""
+        return self.einstellungen.lesen(SettingRepo.HINWEIS_APP_UPDATE, "0") == "1"
+
+    def app_update_hinweis_merken(self) -> None:
+        self.einstellungen.setzen(SettingRepo.HINWEIS_APP_UPDATE, "1")
+
+    def app_update_auslassen(self) -> str:
+        """Tag des Releases, das die Automatik auslässt (es scheiterte von selbst), sonst ``""``."""
+        return self.einstellungen.lesen(SettingRepo.APP_UPDATE_AUSLASSEN, "") or ""
+
+    def app_update_auslassen_setzen(self, tag: str) -> None:
+        self.einstellungen.setzen(SettingRepo.APP_UPDATE_AUSLASSEN, tag)
+
     def paket_updates(self) -> str:
         """„Für alle Pakete“ in Updates (Ben, 9.11.2026): ``auto`` (Vorgabe — kleine und
         mittlere Updates von selbst), ``klein`` (nur kleine) oder ``manuell`` — die Stufe aus

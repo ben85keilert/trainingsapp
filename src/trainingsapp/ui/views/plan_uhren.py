@@ -169,8 +169,12 @@ def plan_uhren_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.Vi
         return karte(
             kartentitel("Für den ganzen Plan"),
             ft.Switch(
-                label="Workout — der Plan läuft von vorn bis hinten",
-                value=p.workout,
+                # Mit Abzweigen ist der Plan immer ein Workout (P169) — der Schalter zeigt es nur
+                label="Workout — mit Abzweigen immer"
+                if p.ablauf.an
+                else "Workout — der Plan läuft von vorn bis hinten",
+                value=p.workout or p.ablauf.an,
+                disabled=p.ablauf.an,
                 on_change=workout_geschaltet,
             ),
             ft.SegmentedButton(
@@ -349,10 +353,18 @@ def plan_uhren_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.Vi
             for i, a in enumerate(teil.abschnitte):
                 zeilen.append(abschnitt_zeile(item, uebung, profil, k, i, a))
 
-            def hinzufuegen(k: int = k) -> None:
-                mit_kopie(
-                    item, profil, lambda kp: teil_abschnitte(kp, k).append(Abschnitt("Pause", 30))
-                )
+            def hinzufuegen(k: int) -> Callable[[], None]:
+                # Fabrik statt ``def handler(k=k)``: Flet reicht einem Handler mit Parameter das
+                # Event als erstes Argument — ``k`` wäre dann das Event (Absturz „Event - int“,
+                # Ben 9.11.2026 beim Ändern der Uhren eines Workouts)
+                def handler() -> None:
+                    mit_kopie(
+                        item,
+                        profil,
+                        lambda kp: teil_abschnitte(kp, k).append(Abschnitt("Pause", 30)),
+                    )
+
+                return handler
 
             def runden(k: int = k, delta: int = 0, jetzt: int = teil.runden) -> Callable[[], None]:
                 def handler() -> None:
@@ -366,7 +378,7 @@ def plan_uhren_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.Vi
                     spacing=6,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
-                        ft.TextButton("+ Abschnitt", on_click=hinzufuegen),
+                        ft.TextButton("+ Abschnitt", on_click=hinzufuegen(k)),
                         ft.Container(expand=True),
                         ft.Text("Runden", size=12, opacity=0.6),
                         ft.IconButton(

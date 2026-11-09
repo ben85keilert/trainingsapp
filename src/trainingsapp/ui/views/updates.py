@@ -10,6 +10,9 @@ Quellen, Neuigkeiten, die Quellenliste und die Schalter dazu.
   eingespielt, „manuell“ nur vorgemerkt. Danach hängt das Label unter dem Zahnrad
   (`AppState.updates_label`) — einmal je Stand, bis diese Seite geöffnet wurde.
 - **„Jetzt prüfen“** macht dasselbe auf Knopfdruck.
+- **App-Update von selbst** (A8, Ben 9.11.2026): nach jeder Prüfung `app_update.automatisch`
+  — lädt im WLAN und installiert, wenn die App eine Minute nicht benutzt wurde; Schalter in
+  der Karte „App“.
 - Netz nur in ``asyncio.to_thread``; Datenbank im Event-Loop.
 
 Rechtlich (`docs/recht/40_toms.md`): Es gehen nur Adresse und User-Agent hinaus,
@@ -151,6 +154,8 @@ async def _starten(page: ft.Page, state: AppState) -> None:
     state.neu_zeichnen()
     for paket, uebungen, kurse in state.entfallene:
         page.show_dialog(entfallene_dialog(page, state, paket, uebungen, kurse))
+    with contextlib.suppress(Exception):  # das App-Update von selbst (A8, Automatik)
+        await app_update.automatisch(page, state)
 
 
 def hinweis_dialog(page: ft.Page, state: AppState) -> ft.AlertDialog:
@@ -238,6 +243,7 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
         state.neu_zeichnen()
         for paket, uebungen, kurse in state.entfallene:
             page.show_dialog(entfallene_dialog(page, state, paket, uebungen, kurse))
+        await app_update.automatisch(page, state)
 
     pruefen_knopf.on_click = jetzt_pruefen
 
@@ -281,11 +287,17 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
 
     # -- App -------------------------------------------------------------------------
     app_zeilen: list[ft.Control] = [ft.Text(app_text)]
+    android = page.platform == ft.PagePlatform.ANDROID
+    # Die Automatik (A8) braucht die Erweiterung — ohne sie (flet run, Web) kein Schalter
+    automatik = (
+        app_update.automatik_schalter(page, state)
+        if android and state.installieren is not None and ist_aktiv("update_pruefung")
+        else []
+    )
     if not ist_aktiv("update_pruefung"):
         app_zeilen.append(hinweis("Updates der App kommen in dieser Edition von der Praxis."))
     elif stand is not None and stand.app is not None:
         release = stand.app
-        android = page.platform == ft.PagePlatform.ANDROID
         ziel = release.apk_url if android else release.seite
 
         async def herunterladen() -> None:
@@ -324,6 +336,7 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
         app_zeilen.append(hinweis("Die App ist auf dem neuesten Stand."))
     else:
         app_zeilen.append(hinweis("Noch nicht geprüft."))
+    app_zeilen += automatik
 
     # -- Pakete ----------------------------------------------------------------------
     def fuer_alle(ev: ft.Event[ft.SegmentedButton]) -> None:

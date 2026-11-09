@@ -103,7 +103,10 @@ Einstellungen → Updates „Laden und installieren“. Die App lädt die APK se
 Größe und SHA-256; installiert wird über die Erweiterung `erweiterungen/flet_installieren`.
 Android fragt einmal je App „Unbekannte Apps installieren“, ab Android 12 dann bei keinem
 Update mehr. Die App schließt sich dabei und muss danach neu geöffnet werden. Während
-einer Messung wird nur geladen.
+einer Messung wird nur geladen. **Von selbst** (Schalter auf derselben Seite, Vorgabe an):
+Ab Android 12 und nach dem ersten „Erlauben“ lädt die App ein neues Release im WLAN beim
+Start und installiert es, wenn sie eine Minute nicht benutzt wurde und nichts läuft; eine
+Benachrichtigung meldet danach „aktualisiert, antippen zum Öffnen“.
 
 Das Skript findet den Schlüssel über `signierung.toml` im Projektordner (nicht
 eingecheckt). Fehlt die Datei, bricht es ab, statt still eine APK zu bauen,
@@ -156,8 +159,8 @@ man an Übungen geändert hat, bleibt. Für die App öffnet „Herunterladen“ 
 Browser (Android); antippen installiert sie als Update über die bestehende App,
 die Daten bleiben (gleicher Signierschlüssel). Dazu muss die Version in
 `pyproject.toml` angehoben sein — bei gleicher Version entscheidet die
-Build-Nummer. iOS kennt keinen Weg am App Store vorbei. Installation innerhalb
-der App (Stufe 2) ist vorgemerkt (`docs/offene_fragen.md`, A8).
+Build-Nummer. iOS kennt keinen Weg am App Store vorbei. Seit 9.11.2026 lädt und
+installiert die Android-App das Update auch selbst (Stufe 2, siehe oben).
 
 ---
 

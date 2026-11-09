@@ -595,6 +595,31 @@ def regulaere(staende: Sequence[KanteStand]) -> KanteStand | None:
     return next((s for s in staende if s.gangbar), None)
 
 
+def wahl_offen(staende: Sequence[KanteStand]) -> list[KanteStand]:
+    """Gibt es mehrere **gleichwertige** Wege, muss die Person wählen, bevor es weitergeht (Ben,
+    9.11.2026: „Egal ob hart oder weich, wenn es mehrere Pfade gibt, wird erst abgefragt, bevor
+    es weiter geht“) — die Kandidaten, sonst leer. Gleichwertig: mehrere angebotene Wege (ihr
+    Auslöser ist erfüllt) oder, wenn keiner angeboten ist, mehrere freie gangbare. Ein einziger
+    angebotener Weg entscheidet von sich aus.
+
+    >>> st = lambda ks, **kw: kanten_pruefen(ks, zeit_ab=True, wdh=None, skala=kw.get("s"))
+    >>> frei2 = [Kante("a", "b"), Kante("a", "c")]
+    >>> [x.kante.nach for x in wahl_offen(st(frei2))]
+    ['b', 'c']
+    >>> wahl_offen(st([Kante("a", "b"), Kante("a", "c", SKALA, 7)], s=8))
+    []
+    >>> wahl_offen(st([Kante("a", "b")]))
+    []
+    """
+    angeboten = [s for s in staende if s.angeboten]
+    if len(angeboten) == 1:
+        return []
+    if len(angeboten) > 1:
+        return angeboten
+    gangbar = [s for s in staende if s.gangbar]
+    return gangbar if len(gangbar) > 1 else []
+
+
 # -- Struktur ------------------------------------------------------------------------------------
 
 
@@ -699,6 +724,68 @@ def ohne_ausweg(ablauf: Ablauf, items: Sequence[str]) -> list[str]:
     return [k for k in items if k not in erreicht]
 
 
+def kreis_von_selbst(ablauf: Ablauf, items: Sequence[str]) -> list[str]:
+    """Knoten auf einem Kreis aus Wegen, die **von selbst** gehen (``ausfuehren``, Auslöser
+    frei oder Zeit ab) — dort läuft das Workout ohne Halt im Kreis, auch wenn es irgendwo einen
+    Ausweg gäbe, bis jemand abbricht (Ben, 9.11.2026: „dafür braucht es in der Planerstellung
+    eine Warnung, falls es passieren könnte, dass der Plan hängen bleibt“).
+
+    >>> selbst = lambda v, n: Kante(v, n, ausfuehren=True)
+    >>> a = Ablauf(True, "a", (selbst("a", "b"), selbst("b", "a"), Kante("b", ENDE)))
+    >>> kreis_von_selbst(a, ["a", "b"])
+    ['a', 'b']
+    >>> kreis_von_selbst(a.mit_kante(Kante("a", "c")), ["a", "b", "c"])
+    ['a', 'b']
+    >>> kreis_von_selbst(Ablauf(True, "a", (Kante("a", "b"), Kante("b", "a"))), ["a", "b"])
+    []
+    """
+    knoten = [*items, *(f.id for f in ablauf.fragen)]
+    folge = {
+        k: {
+            x.nach
+            for x in ablauf.von(k)
+            if x.ausfuehren and x.ausloeser in (FREI, ZEIT) and x.nach in knoten
+        }
+        for k in knoten
+    }
+    out: list[str] = []
+    for k in items:
+        gesehen: set[str] = set()
+        offen = list(folge.get(k, ()))
+        while offen:
+            x = offen.pop()
+            if x == k:
+                out.append(k)
+                break
+            if x not in gesehen:
+                gesehen.add(x)
+                offen.extend(folge.get(x, ()))
+    return out
+
+
+def warnungen(ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str]) -> list[str]:
+    """Was den Plan hängen lassen kann — sichtbar beim Erstellen, nicht hinter einem Knopf (Ben,
+    9.11.2026): ein Kreis ohne Weg hinaus und ein Kreis, der von selbst weiterläuft.
+
+    >>> a = Ablauf(True, "a", (Kante("a", "b"), Kante("b", "a")))
+    >>> warnungen(a, ["a", "b"], {"a": "Bauchatmung", "b": "HRV-Ruhemessung"})[0]
+    'Kein Weg hinaus ab: Bauchatmung, HRV-Ruhemessung — dort käme das Workout nie zum Ende.'
+    """
+    if not ablauf.an:
+        return []
+    out: list[str] = []
+    if kreis := ohne_ausweg(ablauf, items):
+        liste = ", ".join(namen.get(i, i) for i in kreis)
+        out.append(f"Kein Weg hinaus ab: {liste} — dort käme das Workout nie zum Ende.")
+    if selbst := kreis_von_selbst(ablauf, items):
+        liste = ", ".join(namen.get(i, i) for i in selbst)
+        out.append(
+            f"Läuft von selbst im Kreis: {liste} — ohne Halt, bis jemand abbricht. Einen der "
+            "Wege auf „Anbieten“ stellen."
+        )
+    return out
+
+
 def weg_durch(ablauf: Ablauf, items: Sequence[str], knoten: str) -> set[str]:
     """„Nur diesen Weg“: alle Knoten auf einem Pfad vom Start durch ``knoten`` — rückwärts bis
     zum Start, vorwärts bis zum Ende (Vernebeln, §4.5).
@@ -744,6 +831,9 @@ def pruefung(ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str]) -> 
     if kreis:
         liste = ", ".join(namen.get(i, i) for i in kreis)
         out.append(f"Kein Weg hinaus ab: {liste} — von dort erreicht das Workout sein Ende nicht.")
+    if selbst := kreis_von_selbst(ablauf, items):
+        liste = ", ".join(namen.get(i, i) for i in selbst)
+        out.append(f"Läuft von selbst im Kreis: {liste} — ohne Halt, bis jemand abbricht.")
     for i in [*items, *(f.id for f in ablauf.fragen)]:
         anzahl = len(ablauf.von(i))
         if anzahl >= VIELE_WEGE:
@@ -1157,6 +1247,7 @@ __all__ = [
     "kanten_pruefen",
     "kanten_zaehlen",
     "kette",
+    "kreis_von_selbst",
     "lagen_ergaenzen",
     "layout",
     "luecke_schliessen",
@@ -1168,5 +1259,7 @@ __all__ = [
     "regulaere",
     "sekunden_text",
     "von_selbst",
+    "wahl_offen",
+    "warnungen",
     "weg_durch",
 ]

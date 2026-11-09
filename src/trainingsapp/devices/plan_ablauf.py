@@ -243,12 +243,24 @@ class PlanAblaufBaustein:
             gelaufen_s=st.gelaufen_s,
         )
 
+    @property
+    def wahl_noetig(self) -> bool:
+        """Mehrere gleichwertige Wege aus dem laufenden Knoten — dann geht es erst weiter, wenn
+        die Person einen wählt (Ben, 9.11.2026: „Egal ob hart oder weich, wenn es mehrere Pfade
+        gibt, wird erst abgefragt, bevor es weiter geht“; `core.ablauf.wahl_offen`)."""
+        if self.ablauf is None or self.schritt.frage is not None or self.phase == FERTIG:
+            return False
+        return bool(ab.wahl_offen(self.kanten_stand()))
+
     def _weg_frei(self) -> bool:
         """Darf der Schritt jetzt von selbst enden? Linear: die Bedingung ist erfüllt (oder es
-        gibt keine); gezeichnet: eine Kante ist frei — oder er hat keine (dann ist es das Ende)."""
+        gibt keine); gezeichnet: eine Kante ist frei — oder er hat keine (dann ist es das Ende);
+        bei mehreren gleichwertigen Wegen nie (`wahl_noetig`)."""
         if self.ablauf is not None:
             if self.schritt.frage is None and not self.ablauf.von(self.schritt.item_id):
                 return True
+            if self.wahl_noetig:
+                return False
             return self._regulaere_kante() is not None
         erf = self.bedingung_stand()
         return erf is None or erf.erfuellt
@@ -407,6 +419,8 @@ class PlanAblaufBaustein:
             and not self.timer.lauf.fertig
         )
         if timer_laeuft and not self.weiter_automatisch:
+            return
+        if self.wahl_noetig:  # mehrere gleichwertige Wege: die Person wählt (Ben, 9.11.2026)
             return
         for st in self.kanten_stand():
             if st.gangbar and st.kante.ausfuehren and st.kante.ausloeser != ab.FREI:
@@ -624,8 +638,10 @@ class PlanAblaufBaustein:
             self._fertig_gewollt = True
             self._ende_versuchen(self._uhr(), "gemacht" if self.ohne_timer else "fertig")
 
-    def ueberspringen(self) -> None:
-        """Die laufende Übung endet ohne Eintrag; die nächste beginnt (wie nach dem Timer)."""
+    def ueberspringen(self, kante: ab.Kante | None = None) -> None:
+        """Die laufende Übung endet ohne Eintrag; die nächste beginnt (wie nach dem Timer).
+        Gezeichnet mit ``kante``: über diesen Weg — die Ansicht fragt bei mehreren gleichwertigen
+        Wegen vorher (`wahl_noetig`)."""
         if self.phase not in (UEBUNG, UEBERZEIT) or self._t0 is None:
             return
         jetzt = self._uhr()
@@ -634,10 +650,11 @@ class PlanAblaufBaustein:
         if self.ablauf is None:
             self._beenden(jetzt, "uebersprungen", zwingend=True)
             return
-        # Gezeichnet: die reguläre Kante, sonst die erste — ohne Kante ist es das Ende
-        st = self._regulaere_kante()
-        kanten = [k for k in self.ablauf.von(self.schritt.item_id) if not k.schleife]
-        kante = st.kante if st is not None else (kanten[0] if kanten else None)
+        if kante is None:
+            # Gezeichnet: die reguläre Kante, sonst die erste — ohne Kante ist es das Ende
+            st = self._regulaere_kante()
+            kanten = [k for k in self.ablauf.von(self.schritt.item_id) if not k.schleife]
+            kante = st.kante if st is not None else (kanten[0] if kanten else None)
         ziel = self.kante_ziel(kante) if kante is not None else None
         if ziel is None:
             self._ende_gewollt = True
@@ -750,8 +767,10 @@ class PlanAblaufBaustein:
             naechster = self._ziel(ziel)
         else:
             st = self._regulaere_kante()
-            if st is None and self.ablauf.von(self.schritt.item_id) and not zwingend:
-                # Kanten, aber keine frei (Pflicht offen, Skala nicht gewählt): bleiben
+            offen = not zwingend and self.wahl_noetig
+            if (st is None and self.ablauf.von(self.schritt.item_id) and not zwingend) or offen:
+                # Kanten, aber keine frei (Pflicht offen, Skala nicht gewählt) — oder mehrere
+                # gleichwertige: bleiben, bis die Person wählt
                 self.wartet = True
                 self._grund_wartend = grund
                 return

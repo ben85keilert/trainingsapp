@@ -360,6 +360,11 @@ selbst **ausgeführt** wird. **Pflicht** sperrt die anderen Wege, bis sie erfül
 führt dorthin, wo du herkamst (Einschub: Dehnung bei Krämpfen, danach weiter). Eine **Frage**
 ist ein Knoten ohne Übung: Skala wählen, es geht nach dem Wert weiter. Übungen, die nur über
 einen Abzweig erreichbar sind, stehen unter „Bei Bedarf“ — sie kommen nie von selbst dran.
+Gibt es **mehrere gleichwertige Wege** (mehrere freie, oder mehrere, deren Bedingung erfüllt
+ist), fragt das Workout oben **„Wie geht es weiter?“** — hart wie weich, nach „Fertig“, am Ende
+der Zeit und beim Überspringen; vorher geht es nicht weiter.
+
+**Zurück** aus dem Workout führt in den Plan — die Uhr läuft weiter, oben „Fokus“ führt zurück.
 
 Läuft eine Aufnahme, wird das Workout ein Abschnitt in ihr — die Übungen liegen darin.
 """
@@ -375,15 +380,21 @@ sagt „Weiter, wenn …“ unter „Einstellen“, wann es weitergeht — sonst
   **nach unten ziehen** legt eine Übung in einen **Slot** (oder auf „Start“).
 - **Tipp auf eine Übung im Bild** wählt sie. Darunter: **Routing** (Wege einstellen, Weg zu
   einer Übung im Bild, Frage, Schleife, ◀ zurück, Ende, Start, Übung einstellen), **Neuer
-  Slot**, **Beiname**, **Aus Plan nehmen** (Lücke schließen oder die Reihe danach mitnehmen).
+  Slot**, **Beiname**, **Aus dem Ablauf nehmen** (Lücke schließen oder die Reihe danach
+  mitnehmen — die Übung bleibt im Plan und in der Palette). **Aus dem Plan** nimmt sie erst
+  **Gedrückthalten** an ihrer Kachel in der Palette.
+- Der **Punkt** in der Mitte einer Verbindung öffnet ihre Wege — gleich auf diesem Weg.
 - **Wege einstellen** zeigt alle Wege der Übung untereinander: *Kommt von* und *Weiter zu* —
   je Weg das Ziel, *wann* (frei, Zeit ab, Wiederholungen, in einer Zeit, Skala), anbieten oder
   von selbst, Pflicht, Beschriftung („Rücken tut weh“). Dasselbe steht in „Im Plan einstellen“.
-  Der erste Weg ist der **Hauptweg** — der ohne Entscheidung.
+  Der erste Weg ist der **Hauptweg** (er steht auch als Bedingung in der Liste). Gibt es
+  mehrere gleichwertige Wege, fragt das Workout, wohin es weitergeht.
 - **Lang drücken** zeigt nur den Weg durch diese Übung, „Alles zeigen“ holt den Rest zurück.
 - **Neu anordnen** räumt die Zeichnung auf und richtet die Ansicht aus — sonst bleibt alles,
   wo es ist. Zwei Finger zoomen, ein Finger schiebt.
 - **Start** antippen spielt den Hauptweg ab.
+- **Rot** steht eine Warnung, wenn der Plan hängen bleiben kann: ein Kreis ohne Weg hinaus oder
+  ein Kreis aus Wegen, die von selbst gehen.
 
 Übungen, die nur über einen Abzweig erreichbar sind, kommen **bei Bedarf** dran — nie von selbst.
 """

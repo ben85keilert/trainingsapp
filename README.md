@@ -98,6 +98,13 @@ Ergebnis: `dist/trainingsapp-<version>-<build>.apk`. Die APK aufs Handy
 kopieren und antippen; eine schon installierte App wird dabei aktualisiert,
 ihre Daten bleiben.
 
+**Update aus der App** (seit 9.11.2026): Gibt es ein neueres Release bei GitHub, bietet
+Einstellungen → Updates „Laden und installieren“. Die App lädt die APK selbst und prüft
+Größe und SHA-256; installiert wird über die Erweiterung `erweiterungen/flet_installieren`.
+Android fragt einmal je App „Unbekannte Apps installieren“, ab Android 12 dann bei keinem
+Update mehr. Die App schließt sich dabei und muss danach neu geöffnet werden. Während
+einer Messung wird nur geladen.
+
 Das Skript findet den Schlüssel über `signierung.toml` im Projektordner (nicht
 eingecheckt). Fehlt die Datei, bricht es ab, statt still eine APK zu bauen,
 die sich nicht über die bisherige installieren lässt.

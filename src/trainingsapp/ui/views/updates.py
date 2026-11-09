@@ -39,6 +39,7 @@ from trainingsapp.core.paketquelle import (
 )
 from trainingsapp.core.update import UpdateFehler, ist_neuer, neuestes_release
 from trainingsapp.data.repositories import SettingRepo
+from trainingsapp.ui import app_update
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
@@ -251,28 +252,35 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
         async def herunterladen() -> None:
             await link_oeffnen(page, browser, ziel)
 
-        app_zeilen += [
+        app_zeilen.append(
             ft.Text(
                 f"Version {release.version} (Build {release.build}) verfügbar",
                 weight=ft.FontWeight.W_600,
                 color=ft.Colors.PRIMARY,
-            ),
-            hinweis(
-                "Der Browser lädt die APK; antippen installiert sie als Update, die Daten bleiben."
-                if android
-                else "Öffnet die Release-Seite bei GitHub; die APK ist für Android."
-            ),
-            ft.Row(
-                alignment=ft.MainAxisAlignment.END,
-                controls=[
-                    ft.FilledTonalButton(
-                        "Herunterladen" if android else "Release öffnen",
-                        icon=ft.Icons.DOWNLOAD,
-                        on_click=herunterladen,
-                    )
-                ],
-            ),
-        ]
+            )
+        )
+        if android and state.installieren is not None:
+            # Stufe 2 (A8): in der App laden und installieren, der Browser bleibt als Ausweg
+            app_zeilen.append(app_update.app_bereich(state, release, herunterladen))
+        else:
+            app_zeilen += [
+                hinweis(
+                    "Der Browser lädt die APK; antippen installiert sie als Update, "
+                    "die Daten bleiben."
+                    if android
+                    else "Öffnet die Release-Seite bei GitHub; die APK ist für Android."
+                ),
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.END,
+                    controls=[
+                        ft.FilledTonalButton(
+                            "Herunterladen" if android else "Release öffnen",
+                            icon=ft.Icons.DOWNLOAD,
+                            on_click=herunterladen,
+                        )
+                    ],
+                ),
+            ]
     elif stand is not None:
         app_zeilen.append(hinweis("Die App ist auf dem neuesten Stand."))
     else:

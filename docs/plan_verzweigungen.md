@@ -415,6 +415,39 @@ die Wege im Ablauf sind **dasselbe** — linear mit „Kommt von / Weiter zu“ 
 dasselbe Wege-Formular wie im Reiter; der Hauptweg spiegelt sich in die Bedingung
 (`ablauf_speichern`). Kanten kennen dafür auch „Wdh. in einer Zeit“ (`WDH_IN_ZEIT`).
 
+### 8.9 Korrekturen am Reiter „Ablauf“ (9.11.2026, 0.3.72)
+
+Ben, nach dem zweiten Gerätetest — sechs Punkte, alle gebaut:
+
+1. **Herausnehmen ≠ Löschen:** Der Knopf unter dem Bild heißt **„Aus dem Ablauf nehmen“** und
+   nimmt nur aus der Zeichnung (Lücke schließen, mit der Nachfolgereihe oder nur diese — ohne
+   die Planübung zu löschen; war sie der Start, rückt ihr Hauptweg nach). Die Übung bleibt in
+   der Palette, „frei“. **Aus dem Plan** nimmt man sie dort mit **Gedrückthalten** an der Kachel
+   — mit Rückfrage (mitten in einer Reihe dieselbe wie bisher). `entfernen_fragen(…,
+   nur_ablauf=True)`.
+2. **Punkt je Verbindung:** Jede Kante hat in der Mitte zwischen den Ebenen einen **Punkt** in
+   ihrer Farbe — ein Griff von 44 px, die Beschriftung **nach außen** daneben (linkes Kind
+   links, sonst rechts), damit sich Geschwisterwege nicht überdecken (`ablaufbild.etikett`). Ein
+   Tipp öffnet das Wege-Blatt der Übung, **auf diesem Weg**: seine Karte ist umrandet, die anderen
+   Wege sind zugeklappt (Tipp klappt auf; `wege_karte(fokus=…)`).
+3. **„+“ im Ablauf** liegt unter dem Ablauf (`…/bearbeiten/ablauf/hinzufuegen`) — Zurück und
+   „Fertig“ führen in den Ablauf, nicht in den Reiter „Plan“.
+4. **Warnung beim Zeichnen:** `core.ablauf.warnungen` — ein Kreis **ohne Weg hinaus** und ein
+   Kreis aus Wegen, die **von selbst** gehen (`kreis_von_selbst`: „ausführen“ mit Auslöser frei
+   oder Zeit ab), stehen rot über dem Bild und im Reiter „Plan“ unter dem Schalter — nicht erst
+   hinter „Hinweise“. Im Workout steht keine Liste des Vergangenen mehr (Fokus, §9.3 in
+   `plan_uhr_fokus.md`).
+5. **Zurück aus dem Fokus** führt in den Plan (siehe `plan_uhr_fokus.md` §9.3).
+6. **Mehrere gleichwertige Wege: erst fragen** (Ben: „Egal ob hart oder weich, wenn es mehrere
+   Pfade gibt, wird erst abgefragt, bevor es weiter geht“). Gleichwertig = mehrere **angebotene**
+   Wege (Auslöser erfüllt) oder, wenn keiner angeboten ist, mehrere freie gangbare
+   (`core.ablauf.wahl_offen`; ein einziger angebotener entscheidet von selbst). Dann ist kein
+   Weg „frei“ (`PlanAblaufBaustein.wahl_noetig`): „Fertig“, das Ende der Zeit und „Weiter“ ohne
+   Ziel lassen den Schritt **warten**, „von selbst“ geht nichts. Oben im Fokus steht die Karte
+   **„Wie geht es weiter?“** mit den Wegen gleich betont; **„Überspringen“** fragt ebenso
+   („Überspringen — wie geht es weiter?“, „Doch nicht überspringen“, `ueberspringen(kante)`).
+   Die Unterzeile nennt sonst eindeutig, was danach kommt („danach Kniebeuge“).
+
 ## 9. Entscheidungen (Ergänzung)
 
 - **P113** Name des Reiters: „Ablauf“ (Vorschlag) statt „Verlauf“ (belegt durch Kurven/Tagebuch)?

@@ -1,6 +1,6 @@
 [project]
 name = "trainingsapp"
-version = "0.3.71"
+version = "0.3.72"
 description = "Trainingsassistent für Bewegungsübungen mit begleitender HRV-Messung"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -32,13 +32,16 @@ dependencies = [
     # (erweiterungen/flet_ble) und Signaltöne des Timers, die Musik nur kurz
     # leiser machen statt sie anzuhalten (erweiterungen/flet_ton — flet-audio
     # nähme Musik-Apps den Audiofokus) und Hochladen von Fotos und Videos aus der
-    # Fotoauswahl, verkleinert und ohne Ortsangabe (erweiterungen/flet_hochladen, P74).
+    # Fotoauswahl, verkleinert und ohne Ortsangabe (erweiterungen/flet_hochladen, P74)
+    # und das eigene Update über den PackageInstaller (erweiterungen/flet_installieren,
+    # Katalog A8 Stufe 2 — nicht für eine Fassung in Google Play).
     # Quelle für uv: [tool.uv.sources], für `flet build`: [tool.flet.dev_packages].
     # Die CI (`uv sync --only-group ci`) installiert Projektabhängigkeiten nicht und
     # bleibt damit flet-frei.
     "flet-ble",
     "flet-ton",
     "flet-hochladen",
+    "flet-installieren",
     # Uhr am Handgelenk über die Mediensteuerung (Ben, 26.10.2026): Erweiterung aus dem
     # Schwesterrepo hrv-watch (../hrv-watch/flet_medien), eingebunden wie hrv-core;
     # CI und APK-Workflow nehmen den Commit aus `hrv-watch.ref`.
@@ -104,6 +107,7 @@ default-groups = ["dev", "flet-dev"]
 flet-ble = { path = "erweiterungen/flet_ble", editable = true }
 flet-ton = { path = "erweiterungen/flet_ton", editable = true }
 flet-hochladen = { path = "erweiterungen/flet_hochladen", editable = true }
+flet-installieren = { path = "erweiterungen/flet_installieren", editable = true }
 flet-medien = { path = "../hrv-watch/flet_medien", editable = true }
 # Schwesterrepo (siehe Kommentar bei `dependencies`); editierbar, damit eine Änderung
 # an den Algorithmen hier sofort wirkt und beide Apps dieselben Zahlen liefern.
@@ -146,6 +150,7 @@ path = "src"
 flet-ble = "erweiterungen/flet_ble"
 flet-ton = "erweiterungen/flet_ton"
 flet-hochladen = "erweiterungen/flet_hochladen"
+flet-installieren = "erweiterungen/flet_installieren"
 flet-medien = "../hrv-watch/flet_medien"
 # Auch außerhalb des Projektordners erlaubt: flet löst den Pfad relativ zum Projekt
 # auf und übergibt ihn pip als file://-URL (flet_cli build_base, dev_packages).

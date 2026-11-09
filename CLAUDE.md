@@ -220,7 +220,11 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Hinweis und einen Nachtrag in `docs/recht/40_toms.md`, `80_store_freigaben.md`,
   `build/solo.toml`), spielt Pakete im Modus „auto“ ein und hängt das Label unter das
   Zahnrad (`AppState.updates_label`, einmal je Stand). Schalter `update_pruefung` und
-  `paket_quellen` nur Solo. Stufe 2 (Installation in der App) ist Katalog A8.
+  `paket_quellen` nur Solo. **Stufe 2** (Ben, 9.11.2026, Katalog A8): „Laden und installieren“
+  in der Karte „App“ — `core.update.apk_laden` (nur von den Releases des Repos, Größe und
+  SHA-256 aus GitHubs `digest`), Ablauf `ui/app_update.py`, Installieren über die Erweiterung
+  `erweiterungen/flet_installieren` (`PackageInstaller`, ab Android 12 ohne Rückfrage; nie,
+  solange etwas läuft — Android beendet die App dabei). Nicht für eine Fassung in Google Play.
 
 - **Diagnosemodus** (Ben, 4.11.2026, `docs/plan_diagnosemodus.md`, Vertrag §14): in den
   Einstellungen angeboten, je Messung gestartet (Sensorblatt mit Vorabtest), roter Punkt oben
@@ -294,7 +298,13 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Fläche einmal bauen, Inhalt tauschen, Lagen bleiben bis „Neu anordnen“, Eltern mittig;
   `views/ablauf.py`: Seite scrollt nicht, Palette = Planübungen mit `Draggable.affinity`
   senkrecht, Knöpfe unter dem Bild). Zeitleiste `plan/kante|frage|antwort`, `person/wdh`;
-  Paket `plaene[].ablauf` mit Positionen.
+  Paket `plaene[].ablauf` mit Positionen. **Korrekturen 9.11.2026** (§8.9): „Aus dem Ablauf
+  nehmen“ lässt die Planübung im Plan (aus dem Plan: Kachel gedrückt halten), jede Kante hat
+  einen Punkt zum Antippen (Blatt auf diesem Weg), Warnungen `core.ablauf.warnungen` sichtbar
+  beim Zeichnen; **mehrere gleichwertige Wege — erst fragen**, hart wie weich
+  (`core.ablauf.wahl_offen`, `PlanAblaufBaustein.wahl_noetig`, Karte „Wie geht es weiter?“);
+  der Workout-Fokus liegt über dem Plan (`/plan/<id>/workout`, Zurück = Plan, Hinweis „Workout
+  läuft“).
 
 - **Uhr und Fokus beim Üben** (Ben, 8.11.2026 spät, Vertrag `docs/plan_uhr_fokus.md`, Stand §9):
   Die Uhr-Zeile ist `Uhr ▾ · Zeit · Takt · ▶` (`components/uhr.py`); **▶ öffnet den Fokus**

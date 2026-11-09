@@ -8,7 +8,9 @@ Dasselbe Formular steht in „Im Plan einstellen“ (Abschnitt WEGE) und im Reit
 „Planke: ‚Rücken tut weh‘ → Langsitzdehnung, ‚Arme tun weh‘ → Armdehnung“. Je Weg: Ziel (eine
 Übung mit Nummer, eine Frage, „◀ zurück“ oder das Ende), wann (frei · Zeit ab · Wiederholungen ·
 in einer Zeit · Skala), anbieten oder ausführen, Pflicht, Beschriftung, Inhalt. Der erste Weg
-ist der **Hauptweg** (der ohne Entscheidung genommen wird), ↑ macht einen anderen dazu.
+ist der **Hauptweg** (er spiegelt sich in die Bedingung), ↑ macht einen anderen dazu — mehrere
+gleichwertige Wege fragt das Workout ab (`core.ablauf.wahl_offen`). ``fokus``: das Blatt steht
+auf diesem Weg (Punkt einer Verbindung angetippt), die anderen sind zugeklappt.
 
 Das Formular hält nichts selbst: ``lesen`` liefert den Ablauf, ``setzen`` nimmt den geänderten —
 wann gespeichert wird, sagt der Ort (Speichern der Seite bzw. Schließen des Blatts).
@@ -38,10 +40,15 @@ def wege_karte(
     namen: Mapping[str, str],
     ohne_timer: bool = False,
     merken: dict[str, Any] | None = None,
+    fokus: str | None = None,
 ) -> ft.Control:
     """Herkunft und Wege von ``knoten``. ``namen``: jeder Knoten mit Nummer („3 · Planke“), in
     Planfolge, Fragen dahinter; ``ohne_timer``: die Übung hat keinen Timer (Hinweis zu „Zeit
-    ab“); ``merken``: hält über das Neuzeichnen, welche Inhalte aufgeklappt sind."""
+    ab“); ``merken``: hält über das Neuzeichnen, welche Inhalte aufgeklappt sind.
+
+    ``fokus``: das Ziel des angetippten Wegs (Ben, 9.11.2026: „Wenn es mehrere Wege von einer
+    Übung aus gibt, soll das Blatt von unten einfach auf diesen ausgewählten Weg positioniert
+    sein“) — er steht offen und hervorgehoben, die anderen zugeklappt als eine Zeile."""
     a = lesen()
     offen: dict[str, Any] = merken if merken is not None else {}
 
@@ -190,10 +197,53 @@ def wege_karte(
         ft.DropdownOption(key=ab.ZURUECK, text="◀ zurück, wo ich herkam"),
         ft.DropdownOption(key=ENDE, text="Ende des Workouts"),
     ]
+
+    def aufklappen(i: int) -> Callable[[Any], None]:
+        def handler(_e: Any = None) -> None:
+            offen[f"auf{i}"] = True
+            neu_zeichnen()
+
+        return handler
+
     for n, (i, k) in enumerate(raus):
-        teile.append(
-            _weg(i, k, n, ziele, aendern, weg_entfernen, zum_hauptweg, zahl, offen, ohne_timer)
-        )
+        gewaehlt = fokus is not None and len(raus) > 1 and k.nach == fokus
+        if fokus is not None and len(raus) > 1 and not gewaehlt and not offen.get(f"auf{i}"):
+            ziel = "Ende" if k.zum_ende else "◀ zurück" if k.zurueck else namen.get(k.nach, "?")
+            teile.append(
+                ft.Container(
+                    padding=ft.Padding.only(left=12, right=4, top=2, bottom=2),
+                    border_radius=12,
+                    bgcolor=KARTE,
+                    on_click=aufklappen(i),
+                    data=("weg_zu", k.nach),
+                    content=ft.Row(
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Text(
+                                ("Hauptweg" if n == 0 else f"Weg {n + 1}")
+                                + f" → {ziel} · {k.ausloeser_text()}",
+                                size=12,
+                                expand=True,
+                                max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            ft.IconButton(
+                                ft.Icons.EXPAND_MORE,
+                                icon_size=18,
+                                tooltip="Aufklappen",
+                                on_click=aufklappen(i),
+                            ),
+                        ],
+                    ),
+                )
+            )
+            continue
+        karte = _weg(i, k, n, ziele, aendern, weg_entfernen, zum_hauptweg, zahl, offen, ohne_timer)
+        if gewaehlt and isinstance(karte, ft.Container):
+            karte.border = ft.Border.all(2, ft.Colors.PRIMARY)
+            karte.data = ("weg_gewaehlt", k.nach)
+        teile.append(karte)
     teile.append(ft.TextButton("Weg", icon=ft.Icons.ADD, on_click=weg_dazu))
     return ft.Column(spacing=8, tight=True, controls=teile)
 

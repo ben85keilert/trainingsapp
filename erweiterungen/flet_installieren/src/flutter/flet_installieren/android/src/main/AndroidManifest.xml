@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Das eigene Update installieren (Katalog A8 Stufe 2). Android fragt trotzdem einmal
+         je App „Unbekannte Apps installieren — aus dieser Quelle zulassen?". Der
+         Manifest-Merger trägt beides in die App ein. Nicht für eine Fassung in Google Play:
+         Dort darf sich eine App nicht selbst aktualisieren (docs/recht/80_store_freigaben.md). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Android 12+: das eigene Update ohne Rückfrage (normale Berechtigung, keine Abfrage).
+         Fehlt eine Voraussetzung, fragt Android doch — dann kostet es einen Tipp. -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+
+    <application>
+        <!-- Ergebnis der Installationssitzung; nicht exportiert — nur die eigene
+             PendingIntent erreicht ihn -->
+        <receiver
+            android:name="de.praxisebert.flet_installieren.InstallErgebnis"
+            android:exported="false" />
+    </application>
+</manifest>

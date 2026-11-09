@@ -3,9 +3,11 @@
 
 Reiter Plan · Uhren immer; der Schalter „Der Reihe nach | Mit Abzweigen“ bringt „Ablauf“. Die
 Palette zeigt die Planübungen mit Nummer, Slots nehmen sie auf; unter dem Bild Routing, Neuer
-Slot, Beiname, Aus Plan nehmen und Neu anordnen. Das Wege-Blatt stellt alle Wege einer Übung ein
-und spiegelt den Hauptweg in ihre Bedingung — dasselbe Formular in „Im Plan einstellen“.
-Entfernen fragt nach Lücke oder Nachfolgereihe; die Lagen bleiben stehen bis „Neu anordnen“."""
+Slot, Beiname, Aus dem Ablauf nehmen und Neu anordnen. Das Wege-Blatt stellt alle Wege einer
+Übung ein und spiegelt den Hauptweg in ihre Bedingung — dasselbe Formular in „Im Plan
+einstellen“. Entfernen fragt nach Lücke oder Nachfolgereihe; die Lagen bleiben stehen bis „Neu
+anordnen“. Jede Verbindung hat einen Punkt zum Antippen; eine Warnung steht, wenn der Plan
+hängen bleiben kann."""
 
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ from trainingsapp.core import bedingung as bd  # noqa: E402
 from trainingsapp.core.ablauf import Kante  # noqa: E402
 from trainingsapp.core.bedingung import WDH, Bedingung  # noqa: E402
 from trainingsapp.core.models import Exercise, Plan, PlanItem  # noqa: E402
+from trainingsapp.ui.components.ablaufbild import KNOTEN  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.ablauf import (  # noqa: E402
     ablauf_view,
@@ -167,7 +170,7 @@ def test_palette_slot_routing_und_ziel_antippen(umgebung) -> None:
         ).on_click,
         None,
     )
-    assert seite.routen[-1] == f"{basis}/hinzufuegen"
+    assert seite.routen[-1] == f"{basis}/ablauf/hinzufuegen"  # Zurück führt in den Ablauf
     # Ohne Wahl unter dem Bild nur der Hinweis
     assert any(t.startswith("Tipp auf eine Übung im Bild") for t in _texte(ansicht))
     # Planke wählen → Knöpfe; „Neuer Slot“ → Ablage; die Dehnung hinein
@@ -175,7 +178,7 @@ def test_palette_slot_routing_und_ziel_antippen(umgebung) -> None:
     assert state.ablauf_wahl[plan.id] == ip
     texte = _texte(ansicht)
     assert "3 · Planke" in texte and "Routing" in texte
-    for text in ("Neuer Slot", "Beiname", "Aus Plan nehmen", "Neu anordnen"):
+    for text in ("Neuer Slot", "Beiname", "Aus dem Ablauf nehmen", "Neu anordnen"):
         _knopf(ansicht, text)
     _knopf(ansicht, "Neuer Slot").on_click(None)
     assert state.ablauf_slots[plan.id] == [ip]
@@ -316,3 +319,134 @@ def test_lagen_bleiben_bis_neu_anordnen(umgebung) -> None:
     _knopf(ansicht, "Neu anordnen").on_click(None)
     neu = state.ablauf_lagen[plan.id]
     assert neu[iw].x == (neu[ik].x + neu[id_].x) / 2
+
+
+def test_aus_dem_ablauf_nehmen_laesst_die_uebung_im_plan(umgebung) -> None:
+    """Ben, 9.11.2026: „wenn Übungen in einer Kette gelöscht werden, werden diese oben in der
+    Auswahl komplett entfernt. Das soll nicht passieren“ — der Knopf am Bild nimmt nur aus dem
+    Ablauf; aus dem Plan nimmt erst Gedrückthalten in der Auswahl, mit Rückfrage."""
+    state, plan = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    iw, ik, ip, id_ = (it.id for it in plan.items)
+    state.plaene.ablauf_setzen(
+        plan.id, ab.Ablauf(True, iw, (Kante(iw, ik), Kante(ik, ip), Kante(ip, id_)))
+    )
+    plan = state.plaene.laden(plan.id)
+    seite = _Seite()
+    ansicht = ablauf_view(seite, state, plan, basis)
+    _mit_daten(ansicht, "knoten", ik).content.on_tap(None)
+    _klick(_knopf(ansicht, "Aus dem Ablauf nehmen").on_click, None)
+    dialog = seite.dialoge[-1]
+    assert dialog.title.value == "„2 · Kniebeuge“ aus dem Ablauf nehmen"
+    zeilen = {x.title.value: x for x in _alle(dialog) if isinstance(x, ft.ListTile)}
+    assert set(zeilen) == {
+        "Lücke schließen",
+        "Mit der Nachfolgereihe herausnehmen",
+        "Nur diese herausnehmen",
+    }
+    _klick(zeilen["Lücke schließen"].on_click, None)
+    _klick(dialog.on_dismiss, None)
+    plan = state.plaene.laden(plan.id)
+    assert [it.id for it in plan.items] == [iw, ik, ip, id_]  # bleibt im Plan und in der Auswahl
+    assert [(k.von, k.nach) for k in plan.ablauf.kanten] == [(iw, ip), (ip, id_)]
+    assert ik in [x.data for x in _alle(ansicht) if isinstance(x, ft.Draggable)]
+    # Auch der Start: der Hauptweg rückt nach, die Übung bleibt im Plan
+    _mit_daten(ansicht, "knoten", iw).content.on_tap(None)
+    _klick(_knopf(ansicht, "Aus dem Ablauf nehmen").on_click, None)
+    dialog = seite.dialoge[-1]
+    zeilen = {x.title.value: x for x in _alle(dialog) if isinstance(x, ft.ListTile)}
+    _klick(zeilen["Nur diese herausnehmen"].on_click, None)
+    plan = state.plaene.laden(plan.id)
+    assert plan.ablauf.start == ip and iw in [it.id for it in plan.items]
+    # Gedrückt halten in der Auswahl: aus dem Plan — erst nach der Rückfrage
+    kachel = next(x for x in _alle(ansicht) if isinstance(x, ft.Draggable) and x.data == ik)
+    _klick(kachel.content.on_long_press, None)
+    dialog = seite.dialoge[-1]
+    assert isinstance(dialog, ft.AlertDialog)
+    assert dialog.title.value == "„2 · Kniebeuge“ aus dem Plan entfernen?"
+    assert ik in [it.id for it in state.plaene.laden(plan.id).items]
+    _klick(_knopf(dialog, "Entfernen").on_click, None)
+    assert ik not in [it.id for it in state.plaene.laden(plan.id).items]
+
+
+def test_punkt_je_verbindung_und_blatt_auf_dem_weg(umgebung) -> None:
+    """Ben, 9.11.2026: Verbindungen bekommen einen Punkt in der Mitte zwischen den Ebenen; das
+    Blatt von unten steht auf dem angetippten Weg — die anderen Wege zugeklappt."""
+    state, plan = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    iw, ik, ip, _id = (it.id for it in plan.items)
+    state.plaene.ablauf_setzen(plan.id, ab.Ablauf(True, iw, (Kante(iw, ik), Kante(iw, ip))))
+    plan = state.plaene.laden(plan.id)
+    seite = _Seite()
+    ansicht = ablauf_view(seite, state, plan, basis)
+    punkte = {
+        x.data: x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Container) and isinstance(x.data, tuple) and x.data[:1] == ("kante",)
+    }
+    assert set(punkte) == {("kante", iw, ik), ("kante", iw, ip)}
+    # Der Griff ist groß genug für einen Finger und liegt zwischen den Ebenen
+    griff = punkte[("kante", iw, ip)]
+    assert griff.height >= 36 and griff.on_click is not None
+    knoten_w = _mit_daten(ansicht, "knoten", iw)
+    knoten_p = _mit_daten(ansicht, "knoten", ip)
+    mitte = griff.top + griff.height / 2
+    assert knoten_w.top + KNOTEN <= mitte <= knoten_p.top
+    _klick(griff.on_click, None)
+    blatt = seite.dialoge[-1]
+    assert isinstance(blatt, ft.BottomSheet)
+    gewaehlt = [
+        x for x in _alle(blatt) if isinstance(x, ft.Container) and x.data == ("weg_gewaehlt", ip)
+    ]
+    zu = [x for x in _alle(blatt) if isinstance(x, ft.Container) and x.data == ("weg_zu", ik)]
+    assert gewaehlt and gewaehlt[0].border is not None and zu
+    # Der zugeklappte Hauptweg klappt per Tipp auf
+    _klick(zu[0].on_click, None)
+    assert not [x for x in _alle(blatt) if isinstance(x, ft.Container) and x.data == ("weg_zu", ik)]
+    # Beschriftete Geschwisterwege: die Beschriftung steht nach außen — nichts überdeckt sich
+    state.plaene.ablauf_setzen(
+        plan.id,
+        ab.Ablauf(
+            True, iw, (Kante(iw, ik, text="Rücken tut weh"), Kante(iw, ip, text="Arme tun weh"))
+        ),
+    )
+    plan = state.plaene.laden(plan.id)
+    ansicht = ablauf_view(_Seite(), state, plan, basis)
+    griffe = sorted(
+        (
+            x
+            for x in _alle(ansicht)
+            if isinstance(x, ft.Container)
+            and isinstance(x.data, tuple)
+            and x.data[:1] == ("kante",)
+        ),
+        key=lambda g: g.left,
+    )
+    assert len(griffe) == 2 and griffe[0].left + griffe[0].width <= griffe[1].left
+
+
+def test_warnung_wenn_der_plan_haengen_bleiben_kann(umgebung) -> None:
+    """Ben, 9.11.2026: „dafür braucht es in der Planerstellung eine Warnung, falls es passieren
+    könnte, dass der Plan hängen bleibt“ — im Ablauf über dem Bild und im Reiter „Plan“."""
+    state, plan = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    iw, ik, _ip, _id = (it.id for it in plan.items)
+    state.plaene.ablauf_setzen(plan.id, ab.Ablauf(True, iw, (Kante(iw, ik), Kante(ik, iw))))
+    plan = state.plaene.laden(plan.id)
+    ansicht = ablauf_view(_Seite(), state, plan, basis)
+    warnung = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.Container) and x.data == "ablauf_warnung"
+    )
+    assert any(
+        t.startswith("Kein Weg hinaus ab: 1 · Wandsitz, 2 · Kniebeuge") for t in _texte(warnung)
+    )
+    editor = plan_view(_Seite(), state, plan, bearbeiten=True, basis=basis)
+    assert any(isinstance(x, ft.Container) and x.data == "ablauf_warnung" for x in _alle(editor))
+    # Ein Weg hinaus: keine Warnung mehr
+    state.plaene.ablauf_setzen(plan.id, plan.ablauf.mit_kante(Kante(ik, ab.ENDE)))
+    plan = state.plaene.laden(plan.id)
+    ansicht = ablauf_view(_Seite(), state, plan, basis)
+    assert not any(
+        isinstance(x, ft.Container) and x.data == "ablauf_warnung" and x.visible is not False
+        for x in _alle(ansicht)
+    )

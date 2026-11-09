@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import tomllib
 import types
 import urllib.error
@@ -12,8 +14,14 @@ import pytest
 from trainingsapp import config
 from trainingsapp.core.update import (
     API_URL,
+    APK_PREFIX,
     Release,
+    UpdateAbgebrochen,
     UpdateFehler,
+    alte_apks_loeschen,
+    apk_befund,
+    apk_laden,
+    installer_text,
     ist_neuer,
     neuestes_release,
     release_aus_json,
@@ -177,3 +185,149 @@ def test_app_version_ohne_beides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     monkeypatch.setattr(config, "PYPROJECT", tmp_path / "pyproject.toml")
     _build_ersetzen(monkeypatch, None)
     assert config.app_version() == ("0.0.0", None)
+
+
+# ---------------------------------------------------------------------------
+# Stufe 2: laden und installieren (A8, 9.11.2026)
+# ---------------------------------------------------------------------------
+
+_APK = b"PK\x03\x04" + b"apk" * 1000
+_APK_URL = f"{APK_PREFIX}v0.3.71/trainingsapp-0.3.71-386.apk"
+
+
+def _apk_release(**anders) -> Release:
+    werte = {
+        "version": "0.3.71",
+        "build": 386,
+        "tag": "v0.3.71",
+        "apk_url": _APK_URL,
+        "seite": "s",
+        "notizen": "",
+        "veroeffentlicht": "",
+        "apk_sha256": hashlib.sha256(_APK).hexdigest(),
+        "apk_bytes": len(_APK),
+    }
+    werte.update(anders)
+    return Release(**werte)
+
+
+class _Antwort(io.BytesIO):
+    """Was `OEFFNER.open` liefert: lesbar, mit Kopfzeilen."""
+
+    def __init__(self, daten: bytes, laenge: int | None = None) -> None:
+        super().__init__(daten)
+        self.headers = {"Content-Length": str(len(daten) if laenge is None else laenge)}
+
+
+def _oeffner(daten: bytes = _APK, gesehen: list | None = None):
+    def oeffnen(anfrage, timeout=None):
+        if gesehen is not None:
+            gesehen.append(anfrage.full_url)
+        return _Antwort(daten)
+
+    return oeffnen
+
+
+def test_release_liest_pruefsumme_und_groesse() -> None:
+    daten = [_release("v0.3.70", ["trainingsapp-0.3.70-385.apk"])]
+    daten[0]["assets"][0] |= {"digest": "sha256:" + "AB" * 32, "size": 90987285}
+    r = release_aus_json(daten)
+    assert r is not None
+    assert (r.apk_sha256, r.apk_bytes) == ("ab" * 32, 90987285)
+    daten[0]["assets"][0] |= {"digest": "sha1:abc", "size": "groß"}
+    r = release_aus_json(daten)
+    assert r is not None
+    assert (r.apk_sha256, r.apk_bytes) == (None, 0)
+
+
+def test_apk_laden_prueft_und_benennt_um(tmp_path: Path) -> None:
+    schritte: list[tuple[int, int]] = []
+    gesehen: list[str] = []
+    pfad = apk_laden(
+        _apk_release(),
+        tmp_path,
+        lambda g, n: schritte.append((g, n)),
+        oeffnen=_oeffner(gesehen=gesehen),
+    )
+    assert pfad == tmp_path / "trainingsapp-0.3.71-386.apk"
+    assert pfad.read_bytes() == _APK
+    assert gesehen == [_APK_URL]
+    assert schritte[-1] == (len(_APK), len(_APK))
+    assert [p.name for p in tmp_path.iterdir()] == [pfad.name]  # kein .teil übrig
+    # Liegt sie schon geprüft da, wird nicht noch einmal geladen
+    assert apk_laden(_apk_release(), tmp_path, oeffnen=_oeffner(gesehen=gesehen)) == pfad
+    assert gesehen == [_APK_URL]
+
+
+def test_apk_laden_falsche_pruefsumme_bleibt_nicht_liegen(tmp_path: Path) -> None:
+    with pytest.raises(UpdateFehler, match="Prüfsumme"):
+        apk_laden(_apk_release(apk_sha256="0" * 64), tmp_path, oeffnen=_oeffner())
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_apk_laden_unvollstaendig(tmp_path: Path) -> None:
+    with pytest.raises(UpdateFehler, match="Unvollständig"):
+        apk_laden(_apk_release(), tmp_path, oeffnen=_oeffner(_APK[:-10]))
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_apk_laden_nur_von_den_releases_der_app(tmp_path: Path) -> None:
+    for url in (
+        "https://github.com/jemand/anders/releases/download/v1/trainingsapp-0.3.71-386.apk",
+        "http://github.com/ben85keilert/trainingsapp/releases/download/v1/x.apk",
+        "https://example.org/trainingsapp-0.3.71-386.apk",
+    ):
+        with pytest.raises(UpdateFehler, match="Releases der App"):
+            apk_laden(_apk_release(apk_url=url), tmp_path, oeffnen=_oeffner())
+
+
+def test_apk_laden_abbrechen(tmp_path: Path) -> None:
+    with pytest.raises(UpdateAbgebrochen):
+        apk_laden(_apk_release(), tmp_path, abbrechen=lambda: True, oeffnen=_oeffner())
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_apk_laden_netzfehler(tmp_path: Path) -> None:
+    def kaputt(anfrage, timeout=None):
+        raise urllib.error.URLError("offline")
+
+    with pytest.raises(UpdateFehler, match="offline"):
+        apk_laden(_apk_release(), tmp_path, oeffnen=kaputt)
+
+
+def test_alte_apks_loeschen(tmp_path: Path) -> None:
+    for name in (
+        "trainingsapp-0.3.69-380.apk",
+        "trainingsapp-0.3.70-385.apk",
+        "trainingsapp-0.3.71-386.apk",
+        "trainingsapp-0.3.71-386.apk.teil",
+        "notiz.txt",
+    ):
+        (tmp_path / name).write_bytes(b"x")
+    assert alte_apks_loeschen(tmp_path, "0.3.70", 385) == 3
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "notiz.txt",
+        "trainingsapp-0.3.71-386.apk",
+    ]
+    assert alte_apks_loeschen(tmp_path / "fehlt", "0.3.70", 385) == 0
+
+
+def test_apk_befund() -> None:
+    gut = {
+        "eigenes_paket": True,
+        "gleiche_signatur": True,
+        "version_code": 386,
+        "eigener_code": 385,
+    }
+    assert apk_befund(gut) is None
+    assert apk_befund(gut | {"gleiche_signatur": None}) is None  # unbekannt: Android prüft
+    assert "andere App" in (apk_befund(gut | {"eigenes_paket": False, "paket": "x.y"}) or "")
+    assert "Schlüssel" in (apk_befund(gut | {"gleiche_signatur": False}) or "")
+    assert "nicht neuer" in (apk_befund(gut | {"version_code": 385}) or "")
+
+
+def test_installer_text() -> None:
+    assert installer_text(0) == "Installiert."
+    assert "Schlüssel" in installer_text(5, "INSTALL_FAILED_UPDATE_INCOMPATIBLE")
+    assert installer_text(5, "X").endswith("(X)")
+    assert "Dialog" in installer_text(-1)

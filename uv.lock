@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -846,6 +846,17 @@ wheels = [
 name = "flet-hochladen"
 version = "0.1.0"
 source = { editable = "erweiterungen/flet_hochladen" }
+dependencies = [
+    { name = "flet" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "flet", specifier = ">=1.0.3" }]
+
+[[package]]
+name = "flet-installieren"
+version = "0.1.0"
+source = { editable = "erweiterungen/flet_installieren" }
 dependencies = [
     { name = "flet" },
 ]
@@ -2458,8 +2469,9 @@ wheels = [
 
 [[package]]
 name = "trainingsapp"
-version = "0.3.71"
+version = "0.3.72"
 source = { editable = "." }
+default-groups = ["dev", "flet-dev"]
 dependencies = [
     { name = "flet" },
     { name = "flet-audio" },
@@ -2469,6 +2481,7 @@ dependencies = [
     { name = "flet-charts" },
     { name = "flet-geolocator" },
     { name = "flet-hochladen" },
+    { name = "flet-installieren" },
     { name = "flet-map" },
     { name = "flet-medien" },
     { name = "flet-permission-handler" },
@@ -2517,6 +2530,7 @@ requires-dist = [
     { name = "flet-charts", specifier = "==1.0.*" },
     { name = "flet-geolocator", specifier = "==1.0.*" },
     { name = "flet-hochladen", editable = "erweiterungen/flet_hochladen" },
+    { name = "flet-installieren", editable = "erweiterungen/flet_installieren" },
     { name = "flet-map", specifier = "==1.0.*" },
     { name = "flet-medien", editable = "../hrv-watch/flet_medien" },
     { name = "flet-permission-handler", specifier = "==1.0.*" },

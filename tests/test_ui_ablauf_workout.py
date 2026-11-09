@@ -262,3 +262,64 @@ def test_ablaufbild_zeichnet_knoten_etiketten_und_nebel(tmp_path, monkeypatch) -
         assert isinstance(bild.control, ft.InteractiveViewer)
     finally:
         state.schliessen()
+
+
+async def test_mehrere_freie_wege_fragen_vor_dem_weiter(umgebung) -> None:
+    """Ben, 9.11.2026: zwei gleichwertige Wege — „Fertig“ nimmt nicht still den Hauptweg, oben im
+    Fokus steht „Wie geht es weiter?“ mit beiden Wegen gleich betont; „Überspringen“ fragt
+    ebenso, und keine Liste des Vergangenen steht im Lauf."""
+    state, uhr, gurt = umgebung
+    w = _uebung(state, "Wandsitz", 10)
+    k = _uebung(state, "Kniebeuge", None)
+    d = _uebung(state, "Dehnung Beine", None)
+    plan = Plan(name="Zwei Wege", subject_id=state.profil.id)
+    plan.items = [PlanItem(exercise_id=u.id) for u in (w, k, d)]
+    iw, ik, id_ = (i.id for i in plan.items)
+    plan.ablauf = Ablauf(True, iw, (Kante(iw, ik), Kante(iw, id_), Kante(ik, iw)))
+    state.plaene.speichern(plan)
+    plan = state.plaene.laden(plan.id)
+    seite = Seite()
+    route = f"/plan/{plan.id}/workout"
+    _knoepfe(workout_view(seite, state, plan, route=route))["Workout starten"].on_click()
+    teil = plan_ablauf.laufender(state, plan.id)[1]
+    await _sekunden(state, uhr, gurt, 2)
+    laufend = workout_view(seite, state, plan, route=route)
+    assert not any(getattr(x, "data", None) == "weg_frage" for x in _alle(laufend))
+    assert "danach" not in " ".join(_texte(laufend))  # zwei Wege: nichts vorweggenommen
+    _knoepfe(laufend)["Fertig"].on_click()
+    await _sekunden(state, uhr, gurt, 1)
+    assert teil.schritt.name == "Wandsitz" and teil.wartet
+    frage = workout_view(seite, state, plan, route=route)
+    karte = next(x for x in _alle(frage) if getattr(x, "data", None) == "weg_frage")
+    assert "Wie geht es weiter?" in _texte(karte)
+    knoepfe = _knoepfe(karte)
+    assert isinstance(knoepfe["Weiter: Kniebeuge"], ft.FilledButton)
+    assert isinstance(knoepfe["Weiter: Dehnung Beine"], ft.FilledButton)
+    assert "Workout beenden" not in _knoepfe(frage)
+    # oben: die Karte steht als Erstes im scrollenden Inhalt (unter der festen Uhr)
+    scroll = next(
+        x for x in _alle(frage) if isinstance(x, ft.Column) and x.scroll == ft.ScrollMode.AUTO
+    )
+    assert scroll.controls[0].content.controls[0] is karte
+    knoepfe["Weiter: Kniebeuge"].on_click()
+    await _sekunden(state, uhr, gurt, 1)
+    assert teil.schritt.name == "Kniebeuge"
+    # Die Kniebeuge hat einen Weg — „danach Wandsitz“; zurück im Wandsitz fragt „Überspringen“
+    assert "danach Wandsitz" in " ".join(_texte(workout_view(seite, state, plan, route=route)))
+    _knoepfe(workout_view(seite, state, plan, route=route))["Fertig"].on_click()
+    await _sekunden(state, uhr, gurt, 1)
+    assert teil.schritt.name == "Wandsitz" and teil.durchlauf == 2
+    # Die Ansicht bleibt stehen und baut sich neu — die Rückfrage gehört ihr
+    zweiter = workout_view(seite, state, plan, route=route)
+    _knoepfe(zweiter)["Überspringen"].on_click()
+    assert teil.schritt.name == "Wandsitz"  # noch nichts übersprungen
+    karte = next(x for x in _alle(zweiter) if getattr(x, "data", None) == "weg_frage")
+    assert "Überspringen — wie geht es weiter?" in _texte(karte)
+    _knoepfe(karte)["Doch nicht überspringen"].on_click()
+    assert not any(getattr(x, "data", None) == "weg_frage" for x in _alle(zweiter))
+    _knoepfe(zweiter)["Überspringen"].on_click()
+    karte = next(x for x in _alle(zweiter) if getattr(x, "data", None) == "weg_frage")
+    _knoepfe(karte)["Weiter: Dehnung Beine"].on_click()
+    await _sekunden(state, uhr, gurt, 1)
+    assert teil.schritt.name == "Dehnung Beine"
+    assert teil.ergebnisse[iw] == "uebersprungen"  # der zweite Wandsitz — ohne Eintrag

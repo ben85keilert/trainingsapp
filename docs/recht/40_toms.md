@@ -45,6 +45,16 @@
   seit 16.10.2026). Ein Paket nimmt Updates nur von der Quelle an, die es zuletzt
   lieferte (seit 20.10.2026, Sicherheitsdurchsicht S3) — eine fremde Quelle kann
   mitgelieferte oder bereits installierte Inhalte nicht ersetzen.
+- **Update in der App** (seit 9.11.2026, Katalog A8 Stufe 2, nur Android): Auf Tipp
+  („Laden und installieren“) lädt die App die APK des neueren Releases selbst — nur von
+  den Releases des eigenen GitHub-Repos, nur über https; GitHub (und sein Speicher, auf
+  den es weiterleitet) sieht IP-Adresse und den Namen der App, wie vorher der Browser.
+  Größe und SHA-256 werden gegen GitHubs Angaben geprüft; die APK liegt im Cache der App
+  und wird nach dem Update gelöscht. Android installiert sie nur, wenn sie mit
+  **demselben Schlüssel** signiert ist wie die installierte App — eine untergeschobene APK
+  wird abgelehnt. Berechtigungen `REQUEST_INSTALL_PACKAGES` (Android fragt einmal je App)
+  und `UPDATE_PACKAGES_WITHOUT_USER_ACTION` (ab Android 12 ohne Rückfrage je Update).
+  Nie, solange eine Messung, Einheit, ein Training oder Timer läuft.
 - **Geräte-Backup** (seit 20.10.2026, Sicherheitsdurchsicht S4): Androids Auto Backup
   sichert nichts aus der App, solange die Person es nicht unter Einstellungen →
   Geräte-Backup einschaltet (Vorgabe aus; GPS-Strecken nur mit zweitem Schalter).

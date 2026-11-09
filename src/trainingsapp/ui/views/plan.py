@@ -131,6 +131,7 @@ from trainingsapp.core.uebung_timer import timer_fuer
 from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
 from trainingsapp.core.zaehlen import ENDE_ABGEHAKT
 from trainingsapp.ui import marken, uebung_lauf
+from trainingsapp.ui import plan_ablauf as plan_ablauf_ui
 from trainingsapp.ui.components import zaehl_stand
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
@@ -2366,6 +2367,47 @@ def plan_view(
     # mit, so dass man von überall aus durch die Übungen kommt“) — nur der Block scrollt
     pfeile_halter = pfeile_platz()
 
+    def workout_hinweis() -> ft.Control:
+        """Läuft das Workout dieses Plans, steht oben, wo es gerade ist — und ein Knopf zurück in
+        den Fokus (Ben, 9.11.2026: „mit dem Pfeil zurück im regulären Übungsmodus landen, die Uhr
+        läuft weiter und auch einfach wieder in den Fokusmodus kommen“)."""
+        paar = plan_ablauf_ui.laufender(state, plan.id) if not bearbeiten else None
+        if paar is None:
+            return ft.Container(visible=False)
+        _, teil = paar
+        schritt = teil.schritt
+
+        async def zum_fokus() -> None:
+            await page.push_route(f"/plan/{plan.id}/workout")
+
+        return ft.Container(
+            margin=ft.Margin.only(left=12, right=12, top=6),
+            padding=ft.Padding.only(left=12, right=4, top=4, bottom=4),
+            border_radius=14,
+            bgcolor=ft.Colors.TERTIARY_CONTAINER,
+            data="workout_laeuft",
+            on_click=zum_fokus,
+            content=ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Icon(ft.Icons.PLAYLIST_PLAY, color=ft.Colors.ON_TERTIARY_CONTAINER),
+                    ft.Text(
+                        f"Workout läuft · {schritt.anzeigename}",
+                        size=13,
+                        weight=ft.FontWeight.W_600,
+                        expand=True,
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                        color=ft.Colors.ON_TERTIARY_CONTAINER,
+                    ),
+                    ft.FilledTonalButton(
+                        "Fokus", icon=ft.Icons.CENTER_FOCUS_STRONG, on_click=zum_fokus
+                    ),
+                ],
+            ),
+        )
+
     def pfeile_auffrischen() -> None:
         """Die feste Pfeilzeile zur gezeigten Übung — neu bei jedem Wechsel und Eintrag (der
         nächste Pfeil wird nach einer erledigten Übung betont)."""
@@ -2608,7 +2650,15 @@ def plan_view(
             actions=aktionen,
         ),
         padding=0,
-        controls=[sicher(ft.Column(expand=True, spacing=0, controls=[pfeile_halter, liste]))],
+        controls=[
+            sicher(
+                ft.Column(
+                    expand=True,
+                    spacing=0,
+                    controls=[workout_hinweis(), pfeile_halter, liste],
+                )
+            )
+        ],
     )
     ansicht_halter.append(ansicht)
     if nachtrag is not None:

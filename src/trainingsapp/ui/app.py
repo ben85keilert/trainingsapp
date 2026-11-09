@@ -84,8 +84,9 @@ from trainingsapp.core.anhaenge import AUDIO, Ziel, ziel_lesen
 from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
 from trainingsapp.core.result_spec import ResultSpec
-from trainingsapp.ui import ausrichtung, navigation
+from trainingsapp.ui import app_update, ausrichtung, navigation
 from trainingsapp.ui import einheit as einheit_ui
+from trainingsapp.ui import plan_ablauf as plan_ablauf_ui
 from trainingsapp.ui.components import diagnose_punkt, marken_leiste
 from trainingsapp.ui.components.dialoge import dialog_offen
 from trainingsapp.ui.components.fokus import FOKUS_ANSICHT
@@ -462,6 +463,9 @@ def main(page: ft.Page) -> None:
             for sichern in list(state.vor_dem_verlassen.values()):
                 with suppress(Exception):
                     sichern()
+        # Zurück von „Unbekannte Apps installieren“: das Update geht von selbst weiter
+        if vorn and state.installieren is not None:
+            page.run_task(app_update.weiter_nach_erlauben, state)
 
     page.on_app_lifecycle_state_change = lebenszyklus
     # Dienste sind Controls ohne Darstellung; sie müssen an der Seite hängen.
@@ -498,6 +502,21 @@ def main(page: ft.Page) -> None:
 
         state.hochladen = FletHochladen(on_fortschritt=fortschritt)
         page.services.append(state.hochladen)
+    # Das eigene Update installieren (Katalog A8 Stufe 2, Ben 9.11.2026) ebenso — das
+    # Ergebnis von Android geht an `ui.app_update`
+    try:
+        from flet_installieren import FletInstallieren
+        from flet_installieren import verfuegbar as installieren_verfuegbar
+    except ImportError:
+        installieren_verfuegbar = None
+    if installieren_verfuegbar is not None and installieren_verfuegbar(page):
+
+        def install_ergebnis(e: Any) -> None:
+            app_update.ergebnis(state, int(e.status), e.meldung)
+
+        state.installieren = FletInstallieren(on_ergebnis=install_ergebnis)
+        page.services.append(state.installieren)
+        app_update.aufraeumen()
     # Uhr am Handgelenk über die Mediensteuerung (hrv-watch `flet_medien`, Ben 26.10.2026):
     # Seiten aus `core.uhr_seiten`, Tasten des Bands blättern und setzen Marken
     try:
@@ -550,6 +569,15 @@ def main(page: ft.Page) -> None:
             ablegen(lambda: plan_uhren_view(page, state, plan, basis))
         elif rest[:1] == ["ablauf"]:  # der Reiter „Ablauf“ (G3, `docs/plan_verzweigungen.md` §8)
             ablegen(lambda: ablauf_view(page, state, plan, basis))
+            # „+“ im Ablauf (Ben, 9.11.2026): Hinzufügen liegt darüber — Zurück und „Fertig“
+            # führen in den Ablauf, nicht in den Reiter „Plan“
+            if rest[1:2] == ["hinzufuegen"]:
+                im_ablauf = f"{basis}/ablauf"
+                ablegen(lambda: plan_hinzufuegen_view(page, state, plan, basis=im_ablauf))
+                if rest[2:3] == ["neu"]:
+                    ablegen(
+                        lambda: uebung_bearbeiten(page, state, None, plan=plan, basis=im_ablauf)
+                    )
 
     def plan_routen(teile: list[str]) -> None:
         plan = state.plaene.laden(teile[1])
@@ -559,8 +587,16 @@ def main(page: ft.Page) -> None:
             bearbeiten_routen(plan, f"/plaene/{plan.id}", "/", teile[2:])
             return
         # Üben — ein Workout-Plan öffnet mit dem Start-Bild, bis „Als Plan üben“ (7.11.2026,
-        # `docs/plan_workout.md`); `…/workout` legt das Workout über den Plan
-        if plan.workout and plan.id not in state.plan_als_plan and len(teile) == 2:
+        # `docs/plan_workout.md`); `…/workout` legt das Workout über den Plan. Läuft sein
+        # Workout, steht darunter der Plan (Ben, 9.11.2026: „mit dem Pfeil zurück im regulären
+        # Übungsmodus landen, die Uhr läuft weiter“)
+        laeuft_workout = plan_ablauf_ui.laufender(state, plan.id) is not None
+        if (
+            plan.workout
+            and plan.id not in state.plan_als_plan
+            and len(teile) == 2
+            and not laeuft_workout
+        ):
             ablegen(
                 lambda: workout_view(page, state, plan, route=f"/plan/{plan.id}", browser=browser)
             )

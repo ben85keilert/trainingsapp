@@ -115,6 +115,8 @@ def workout_view(
         "bed_karte": None,
         #: wie viele der ersten Teile von `waehrend` fest oben stehen
         "oben": 0,
+        #: „Überspringen“ bei mehreren gleichwertigen Wegen: (Planübung, Durchlauf) bis gewählt
+        "ueberspringen": None,
     }
 
     def beide_auffrischen() -> None:
@@ -191,7 +193,20 @@ def workout_view(
             plan_ablauf.starten(page, state, plan, **optionen())
         except (RuntimeError, ValueError) as fehler:
             melden(str(fehler))
+            return
         wahl["noch_einmal"] = False
+        zum_fokus()
+
+    def zum_fokus() -> None:
+        """Vom Start-Bild des Workout-Plans (Route ``/plan/<id>``) in den Fokus über dem Plan —
+        Zurück führt dann in den Plan, die Uhr läuft weiter (Ben, 9.11.2026). Auch, wenn das
+        Workout über „Bereitstellen“ und die Laufleiste startete."""
+        fokus_route = f"/plan/{plan.id}/workout"
+        if route == fokus_route or stand.get("zum_fokus"):
+            return
+        stand["zum_fokus"] = True
+        with contextlib.suppress(Exception):
+            page.run_task(page.push_route, fokus_route)
 
     def bereitstellen() -> None:
         try:
@@ -748,18 +763,29 @@ def workout_view(
             zusatz += f" ({k.ausloeser_text()})"
         return f"Weiter: {name}{zusatz}"
 
-    def kanten_knoepfe(teil: PlanAblaufBaustein, weich: bool) -> list[ft.Control]:
+    def kanten_knoepfe(
+        teil: PlanAblaufBaustein, weich: bool, *, gleich: bool = False, ueber: bool = False
+    ) -> list[ft.Control]:
         """Die Wege des laufenden Knotens als Knöpfe (E6): der angebotene betont; im harten
         Übergang nur erfüllte wählbar, im weichen auch unerfüllte (Bedingungen sind dort
-        Vorschläge) — nie gegen eine Pflicht, und eine Frage verzweigt nur nach der Antwort."""
+        Vorschläge) — nie gegen eine Pflicht, und eine Frage verzweigt nur nach der Antwort.
+
+        ``gleich``: Die Abfrage bei mehreren gleichwertigen Wegen (Ben, 9.11.2026) — sie stehen
+        gleich betont, keiner ist vorgezogen. ``ueber``: Die Wahl nach „Überspringen“ — der Weg
+        beendet die Übung ohne Eintrag."""
         out: list[ft.Control] = []
         staende = teil.kanten_stand()
         frage = teil.schritt.frage is not None
         regulaer = ab.regulaere(staende)
+        kandidaten = ab.wahl_offen(staende) if gleich else []
 
         def gehe(kk: ab.Kante) -> Callable[[], None]:
             def handler() -> None:
-                teil.kante_gehen(kk)
+                stand["ueberspringen"] = None
+                if ueber:
+                    teil.ueberspringen(kk)
+                else:
+                    teil.kante_gehen(kk)
                 einheit_ui.melden(state)
                 auffrischen()
 
@@ -771,7 +797,12 @@ def workout_view(
             text = kanten_text(teil, st)
             if st.gesperrt:
                 text += " · gesperrt (Pflicht)"
-            betont = st.angeboten or (regulaer is st and (teil.phase == UEBERZEIT or teil.wartet))
+            if gleich:
+                betont = any(st is x for x in kandidaten)
+            else:
+                betont = st.angeboten or (
+                    regulaer is st and (teil.phase == UEBERZEIT or teil.wartet)
+                )
             symbol = (
                 ft.Icons.REPLAY
                 if k.schleife or (k.zurueck and k.wiederholen)
@@ -798,60 +829,44 @@ def workout_view(
 
     bedarf_ids = set(ab.bedarf(plan.ablauf, ids)) if gezeichnet else set()
 
-    def ablauf_schrittliste(teil: PlanAblaufBaustein) -> ft.Control:
-        """Die Schrittliste nach dem Ablauf: der Verlauf bisher, der laufende Schritt, dann
-        was vom Hauptpfad noch aussteht; Bedarfsübungen grau darunter."""
-        zeilen: list[ft.Control] = []
-        gelaufen = [teil.schritte[k] for k in teil.verlauf[:-1]]
-        for s in gelaufen:
-            grund = teil.ergebnisse.get(s.item_id, "")
-            zeilen.append(
-                ft.Row(
-                    spacing=8,
-                    controls=[
-                        ft.Icon(ft.Icons.CHECK, size=16, color=ft.Colors.PRIMARY),
-                        ft.Text(s.anzeigename, size=13, expand=True, opacity=0.6),
-                        ft.Text(GRUENDE.get(grund, grund), size=12, opacity=0.65),
-                    ],
-                )
-            )
-        if teil.phase != FERTIG:
-            zeilen.append(
-                ft.Row(
-                    spacing=8,
-                    controls=[
-                        ft.Icon(ft.Icons.PLAY_ARROW, size=16, color=ft.Colors.PRIMARY),
-                        ft.Text(
-                            teil.schritt.anzeigename,
-                            size=13,
-                            expand=True,
-                            weight=ft.FontWeight.W_600,
-                        ),
-                        ft.Text("läuft", size=12, opacity=0.65),
-                    ],
-                )
-            )
-        # Was ohne Entscheidung noch käme: der Hauptpfad ab hier
-        pfad = ab.hauptpfad(
-            ab.Ablauf(True, teil.schritt.item_id, plan.ablauf.kanten, plan.ablauf.fragen), ids
-        )[1:]
-        for item_id in pfad:
-            kommend = schritt_fuer(item_id)
-            if kommend is None or not teil.hat(item_id):
-                continue
-            kanten = plan.ablauf.von(item_id)
-            rechts = kanten[0].kurztext() if kanten else "Ende"
-            zeilen.append(
-                ft.Row(
-                    spacing=8,
-                    controls=[
-                        ft.Icon(ft.Icons.CIRCLE_OUTLINED, size=16, opacity=0.5),
-                        ft.Text(kommend.anzeigename, size=13, expand=True),
-                        ft.Text(rechts or "weiter", size=12, opacity=0.65),
-                    ],
-                )
-            )
-        return karte(ft.Column(spacing=4, controls=zeilen), abstand=0, padding=10)
+    def weg_frage(
+        knoepfe: list[ft.Control], ueber: bool, doch_nicht: Callable[[], None]
+    ) -> ft.Control:
+        """Die Abfrage bei mehreren gleichwertigen Wegen — oben im Fokus, bevor es weitergeht
+        (Ben, 9.11.2026: „Egal ob hart oder weich, wenn es mehrere Pfade gibt, wird erst
+        abgefragt, bevor es weiter geht“)."""
+        titel = "Überspringen — wie geht es weiter?" if ueber else "Wie geht es weiter?"
+        return ft.Container(
+            padding=12,
+            border_radius=16,
+            bgcolor=ft.Colors.TERTIARY_CONTAINER,
+            data="weg_frage",
+            content=ft.Column(
+                spacing=8,
+                controls=[
+                    ft.Row(
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Icon(ft.Icons.ALT_ROUTE, color=ft.Colors.ON_TERTIARY_CONTAINER),
+                            ft.Text(
+                                titel,
+                                size=16,
+                                weight=ft.FontWeight.W_600,
+                                expand=True,
+                                color=ft.Colors.ON_TERTIARY_CONTAINER,
+                            ),
+                        ],
+                    ),
+                    *knoepfe,
+                    *(
+                        [ft.TextButton("Doch nicht überspringen", on_click=doch_nicht)]
+                        if ueber
+                        else []
+                    ),
+                ],
+            ),
+        )
 
     # -- Während (C2) ----------------------------------------------------------------------
 
@@ -866,38 +881,6 @@ def workout_view(
                 farbe = ft.Colors.OUTLINE_VARIANT
             stuecke.append(ft.Container(expand=True, height=5, border_radius=3, bgcolor=farbe))
         return ft.Row(spacing=4, controls=stuecke)
-
-    def schrittliste(teil: PlanAblaufBaustein) -> ft.Control:
-        zeilen: list[ft.Control] = []
-        for i, s in enumerate(teil.schritte):
-            grund = teil.ergebnisse.get(s.item_id)
-            laeuft = i == teil.k and teil.phase in (UEBUNG, UEBERZEIT)
-            if grund is not None:
-                symbol = ft.Icon(ft.Icons.CHECK, size=16, color=ft.Colors.PRIMARY)
-                rechts = GRUENDE.get(grund, grund)
-            elif laeuft:
-                symbol = ft.Icon(ft.Icons.PLAY_ARROW, size=16, color=ft.Colors.PRIMARY)
-                rechts = "läuft"
-            else:
-                symbol = ft.Icon(ft.Icons.CIRCLE_OUTLINED, size=16, opacity=0.5)
-                rechts = bedingung_text(s)
-            zeilen.append(
-                ft.Row(
-                    spacing=8,
-                    controls=[
-                        symbol,
-                        ft.Text(
-                            f"{nummern.get(s.item_id, i + 1)} · {s.anzeigename}",
-                            size=13,
-                            expand=True,
-                            weight=ft.FontWeight.W_600 if laeuft else None,
-                            opacity=0.6 if grund is not None else 1,
-                        ),
-                        ft.Text(rechts, size=12, opacity=0.65),
-                    ],
-                )
-            )
-        return karte(ft.Column(spacing=4, controls=zeilen), abstand=0, padding=10)
 
     def bedingung_karte(erf: bd.Erfuellung, b: bd.Bedingung) -> ft.Control:
         text = ft.Text(erf.text or b.kurztext() or "erfüllt", size=14, weight=ft.FontWeight.W_600)
@@ -966,6 +949,8 @@ def workout_view(
         s = teil.schritt
         gez = teil.ablauf is not None
         u = katalog.get(s.uebung_id) if s.uebung_id else None
+        if s.frage is None:  # Zurück in den Plan zeigt die laufende Übung
+            state.plan_gezeigt[plan.id] = s.item_id
         item = state.plaene.item_laden(s.item_id) if s.frage is None else None
         teil.wdh_setzen(wdh_jetzt(teil))
         stand["bed_text"], stand["bed_karte"] = None, None
@@ -980,6 +965,12 @@ def workout_view(
             if gez
             else f"Schritt {teil.k + 1} von {len(teil.schritte)} · {uebergang}{durchlauf}"
         )
+        # Statt einer Liste nur, was als Nächstes kommt — eindeutig, sonst nichts (die Wahl
+        # kommt als Frage)
+        if s.frage is None and teil.phase != FERTIG and not teil.wahl_noetig:
+            n = teil.naechster
+            if n is not None and n != teil.k:
+                unter += f" · danach {teil.schritte[n].anzeigename}"
         kopf = ft.Row(
             spacing=8,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -1037,8 +1028,17 @@ def workout_view(
             auffrischen()
 
         def ueberspringen() -> None:
+            if gez and teil.wahl_noetig:
+                # Mehrere gleichwertige Wege: erst fragen, wohin (Ben, 9.11.2026)
+                stand["ueberspringen"] = (s.item_id, teil.durchlauf)
+                auffrischen()
+                return
             teil.ueberspringen()
             einheit_ui.melden(state)
+            auffrischen()
+
+        def doch_nicht() -> None:
+            stand["ueberspringen"] = None
             auffrischen()
 
         # -- Uhr, Frage oder Pause ---------------------------------------------------------
@@ -1159,14 +1159,23 @@ def workout_view(
                 eintragen.append(wdh_eintrag(e, teil, u, wdh_ziel))
             if eintragen:
                 teile.append(fe.karte(*eintragen, page=page))
-        teile.append(ablauf_schrittliste(teil) if gez else schrittliste(teil))
+        # Keine Liste des Vergangenen im Lauf (Ben, 9.11.2026: „im Fokusmodus stört die Übersicht
+        # über das Vergangene … alles, was man für die aktuelle Übung braucht“) — der Weg steht im
+        # Ablaufbild (Symbol oben), das Ergebnis nach dem Workout
 
         # -- Knöpfe ------------------------------------------------------------------------
         if s.frage is not None:
             teile.extend(kanten_knoepfe(teil, weich))
         elif gez:
-            knoepfe = kanten_knoepfe(teil, weich)
-            if teil.phase == UEBUNG and not teil.wartet:
+            # Mehrere gleichwertige Wege: erst fragen, dann weiter — hart wie weich, nach
+            # „Fertig“, am Ende der Zeit und nach „Überspringen“ (Ben, 9.11.2026)
+            ueber = stand.get("ueberspringen") == (s.item_id, teil.durchlauf)
+            frage_offen = teil.wahl_noetig and (teil.wartet or teil.phase == UEBERZEIT or ueber)
+            knoepfe = kanten_knoepfe(teil, weich, gleich=frage_offen, ueber=ueber)
+            if frage_offen:
+                # oben über allem anderen — ohne zu scrollen sichtbar
+                teile.insert(stand["oben"], weg_frage(knoepfe, ueber, doch_nicht))
+            elif teil.phase == UEBUNG and not teil.wartet:
                 teile.append(
                     ft.FilledButton(
                         "Fertig" if knoepfe else "Fertig — Workout beenden",
@@ -1186,7 +1195,8 @@ def workout_view(
                         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26)),
                     )
                 )
-            teile.extend(knoepfe)
+            if not frage_offen:
+                teile.extend(knoepfe)
             if wartend:
                 teile.append(
                     ft.OutlinedButton("Noch einmal", icon=ft.Icons.REPLAY, on_click=noch_einmal)
@@ -1384,6 +1394,8 @@ def workout_view(
                 teil.phase,
                 len(teil.verlauf),
                 teil.wartet,
+                teil.wahl_noetig,
+                stand.get("ueberspringen"),
                 kanten,
                 flags,
                 teil.skala_wert,
@@ -1413,6 +1425,7 @@ def workout_view(
         if k[0] == "lauf":
             paar = plan_ablauf.laufender(state, plan.id)
             assert paar is not None
+            zum_fokus()
             takt_je_schritt(*paar)
             alle = waehrend(*paar)
             fest.controls = alle[: stand["oben"]]

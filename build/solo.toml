@@ -4,7 +4,10 @@
 #
 # Kein Netzwerkpfad für eigene Daten, keine Serververbindung. Nach außen gehen nur,
 # abschaltbar und mit Hinweis: Kartenkacheln (OpenStreetMap), Update-Prüfung
-# (GitHub-Releases, Paketquellen — nur Versionsnummern) und verlinkte Videos.
+# (GitHub-Releases, Paketquellen — nur Versionsnummern) und verlinkte Videos. Auf Tipp
+# lädt die App das neuere Release (APK von GitHub) und installiert es selbst
+# (erweiterungen/flet_installieren, seit 9.11.2026; die Berechtigungen bringt deren
+# Manifest mit — für eine Fassung in Google Play die Erweiterung weglassen).
 # Bilder in Kurskapiteln laden erst nach Einschalten (Einstellungen → Updates).
 # Androids Geräte-Backup sichert nur, wenn es in den Einstellungen eingeschaltet ist
 # (Vorgabe aus; GPS-Strecken gesondert) — BackupAgent `Sicherung`, scripts/apk_bauen.py.

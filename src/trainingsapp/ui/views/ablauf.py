@@ -21,7 +21,8 @@ neu aus — Ben: „Ansicht neu ausrichten nur mit dem Button“).
   verschiedenen Buttontypen anbieten“): **Routing ▾** (Wege einstellen — alle Wege des Knotens in
   einem Blatt, „Kommt von“ und „Weiter zu“, wie in „Im Plan einstellen“ —, Weg zu einer
   bestehenden Übung, Frage, Schleife, ◀ zurück, Ende, Start, Übung einstellen), **Neuer Slot**,
-  **Beiname**, **Aus Plan nehmen** (fragt: Lücke schließen oder ganze Nachfolgereihe löschen);
+  **Beiname**, **Aus dem Ablauf nehmen** (fragt: Lücke schließen oder Nachfolgereihe — die Übung
+  bleibt in der Palette; aus dem Plan nimmt sie dort Gedrückthalten);
   daneben **Neu anordnen**, **Pfad abspielen**, Hinweise.
 
 Gespeichert wird sofort (`ablauf_speichern`): der Ablauf und, gespiegelt, die Hauptwege als
@@ -178,16 +179,37 @@ def modus_zeile(page: Any, state: AppState, plan: Plan) -> ft.Control:
                 on_change=gewaehlt,
             ),
             ft.Text(ablauf_zusammenfassung(plan), size=12, opacity=0.7),
+            # Kann der Plan hängen bleiben, steht es auch hier (Ben, 9.11.2026)
+            *(
+                [warn_karte(gefahr)]
+                if (
+                    gefahr := ab.warnungen(
+                        plan.ablauf, [it.id for it in plan.items], knoten_namen(state, plan)
+                    )
+                )
+                else []
+            ),
         ],
     )
 
 
 def entfernen_fragen(
-    page: Any, state: AppState, plan_id: str, knoten: str, danach: Callable[[], Any]
+    page: Any,
+    state: AppState,
+    plan_id: str,
+    knoten: str,
+    danach: Callable[[], Any],
+    *,
+    nur_ablauf: bool = False,
 ) -> None:
     """Eine Übung (oder Frage) aus dem Plan nehmen — steht sie mitten in einer Reihe, fragt es
     (Ben, 8.11.2026, Frage 4): **Lücke schließen** (Vorgänger mit dem Nachfolger verbinden) oder
-    **mit der ganzen Nachfolgereihe** löschen (was nur über sie erreichbar ist)."""
+    **mit der ganzen Nachfolgereihe** löschen (was nur über sie erreichbar ist).
+
+    ``nur_ablauf`` (Ben, 9.11.2026: „wenn Übungen in einer Kette gelöscht werden, werden diese
+    oben in der Auswahl komplett entfernt. Das soll nicht passieren“): nur aus der Zeichnung —
+    die Planübung bleibt in der Palette, „frei“; aus dem Plan nimmt man sie dort mit
+    Gedrückthalten."""
     p = state.plaene.laden(plan_id)
     if p is None:
         return
@@ -202,10 +224,15 @@ def entfernen_fragen(
     nachher = Nachher()
 
     def weg(k: str) -> None:
-        if a.frage(k) is not None or k not in ids:
+        if nur_ablauf or a.frage(k) is not None or k not in ids:
             jetzt = state.plaene.laden(plan_id)
             if jetzt is not None:
-                ablauf_speichern(state, plan_id, jetzt.ablauf.ohne_knoten(k))
+                alt = jetzt.ablauf
+                neu = alt.ohne_knoten(k)
+                if alt.start == k:  # war sie der Start, rückt ihr Hauptweg nach
+                    folge = [x for x in alt.von(k) if not x.schleife and x.nach in ids]
+                    neu = replace(neu, start=folge[0].nach if folge else "")
+                ablauf_speichern(state, plan_id, neu)
         else:
             state.plaene.uebung_entfernen(k)  # nimmt die Kanten von und zu ihr mit
         if state.ablauf_wahl.get(plan_id) == k:
@@ -215,9 +242,10 @@ def entfernen_fragen(
         with contextlib.suppress(Exception):
             page.show_dialog(ft.SnackBar(ft.Text(text)))
 
+    raus_text = "aus dem Ablauf genommen — sie bleibt im Plan" if nur_ablauf else "entfernt"
     if not a.an or not ((rein and raus) or reihe):
         weg(knoten)
-        melden(f"„{name}“ entfernt — Einträge bleiben.")
+        melden(f"„{name}“ {raus_text} — Einträge bleiben.")
         danach()
         return
 
@@ -230,20 +258,20 @@ def entfernen_fragen(
 
     def luecke(_e: Any = None) -> None:
         ablauf_speichern(state, plan_id, ab.luecke_schliessen(a, knoten))
-        if not ist_frage:
+        if not ist_frage and not nur_ablauf:
             state.plaene.uebung_entfernen(knoten)
         if state.ablauf_wahl.get(plan_id) == knoten:
             state.ablauf_wahl[plan_id] = None
-        fertig(f"„{name}“ entfernt, die Lücke ist geschlossen.")
+        fertig(f"„{name}“ {raus_text}, die Lücke ist geschlossen.")
 
     def mit_reihe(_e: Any = None) -> None:
         for k in [knoten, *reihe]:
             weg(k)
-        fertig(f"„{name}“ und {len(reihe)} danach entfernt — Einträge bleiben.")
+        fertig(f"„{name}“ und {len(reihe)} danach {raus_text} — Einträge bleiben.")
 
     def nur(_e: Any = None) -> None:
         weg(knoten)
-        fertig(f"„{name}“ entfernt — Einträge bleiben.")
+        fertig(f"„{name}“ {raus_text} — Einträge bleiben.")
 
     def zeile(
         titel: str, unter: str, aktion: Callable[[Any], None], gefahr: bool = False
@@ -263,15 +291,23 @@ def entfernen_fragen(
     if reihe:
         zeilen.append(
             zeile(
-                "Mit der Nachfolgereihe löschen",
+                "Mit der Nachfolgereihe herausnehmen"
+                if nur_ablauf
+                else "Mit der Nachfolgereihe löschen",
                 "auch: " + ", ".join(namen.get(k, "?") for k in reihe),
                 mit_reihe,
-                gefahr=True,
+                gefahr=not nur_ablauf,
             )
         )
-    zeilen.append(zeile("Nur diese entfernen", "Wege hierher und weiter fallen weg", nur))
+    zeilen.append(
+        zeile(
+            "Nur diese herausnehmen" if nur_ablauf else "Nur diese entfernen",
+            "Wege hierher und weiter fallen weg",
+            nur,
+        )
+    )
     dialog = ft.AlertDialog(
-        title=ft.Text(f"„{name}“ aus dem Plan nehmen"),
+        title=ft.Text(f"„{name}“ aus dem {'Ablauf' if nur_ablauf else 'Plan'} nehmen"),
         content=ft.Column(
             tight=True,
             spacing=0,
@@ -285,6 +321,32 @@ def entfernen_fragen(
     )
     with contextlib.suppress(Exception):
         page.show_dialog(dialog)
+
+
+def warn_karte(warnungen: list[str]) -> ft.Control:
+    """Die Warnung „Der Plan kann hängen bleiben“ — im Ablauf über dem Bild, im Reiter „Plan“
+    unter dem Schalter (`core.ablauf.warnungen`)."""
+    return ft.Container(
+        padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+        border_radius=10,
+        bgcolor=ft.Colors.ERROR_CONTAINER,
+        data="ablauf_warnung",
+        content=ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+            controls=[
+                ft.Icon(ft.Icons.WARNING_AMBER, size=20, color=ft.Colors.ON_ERROR_CONTAINER),
+                ft.Column(
+                    spacing=4,
+                    tight=True,
+                    expand=True,
+                    controls=[
+                        ft.Text(w, size=13, color=ft.Colors.ON_ERROR_CONTAINER) for w in warnungen
+                    ],
+                ),
+            ],
+        ),
+    )
 
 
 # -- Die Ansicht -----------------------------------------------------------------------------
@@ -322,7 +384,8 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             reihe.update()
 
     async def hinzufuegen(_e: Any = None) -> None:
-        await page.push_route(f"{basis}/hinzufuegen")
+        # Unter dem Ablauf (Ben, 9.11.2026): Zurück führt wieder hierher, nicht in „Plan“
+        await page.push_route(f"{route}/hinzufuegen")
 
     palette = ft.Column(
         spacing=6,
@@ -401,6 +464,9 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                     content=ft.Container(
                         width=70,
                         on_click=lambda _e, i=it.id: palette_getippt(i),
+                        # Gedrückt halten nimmt sie aus dem Plan (Ben, 9.11.2026) — mit Rückfrage
+                        on_long_press=lambda _e, i=it.id: aus_dem_plan(i),
+                        tooltip="Tippen: in den Ablauf · gedrückt halten: aus dem Plan",
                         content=ft.Column(
                             spacing=3,
                             tight=True,
@@ -439,6 +505,40 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                 )
             )
         reihe.controls = kacheln
+
+    def aus_dem_plan(item_id: str) -> None:
+        """Gedrückt halten an einer Kachel: die Übung aus dem Plan nehmen — steht sie mitten in
+        einer Reihe, fragt `entfernen_fragen` nach Lücke oder Nachfolgereihe, sonst eine
+        einfache Rückfrage. Einträge bleiben."""
+        p = frisch()
+        a = p.ablauf
+        if a.an and [k for k in a.zu(item_id) if k.von != item_id] and a.von(item_id):
+            entfernen_fragen(page, state, plan.id, item_id, neu_zeichnen)
+            return
+        name = knoten_namen(state, p).get(item_id, "?")
+        nachher = Nachher()
+        dialog: ft.AlertDialog
+
+        def entfernen(_e: Any = None) -> None:
+            state.plaene.uebung_entfernen(item_id)
+            if state.ablauf_wahl.get(plan.id) == item_id:
+                state.ablauf_wahl[plan.id] = None
+            nachher.danach(neu_zeichnen)
+            schliessen(dialog)
+
+        dialog = ft.AlertDialog(
+            title=ft.Text(f"„{name}“ aus dem Plan entfernen?"),
+            content=ft.Text("Ihre Wege im Ablauf fallen weg. Einträge im Tagebuch bleiben."),
+            actions=[
+                ft.TextButton("Abbrechen", on_click=lambda _e=None: schliessen(dialog)),
+                ft.TextButton(
+                    "Entfernen", style=ft.ButtonStyle(color=ft.Colors.ERROR), on_click=entfernen
+                ),
+            ],
+            on_dismiss=nachher.bei_schliessen,
+        )
+        with contextlib.suppress(Exception):
+            page.show_dialog(dialog)
 
     def palette_getippt(item_id: str) -> None:
         """Ohne Ziehen: mit gewähltem Knoten ein Weg dorthin, sonst in den ersten Slot."""
@@ -503,9 +603,11 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         neu_zeichnen()
 
     def kante_getippt(k: Kante) -> None:
+        """Der Punkt einer Verbindung (oder ihr Etikett): das Blatt der Wege ihrer Übung — auf
+        diesen Weg gerichtet (Ben, 9.11.2026)."""
         state.ablauf_wahl[plan.id] = k.von
         neu_zeichnen()
-        wege_blatt(k.von)
+        wege_blatt(k.von, fokus=k.nach)
 
     def pfad_abspielen() -> None:
         p = frisch()
@@ -657,7 +759,8 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             neu_zeichnen()
 
         def entfernen(_e: Any = None) -> None:
-            entfernen_fragen(page, state, plan.id, knoten, neu_zeichnen)
+            # Nur aus der Zeichnung (9.11.2026) — die Übung bleibt oben in der Palette
+            entfernen_fragen(page, state, plan.id, knoten, neu_zeichnen, nur_ablauf=True)
 
         knoepfe: list[ft.Control] = [
             ft.Text(namen[knoten], size=13, weight=ft.FontWeight.W_600),
@@ -683,7 +786,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             )
         knoepfe.append(
             ft.TextButton(
-                "Frage löschen" if ist_frage else "Aus Plan nehmen",
+                "Frage löschen" if ist_frage else "Aus dem Ablauf nehmen",
                 icon=ft.Icons.DELETE_OUTLINE,
                 style=ft.ButtonStyle(color=ft.Colors.ERROR),
                 on_click=entfernen,
@@ -735,10 +838,11 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
 
     # -- Blätter ---------------------------------------------------------------------------------
 
-    def wege_blatt(knoten: str) -> None:
+    def wege_blatt(knoten: str, fokus: str | None = None) -> None:
         """Alle Wege eines Knotens auf einmal (Ben: „wenn eine Übung mehrere Folgewege hat, dann
         diese gleichzeitig einstellen können … die verschiedenen Pfade einfach scrollbar“) — das
-        Formular aus „Im Plan einstellen“. Gespeichert wird beim Schließen."""
+        Formular aus „Im Plan einstellen“. Gespeichert wird beim Schließen. ``fokus``: das Ziel
+        des angetippten Wegs — er steht offen, die anderen zugeklappt."""
         p = frisch()
         stand: dict[str, Any] = {"a": p.ablauf, "verworfen": False}
         merken: dict[str, Any] = {}
@@ -765,6 +869,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                     namen=namen,
                     ohne_timer=ohne,
                     merken=merken,
+                    fokus=fokus,
                 ),
             ]
 
@@ -972,6 +1077,11 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                     ],
                 ),
             )
+        # Was den Plan hängen lassen kann, steht sichtbar über dem Bild (Ben, 9.11.2026: „dafür
+        # braucht es in der Planerstellung eine Warnung“)
+        gefahr = ab.warnungen(p.ablauf, [it.id for it in p.items], knoten_namen(state, p))
+        warnung.visible = bool(gefahr)
+        warnung.content = warn_karte(gefahr) if gefahr else None
         abbild.aktualisieren(bild, zeichnung_jetzt(p))
         knoten_leiste.controls = knoten_knoepfe(p)
         werkzeug_leiste.controls = werkzeuge(p)
@@ -985,6 +1095,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         with contextlib.suppress(Exception):
             page.update()
 
+    warnung = ft.Container(visible=False)
     inhalt = ft.Column(
         spacing=8,
         expand=True,
@@ -993,6 +1104,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             einfuehrung,
             palette,
             hinweis_ziel,
+            warnung,
             rahmen,
             knoten_leiste,
             werkzeug_leiste,

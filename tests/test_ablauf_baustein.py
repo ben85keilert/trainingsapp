@@ -224,8 +224,67 @@ def test_ausgelassene_knoten_werden_durchlaufen() -> None:
 def test_schleife_zaehlt_die_durchlaeufe_im_verlauf() -> None:
     a = Ablauf(True, "w", (Kante("w", "w", text="noch einmal"), Kante("w", "k")))
     teil, uhr = _baustein(a)
-    _lauf(teil, uhr, 10)  # hart: die erste Kante ist die reguläre — die Schleife
+    _lauf(teil, uhr, 10)  # zwei freie Wege: auch hart wird erst gefragt (Ben, 9.11.2026)
+    assert teil.wartet and teil.wahl_noetig and teil.schritt.item_id == "w"
+    teil.kante_gehen(teil.kanten_stand()[0].kante)  # „noch einmal“
     _lauf(teil, uhr, 10)
+    teil.kante_gehen(teil.kanten_stand()[0].kante)
     assert teil.schritt.item_id == "w" and teil.durchlauf == 3 and teil.verlauf == [0, 0, 0]
     teil.kante_gehen(teil.kanten_stand()[1].kante)
     assert teil.schritt.item_id == "k"
+
+
+def test_mehrere_freie_wege_hart_wartet_auf_die_wahl() -> None:
+    """Ben, 9.11.2026: „Egal ob hart oder weich, wenn es mehrere Pfade gibt, wird erst
+    abgefragt, bevor es weiter geht“ — die Zeit ist ab, nichts geht von selbst."""
+    a = Ablauf(True, "w", (Kante("w", "k"), Kante("w", "p")))
+    teil, uhr = _baustein(a, HART)
+    assert teil.wahl_noetig
+    _lauf(teil, uhr, 15)
+    assert teil.schritt.item_id == "w" and teil.wartet and "w" not in teil.ergebnisse
+    teil.kante_gehen(teil.kanten_stand()[1].kante)
+    assert teil.schritt.item_id == "p" and teil.ergebnisse["w"] == "fertig"
+    assert not teil.wahl_noetig  # die Planke hat keinen Weg mehr — sie endet das Workout
+
+
+def test_mehrere_freie_wege_weich_fertig_fragt() -> None:
+    """„Wenn man auf Fertig klickt, geht der Hauptpfad weiter“ — nicht mehr: Fertig wartet auf
+    die Wahl, auch ohne Timer (Stoppuhr)."""
+    a = Ablauf(True, "k", (Kante("k", "w"), Kante("k", "p")))
+    teil, uhr = _baustein(a, WEICH)
+    assert teil.schritt.item_id == "k"
+    teil.gemacht()
+    _lauf(teil, uhr, 1)
+    assert teil.schritt.item_id == "k" and teil.wartet
+    teil.weiter()  # „Weiter“ ohne Ziel nimmt nicht still den Hauptweg
+    assert teil.schritt.item_id == "k" and teil.wartet
+    teil.kante_gehen(teil.kanten_stand()[1].kante)
+    assert teil.schritt.item_id == "p"
+
+
+def test_ein_angebotener_weg_entscheidet_von_selbst() -> None:
+    """Ist genau ein Weg angeboten (sein Auslöser ist erfüllt), braucht es keine Wahl."""
+    a = Ablauf(True, "w", (Kante("w", "k"), Kante("w", "p", ab.ZEIT)))
+    teil, uhr = _baustein(a, HART)
+    _lauf(teil, uhr, 10)
+    assert teil.schritt.item_id == "p" and not teil.wartet
+
+
+def test_zwei_angebotene_wege_von_selbst_gehen_nicht_von_selbst() -> None:
+    """Zwei Wege „von selbst“, beide erfüllt: keiner geht — die Person wählt."""
+    a = Ablauf(
+        True,
+        "w",
+        (Kante("w", "k", ab.ZEIT, ausfuehren=True), Kante("w", "p", ab.ZEIT, ausfuehren=True)),
+    )
+    teil, uhr = _baustein(a, HART)
+    _lauf(teil, uhr, 12)
+    assert teil.schritt.item_id == "w" and teil.wartet and teil.wahl_noetig
+
+
+def test_ueberspringen_ueber_den_gewaehlten_weg() -> None:
+    a = Ablauf(True, "w", (Kante("w", "k"), Kante("w", "p")))
+    teil, uhr = _baustein(a, HART)
+    _lauf(teil, uhr, 3)
+    teil.ueberspringen(teil.kanten_stand()[1].kante)
+    assert teil.schritt.item_id == "p" and teil.ergebnisse["w"] == "uebersprungen"

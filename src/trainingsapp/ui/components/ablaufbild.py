@@ -49,6 +49,9 @@ START_H = 36
 FRAGE_B = 120
 FRAGE_H = 66
 ETIKETT_B = 120
+#: der Punkt einer Verbindung und seine Fläche zum Antippen (Ben, 9.11.2026)
+PUNKT = 14
+GRIFF = 44
 #: so durchsichtig wird Vernebeltes
 NEBEL = 0.25
 
@@ -202,35 +205,64 @@ def zeichnung(
             paint=ft.Paint(color=ft.Colors.with_opacity(NEBEL if dimm else 1.0, farbe)),
         )
 
-    def etikett(k: Kante, x: float, y: float, dimm: bool) -> None:
-        """Das Etikett mittig bei (x, y) — feste Breite, Text in der Mitte, höchstens zwei
-        Zeilen."""
+    def etikett(k: Kante, x: float, y: float, dimm: bool, seite: int = 1) -> None:
+        """Der Griff einer Verbindung bei (x, y) — ein Punkt in der Mitte zwischen den Ebenen
+        (Ben, 9.11.2026: „Pfeile/Verbindungen lassen sich bisher nicht anklicken. Erstelle einen
+        Punkt …, damit man diesen gut klicken kann“). Die Fläche ist groß genug für einen Finger.
+        Eine Beschriftung steht **nach außen** neben dem Punkt (``seite`` −1: links, 1: rechts),
+        damit sich Geschwisterwege nicht überdecken."""
         text = etikett_text(k, zaehlung)
-        if not text:
-            return
         warm = k.nach in bedarf or k.zurueck
+        punkt = ft.Container(
+            width=PUNKT,
+            height=PUNKT,
+            border_radius=PUNKT / 2,
+            bgcolor=farbe_fuer(k),
+            border=ft.Border.all(2, ft.Colors.SURFACE),
+        )
+        aufschrift = ft.Text(
+            text,
+            size=10,
+            max_lines=2,
+            text_align=ft.TextAlign.CENTER,
+            color=ft.Colors.ON_TERTIARY_CONTAINER if warm else None,
+        )
+        rand = 4  # vom Rand der Blase bis zum Punkt
+        if not text:
+            left, breite, ausrichtung = x - GRIFF / 2, GRIFF, ft.Alignment.CENTER
+            inhalt: ft.Control = punkt
+        else:
+            links = seite < 0
+            inhalt = ft.Container(
+                padding=ft.Padding.only(
+                    left=8 if links else rand, right=rand if links else 8, top=3, bottom=3
+                ),
+                border_radius=10,
+                bgcolor=ft.Colors.TERTIARY_CONTAINER
+                if warm
+                else ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                content=ft.Row(
+                    spacing=4,
+                    tight=True,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[aufschrift, punkt] if links else [punkt, aufschrift],
+                ),
+            )
+            breite = ETIKETT_B
+            mitte_punkt = rand + PUNKT / 2  # so weit liegt die Punktmitte vom Rand
+            left = x + mitte_punkt - breite if links else x - mitte_punkt
+            ausrichtung = ft.Alignment.CENTER_RIGHT if links else ft.Alignment.CENTER_LEFT
         etiketten.append(
             ft.Container(
-                left=x - ETIKETT_B / 2,
-                top=y - 12,
-                width=ETIKETT_B,
-                alignment=ft.Alignment.CENTER,
+                left=left,
+                top=y - GRIFF / 2,
+                width=breite,
+                height=GRIFF,
+                alignment=ausrichtung,
                 opacity=NEBEL if dimm else 1.0,
                 on_click=(lambda _e, kk=k: on_kante(kk)) if on_kante is not None else None,
-                content=ft.Container(
-                    padding=ft.Padding.symmetric(horizontal=6, vertical=2),
-                    border_radius=8,
-                    bgcolor=ft.Colors.TERTIARY_CONTAINER
-                    if warm
-                    else ft.Colors.SURFACE_CONTAINER_HIGHEST,
-                    content=ft.Text(
-                        text,
-                        size=10,
-                        max_lines=2,
-                        text_align=ft.TextAlign.CENTER,
-                        color=ft.Colors.ON_TERTIARY_CONTAINER if warm else None,
-                    ),
-                ),
+                content=inhalt,
+                tooltip=text or "Weg einstellen",
                 data=("kante", k.von, k.nach),
             )
         )
@@ -269,7 +301,7 @@ def zeichnung(
                 )
             )
             formen.append(pfeil(x0 - breit, y0 - 14, 0.0, farbe, dimm))
-            etikett(k, x0 - r - 12, y0 + 34, dimm)
+            etikett(k, x0 - r - 12, y0 + 34, dimm, -1)
             continue
         if k.zurueck:
             formen.append(
@@ -282,7 +314,7 @@ def zeichnung(
                 )
             )
             formen.append(pfeil(x0 - 26, y0 - 74, -math.radians(60), farbe, dimm))
-            etikett(k, x0 - 40, y0 - 40, dimm)
+            etikett(k, x0 - 40, y0 - 40, dimm, -1)
             continue
         if k.zum_ende:
             unten = y0 + KNOTEN / 2 + 40
@@ -299,7 +331,7 @@ def zeichnung(
             continue
         x1, y1 = mitten[k.nach]
         if y1 > y0:
-            # abwärts: Unterkante zur Oberkante als weiche Kurve; das Etikett nahe am Ziel
+            # abwärts: Unterkante zur Oberkante als weiche Kurve; der Punkt in der Mitte
             a = (x0, y0 + KNOTEN / 2)
             b = (x1, y1 - KNOTEN / 2 - 6)
             c1, c2 = (a[0], a[1] + 50), (b[0], b[1] - 50)
@@ -310,8 +342,8 @@ def zeichnung(
                 )
             )
             formen.append(pfeil(b[0], b[1], math.radians(90), farbe, dimm))
-            ex, ey = bezier(a, c1, c2, b, 0.62)
-            etikett(k, ex, ey, dimm)
+            ex, ey = bezier(a, c1, c2, b, 0.5)  # die Mitte zwischen den Ebenen
+            etikett(k, ex, ey, dimm, -1 if x1 < x0 else 1)
         else:
             # aufwärts oder gleiche Ebene: rechts herum zurück
             a = (x0 + breit, y0)

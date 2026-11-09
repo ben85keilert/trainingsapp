@@ -127,7 +127,7 @@ async def test_workout_start_weich_ueberzeit_weiter_und_ende(umgebung) -> None:
     await _sekunden(state, uhr, gurt, 3)
     laufend = workout_view(seite, state, plan, route=route)
     texte = _texte(laufend)
-    assert "Schritt 1 von 2 · weich" in texte and "Kniebeuge" in texte
+    assert "Schritt 1 von 2 · weich · danach Katze-Kuh" in texte and "Kniebeuge" in texte
     assert any("Katze-Kuh" in t for t in texte) and _knopf(laufend, "Fertig")
     assert _ebenen(laufend) == ["Takt", "Bewegung", "HF", "Kurve"]
     # Fokus (Ben, 8.11.2026 spät): keine Laufleiste, keine Uhr in der Titelleiste — und die Uhr

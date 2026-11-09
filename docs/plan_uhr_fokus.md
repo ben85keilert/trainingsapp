@@ -251,3 +251,21 @@ aktivieren“.
   dann weiter alles. Die Wahlen „Wenn das Workout fertig ist“ und „Wenn die Messdauer um ist“
   stehen auf „Weiterlaufen“.
 
+### 9.3 Workout: nur das Jetzt, Zurück in den Plan (9.11.2026, 0.3.72)
+
+Ben: „im Fokusmodus stört die Übersicht über das Vergangene. Die Ansicht muss minimalistischer
+sein“; „Wenn man aus dem Fokusmodus raus geht, landet man in ‚Heute – Einheit läuft‘. Man
+sollte mit dem Pfeil zurück im regulären Übungsmodus landen, die Uhr läuft weiter, und auch
+einfach wieder in den Fokusmodus kommen.“
+
+- **Keine Schrittliste im Lauf:** Das Workout zeigt nur die laufende Übung — Kopf, Fortschritt,
+  Uhr, Eintragen, Knöpfe. Was danach kommt, steht knapp in der Unterzeile („danach
+  Kniebeuge“, nur wenn es eindeutig ist); der Weg steht im Ablaufbild (Symbol oben), das
+  Ergebnis nach dem Workout.
+- **Der Fokus liegt über dem Plan:** „Workout starten“ vom Start-Bild öffnet
+  `/plan/<id>/workout`; darunter liegt, solange das Workout läuft, der **Plan** (nicht das
+  Start-Bild, `ui/app.py`). Zurück = der Plan mit der laufenden Übung (`plan_gezeigt`), die Uhr
+  läuft weiter. Oben steht **„Workout läuft · Übung“** mit dem Knopf **„Fokus“** zurück.
+- **Aus „Heute“/„Einheit“:** Ein Tipp auf das laufende Workout führt wie bisher in den Fokus
+  (`einheit.teil_route` → `/plan/<id>/workout`), Zurück von dort ebenso in den Plan.
+

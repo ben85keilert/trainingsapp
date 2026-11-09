@@ -421,6 +421,12 @@ class AppState:
     #: Fortschritt des Verkleinerns gerade sehen will (die Seite „Hochladen“)
     hochladen: Any = None
     hochladen_beobachter: Callable[[float], None] | None = None
+    #: Das eigene Update installieren (`flet_installieren.FletInstallieren`, nur in der
+    #: gebauten App, Katalog A8 Stufe 2), der Stand von „Laden und installieren“
+    #: (`ui.app_update.UpdateLauf`) und wer ihn gerade zeigt (die Seite „Updates“)
+    installieren: Any = None
+    app_update: Any = None
+    app_update_beobachter: Callable[[], None] | None = None
     #: Was gleich gespeichert werden muss, bevor die App in den Hintergrund geht oder die
     #: Ansichten neu entstehen (Zurück, Reiterwechsel) — etwa die Notiz zum Tag, solange
     #: man sie schreibt (`components/tagesnotiz.py`, Ben 22.10.2026: „Zurück macht Autosave“)

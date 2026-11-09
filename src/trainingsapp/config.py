@@ -171,6 +171,18 @@ def datenbankpfad() -> Path:
     return datenverzeichnis() / "trainingsapp.db"
 
 
+def updateverzeichnis() -> Path:
+    """Wohin die App ein geladenes Update (APK, ~90 MB) legt, bevor sie es installiert.
+
+    In den **Cache** der App (``FLET_APP_STORAGE_TEMP``): Android darf ihn leeren, er geht
+    in kein Geräte-Backup, und die nächste Version räumt ihn auf
+    (`core.update.alte_apks_loeschen`). Ohne Flet: neben den Daten.
+    """
+    if temp := os.environ.get("FLET_APP_STORAGE_TEMP"):
+        return Path(temp) / "Updates"
+    return datenverzeichnis() / "Updates"
+
+
 def paketordner() -> Path | None:
     """Ordner mit Paketdateien (TOML/JSON), die jeder Start wie einen Import einspielt.
 
@@ -243,4 +255,5 @@ __all__ = [
     "messungenverzeichnis",
     "paketordner",
     "streckenverzeichnis",
+    "updateverzeichnis",
 ]

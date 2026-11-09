@@ -398,3 +398,34 @@ def test_heute_haelt_die_uebungsseite_bis_zurueck(umgebung) -> None:
     haupt.selected_index = labels.index("Heute")
     asyncio.run(haupt.on_change(SimpleNamespace(control=haupt)))
     assert seite.routen() == ["/"] and state.heute_haelt is None
+
+
+def test_aus_dem_workout_fokus_zurueck_in_den_plan(umgebung) -> None:
+    """Ben, 9.11.2026: „Wenn man aus dem Fokusmodus raus geht, landet man in Heute – Einheit
+    läuft. Man sollte mit dem Pfeil zurück im regulären Übungsmodus landen, die Uhr läuft weiter
+    und auch einfach wieder in den Fokusmodus kommen.“ — unter dem Fokus liegt der Plan mit der
+    laufenden Übung und dem Hinweis „Workout läuft“, der zurück in den Fokus führt."""
+    from trainingsapp.ui import plan_ablauf
+
+    seite, state = umgebung()
+    plan = _plan(state)
+    state.plaene.workout_setzen(plan.id, True, False)
+    plan = state.plaene.laden(plan.id)
+    start = f"/plan/{plan.id}"
+    fokus = f"{start}/workout"
+    seite.gehe(start)
+    assert seite.views[-1].appbar.title.value == "Kräftigung kurz · Workout"  # das Start-Bild
+    plan_ablauf.starten(seite, state, plan, workout=True, hrv=False)
+    seite.gehe(fokus)
+    assert seite.routen() == ["/", start, fokus]
+    seite.zurueck()
+    assert seite.routen() == ["/", start]  # der Plan — nicht „Heute“, nicht das Start-Bild
+    assert seite.views[-1].appbar.title.value != "Kräftigung kurz · Workout"
+    hinweis = next(
+        x
+        for x in _alle(seite.views[-1])
+        if isinstance(x, ft.Container) and x.data == "workout_laeuft"
+    )
+    assert plan_ablauf.laufender(state, plan.id) is not None  # die Uhr läuft weiter
+    asyncio.run(hinweis.on_click())
+    assert seite.routen() == ["/", start, fokus]

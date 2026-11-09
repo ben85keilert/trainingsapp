@@ -136,6 +136,8 @@ from trainingsapp.ui.components import zaehl_stand
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.material import material_knopf
+from trainingsapp.ui.components.neu_laden import herkunft, neu_laden_blatt
 from trainingsapp.ui.components.plan_reiter import plan_reiter
 from trainingsapp.ui.components.planblatt import PlanZeile, gesamtplan_blatt
 from trainingsapp.ui.components.planpfeile import halter as pfeile_platz
@@ -1457,6 +1459,13 @@ def plan_view(
                     ],
                 ),
                 *uhr,
+                # Material (U2, F6): Anweisungen der Planübung, Videos — hält die Uhr an
+                *(
+                    [k]
+                    if not bearbeiten
+                    and (k := material_knopf(page, state, uebung, item, text=False)) is not None
+                    else []
+                ),
                 ft.IconButton(
                     ft.Icons.INFO_OUTLINE,
                     tooltip="Übung ansehen",
@@ -2367,6 +2376,34 @@ def plan_view(
     # mit, so dass man von überall aus durch die Übungen kommt“) — nur der Block scrollt
     pfeile_halter = pfeile_platz()
 
+    def herkunft_zeile() -> list[ft.Control]:
+        """Paket- und Kapitelpläne: woher sie kommen und „Neu laden …“ (U2, Ben 9.11.2026:
+        „kann man den Plan/Kurs neu laden und es wäre wieder da, wenn die Quelle existiert“)."""
+        quelle = herkunft(state, plan)
+        if quelle is None:
+            return []
+
+        def oeffnen(_e: Any = None) -> None:
+            blatt = neu_laden_blatt(page, state, plan, danach=state.neu_zeichnen)
+            if blatt is None:
+                page.show_dialog(ft.SnackBar(ft.Text("Die Quelle des Plans gibt es nicht mehr.")))
+                return
+            page.show_dialog(blatt)
+
+        return [
+            ft.Row(
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Icon(ft.Icons.INVENTORY_2_OUTLINED, size=16, opacity=0.7),
+                    ft.Text(f"Aus {quelle}", size=12, opacity=0.75, expand=True),
+                    ft.TextButton(
+                        "Neu laden …", icon=ft.Icons.RESTORE, on_click=oeffnen, data="neu_laden"
+                    ),
+                ],
+            )
+        ]
+
     def workout_hinweis() -> ft.Control:
         """Läuft das Workout dieses Plans, steht oben, wo es gerade ist — und ein Knopf zurück in
         den Fokus (Ben, 9.11.2026: „mit dem Pfeil zurück im regulären Übungsmodus landen, die Uhr
@@ -2494,6 +2531,7 @@ def plan_view(
             # 8.11.2026: „Geht man zurück, sind die Reiter weg“)
             plan_reiter(page, route, "", ablauf_an=plan.ablauf.an),
             ft.TextField(label="Name des Plans", value=plan.name, on_blur=umbenennen),
+            *herkunft_zeile(),
             ft.Switch(
                 label="Aktiv — erscheint auf „Heute“" if plan.aktiv else "Deaktiviert",
                 value=plan.aktiv,

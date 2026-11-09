@@ -122,6 +122,51 @@ class Media:
     title: str = ""
     license: str = ""
 
+    def als_dict(self) -> dict[str, Any]:
+        """Wie im Paket (`core.pakete.stand`): Art, Quelle, Adresse, Titel, Lizenz nur gesetzt.
+
+        >>> Media(uri="https://x.org/v", title="Erklärung").als_dict()
+        {'kind': 'video', 'source': 'url', 'uri': 'https://x.org/v', 'title': 'Erklärung'}
+        """
+        d: dict[str, Any] = {
+            "kind": str(self.kind),
+            "source": str(self.source),
+            "uri": self.uri,
+            "title": self.title,
+        }
+        if self.license:
+            d["license"] = self.license
+        return d
+
+
+def medium_aus_dict(roh: Any) -> Media | None:
+    """Ein Medium aus seiner Wörterbuch-Form (`Media.als_dict`) — ``None``, wenn es unbrauchbar
+    ist (keine Adresse, unbekannte Art oder Quelle). Prüft keine Links: das tut, wer von außen
+    liest (`core.pakete._medium`, `core.kurse`).
+
+    >>> medium_aus_dict({"kind": "image", "uri": "https://x.org/b.jpg"}).kind
+    <MediaKind.IMAGE: 'image'>
+    >>> medium_aus_dict({"kind": "hologramm", "uri": "x"}) is None
+    True
+    """
+    if not isinstance(roh, dict):
+        return None
+    uri = str(roh.get("uri") or "").strip()
+    try:
+        art = MediaKind(roh.get("kind", "video"))
+        quelle = MediaSource(roh.get("source", "url"))
+    except ValueError:
+        return None
+    if not uri:
+        return None
+    return Media(
+        kind=art,
+        source=quelle,
+        uri=uri,
+        title=str(roh.get("title") or ""),
+        license=str(roh.get("license") or ""),
+    )
+
 
 @dataclass(slots=True)
 class Exercise:
@@ -434,6 +479,11 @@ class PlanItem:
     #: Beiname im Ablaufbild (Migration 044, `docs/plan_verzweigungen.md` §8.1): unterscheidet
     #: zwei gleiche Übungen („2. Durchgang“) — leer = keiner
     beiname: str = ""
+    #: Eigene Inhalte der Planübung (Migration 046, U2, `docs/plan_paketinhalte.md` §9):
+    #: Abschnitte wie die Beschreibung der Übung (`## Name`) — Anweisungen für diesen Plan —
+    #: und Medien (Videos, Bilder, Links); aus dem Paketplan oder selbst geschrieben
+    description: str = ""
+    media: list[Media] = field(default_factory=list)
 
 
 @dataclass(slots=True)

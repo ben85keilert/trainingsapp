@@ -60,7 +60,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.abgleich import Hinweis, Unterschied, hinweise_lesen, uebernehmen, unterschiede
-from ..core.kurse import Kurs, ablauf_aufloesen, verweise_aufloesen
+from ..core.kurse import Kurs, ablauf_aufloesen, ids_uebernehmen, verweise_aufloesen
 from ..core.models import TAG_REGION, TAG_TYP, Exercise, MediaSource, Plan, PlanItem, jetzt, new_id
 from ..core.pakete import (
     FELDNAMEN,
@@ -71,6 +71,7 @@ from ..core.pakete import (
     kurs_aus_stand,
     kurs_stand,
     paketplan_aus,
+    plan_abgleichen,
     plan_id,
     plan_stand,
     stand,
@@ -128,6 +129,9 @@ class Vorschau:
     plaene: dict[str, Status] = field(default_factory=dict)
     #: Übung → wo das Paket eine neue Fassung hat, die eigene aber bleibt (U1, 9.11.2026)
     hinweise: dict[str, list[Hinweis]] = field(default_factory=dict)
+    #: Plan → neuer Paketstand, wo das Update der eigenen Fassung nichts brachte (U2) — der
+    #: Import schreibt nur den Stand, nicht den Plan
+    plan_staende: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def anzahl(self, *stati: Status) -> int:
         return sum(1 for s in self.status.values() if s in stati)
@@ -752,6 +756,8 @@ class PaketRepo:
                 repo.speichern(u, neue_tags_oben=neue_tags_oben)
             for plan in plan_ziele:  # nach den Übungen: die Planpositionen verweisen auf sie
                 plaene.speichern(plan)
+            for plan_id_, standard_ in vorschau.plan_staende.items():
+                plaene.paketstand_setzen(plan_id_, standard_)
             for uebung_id, s in vorschau.status.items():
                 if s == Status.ZURUECK:  # aus Papierkorb oder Grabstein zurück
                     self.con.execute(
@@ -846,13 +852,12 @@ class PaketRepo:
         if subject_id is None or not inhalt.plaene:
             return []
         plaene = PlanRepo(self.con)
-        da = {u.id for u in ExerciseRepo(self.con).alle(mit_archivierten=True)}
-        da |= {u.id for u in inhalt.uebungen}
+        da = self._vorhandene_uebungen() | {u.id for u in inhalt.uebungen}
         ziele: list[Plan] = []
         for pp in inhalt.plaene:
             pid = plan_id(inhalt.paket.id, pp.key, subject_id)
             soll = plan_stand(pp)
-            alt = plaene.laden(pid, mit_geloeschten=True)
+            alt = plaene.laden(pid, mit_geloeschten=True, mit_verborgenen=True)
             if alt is None:
                 if plaene.zeile_bekannt(pid):  # endgültig gelöscht (Grabstein)
                     vorschau.plaene[pp.key] = Status.GELOESCHT
@@ -866,17 +871,138 @@ class PaketRepo:
             if alt.package_standard == soll:
                 vorschau.plaene[pp.key] = Status.UNVERAENDERT
                 continue
-            if (
-                alt.package_standard is not None
-                and plan_stand(paketplan_aus(alt, pp.key)) != alt.package_standard
-            ):
-                vorschau.plaene[pp.key] = Status.EIGENE  # von der Person geändert — bleibt
-                continue
+            quelle = pp
+            nutzer = plan_stand(paketplan_aus(alt, pp.key))
+            if alt.package_standard is not None and nutzer != alt.package_standard:
+                # Von der Person geändert (U2, 9.11.2026): je Planübung abgleichen — was sie
+                # nicht angefasst hat, bekommt das Update, Eigenes und Herausgenommenes bleibt
+                gemischt = plan_abgleichen(alt.package_standard, nutzer, soll)
+                if gemischt == nutzer:
+                    vorschau.plaene[pp.key] = Status.EIGENE  # nichts Neues — bleibt, wie es ist
+                    vorschau.plan_staende[alt.id] = soll
+                    continue
+                quelle = PaketPlan.from_dict(gemischt)
             vorschau.plaene[pp.key] = Status.GEAENDERT
-            neu = _plan_aus_paketplan(pp, inhalt.paket.id, subject_id, da)
+            neu = _plan_aus_paketplan(quelle, inhalt.paket.id, subject_id, da, alt=alt)
             neu.id, neu.created_at, neu.aktiv = alt.id, alt.created_at, alt.aktiv
+            neu.package_standard = soll
             ziele.append(neu)
         return ziele
+
+    def _vorhandene_uebungen(self) -> set[str]:
+        """Alle Übungen, die es hier gibt — auch im Archiv und im Papierkorb (deren
+        Planübungen bleiben verborgen im Plan, bis die Übung zurückkommt)."""
+        return {r[0] for r in self.con.execute("SELECT id FROM exercise WHERE purged_at IS NULL")}
+
+    # -- Paketpläne neu laden (U2, `docs/plan_paketinhalte.md` §9) ----------------------
+
+    def paketplan_fuer(self, plan: Plan) -> PaketPlan | None:
+        """Der Paketplan, aus dem ``plan`` stammt — ``None``, wenn das Paket nicht (mehr)
+        installiert oder deaktiviert ist („wenn die Quelle existiert“, Ben 9.11.2026)."""
+        if not plan.package_id or not plan.package_key:
+            return None
+        paket = self.laden(plan.package_id)
+        if paket is None or not paket.aktiv:
+            return None
+        return next((pp for pp in self.paketplaene(paket.id) if pp.key == plan.package_key), None)
+
+    def _neu_geladen(self, alt: Plan, pp: PaketPlan, hart: bool) -> Plan:
+        """Der Plan nach „Plan neu laden“ — ``hart``: ganz der Paketplan; sonst kommt zurück,
+        was fehlt, und Eigenes bleibt. IDs der Planübungen bleiben, wo es sie noch gibt."""
+        assert alt.package_id is not None and alt.subject_id is not None
+        quelle = pp
+        if not hart:
+            nutzer = plan_stand(paketplan_aus(alt, pp.key))
+            quelle = PaketPlan.from_dict(plan_abgleichen({}, nutzer, plan_stand(pp)))
+        neu = _plan_aus_paketplan(
+            quelle, alt.package_id, alt.subject_id, self._vorhandene_uebungen(), alt=alt
+        )
+        neu.id, neu.created_at, neu.aktiv = alt.id, alt.created_at, alt.aktiv
+        neu.package_standard = plan_stand(pp)
+        return neu
+
+    def plan_neu_laden_vorschau(self, plan_id_: str) -> tuple[list[str], bool] | None:
+        """``(Namen der Übungen, die zurückkämen; ändert „Auf Paketstand“ noch mehr?)`` —
+        ``None`` ohne Quelle."""
+        plaene = PlanRepo(self.con)
+        alt = plaene.laden(plan_id_, mit_geloeschten=True, mit_verborgenen=True)
+        pp = self.paketplan_fuer(alt) if alt is not None else None
+        if alt is None or pp is None:
+            return None
+        weich = self._neu_geladen(alt, pp, hart=False)
+        hart = self._neu_geladen(alt, pp, hart=True)
+        alte_ids = {i.id for i in alt.items}
+        zurueck = [self._uebungsname(i.exercise_id) for i in weich.items if i.id not in alte_ids]
+        return zurueck, plan_stand(paketplan_aus(hart, pp.key)) != plan_stand(
+            paketplan_aus(weich, pp.key)
+        )
+
+    def _uebungsname(self, uebung_id: str) -> str:
+        r = self.con.execute("SELECT name FROM exercise WHERE id = ?", (uebung_id,)).fetchone()
+        return str(r[0]) if r is not None else "?"
+
+    def plan_neu_laden(self, plan_id_: str, *, hart: bool) -> Plan | None:
+        """„Plan neu laden“ (Ben, 9.11.2026: „Wenn man die Übung aus einem Plan löscht, kann
+        man den Plan neu laden und es wäre wieder da, wenn die Quelle existiert“) —
+        ``hart=False``: „Fehlendes zurückholen“, Eigenes bleibt; ``hart=True``: „Auf
+        Paketstand setzen“. Ein Plan im Papierkorb kommt dabei zurück. ``None`` ohne Quelle."""
+        plaene = PlanRepo(self.con)
+        alt = plaene.laden(plan_id_, mit_geloeschten=True, mit_verborgenen=True)
+        pp = self.paketplan_fuer(alt) if alt is not None else None
+        if alt is None or pp is None:
+            return None
+        neu = self._neu_geladen(alt, pp, hart)
+        with transaktion(self.con):
+            if alt.deleted_at is not None:
+                plaene.wiederbeleben(alt.id)
+            plaene.speichern(neu)
+        return neu
+
+    def paketplaene_im_profil(
+        self, paket_id: str, subject_id: str
+    ) -> list[tuple[PaketPlan, Plan | None, str]]:
+        """Die Pläne eines Pakets in einem Profil: ``(Paketplan, Plan oder None, Zustand)`` —
+        Zustand ``aktiv``, ``geaendert`` (von der Person), ``papierkorb`` oder ``geloescht``."""
+        plaene = PlanRepo(self.con)
+        out: list[tuple[PaketPlan, Plan | None, str]] = []
+        for pp in self.paketplaene(paket_id):
+            pid = plan_id(paket_id, pp.key, subject_id)
+            plan = plaene.laden(pid, mit_geloeschten=True, mit_verborgenen=True)
+            if plan is None or self._plan_endgueltig_weg(pid):
+                out.append((pp, None, "geloescht"))
+            elif plan.deleted_at is not None:
+                out.append((pp, plan, "papierkorb"))
+            elif (
+                plan.package_standard is not None
+                and plan_stand(paketplan_aus(plan, pp.key)) != plan.package_standard
+            ):
+                out.append((pp, plan, "geaendert"))
+            else:
+                out.append((pp, plan, "aktiv"))
+        return out
+
+    def _plan_endgueltig_weg(self, plan_id_: str) -> bool:
+        r = self.con.execute("SELECT purged_at FROM plan WHERE id = ?", (plan_id_,)).fetchone()
+        return r is not None and r[0] is not None
+
+    def plan_wieder_anlegen(self, paket_id: str, key: str, subject_id: str) -> Plan | None:
+        """Einen gelöschten Paketplan wieder anlegen (U2) — aus dem Papierkorb oder hinter dem
+        Grabstein, ganz wie im Paket. ``None``, wenn das Paket ihn nicht (mehr) hat."""
+        pp = next((x for x in self.paketplaene(paket_id) if x.key == key), None)
+        paket = self.laden(paket_id)
+        if pp is None or paket is None or not paket.aktiv:
+            return None
+        plaene = PlanRepo(self.con)
+        pid = plan_id(paket_id, key, subject_id)
+        alt = plaene.laden(pid, mit_geloeschten=True, mit_verborgenen=True)
+        neu = _plan_aus_paketplan(pp, paket_id, subject_id, self._vorhandene_uebungen(), alt=alt)
+        if alt is not None:
+            neu.created_at = alt.created_at
+        with transaktion(self.con):
+            if plaene.zeile_bekannt(pid):
+                plaene.wiederbeleben(pid)
+            plaene.speichern(neu)
+        return neu
 
     def _planen(
         self, inhalt: Paketinhalt, aktualisieren: bool, subject_id: str | None = None
@@ -1190,8 +1316,12 @@ class PaketRepo:
         )
 
 
-def _plan_aus_paketplan(pp: PaketPlan, paket_id: str, subject_id: str, da: set[str]) -> Plan:
-    """Der Plan eines Profils aus einem Paketplan — nur mit Übungen, die es hier gibt."""
+def _plan_aus_paketplan(
+    pp: PaketPlan, paket_id: str, subject_id: str, da: set[str], alt: Plan | None = None
+) -> Plan:
+    """Der Plan eines Profils aus einem Paketplan — nur mit Übungen, die es hier gibt. ``alt``:
+    der bisherige Plan — seine Planübungen behalten ihre IDs (Einträge und Wege zeigen auf
+    sie), je Übung in der Reihenfolge ihres Vorkommens (U2)."""
     plan = Plan(
         id=plan_id(paket_id, pp.key, subject_id),
         name=pp.vorlage.name,
@@ -1214,6 +1344,7 @@ def _plan_aus_paketplan(pp: PaketPlan, paket_id: str, subject_id: str, da: set[s
         if item.exercise_id in da:
             plan.items.append(item.als_planitem(plan.id, len(plan.items)))
             positionen.append(pos)
+    ids_uebernehmen(plan.items, alt)
     verweise_aufloesen(plan.items, positionen)  # P97: „#n“ → ID der Planübung
     ablauf_aufloesen(plan, pp.vorlage, positionen)  # G4: der gezeichnete Ablauf
     return plan

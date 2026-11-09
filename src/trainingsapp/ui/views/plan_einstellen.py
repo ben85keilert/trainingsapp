@@ -44,7 +44,8 @@ from trainingsapp.core import bedingung as bd
 from trainingsapp.core import varianten as var
 from trainingsapp.core import zaehlen as zl
 from trainingsapp.core.bedingung import Bedingung
-from trainingsapp.core.models import Exercise, Plan, PlanItem, new_id
+from trainingsapp.core.links import erlaubt as link_erlaubt
+from trainingsapp.core.models import Exercise, Media, MediaKind, Plan, PlanItem, new_id
 from trainingsapp.core.parameter import chips_sortiert
 from trainingsapp.core.result_spec import (
     FieldSpec,
@@ -75,6 +76,7 @@ from trainingsapp.core.takt import AUS, Takt
 from trainingsapp.core.timer import Abschnitt, TimerProfil
 from trainingsapp.core.uebung_timer import TimerWahl, timer_fuer
 from trainingsapp.core.zaehlen import VORLAGE_AUTO, VORLAGEN_ANGEBOT, SensorWahl, vorlagen_angebot
+from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
 from trainingsapp.ui.components.bedingung_form import bedingung_karte as bedingungs_karte
 from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -219,6 +221,119 @@ def plan_einstellen(
     ziel_gemerkt: dict[str, Any] = dict(ziel_von(item, uebung))
     inhalt = ft.Column(spacing=16)
 
+    # -- Anweisungen (U2, Ben 9.11.2026, F6): Abschnitte und Links nur in diesem Plan ------
+    # Einmal gebaut: `zeichnen` hängt den Block wieder in dieselbe Spalte (`inhalt`); die
+    # Linkfelder entstehen je Aufbau neu und schreiben in ``links_stand`` (Werte, nicht Controls)
+
+    anweisung_editor = AbschnittEditor(
+        page,
+        state,
+        item.description,
+        schluessel=f"planuebung:{item.id}",
+        leer_text="Keine Anweisungen — die Beschreibung der Übung steht im „i“.",
+        namen_hinweis="z. B. Im Plan, Für dich, Achtung",
+        inhalt_hinweis="Was in diesem Plan gilt … Tippen oder diktieren.",
+        erster_name="Anweisung",
+    )
+    anweisung_anfang = anweisung_editor.text()
+    links_stand: list[dict[str, Any]] = [
+        {"medium": m, "titel": m.title, "uri": m.uri, "id": m.id} for m in item.media
+    ]
+    links_spalte = ft.Column(spacing=6, tight=True)
+    links_fehler = ft.Text("", size=12, color=ft.Colors.ERROR, visible=False)
+
+    def links_neu() -> None:
+        links_zeichnen()
+        with contextlib.suppress(Exception):
+            links_spalte.update()
+
+    def link_entferner(z: dict[str, Any]) -> Callable[..., None]:
+        def handler(_e: Any = None) -> None:
+            links_stand.remove(z)
+            links_neu()
+
+        return handler
+
+    def link_hinzufuegen(_e: Any = None) -> None:
+        links_stand.append({"medium": None, "titel": "", "uri": "", "id": new_id()})
+        links_neu()
+
+    def links_zeichnen() -> None:
+        zeilen: list[ft.Control] = []
+        for z in links_stand:
+
+            def titel_aendern(e: Any, z: dict[str, Any] = z) -> None:
+                z["titel"] = e.control.value or ""
+
+            def uri_aendern(e: Any, z: dict[str, Any] = z) -> None:
+                z["uri"] = e.control.value or ""
+
+            zeilen.append(
+                ft.Row(
+                    spacing=6,
+                    controls=[
+                        ft.Container(
+                            expand=2,
+                            content=ft.TextField(
+                                label="Titel", value=z["titel"], dense=True, on_change=titel_aendern
+                            ),
+                        ),
+                        ft.Container(
+                            expand=3,
+                            content=ft.TextField(
+                                label="Adresse (https://…)",
+                                value=z["uri"],
+                                dense=True,
+                                keyboard_type=ft.KeyboardType.URL,
+                                on_change=uri_aendern,
+                            ),
+                        ),
+                        ft.IconButton(
+                            ft.Icons.CLOSE, tooltip="Entfernen", on_click=link_entferner(z)
+                        ),
+                    ],
+                )
+            )
+        zeilen += [
+            links_fehler,
+            ft.Row(
+                controls=[
+                    ft.TextButton(
+                        "Link hinzufügen",
+                        icon=ft.Icons.ADD_LINK,
+                        tooltip="Video, Text oder PDF — eine https-Adresse",
+                        on_click=link_hinzufuegen,
+                        data="link_hinzufuegen",
+                    )
+                ]
+            ),
+        ]
+        links_spalte.controls = zeilen
+
+    def links_lesen() -> list[Media]:
+        """Die Links, wie sie dastehen — bisherige behalten ID, Art und Quelle."""
+        medien: list[Media] = []
+        for z in links_stand:
+            uri, titel = str(z["uri"]).strip(), str(z["titel"]).strip()
+            if not uri:
+                continue
+            if isinstance(z["medium"], Media):
+                medien.append(replace(z["medium"], uri=uri, title=titel))
+            else:
+                medien.append(Media(id=z["id"], kind=MediaKind.VIDEO, uri=uri, title=titel))
+        return medien
+
+    def links_pruefen() -> str | None:
+        falsch = [m.uri for m in links_lesen() if not link_erlaubt(m.uri)]
+        links_fehler.value = f"Nur https-Adressen: {falsch[0]}" if falsch else ""
+        links_fehler.visible = bool(falsch)
+        return links_fehler.value or None
+
+    links_zeichnen()
+    anweisungen_block = ft.Column(
+        spacing=8, tight=True, controls=[anweisung_editor.spalte, links_spalte]
+    )
+
     def felder_jetzt() -> list[str]:
         return [f.key for f in planbar if f.key in aktiv]
 
@@ -249,6 +364,7 @@ def plan_einstellen(
             uhr=None if uhr_wert() == "uebung" else uhr_wert() == "an",
             zaehlt=None if zaehlt_wert() == "uebung" else zaehlt_wert() == "an",
         )
+        beschreibung = anweisung_editor.text()
         neu = replace(
             item,
             target=ziel(),
@@ -258,6 +374,9 @@ def plan_einstellen(
             acc=acc_stand["acc"],
             takt=takt_stand["takt"],
             bedingung=bed_stand["b"],
+            # Unberührt bleibt der Text, wie er war (ein Paketplan sähe ihn sonst geändert)
+            description=item.description if beschreibung == anweisung_anfang else beschreibung,
+            media=links_lesen(),
         )
         an = bool(varianten_schalter.value) or not varianten_liste
         return bereinigt(varianten_schalten(neu, an), uebung)
@@ -781,6 +900,8 @@ def plan_einstellen(
                 size=12,
                 opacity=0.75,
             ),
+            abschnitt("ANWEISUNGEN", hilfe_knopf(page, thema="anweisungen")),
+            anweisungen_block,
             abschnitt("PARAMETER", hilfe_knopf(page, thema="parameter")),
             ft.Row(
                 wrap=True,
@@ -905,6 +1026,10 @@ def plan_einstellen(
         if probleme := pruefen():
             page.update()
             return "Im Ziel ist etwas unlesbar: " + ", ".join(probleme) + "."
+        if link_fehler := links_pruefen():
+            with contextlib.suppress(Exception):
+                page.update()
+            return link_fehler + "."
         state.plaene.item_speichern(eingestellt())
         if ablauf_stand["a"] != ablauf_anfang:
             # Dieselben Wege wie im Reiter „Ablauf“ — gespiegelt auch in die Bedingungen

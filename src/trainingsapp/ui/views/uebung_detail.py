@@ -362,12 +362,51 @@ def _varianten(liste: list[var.Variante]) -> ft.Control:
     return ft.Row(wrap=True, spacing=6, run_spacing=6, controls=[etikett(v) for v in liste])
 
 
+def _anweisungen(
+    item: PlanItem, oeffner: Callable[[Media], Callable[[], object]]
+) -> list[ft.Control]:
+    """Die Anweisungen der Planübung (U2, F6: „Erklärungen beim i“) — Abschnitte, darunter Videos
+    und Links; leer ohne."""
+    zeilen: list[ft.Control] = []
+    for a in abschnitte(item.description):
+        if a.leer:
+            continue
+        if a.name:
+            zeilen.append(ft.Text(a.name, size=13, weight=ft.FontWeight.W_600, opacity=0.8))
+        if a.text:
+            zeilen.append(ft.Text(a.text))
+    for m in item.media:
+        if not m.uri:
+            continue
+        zeilen.append(
+            ft.ListTile(
+                leading=ft.Icon(ft.Icons.PLAY_CIRCLE_OUTLINE),
+                title=ft.Text(m.title or m.uri),
+                subtitle=ft.Text(m.uri, size=11, opacity=0.6) if m.title else None,
+                trailing=ft.Icon(ft.Icons.OPEN_IN_NEW, size=18, opacity=0.6),
+                on_click=oeffner(m),
+                content_padding=ft.Padding.only(left=0, right=0),
+            )
+        )
+    if zeilen:
+        zeilen.insert(
+            0,
+            ft.Text("ANWEISUNGEN IN DIESEM PLAN", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+        )
+    return zeilen
+
+
 def _plan_karte(
-    uebung: Exercise, plan: Plan, item: PlanItem, einstellen: Callable[[], object] | None
+    uebung: Exercise,
+    plan: Plan,
+    item: PlanItem,
+    einstellen: Callable[[], object] | None,
+    anweisungen: list[ft.Control] | None = None,
 ) -> ft.Control:
     """Oben auf der Übungsseite, wenn man aus einem Plan kommt: was dort gilt (P79, Skizze A2).
 
     Grau „wie die Übung“, sonst „nur hier“; „Im Plan einstellen“ öffnet die Seite dafür.
+    ``anweisungen``: Abschnitte und Links der Planübung (U2), unter den Einstellungen.
     """
     unterschiede = abweichungen(item, uebung)
     parameter = [f for f in aktive_felder(item, uebung) if not var.ist_variante(f)]
@@ -428,6 +467,7 @@ def _plan_karte(
                     ],
                 ),
                 *zeilen,
+                *(anweisungen or []),
                 *(
                     [
                         ft.Row(
@@ -665,7 +705,13 @@ def uebung_detail(
         )
     if plan is not None and item is not None:
         abschnitte.append(
-            _plan_karte(uebung, plan, item, gehe_zu(einstellen) if einstellen else None)
+            _plan_karte(
+                uebung,
+                plan,
+                item,
+                gehe_zu(einstellen) if einstellen else None,
+                _anweisungen(item, oeffner),
+            )
         )
     abschnitte += [
         _kopf(state, uebung),

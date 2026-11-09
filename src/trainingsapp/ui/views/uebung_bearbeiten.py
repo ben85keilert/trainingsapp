@@ -46,7 +46,6 @@ import flet as ft
 
 from trainingsapp.core import varianten as var
 from trainingsapp.core.anhaenge import BILD, Ziel
-from trainingsapp.core.beschreibung import Abschnitt, abschnitte, zusammen
 from trainingsapp.core.bewegungsbild import bewegungsbild, mit_bewegungsbild
 from trainingsapp.core.models import (
     TAG_REGION,
@@ -87,6 +86,7 @@ from trainingsapp.core.zaehlen import (
     knopf_text,
     vorlagen_angebot,
 )
+from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
 from trainingsapp.ui.components.bewegungsbild import bewegungsbild_blatt
 from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -94,7 +94,6 @@ from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.notizeditor import Textnotiz
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.symbol_blatt import symbol_blatt
 from trainingsapp.ui.components.tagwahl import TagWahl
@@ -367,186 +366,17 @@ def uebung_bearbeiten(
 
     # -- Beschreibung: Abschnitte (Name + Inhalt), Editor an Ort und Stelle (P108) -------
     # Ben, 2.11.2026: „den Text als ‚Name‘ + ‚Inhalt‘ setzen … Nur die Reihenfolge ist wichtig“
-    # — gespeichert bleibt ein Text mit ``## Name``-Zeilen (`core/beschreibung.py`).
+    # — gespeichert bleibt ein Text mit ``## Name``-Zeilen (`core/beschreibung.py`). Der Editor
+    # ist seit U2 eine Komponente, die auch „Im Plan einstellen“ nimmt (`abschnitt_editor.py`).
 
-    abschnitt_stand: list[dict[str, Any]] = [
-        {"id": new_id(), "name": a.name, "text": a.text}
-        for a in abschnitte(uebung.description if uebung else "")
-    ]
-    beschreibung_spalte = ft.Column(spacing=8, tight=True)
-    #: Der offene Abschnitt (seine ID), je Abschnitt sein Editor und sein Namensfeld
-    beschreibung_offen: dict[str, str | None] = {"id": None}
-    editoren: dict[str, Textnotiz] = {}
-    abschnitt_namen: dict[str, ft.TextField] = {}
-
-    def abschnitt_text(a: dict[str, Any]) -> str:
-        e = editoren.get(a["id"])
-        if e is not None and beschreibung_offen["id"] == a["id"]:
-            return e.text.strip()
-        return str(a["text"]).strip()
-
-    def abschnitt_name(a: dict[str, Any]) -> str:
-        feld = abschnitt_namen.get(a["id"])
-        return ((feld.value if feld is not None else a["name"]) or "").strip()
-
-    def beschreibung_text() -> str:
-        return zusammen(Abschnitt(abschnitt_name(a), abschnitt_text(a)) for a in abschnitt_stand)
-
-    def beschreibung_neu() -> None:
-        beschreibung_zeichnen()
-        with contextlib.suppress(Exception):
-            beschreibung_spalte.update()
-
-    def abschnitt_geschlossen() -> None:
-        aid = beschreibung_offen["id"]
-        a = next((x for x in abschnitt_stand if x["id"] == aid), None)
-        if a is not None:
-            a["text"], a["name"] = abschnitt_text(a), abschnitt_name(a)
-        beschreibung_offen["id"] = None
-        beschreibung_neu()
-
-    def abschnitt_oeffner(a: dict[str, Any]) -> Callable[[], None]:
-        def handler() -> None:
-            beschreibung_offen["id"] = a["id"]
-            e = editoren.get(a["id"])
-            if e is None:
-
-                def sichern_text(text: str, ziel: dict[str, Any] = a) -> None:
-                    ziel["text"] = text
-
-                e = editoren[a["id"]] = Textnotiz(
-                    page,
-                    state,
-                    str(a["text"]),
-                    sichern_text,
-                    schluessel=f"uebung:{uebung.id if uebung is not None else 'neu'}:{a['id']}",
-                    hinweis="Inhalt … Ausführung, worauf achten. Tippen oder diktieren.",
-                    danach=abschnitt_geschlossen,
-                )
-            e.fokus = True
-            beschreibung_neu()
-
-        return handler
-
-    def abschnitt_hoch(a: dict[str, Any]) -> Callable[[], None]:
-        def handler() -> None:
-            k = abschnitt_stand.index(a)
-            if k > 0:
-                abschnitt_stand.insert(k - 1, abschnitt_stand.pop(k))
-            beschreibung_neu()
-
-        return handler
-
-    def abschnitt_entferner(a: dict[str, Any]) -> Callable[[], None]:
-        def handler() -> None:
-            abschnitt_stand.remove(a)
-            editoren.pop(a["id"], None)
-            abschnitt_namen.pop(a["id"], None)
-            if beschreibung_offen["id"] == a["id"]:
-                beschreibung_offen["id"] = None
-            beschreibung_neu()
-
-        return handler
-
-    def abschnitt_hinzufuegen() -> None:
-        a = {"id": new_id(), "name": "", "text": ""}
-        abschnitt_stand.append(a)
-        abschnitt_oeffner(a)()
-
-    def abschnitt_karte(a: dict[str, Any], k: int) -> ft.Control:
-        aid = a["id"]
-        offen = beschreibung_offen["id"] == aid
-        if aid not in abschnitt_namen:
-            abschnitt_namen[aid] = ft.TextField(
-                label="Name des Abschnitts",
-                value=str(a["name"]),
-                hint_text="z. B. Ausführung, Worauf achten, Für mich",
-                dense=True,
-                expand=True,
-                capitalization=ft.TextCapitalization.SENTENCES,
-            )
-        if offen:
-            inhalt: list[ft.Control] = [
-                ft.Row(
-                    spacing=4,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        abschnitt_namen[aid],
-                        ft.IconButton(
-                            ft.Icons.ARROW_UPWARD,
-                            tooltip="Nach oben",
-                            visible=k > 0,
-                            on_click=abschnitt_hoch(a),
-                        ),
-                        ft.IconButton(
-                            ft.Icons.DELETE_OUTLINE,
-                            tooltip="Abschnitt entfernen",
-                            on_click=abschnitt_entferner(a),
-                        ),
-                    ],
-                ),
-                editoren[aid].control(),
-            ]
-            return ft.Container(
-                bgcolor=KARTE,
-                border_radius=14,
-                padding=ft.Padding.only(left=12, right=10, top=8, bottom=10),
-                content=ft.Column(spacing=6, tight=True, controls=inhalt),
-            )
-        name_ = abschnitt_name(a)
-        text = abschnitt_text(a)
-        return ft.Container(
-            bgcolor=KARTE,
-            border_radius=14,
-            padding=ft.Padding.only(left=12, right=10, top=8, bottom=10),
-            ink=True,
-            on_click=abschnitt_oeffner(a),
-            content=ft.Column(
-                spacing=4,
-                tight=True,
-                controls=[
-                    ft.Row(
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        controls=[
-                            ft.Text(
-                                name_ or ("Beschreibung" if k == 0 else "Abschnitt"),
-                                size=12,
-                                weight=ft.FontWeight.W_600,
-                                opacity=0.7,
-                            ),
-                            ft.Icon(ft.Icons.EDIT_OUTLINED, size=16, opacity=0.5),
-                        ],
-                    ),
-                    ft.Text(
-                        text or "Noch nichts — antippen und beschreiben.",
-                        size=14,
-                        opacity=1.0 if text else 0.55,
-                    ),
-                ],
-            ),
-        )
-
-    def beschreibung_zeichnen() -> None:
-        karten: list[ft.Control] = [abschnitt_karte(a, k) for k, a in enumerate(abschnitt_stand)]
-        if not abschnitt_stand:
-            karten.append(
-                ft.Text("Noch keine Beschreibung — „Abschnitt hinzufügen“.", size=12, opacity=0.6)
-            )
-        karten.append(
-            ft.Row(
-                controls=[
-                    ft.TextButton(
-                        "Abschnitt hinzufügen",
-                        icon=ft.Icons.ADD,
-                        tooltip="Ein Abschnitt mit Name und Inhalt — z. B. vom Paket, für dich",
-                        on_click=abschnitt_hinzufuegen,
-                    )
-                ]
-            )
-        )
-        beschreibung_spalte.controls = karten
-
-    beschreibung_zeichnen()
+    beschreibung_editor = AbschnittEditor(
+        page,
+        state,
+        uebung.description if uebung else "",
+        schluessel=f"uebung:{uebung.id if uebung is not None else 'neu'}",
+    )
+    beschreibung_spalte = beschreibung_editor.spalte
+    beschreibung_text = beschreibung_editor.text
 
     # -- Typen und Regionen ------------------------------------------------
     # Die Tag-Auswahl wie im Katalog: zwei Kästen, Mehrfachauswahl in der

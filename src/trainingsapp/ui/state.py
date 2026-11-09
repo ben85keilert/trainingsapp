@@ -401,6 +401,9 @@ class AppState:
     takt_verfolger: Any = None
     #: Vibration (Flet-Dienst `HapticFeedback`), setzt `app.main()`
     haptik: Any = None
+    #: Links öffnen (Flet-Dienst `UrlLauncher`), setzt `app.main()` — für das Material beim
+    #: Üben (`components/material.py`), das keine Ansicht mit eigenem Dienst hat
+    browser: Any = None
     #: Diagnosemodus (`docs/plan_diagnosemodus.md`): der rote Punkt in ``page.overlay``
     #: (`components.diagnose_punkt`) und die Marken-Leiste (offen oder zum Knopf eingeklappt)
     diagnose_punkt: Any = None

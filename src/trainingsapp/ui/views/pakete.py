@@ -35,6 +35,7 @@ import sqlite3
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import flet as ft
 
@@ -46,6 +47,7 @@ from trainingsapp.core.pakete import (
     Paket,
     PaketFehler,
     Paketinhalt,
+    PaketPlan,
     dateiname,
     name_pruefen,
     paket_id,
@@ -60,6 +62,7 @@ from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.neu_laden import neu_laden_blatt
 from trainingsapp.ui.components.paket_link import import_blatt
 from trainingsapp.ui.components.paketvergleich import vergleich_blatt
 from trainingsapp.ui.components.uebungsbild import uebungsbild
@@ -756,6 +759,71 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
             ],
         )
 
+    # -- Pläne des Pakets in diesem Profil (U2): neu laden, wieder anlegen ------------------
+
+    plaene_hier = state.pakete.paketplaene_im_profil(paket.id, state.profil.id)
+
+    #: Ohne aktives Paket gibt es keine Quelle zum Neuladen (`PaketRepo.paketplan_fuer`)
+    inaktiv_text = "Das Paket ist deaktiviert — erst aktivieren."
+
+    def wieder_anleger(key: str) -> Callable[..., None]:
+        def handler(_e: Any = None) -> None:
+            neu = state.pakete.plan_wieder_anlegen(paket.id, key, state.profil.id)
+            if neu is None:
+                melden(inaktiv_text if not paket.aktiv else "Den Plan gibt es im Paket nicht mehr.")
+                return
+            melden(f"„{neu.name}“ ist wieder da.")
+            state.neu_zeichnen()
+
+        return handler
+
+    def neu_lader(plan: Plan) -> Callable[..., None]:
+        def handler(_e: Any = None) -> None:
+            blatt = neu_laden_blatt(page, state, plan, danach=state.neu_zeichnen)
+            if blatt is None:
+                melden(inaktiv_text if not paket.aktiv else "Den Plan gibt es im Paket nicht mehr.")
+                return
+            page.show_dialog(blatt)
+
+        return handler
+
+    def paketplan_zeile(pp: PaketPlan, plan: Plan | None, zustand: str) -> ft.Control:
+        text = {
+            "aktiv": "wie im Paket",
+            "geaendert": "von dir geändert — Updates kommen je Übung",
+            "papierkorb": "im Papierkorb",
+            "geloescht": "gelöscht",
+        }[zustand]
+        weg = zustand in ("papierkorb", "geloescht")
+        return ft.Row(
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Icon(ft.Icons.LIST_ALT_OUTLINED, opacity=0.5 if weg else 1.0),
+                ft.Column(
+                    spacing=0,
+                    expand=True,
+                    controls=[
+                        ft.Text(plan.name if plan is not None else pp.vorlage.name, size=15),
+                        ft.Text(text, size=11, opacity=0.7),
+                    ],
+                ),
+                ft.TextButton(
+                    "Wieder anlegen",
+                    icon=ft.Icons.RESTORE_PAGE_OUTLINED,
+                    on_click=wieder_anleger(pp.key),
+                    data=("plan_wieder", pp.key),
+                )
+                if weg
+                else ft.IconButton(
+                    ft.Icons.RESTORE,
+                    tooltip="Plan neu laden …",
+                    on_click=neu_lader(plan) if plan is not None else None,
+                    data=("plan_neu_laden", pp.key),
+                ),
+            ],
+        )
+
     def kurs_zeile(k: Kurs) -> ft.Control:
         weg = any(e.id == k.id for e in entfallene_kurse)
         return ft.Row(
@@ -897,12 +965,19 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
                             "Videos. Ein Update lässt stehen, was du geändert hast; „Auf "
                             "Paketstand“ holt den Paketstand ganz zurück. „Deaktivieren“ "
                             "nimmt alles aus Katalog, Kursen und Plänen, ohne etwas zu "
-                            "löschen. Pläne behalten ihre Einstellungen."
+                            "löschen. Pläne bekommen Updates je Übung — was du an einer "
+                            "Planübung geändert oder herausgenommen hast, bleibt; „Neu laden“ "
+                            "holt es zurück."
                         ),
                         *offen,
                         karte(
                             titel("Übungen"),
                             *([zeile(z) for z in staende] or [hinweis("Keine Übungen.")]),
+                        ),
+                        *(
+                            [karte(titel("Pläne"), *[paketplan_zeile(*e) for e in plaene_hier])]
+                            if plaene_hier
+                            else []
                         ),
                         *(
                             [karte(titel("Kurse"), *[kurs_zeile(k) for k in kurse])]

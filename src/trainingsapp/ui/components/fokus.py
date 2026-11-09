@@ -318,6 +318,7 @@ class Fokus:
         Balken, die Reihe Takt · Bewegung · HF, Kurven, Zählstand, Sätze."""
         from trainingsapp.ui.components import zaehlen
         from trainingsapp.ui.components.karte import karte
+        from trainingsapp.ui.components.material import material_knopf
 
         self.tempo_platz.content = TempoRegler(self.state, self.key, lauf).control
         self._zonen_laden()
@@ -334,9 +335,11 @@ class Fokus:
             name="timer",
         )
         knopf = self.ebenen_knopf()
+        # Material (U2, F6): nur, wenn es welches gibt — ansehen hält die Uhr an
+        material = material_knopf(self.page, self.state, self.uebung, self.item, text=False)
         self.ebenen_anwenden()
         return [
-            # Takt · Zeit (mit Stand) · Ebenen — eine Zeile (8.11.2026 spät)
+            # Takt · Zeit (mit Stand) · Material · Ebenen — eine Zeile (8.11.2026 spät)
             ft.Row(
                 spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -349,6 +352,7 @@ class Fokus:
                         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[self.zeit_text, self.stand_text],
                     ),
+                    *([material] if material is not None else []),
                     knopf,
                 ],
             ),

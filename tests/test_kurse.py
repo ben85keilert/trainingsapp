@@ -410,3 +410,70 @@ def test_kapitel_eines_anderen_kurses_wird_nicht_uebernommen(con) -> None:
     with pytest.raises(ValueError, match="gehört schon"):
         repo.speichern(b)
     assert [k.titel for k in repo.laden(a.id).kapitel] == ["Eins"]
+
+
+def test_kapitelplan_neu_laden(con, profil) -> None:
+    """U2 (Ben, 9.11.2026: „Wenn man die Übung aus einem Plan löscht, kann man den Plan/Kurs neu
+    laden und es wäre wieder da“): Fehlendes zurückholen behält Eigenes, „wie im Kapitel“ setzt
+    ganz zurück; die Planübung behält ihre ID, der Fortschritt bleibt."""
+    repo, plaene = KursRepo(con), PlanRepo(con)
+    liege, knie = seed_id("liegestuetzen"), seed_id("kniebeuge")
+    k = kurs_mit_plan(liege)
+    k.kapitel[1].plaene[0].items.append(VorlageItem(knie, target={"reps": 10}))
+    repo.speichern(k)
+    lesen, ueben, _ende = k.kapitel
+    repo.starten(k, profil.id)
+    repo.kapitel_abschliessen(k, lesen, profil.id)
+    (plan,) = repo.kapitel_plaene(ueben.id, profil.id)
+    liege_item, _knie_item = plan.items
+    # Eigene Fassung: Liegestütz mit eigenem Ziel, Kniebeuge herausgenommen
+    liege_item.target = {"reps": 20}
+    plan.items = [liege_item]
+    plaene.speichern(plan)
+
+    assert repo.kapitelplan_vorschau(plan.id) == (["Kniebeuge"], True)
+    neu = repo.kapitelplan_neu_laden(plan.id, hart=False)
+    assert neu is not None
+    assert [(i.exercise_id, i.target) for i in plaene.laden(plan.id).items] == [
+        (liege, {"reps": 20}),
+        (knie, {"reps": 10}),
+    ]
+    assert plaene.laden(plan.id).items[0].id == liege_item.id
+    neu = repo.kapitelplan_neu_laden(plan.id, hart=True)
+    assert [(i.exercise_id, i.target) for i in plaene.laden(plan.id).items] == [
+        (liege, None),
+        (knie, {"reps": 10}),
+    ]
+    assert repo.staende(profil.id, k.id)[lesen.id].abgeschlossen is not None  # Fortschritt
+
+
+def test_kurs_neu_laden_holt_geloeschte_kapitelplaene_zurueck(con, profil) -> None:
+    """„Kurs neu laden“ (U2): Pläne erreichter Kapitel — gelöschte entstehen neu (aktiv nur im
+    laufenden Kapitel), vorhandene holen Fehlendes zurück; nicht erreichte Kapitel bleiben."""
+    repo, plaene = KursRepo(con), PlanRepo(con)
+    liege, knie = seed_id("liegestuetzen"), seed_id("kniebeuge")
+    k = kurs_mit_plan(liege)
+    k.kapitel[0].plaene = [PlanVorlage("Kurs: Lesen", [1], [VorlageItem(knie)])]
+    repo.speichern(k)
+    lesen, ueben, ende = k.kapitel
+    ende.plaene = [PlanVorlage("Kurs: Ende", [], [VorlageItem(knie)])]
+    repo.speichern(k)
+    repo.starten(k, profil.id)
+    repo.kapitel_abschliessen(k, lesen, profil.id)  # Lesen fertig, Üben läuft
+    (alt_lesen,) = repo.kapitel_plaene(lesen.id, profil.id)
+    (alt_ueben,) = repo.kapitel_plaene(ueben.id, profil.id)
+    plaene.loeschen(alt_lesen.id)
+    plaene.endgueltig_loeschen(alt_lesen.id)  # ganz weg
+    alt_ueben.name = "Mein Üben"  # umbenannt — gefunden der Reihe nach
+    plaene.speichern(alt_ueben)
+    plaene.loeschen(alt_ueben.id)  # im Papierkorb
+
+    assert repo.kurs_neu_laden(k, profil.id, hart=False) == (1, 1)
+    (neu_lesen,) = repo.kapitel_plaene(lesen.id, profil.id)
+    (neu_ueben,) = repo.kapitel_plaene(ueben.id, profil.id)
+    assert neu_lesen.id != alt_lesen.id and not neu_lesen.aktiv  # abgeschlossen → deaktiviert
+    assert neu_ueben.id == alt_ueben.id and neu_ueben.name == "Mein Üben" and neu_ueben.aktiv
+    assert repo.kapitel_plaene(ende.id, profil.id) == []  # nicht erreicht
+    # Wie im Kurs: der Name kommt zurück
+    assert repo.kurs_neu_laden(k, profil.id, hart=True) == (2, 0)
+    assert repo.kapitel_plaene(ueben.id, profil.id)[0].name == "Kurs: Üben"

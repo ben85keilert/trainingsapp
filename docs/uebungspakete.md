@@ -259,10 +259,40 @@ gibt einen Hinweis). `trainingsapp-paket pruefen` meldet eine Kante ohne Positio
 einen unbekannten Auslöser als Hinweis; ältere Apps übergehen das Feld. Je Planübung dazu
 `beiname` (Text, unterscheidet zwei gleiche Übungen im Bild: „2. Durchgang“).
 
+**Anweisungen je Planübung** (U2, Ben 9.11.2026, `docs/plan_paketinhalte.md` §9, F6) — in
+`plaene[].uebungen[]` und in Kurskapiteln: `beschreibung` (ein Text mit `## Name`-Zeilen wie die
+Beschreibung der Übung, `core/beschreibung.py`) und `medien` (eine Liste wie `media` der Übung:
+`{ uri, title, kind, source, license }`). Was die App nicht öffnen darf (nur `https://` und
+`mailto:`), Dateien vom Gerät und Töne fallen beim Import still weg; `trainingsapp-paket
+pruefen` gibt dazu einen Hinweis. Die Anweisungen gelten nur in diesem Plan — die Beschreibung
+der Übung bleibt im „i“; beim Üben zeigt der Knopf **Material** (Buch-Symbol neben dem „i“ und
+im Fokus), dass es welche gibt (`core/material.py`, `components/material.py`). In der App
+`plan_item.description`/`media_json` (Migration 046), bearbeitet in „Im Plan einstellen“, Karte
+„Anweisungen“. Ältere Apps übergehen beide Felder (keine neue Formatversion).
+
 Import: Ein Paketplan wird **im aktiven Profil** angelegt; andere Profile bekommen ihn beim
-nächsten Start (`PaketRepo.plaene_nachlegen`). Ein neuer Stand gilt nur für einen Plan, den
-die Person nicht geändert hat (Vergleich mit `plan.package_standard_json`); im Papierkorb
-bleibt er dort. Entfernen des Pakets legt seine Pläne in den Papierkorb, Deaktivieren
+nächsten Start (`PaketRepo.plaene_nachlegen`). Ein neuer Stand geht **je Feld und je
+Planübung** (U2, 9.11.2026, `core.pakete.plan_abgleichen`): Was die Person nicht angefasst hat
+(Vergleich mit `plan.package_standard_json`), bekommt das Update; neue Planübungen kommen dazu;
+was sie geändert oder **herausgenommen** hat, bleibt so. Eine Planübung wird über ihre Übung und
+ihr wievieltes Vorkommen erkannt (`baum#2`) und behält ihre ID (Einträge und Wege zeigen
+darauf). Hat der Plan einen gezeichneten Ablauf oder Zweige und verschöben sich die
+Planübungen, bleibt die eigene Fassung ganz — sonst zeigten die Wege auf andere Übungen. Im
+Papierkorb bleibt ein Plan dort.
+
+**Plan neu laden** (U2, F7): Im Plan-Editor steht unter dem Namen, woher ein Plan kommt
+(„Aus Paket „Qigong““, „Aus Kurs „…“ · Kapitel“), mit **„Neu laden …“** — ein Blatt mit
+**„Fehlendes zurückholen“** (Herausgenommenes kommt wieder, eigene Änderungen bleiben) und
+**„Auf Paketstand setzen“** bzw. **„Wie im Kapitel“** (alles wie in der Quelle, zweiter Tipp).
+Geht nur, solange das Paket installiert und aktiv ist bzw. den Kurs gibt; ein Plan im Papierkorb
+kommt dabei zurück, Einträge bleiben (`PaketRepo.plan_neu_laden`,
+`KursRepo.kapitelplan_neu_laden`). Der Paketmanager zeigt je Paket die Karte **„Pläne“** mit
+Zustand (wie im Paket · von dir geändert · im Papierkorb · gelöscht); ein gelöschter Plan lässt
+sich dort **„Wieder anlegen“** (`PaketRepo.plan_wieder_anlegen`, auch hinter dem Grabstein).
+Die Kursseite hat im Menü **„Kurs neu laden …“** (`KursRepo.kurs_neu_laden`): die Pläne aller
+erreichten Kapitel — vorhandene wie oben, gelöschte entstehen neu (aktiv nur im laufenden
+Kapitel); der Fortschritt bleibt. Mit gezeichnetem Ablauf holt „Fehlendes zurückholen“ nichts
+zurück, wenn sich dafür Positionen verschieben müssten — dann hilft nur der harte Weg. Entfernen des Pakets legt seine Pläne in den Papierkorb, Deaktivieren
 versteckt sie wie die Übungen. Nicht mehr im Paket → bleibt (ein Plan ist etwas Eigenes,
 sobald er geübt wird). Export: die Gruppe „Pläne“ im Exportdialog — ein Plan nimmt seine
 Übungen mit. **Platzhalter** (`$auswahl`, `$test.duration` — Kurs stellt den Plan aus

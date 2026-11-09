@@ -1476,3 +1476,67 @@ def test_update_medien_je_eintrag(con) -> None:
         "https://x.org/neu",
         "https://x.org/mein",
     ]
+
+
+def test_paketplan_update_je_planuebung_neu_laden_und_wieder_anlegen(con) -> None:
+    """U2 (Ben, 9.11.2026, `docs/plan_paketinhalte.md` §9): Ein Paketplan, den die Person
+    geändert hat, bekommt Updates je Planübung — Eigenes und Herausgenommenes bleibt, Neues kommt
+    dazu, IDs bleiben. „Plan neu laden“ holt Fehlendes zurück (Eigenes bleibt) oder setzt ganz
+    auf den Paketstand; ein gelöschter Paketplan lässt sich wieder anlegen."""
+    pakete, plaene = PaketRepo(con), PlanRepo(con)
+    ich = _profil(con)
+    roh = qigong_mit_plan()
+    roh["plaene"][0]["uebungen"][0]["beschreibung"] = "## Im Plan\nmorgens am Fenster"
+    roh["plaene"][0]["uebungen"][0]["medien"] = [
+        {"kind": "video", "uri": "https://x.org/baum", "title": "Baum im Plan"},
+        {"kind": "video", "uri": "intent://boese"},  # die App öffnet es nicht — fällt weg
+    ]
+    inhalt = paket_lesen(roh)
+    pakete.importieren(inhalt, subject_id=ich.id)
+    (plan,) = plaene.des_pakets(inhalt.paket.id, ich.id)
+    baum, tief = plan.items
+    assert baum.description == "## Im Plan\nmorgens am Fenster"
+    assert [m.uri for m in baum.media] == ["https://x.org/baum"]
+    # Eigene Fassung: Ziel des Baums geändert, die tiefe Variante herausgenommen
+    baum.target = {"hold": [600]}
+    plan.items = [baum]
+    plaene.speichern(plan)
+
+    # Neue Fassung: anderer Name, neue Beschreibung des Plans, eine dritte Planübung
+    roh = qigong_mit_plan(version=2)
+    roh["plaene"][0]["name"] = "Morgenroutine kurz"
+    roh["plaene"][0]["uebungen"].append({"uebung": "baum", "ziel": {"hold": [60]}})
+    neu = paket_lesen(roh)
+    assert pakete.vorschau(neu, ich.id).plaene == {"morgen": Status.GEAENDERT}
+    pakete.importieren(neu, subject_id=ich.id)
+    plan = plaene.laden(plan.id)
+    assert plan.name == "Morgenroutine kurz"
+    assert [(i.exercise_id, i.target) for i in plan.items] == [
+        (baum.exercise_id, {"hold": [600]}),  # eigenes Ziel bleibt
+        (baum.exercise_id, {"hold": [60]}),  # neu aus dem Paket
+    ]
+    assert plan.items[0].id == baum.id  # dieselbe Planübung
+    # „Plan neu laden“: Fehlendes zurückholen — die tiefe Variante kommt wieder, Eigenes bleibt
+    zurueck, mehr = pakete.plan_neu_laden_vorschau(plan.id)
+    assert zurueck == ["Stehen wie ein Baum, tief"] and mehr
+    plan = pakete.plan_neu_laden(plan.id, hart=False)
+    assert [i.target for i in plan.items] == [{"hold": [600]}, None, {"hold": [60]}]
+    # Auf Paketstand: alles wie im Paket
+    plan = pakete.plan_neu_laden(plan.id, hart=True)
+    assert [i.target for i in plan.items] == [{"hold": [300]}, None, {"hold": [60]}]
+    assert plan.items[0].id == baum.id
+    # Gelöscht und wieder angelegt
+    plaene.loeschen(plan.id)
+    assert [z for _, _, z in pakete.paketplaene_im_profil(inhalt.paket.id, ich.id)] == [
+        "papierkorb"
+    ]
+    plaene.endgueltig_loeschen(plan.id)
+    assert [z for _, _, z in pakete.paketplaene_im_profil(inhalt.paket.id, ich.id)] == ["geloescht"]
+    wieder = pakete.plan_wieder_anlegen(inhalt.paket.id, "morgen", ich.id)
+    assert wieder is not None and wieder.id == plan.id
+    assert [i.exercise_id for i in plaene.laden(plan.id).items] == [
+        baum.exercise_id,
+        tief.exercise_id,
+        baum.exercise_id,
+    ]
+    assert [z for _, _, z in pakete.paketplaene_im_profil(inhalt.paket.id, ich.id)] == ["aktiv"]

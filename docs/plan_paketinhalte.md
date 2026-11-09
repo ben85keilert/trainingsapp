@@ -175,7 +175,11 @@ Feld bzw. je Abschnitt (der Vergleich aus `plan_paketversionen.md` §4).
   oder selbst geschrieben. **Erklärungen stehen im „i“** (Ben, F6); gibt es **Material**
   (Video, Text, PDF …), zeigen Fokus und Übung an, dass es das gibt — **solange man es ansieht,
   pausiert die Uhr**, man startet sie selbst wieder. Die kurze Notiz (`note`) bleibt, wie sie
-  ist.
+  ist. *Gebaut so (U2):* Das Blatt „Material“ hält die Uhr **dieser** Übung beim Öffnen an;
+  „Uhr weiter“ startet sie von Hand, **beim Schließen läuft sie weiter**, wenn sie für das
+  Material stand und niemand sie angefasst hat („solange“). Material = Anweisungen der
+  Planübung und Videos/Links der Übung; die Beschreibung der Übung bleibt im „i“ (Gerätetest
+  T108).
 - **Paketplan-Updates je Planübung** statt alles oder nichts: Was die Person an einer Planübung
   nicht angefasst hat, bekommt das Update; neue Planübungen kommen dazu; was sie
   **herausgenommen** hat, merkt sich der Plan und lässt es weg …
@@ -282,7 +286,7 @@ für JSON-Pakete schon vor U3.
 | Stufe | Stand |
 |---|---|
 | U1 | **gebaut 9.11.2026 (0.3.74):** `core/abgleich.py` (je Abschnitt, je Medium, Hinweise, Vergleich, übernehmen), Migration 045 `package_hints_json`, `PaketRepo.hinweise/vergleich/paketfassung_uebernehmen`, `components/paketvergleich.py` im Paketmanager und auf der Übungsseite |
-| U2 | in Arbeit |
+| U2 | **gebaut 9.11.2026 (0.3.75):** Migration 046 (`plan_item.description`, `media_json`), Paketfeld `beschreibung`/`medien` je Planübung (keine neue Formatversion), `core.pakete.plan_abgleichen` (je Feld, je Planübung `übung#n`, IDs bleiben), `PaketRepo.plan_neu_laden`/`plan_wieder_anlegen`/`paketplaene_im_profil`, `KursRepo.kapitelplan_neu_laden`/`kurs_neu_laden`, `core/material.py` + `components/material.py` (Knopf neben dem „i“ und im Fokus, Uhr hält an), `components/neu_laden.py` (Plan-Editor), Karte „Pläne“ im Paketmanager, „Kurs neu laden …“ im Kursmenü, Karte „Anweisungen“ in „Im Plan einstellen“ (`components/abschnitt_editor.py`, auch in „Übung bearbeiten“), Anweisungen im „i“ |
 | U3 | offen |
 | U4 | offen |
 | U5 | offen |

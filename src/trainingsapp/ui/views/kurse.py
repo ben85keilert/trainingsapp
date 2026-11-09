@@ -20,6 +20,7 @@ an); **abgeschlossen** mit „Weiter“. Was man dabei übersprungen hat, bleibt
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 
@@ -49,7 +50,7 @@ from trainingsapp.core.kurse import (
 )
 from trainingsapp.core.models import Exercise, Media, MediaKind, Plan
 from trainingsapp.core.plaene import erledigte, tage_text
-from trainingsapp.ui.components.dialoge import Nachher
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
@@ -196,6 +197,52 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
             )
         )
 
+    def neu_laden_fragen() -> None:
+        """„Kurs neu laden“ (U2, Ben 9.11.2026: „Wenn man die Übung aus einem Plan löscht, kann
+        man den Plan/Kurs neu laden und es wäre wieder da“) — die Pläne der erreichten Kapitel."""
+        stand = {"sicher": False}
+
+        def ausfuehren(hart: bool) -> None:
+            geladen, angelegt = state.kurse.kurs_neu_laden(kurs, state.profil.id, hart=hart)
+            teile = [
+                f"{geladen} Plan neu geladen" if geladen == 1 else f"{geladen} Pläne neu geladen"
+            ]
+            if angelegt:
+                teile.append(f"{angelegt} wieder angelegt")
+            nachher.danach(state.neu_zeichnen)
+            nachher.danach(lambda: melden(", ".join(teile)))
+            schliessen(dialog)
+
+        def hart_tippen(_e: object = None) -> None:
+            if not stand["sicher"]:
+                stand["sicher"] = True
+                hart_knopf.content = "Wirklich? Eigenes geht verloren"
+                hart_knopf.style = ft.ButtonStyle(color=ft.Colors.ERROR)
+                with contextlib.suppress(Exception):
+                    hart_knopf.update()
+                return
+            ausfuehren(True)
+
+        hart_knopf = ft.OutlinedButton("Wie im Kurs", on_click=hart_tippen, data="hart")
+        dialog: ft.AlertDialog = ft.AlertDialog(
+            modal=True,
+            on_dismiss=nachher.bei_schliessen,
+            title=ft.Text("Kurs neu laden?"),
+            content=ft.Text(
+                "Die Pläne der erreichten Kapitel: Fehlendes kommt zurück, gelöschte Pläne "
+                "entstehen neu — deine Änderungen bleiben. „Wie im Kurs“ setzt sie ganz auf den "
+                "Stand der Kapitel. Fortschritt und Einträge bleiben."
+            ),
+            actions=[
+                ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
+                hart_knopf,
+                ft.FilledButton(
+                    "Fehlendes zurückholen", on_click=lambda: ausfuehren(False), data="weich"
+                ),
+            ],
+        )
+        page.show_dialog(dialog)
+
     def zeile(nr: int, kapitel: Kapitel) -> ft.Control:
         s = stati[kapitel.id]
         symbol, wort = _STATUS[s]
@@ -245,10 +292,15 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
                 icon=ft.Icons.MORE_VERT,
                 items=[
                     ft.PopupMenuItem(
+                        content="Kurs neu laden …",
+                        icon=ft.Icons.RESTORE,
+                        on_click=neu_laden_fragen,
+                    ),
+                    ft.PopupMenuItem(
                         content="Von vorn beginnen",
                         icon=ft.Icons.RESTART_ALT,
                         on_click=zuruecksetzen_fragen,
-                    )
+                    ),
                 ],
             )
         )

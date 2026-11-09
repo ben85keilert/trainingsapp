@@ -45,6 +45,7 @@ from typing import Any
 from trainingsapp.core.ablauf import ablauf_pruefen
 from trainingsapp.core.bedingung import bedingung_pruefen
 from trainingsapp.core.kurse import Kapitel, Kurs, PlanVorlage, VorlageItem
+from trainingsapp.core.links import erlaubt as links_erlaubt
 from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.core.pakete import (
     FELDNAMEN,
@@ -268,11 +269,37 @@ def pruefen(
                 f_bed, h_bed = bedingung_pruefen(pe["bedingung"], im_plan=True)
                 fehler.extend(f"{wo_pe}: bedingung: {x}" for x in f_bed)
                 hinweise.extend(f"{wo_pe}: bedingung: {x}" for x in h_bed)
+            hinweise.extend(f"{wo_pe}: {x}" for x in _planmedien_pruefen(pe.get("medien")))
     if inhalt.paket.version is None:
         hinweise.append("Kopf ohne `version` — ohne sie erkennt kein Gerät ein Update")
     for treffer in wortliste_pruefen(roh, wortliste):
         (fehler if streng else hinweise).append(f"Wortliste: {treffer}")
     return fehler, hinweise
+
+
+def _planmedien_pruefen(roh: Any) -> list[str]:
+    """Hinweise zu ``medien`` einer Planübung (U2): was die App beim Import still weglässt —
+    keine Liste, ein Link ohne https, eine Datei vom Gerät, ein Ton.
+
+    >>> _planmedien_pruefen([{"uri": "https://x.org/v"}, {"uri": "http://x.org/a"}])
+    ['medien: „http://x.org/a“ fällt weg (nur https-Adressen)']
+    >>> _planmedien_pruefen("x"), _planmedien_pruefen(None)
+    (['medien: keine Liste — fällt weg'], [])
+    """
+    if roh is None:
+        return []
+    if not isinstance(roh, list):
+        return ["medien: keine Liste — fällt weg"]
+    out: list[str] = []
+    for e in roh:
+        uri = str(e.get("uri") or "").strip() if isinstance(e, dict) else ""
+        if not isinstance(e, dict) or not uri:
+            out.append("medien: ein Eintrag ohne Adresse fällt weg")
+        elif e.get("source") == "local" or e.get("kind") == "audio":
+            out.append(f"medien: „{uri}“ fällt weg (keine Datei vom Gerät, kein Ton)")
+        elif not links_erlaubt(uri):
+            out.append(f"medien: „{uri}“ fällt weg (nur https-Adressen)")
+    return out
 
 
 def quelle_pruefen(

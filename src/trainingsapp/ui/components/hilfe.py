@@ -425,6 +425,19 @@ Timer.
 **Wischen** wechselt zwischen Zeiten und Klängen.
 """
 
+ANWEISUNGEN_MD = """\
+**Anweisungen** gelten nur in diesem Plan: Abschnitte mit Name und Inhalt (etwa „Im Plan“,
+„Für dich“) und Links zu Videos, Texten oder PDFs. Sie kommen aus dem Paketplan oder du
+schreibst sie selbst. Die Beschreibung der Übung bleibt, wie sie ist — sie steht im „i“.
+
+Beim Üben zeigt ein Buch-Symbol neben dem „i“ (und im Fokus), dass es **Material** gibt.
+**Solange du es ansiehst, steht die Uhr**; „Uhr weiter“ lässt sie von Hand weiterlaufen, beim
+Schließen läuft sie von selbst weiter. Die Messung läuft immer weiter.
+
+Kommt der Plan aus einem Paket, bekommt eine Planübung, die du nicht geändert hast, mit dem
+nächsten Update die neue Fassung; deine eigene bleibt.
+"""
+
 THEMEN: dict[str, tuple[str, str, str]] = {
     "ablauf": ("Ablauf", ABLAUF_MD, "Der Reihe nach oder mit Abzweigen"),
     "timer_editor": ("Timer bearbeiten", TIMER_EDITOR_MD, "Zeiten, Klänge, Teile, Runden"),
@@ -433,6 +446,7 @@ THEMEN: dict[str, tuple[str, str, str]] = {
     "plan": ("Üben im Plan", PLAN_MD, "Knöpfe und Eingabe"),
     "varianten": ("Varianten", VARIANTEN_MD, "Was sind Varianten?"),
     "parameter": ("Parameter, Chips und Ziel", PARAMETER_MD, "Parameter, Chips und Ziel"),
+    "anweisungen": ("Anweisungen im Plan", ANWEISUNGEN_MD, "Anweisungen und Material"),
     "uhr": ("Uhr", UHR_MD, "Uhr: Stoppuhr, Timer, zählt, Zeit stellen"),
     "takt": ("Takt", TAKT_MD, "Takt, Tempo und „Takt zählt“"),
     "beschleunigung": (

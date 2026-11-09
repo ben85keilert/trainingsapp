@@ -473,6 +473,7 @@ def main(page: ft.Page) -> None:
     # Dienste sind Controls ohne Darstellung; sie müssen an der Seite hängen.
     browser = ft.UrlLauncher()
     page.services.append(browser)
+    state.browser = browser
     haptik = ft.HapticFeedback()  # Vibration beim Abschnittswechsel des Timers
     page.services.append(haptik)
     state.haptik = haptik

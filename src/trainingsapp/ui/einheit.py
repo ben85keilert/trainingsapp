@@ -849,6 +849,55 @@ def anhalten_oder_weiter(page: Any, state: Any) -> None:
     melden(state)
 
 
+def _uhr_der_uebung(e: Einheitslauf, uebung_id: str, item_id: str | None) -> bool:
+    """Gehört die Uhr der Einheit zu dieser Übung — als Übung für sich, als Planübung oder als
+    laufender Schritt eines Workouts?"""
+    teil = e.teil("plan")
+    if isinstance(teil, UebungBaustein):
+        k = teil.kontext
+        return k.uebung_id == uebung_id and (item_id is None or k.item_id in (None, item_id))
+    if isinstance(teil, PlanAblaufBaustein):
+        s = teil.schritt
+        return s.uebung_id == uebung_id and (item_id is None or s.item_id == item_id)
+    return False
+
+
+def _beobachter_rufen(state: Any) -> None:
+    for beobachter in list(getattr(state, "timer_beobachter", {}).values()):
+        with contextlib.suppress(Exception):
+            beobachter()
+
+
+def uhr_fuer_material_anhalten(state: Any, uebung_id: str, item_id: str | None) -> TimerLauf | None:
+    """Material ansehen (U2, Ben 9.11.2026, F6: „solange das Material angesehen wird, pausiert
+    die Uhr“): Läuft die Uhr dieser Übung, hält sie an — der Lauf, wenn sie lief, sonst
+    ``None``. Die HRV läuft weiter (wie bei ⏸)."""
+    e = laeuft(state)
+    if e is None or (teil := e.timer) is None or not teil.lauf.laeuft:
+        return None
+    if not _uhr_der_uebung(e, uebung_id, item_id):
+        return None
+    teil.lauf.pause()
+    melden(state)
+    _beobachter_rufen(state)
+    return teil.lauf
+
+
+def uhr_fortsetzen(page: Any, state: Any, lauf: TimerLauf) -> bool:
+    """Die für das Material angehaltene Uhr läuft weiter — nur derselbe Lauf, nur wenn er noch
+    steht (nicht fertig, nicht abgebrochen, nicht schon wieder gestartet)."""
+    e = laeuft(state)
+    if e is None or (teil := e.timer) is None or teil.lauf is not lauf:
+        return False
+    if lauf.laeuft or lauf.fertig or lauf.abgebrochen:
+        return False
+    lauf.fortsetzen()
+    _timer_ticken(page, state, e)
+    melden(state)
+    _beobachter_rufen(state)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Wohin ein Tipp auf einen Teil führt
 # ---------------------------------------------------------------------------

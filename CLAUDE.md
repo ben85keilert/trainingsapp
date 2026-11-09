@@ -178,7 +178,15 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   (Ben, 16.10.2026: Drei-Wege-Abgleich je Feld gegen den Paketstand,
   `core/pakete.zusammenfuehren`; seit 9.11.2026 die Beschreibung **je Abschnitt** und Medien
   **je Eintrag**, `core/abgleich.py`, mit Hinweisen und „Mit dem Paket vergleichen“ —
-  `docs/plan_paketinhalte.md`, Stufen U1–U7); eigene Übungen ändert er nie. Paketmanager: Jede
+  `docs/plan_paketinhalte.md`, Stufen U1–U7); eigene Übungen ändert er nie. **Paketpläne je
+  Planübung** (U2, 9.11.2026): `core.pakete.plan_abgleichen` (Planübung = Übung + wievieltes
+  Vorkommen, IDs bleiben, mit Ablauf/Zweigen und verschobenen Stellen bleibt die eigene Fassung),
+  „Neu laden …“ im Plan-Editor (`components/neu_laden.py`: Fehlendes zurückholen · Auf
+  Paketstand bzw. Wie im Kapitel), „Wieder anlegen“ im Paketmanager, „Kurs neu laden …“;
+  **Anweisungen je Planübung** (`plan_item.description`/`media_json`, Migration 046, Paketfeld
+  `beschreibung`/`medien`) in „Im Plan einstellen“ und im „i“, beim Üben der Knopf **Material**
+  (`core/material.py`, `components/material.py`) — **solange das Blatt offen ist, steht die Uhr
+  dieser Übung** (`einheit_ui.uhr_fuer_material_anhalten`), Schließen lässt sie weiterlaufen. Paketmanager: Jede
   Paketübung trägt ihren Paketstand (`package_standard_json`) für „Auf Paketstand setzen“;
   Entfernen legt die Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück;
   **Deaktivieren** (Migration 017) versteckt alles, ohne zu löschen; was beim Update aus

@@ -48,6 +48,7 @@ from .models import (
     PlanItem,
     SessionEntry,
     jetzt,
+    medium_aus_dict,
     new_id,
 )
 from .result_spec import FieldSpec, FieldType, vorrat_feld
@@ -155,6 +156,10 @@ class VorlageItem:
     bedingung: Weiterbedingung | None = None
     #: Beiname im Ablaufbild (G4, Paketfeld ``beiname`` je Planübung) — leer = keiner
     beiname: str = ""
+    #: Eigene Inhalte der Planübung (U2, Paketfelder ``beschreibung`` und ``medien`` je
+    #: Planübung, `docs/plan_paketinhalte.md` §9): Abschnitte und Medien für diesen Plan
+    beschreibung: str = ""
+    medien: list[Media] = field(default_factory=list)
 
     @classmethod
     def aus_planitem(cls, item: PlanItem) -> VorlageItem:
@@ -168,6 +173,8 @@ class VorlageItem:
             takt=item.takt,
             bedingung=None if item.bedingung.leer else item.bedingung,
             beiname=item.beiname,
+            beschreibung=item.description,
+            medien=[m for m in item.media if m.source != MediaSource.LOCAL],
         )
 
     def als_planitem(self, plan_id: str, order: int) -> PlanItem:
@@ -192,6 +199,8 @@ class VorlageItem:
             takt=self.takt,
             bedingung=self.bedingung if self.bedingung is not None else Weiterbedingung(),
             beiname=self.beiname,
+            description=self.beschreibung,
+            media=list(self.medien),
         )
 
     def to_dict(self, uebung: str | None = None) -> dict[str, Any]:
@@ -215,6 +224,10 @@ class VorlageItem:
             d["bedingung"] = self.bedingung.als_dict()
         if self.beiname:
             d["beiname"] = self.beiname
+        if self.beschreibung:
+            d["beschreibung"] = self.beschreibung
+        if self.medien:
+            d["medien"] = [m.als_dict() for m in self.medien]
         return d
 
     @classmethod
@@ -242,7 +255,27 @@ class VorlageItem:
             takt=_takt_lesen(takt),
             bedingung=Weiterbedingung.aus_dict(bed) if isinstance(bed, Mapping) and bed else None,
             beiname=str(e.get("beiname") or "").strip(),
+            beschreibung=str(e.get("beschreibung") or "").strip(),
+            medien=_medien_lesen(e.get("medien")),
         )
+
+
+def _medien_lesen(roh: Any) -> list[Media]:
+    """Medien einer Planübung aus dem Paket — nur, was die App öffnen darf (`links.erlaubt`),
+    nie Dateien vom Ursprungsgerät; Unbrauchbares fällt still weg (wie `core.pakete._medium`).
+
+    >>> [m.uri for m in _medien_lesen([{"uri": "https://x.org/v"}, {"uri": "intent://x"}])]
+    ['https://x.org/v']
+    """
+    out: list[Media] = []
+    for e in roh if isinstance(roh, list) else []:
+        m = medium_aus_dict(dict(e) if isinstance(e, Mapping) else None)
+        if m is None or m.source == MediaSource.LOCAL or not links.erlaubt(m.uri):
+            continue
+        if m.kind == MediaKind.AUDIO:
+            continue
+        out.append(m)
+    return out
 
 
 def verweise_als_position(items: list[VorlageItem], ids: Sequence[str]) -> list[VorlageItem]:
@@ -663,10 +696,35 @@ def _feld(bedingung: Bedingung, uebung: Exercise | None) -> FieldSpec:
 # ---------------------------------------------------------------------------
 
 
+def ids_uebernehmen(items: Sequence[PlanItem], alt: Plan | None) -> None:
+    """Die neuen Planübungen bekommen die IDs der bisherigen — je Übung in der Reihenfolge ihres
+    Vorkommens (U2: Einträge und Wege zeigen auf die ID, ein Update darf sie nicht wechseln).
+
+    >>> alt = Plan(items=[PlanItem(id="p1", exercise_id="a"), PlanItem(id="p2", exercise_id="a")])
+    >>> neu = [PlanItem(exercise_id="b"), PlanItem(exercise_id="a"), PlanItem(exercise_id="a")]
+    >>> ids_uebernehmen(neu, alt)
+    >>> [i.id for i in neu[1:]]
+    ['p1', 'p2']
+    """
+    if alt is None:
+        return
+    frei: dict[str, list[str]] = {}
+    for vorher in sorted(alt.items, key=lambda i: i.order):
+        frei.setdefault(vorher.exercise_id, []).append(vorher.id)
+    for planuebung in items:
+        if ids := frei.get(planuebung.exercise_id):
+            planuebung.id = ids.pop(0)
+
+
 def plan_aus_vorlage(
-    vorlage: PlanVorlage, kapitel: Kapitel, subject_id: str, vorhandene: Iterable[str]
+    vorlage: PlanVorlage,
+    kapitel: Kapitel,
+    subject_id: str,
+    vorhandene: Iterable[str],
+    alt: Plan | None = None,
 ) -> Plan:
-    """Der echte Plan zu einer Vorlage — nur mit Übungen, die es hier gibt.
+    """Der echte Plan zu einer Vorlage — nur mit Übungen, die es hier gibt. ``alt``: der
+    bisherige Plan („Kapitelplan neu laden“) — seine Planübungen behalten ihre IDs.
 
     >>> v = PlanVorlage("Atmung", [0, 2, 4], [VorlageItem("a"), VorlageItem("fehlt")])
     >>> p = plan_aus_vorlage(v, Kapitel(id="k1"), "s1", {"a"})
@@ -685,6 +743,7 @@ def plan_aus_vorlage(
         if item.exercise_id in da:
             plan.items.append(item.als_planitem(plan.id, len(plan.items)))
             positionen.append(pos)
+    ids_uebernehmen(plan.items, alt)
     verweise_aufloesen(plan.items, positionen)
     ablauf_aufloesen(plan, vorlage, positionen)
     return plan
@@ -783,6 +842,7 @@ __all__ = [
     "begonnen",
     "fehlt_text",
     "fortschritt_text",
+    "ids_uebernehmen",
     "medien_from_list",
     "medien_to_list",
     "naechstes",

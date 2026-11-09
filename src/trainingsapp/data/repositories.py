@@ -54,6 +54,7 @@ from ..core.models import (
     iso_utc,
     jetzt,
     lokaler_tag,
+    medium_aus_dict,
     new_id,
     tag_name_pruefen,
     tagesgrenzen,
@@ -1090,14 +1091,43 @@ class PlanRepo:
 
     # -- Lesen -------------------------------------------------------------
 
-    def laden(self, plan_id: str, mit_geloeschten: bool = False) -> Plan | None:
+    def laden(
+        self, plan_id: str, mit_geloeschten: bool = False, mit_verborgenen: bool = False
+    ) -> Plan | None:
+        """``mit_verborgenen``: auch Planübungen, deren Übung im Papierkorb oder in einem
+        deaktivierten Paket liegt — wer den Plan neu schreibt, behält sie so."""
         sql = "SELECT * FROM plan WHERE id = ?"
         if not mit_geloeschten:
             sql += " AND deleted_at IS NULL"
         r = self.con.execute(sql, (plan_id,)).fetchone()
         if r is None:
             return None
-        return self._mit_items([self._zeile(r)])[0]
+        return self._mit_items([self._zeile(r)], verborgene=mit_verborgenen)[0]
+
+    def wiederbeleben(self, plan_id: str) -> None:
+        """Aus Papierkorb oder Grabstein zurück (U2: „Plan wieder anlegen“) — die Zeile gilt
+        danach als lebendig; den Inhalt schreibt der Aufrufer (`speichern`)."""
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE plan SET deleted_at = NULL, purged_at = NULL, updated_at = ? WHERE id = ?",
+                (jetzt().isoformat(), plan_id),
+            )
+            self.con.execute(
+                "DELETE FROM tombstone WHERE entity = 'plan' AND entity_id = ?", (plan_id,)
+            )
+
+    def paketstand_setzen(self, plan_id: str, standard: dict[str, Any] | None) -> None:
+        """Nur den Paketstand eines Plans (U2: das Update brachte für die eigene Fassung nichts
+        Neues — der Stand wird trotzdem der neue)."""
+        self.con.execute(
+            "UPDATE plan SET package_standard_json = ? WHERE id = ?",
+            (
+                json.dumps(standard, ensure_ascii=False, sort_keys=True)
+                if standard is not None
+                else None,
+                plan_id,
+            ),
+        )
 
     def des_pakets(self, paket_id: str, subject_id: str | None = None) -> list[Plan]:
         """Die Pläne eines Pakets — aller Profile oder eines; auch deaktivierte, aber nicht
@@ -1222,8 +1252,9 @@ class PlanRepo:
             self._beruehrt(zeile["plan_id"])
 
     def item_speichern(self, item: PlanItem) -> None:
-        """Ziel, Parameter, Chips, Timer, Sensor, Takt und Bedingung einer Planübung auf einmal
-        („Im Plan einstellen“, „Alles wie die Übung“ — P79)."""
+        """Ziel, Parameter, Chips, Timer, Sensor, Takt, Bedingung und Anweisungen (Abschnitte und
+        Links, U2) einer Planübung auf einmal („Im Plan einstellen“, „Alles wie die Übung“ —
+        P79)."""
         with transaktion(self.con):
             self.ziel_setzen(item.id, item.target)
             self.eingabe_setzen(item.id, item.input_mode, item.quick, item.felder)
@@ -1231,7 +1262,15 @@ class PlanRepo:
             self.sensor_takt_setzen(item.id, item.acc, item.takt)
             self.bedingung_setzen(item.id, item.bedingung)
             self.con.execute(
-                "UPDATE plan_item SET beiname = ? WHERE id = ?", (item.beiname.strip(), item.id)
+                "UPDATE plan_item SET beiname = ?, description = ?, media_json = ? WHERE id = ?",
+                (
+                    item.beiname.strip(),
+                    item.description.strip(),
+                    json.dumps([m.als_dict() for m in item.media], ensure_ascii=False)
+                    if item.media
+                    else None,
+                    item.id,
+                ),
             )
 
     def verwendungen(
@@ -1270,7 +1309,8 @@ class PlanRepo:
         self.con.execute(
             "INSERT INTO plan_item (id, plan_id, exercise_id, sort_order, target_json, note, "
             "input_mode, quick_json, fields_json, timer_json, acc_json, takt_json, "
-            "bedingung_json, beiname) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "bedingung_json, beiname, description, media_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 item.id,
                 item.plan_id,
@@ -1286,22 +1326,31 @@ class PlanRepo:
                 _takt_json(item.takt),
                 _bedingung_json(item.bedingung),
                 item.beiname.strip(),
+                item.description.strip(),
+                json.dumps([m.als_dict() for m in item.media], ensure_ascii=False)
+                if item.media
+                else None,
             ),
         )
 
-    def _mit_items(self, plaene: list[Plan]) -> list[Plan]:
+    def _mit_items(self, plaene: list[Plan], verborgene: bool = False) -> list[Plan]:
         if not plaene:
             return plaene
         ids = [p.id for p in plaene]
         platzhalter = ",".join("?" * len(ids))
         nach_plan: dict[str, list[PlanItem]] = defaultdict(list)
         # Übungen im Papierkorb und aus deaktivierten Paketen blenden sich aus dem
-        # Plan aus; holt man sie zurück, stehen sie wieder an ihrem Platz.
+        # Plan aus; holt man sie zurück, stehen sie wieder an ihrem Platz. ``verborgene``:
+        # auch diese (U2: ein Paketplan-Update darf sie nicht verlieren).
+        bedingung = (
+            ""
+            if verborgene
+            else "AND e.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM package pk "
+            "WHERE pk.id = e.package_id AND pk.disabled_at IS NOT NULL) "
+        )
         for r in self.con.execute(
             f"SELECT pi.* FROM plan_item pi JOIN exercise e ON e.id = pi.exercise_id "
-            f"WHERE pi.plan_id IN ({platzhalter}) AND e.deleted_at IS NULL "
-            "AND NOT EXISTS (SELECT 1 FROM package pk WHERE pk.id = e.package_id "
-            "AND pk.disabled_at IS NOT NULL) "
+            f"WHERE pi.plan_id IN ({platzhalter}) {bedingung}"
             "ORDER BY pi.plan_id, pi.sort_order",
             ids,
         ):
@@ -1327,6 +1376,8 @@ class PlanRepo:
             takt=_takt_lesen(r["takt_json"]),
             bedingung=Bedingung.aus_dict(_tabelle_lesen(r["bedingung_json"])),
             beiname=r["beiname"] or "",
+            description=r["description"] or "",
+            media=[m for roh in _json_lesen(r["media_json"], []) if (m := medium_aus_dict(roh))],
         )
 
     @staticmethod

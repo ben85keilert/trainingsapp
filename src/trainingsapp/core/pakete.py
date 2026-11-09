@@ -41,14 +41,14 @@ import json
 import math
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from . import ablauf as ab
 from . import links
-from .abgleich import Hinweis, abgleichen
+from .abgleich import Hinweis, abgleichen, liste_abgleichen
 from .kurse import (
     BEDINGUNGEN,
     FREISCHALTUNGEN,
@@ -197,6 +197,88 @@ def plan_id(paket: str, key: str, subject_id: str) -> str:
 def plan_stand(p: PaketPlan) -> dict[str, Any]:
     """Der Paketstand eines Plans — womit der Import Geändertes erkennt (wie `kurs_stand`)."""
     return json.loads(json.dumps(p.to_dict(), ensure_ascii=False, sort_keys=True))
+
+
+#: Felder eines Paketplans, die je Feld abgeglichen werden (U2); die Planübungen gehen je Eintrag
+PLANFELDER: tuple[str, ...] = (
+    "name",
+    "wochentage",
+    "beschreibung",
+    "timer",
+    "weiter_automatisch",
+    "pause_ohne_timer",
+    "ablauf",
+)
+
+
+def planuebungen_mit_schluessel(eintraege: Any) -> list[tuple[str, dict[str, Any]]]:
+    """Die Planübungen eines Paketplans mit Schlüssel — die Übung und ihr wievieltes Mal im
+    Plan („id#2“): so findet ein Update dieselbe Planübung wieder.
+
+    >>> [k for k, _ in planuebungen_mit_schluessel([{"uebung": "a"}, {"uebung": "a"}])]
+    ['a#1', 'a#2']
+    """
+    gesehen: dict[str, int] = {}
+    out: list[tuple[str, dict[str, Any]]] = []
+    for e in eintraege if isinstance(eintraege, list) else []:
+        if not isinstance(e, Mapping):
+            continue
+        uebung = str(e.get("uebung") or "")
+        n = gesehen.get(uebung, 0) + 1
+        gesehen[uebung] = n
+        out.append((f"{uebung}#{n}", dict(e)))
+    return out
+
+
+def _verweise(eintraege: Iterable[Mapping[str, Any]]) -> bool:
+    """Zeigt eine Planübung auf eine Stelle („#2“ — Zweig einer Bedingung)?"""
+    for e in eintraege:
+        b = e.get("bedingung")
+        if isinstance(b, Mapping) and (b.get("dann") or b.get("sonst")):
+            return True
+    return False
+
+
+def plan_abgleichen(
+    basis: Mapping[str, Any], nutzer: Mapping[str, Any], soll: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Ein Paketplan je Feld und **je Planübung** (U2, Ben 9.11.2026, `docs/plan_paketinhalte.md`
+    §9) — Stände wie `plan_stand`. Was die Person nicht angefasst hat, bekommt das Update; neue
+    Planübungen kommen dazu; was sie geändert oder herausgenommen hat, bleibt so. Mit leerem
+    ``basis`` kommt zurück, was fehlt („Plan neu laden“ → „Fehlendes zurückholen“).
+
+    >>> alt = {"name": "Knie", "uebungen": [{"uebung": "a"}, {"uebung": "b"}]}
+    >>> mein = {"name": "Mein Knie", "uebungen": [{"uebung": "a", "ziel": {"reps": 12}}]}
+    >>> neu = {"name": "Knie 2", "uebungen": [{"uebung": "a"}, {"uebung": "b"}, {"uebung": "c"}]}
+    >>> g = plan_abgleichen(alt, mein, neu)
+    >>> g["name"], [e["uebung"] for e in g["uebungen"]], g["uebungen"][0]["ziel"]
+    ('Mein Knie', ['a', 'c'], {'reps': 12})
+    >>> [e["uebung"] for e in plan_abgleichen({}, mein, neu)["uebungen"]]
+    ['a', 'b', 'c']
+
+    Zeigt der Plan Stellen an (gezeichneter Ablauf, Zweige) und verschieben sich die
+    Planübungen, bleibt die eigene Fassung ganz — sonst zeigten die Wege auf andere Übungen.
+    """
+    ergebnis: dict[str, Any] = dict(soll)
+    for feld in PLANFELDER:
+        b, n, s = basis.get(feld), nutzer.get(feld), soll.get(feld)
+        wert = n if n != b else s
+        if wert is None:
+            ergebnis.pop(feld, None)
+        else:
+            ergebnis[feld] = wert
+    teile, _ = liste_abgleichen(
+        planuebungen_mit_schluessel(basis.get("uebungen")),
+        planuebungen_mit_schluessel(nutzer.get("uebungen")),
+        planuebungen_mit_schluessel(soll.get("uebungen")),
+        lambda a, b: a == b,
+    )
+    uebungen = [e for _, e in teile]
+    ergebnis["uebungen"] = uebungen
+    stellen = bool(ergebnis.get("ablauf")) or _verweise(uebungen)
+    if stellen and uebungen not in (nutzer.get("uebungen"), soll.get("uebungen")):
+        return dict(nutzer)
+    return ergebnis
 
 
 def paketplan_aus(plan: Plan, key: str | None = None) -> PaketPlan:
@@ -1076,6 +1158,7 @@ __all__ = [
     "FORMAT_VERSION",
     "GRUNDAUSSTATTUNG",
     "NAMENSRAUM",
+    "PLANFELDER",
     "Paket",
     "PaketFehler",
     "PaketPlan",
@@ -1093,8 +1176,10 @@ __all__ = [
     "paket_json",
     "paket_lesen",
     "paketplan_aus",
+    "plan_abgleichen",
     "plan_id",
     "plan_stand",
+    "planuebungen_mit_schluessel",
     "stand",
     "stand_tag_nachziehen",
     "uebung_id",

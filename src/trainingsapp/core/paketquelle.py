@@ -25,17 +25,19 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Final
 
 from .models import jetzt
 from .netz import OEFFNER, verschluesselt
-from .paketdatei import CodeNoetig, paket_oeffnen
+from .paketdatei import GELADEN, CodeNoetig, paket_oeffnen, sha256_datei
 from .pakete import (
     FORMAT,
     GRUNDAUSSTATTUNG,
@@ -55,6 +57,9 @@ INDEX_VERSION: Final[int] = 1
 #: niemand eigene Quellen einträgt. Übergang, bis die Website der App steht: Zieht die
 #: Quelle um, leitet die alte Adresse per 301 weiter (Katalog A9).
 QUELLE_VORGABE: Final[str] = "https://trainingsapp.osteo-ebert.de/pakete/index.json"
+#: Die Standdatei neben einer Paketdatei (`stand_url`) — Kennung und Endung
+STAND_FORMAT: Final[str] = "trainingsapp-paketstand"
+STAND_ENDUNG: Final[str] = ".stand.json"
 #: Größer ist kein Index
 MAX_INDEX_BYTES: Final[int] = 1_000_000
 _ZEITLIMIT_S: Final[float] = 10.0
@@ -373,6 +378,91 @@ def updates_finden(
 INDEX, DATEI = "index", "datei"
 
 
+# -- Standdatei: die Version eines Datei-Links, ohne die Datei zu laden ------------------------
+#
+# Ein Paket aus einem Datei-Link hat keinen Index. Um seine Version zu erfahren, lud die
+# Prüfung bisher bei jedem Start die ganze Datei — bei einer ZIP mit Videos bis 300 MB, bei
+# einem privaten Paket samt Entschlüsseln (Durchsicht 10.11.2026). Darum liegt neben der
+# Paketdatei eine kleine Standdatei: ``…/paket.zip`` → ``…/paket.stand.json`` mit Version,
+# Prüfsumme und Größe. Sie nennt weder Name noch Inhalt (bei privaten Paketen liegt sie
+# unverschlüsselt im Zufallsordner). Geladen wird die Paketdatei erst für ein Update — und
+# dann gegen die Prüfsumme der Standdatei geprüft (`paket_laden`).
+
+
+def stand_url(url: str) -> str:
+    """Wo die Standdatei zu einer Paketdatei liegt — gleiche Adresse, Endung ``.stand.json``.
+
+    >>> stand_url("https://x.org/pakete/p/7Hq3/paket.zip?v=2")
+    'https://x.org/pakete/p/7Hq3/paket.stand.json'
+    >>> stand_url("https://x.org/knie.json")
+    'https://x.org/knie.stand.json'
+    """
+    teile = urllib.parse.urlsplit(url)
+    pfad = teile.path
+    kopf, _, name = pfad.rpartition("/")
+    stamm = name.rsplit(".", 1)[0] if "." in name else name
+    return urllib.parse.urlunsplit(
+        (teile.scheme, teile.netloc, f"{kopf}/{stamm}{STAND_ENDUNG}", "", "")
+    )
+
+
+def stand_json(version: int | None, sha256: str, groesse: int) -> bytes:
+    """Die Standdatei, wie `trainingsapp-paket bauen` sie schreibt.
+
+    >>> json.loads(stand_json(10203, "0" * 64, 5))["paket"]["version"]
+    10203
+    """
+    roh = {
+        "format": STAND_FORMAT,
+        "version": 1,
+        "paket": {"version": version, "sha256": sha256, "bytes": groesse},
+    }
+    return (json.dumps(roh, indent=2) + "\n").encode("utf-8")
+
+
+def stand_lesen(daten: bytes, paket: Paket) -> IndexEintrag | None:
+    """Die Standdatei eines installierten Pakets als Eintrag wie aus einem Index — ``None``,
+    wenn es keine (lesbare) Standdatei ist.
+
+    >>> p = Paket(id="p1", name="Knie", version=1, quelle="https://x/k.zip", quelle_art=DATEI)
+    >>> e = stand_lesen(stand_json(2, "a" * 64, 9), p)
+    >>> e.id, e.version, e.url, e.bytes
+    ('p1', 2, 'https://x/k.zip', 9)
+    >>> stand_lesen(b"<html>", p) is None
+    True
+    """
+    try:
+        roh = json.loads(daten) if len(daten) <= MAX_INDEX_BYTES else None
+    except ValueError:
+        return None
+    if not isinstance(roh, dict) or roh.get("format") != STAND_FORMAT:
+        return None
+    e = roh.get("paket")
+    if not isinstance(e, dict) or not paket.quelle:
+        return None
+    version = version_zahl(e.get("version")) if e.get("version") is not None else None
+    sha256 = str(e.get("sha256") or "").lower()
+    if version is None or not _SHA256.fullmatch(sha256):
+        return None
+    return IndexEintrag(
+        id=paket.id,
+        name=paket.name,
+        version=version,
+        url=paket.quelle,
+        sha256=sha256,
+        bytes=int(e["bytes"]) if _ganzzahl(e.get("bytes")) else 0,
+        quelle_url=paket.quelle,
+    )
+
+
+def _stand(paket: Paket, laden: Callable[[str], bytes]) -> IndexEintrag | None:
+    """Die Standdatei holen — fehlt sie (anderer Server, ältere Veröffentlichung), ``None``."""
+    try:
+        return stand_lesen(_holen(stand_url(paket.quelle or ""), laden), paket)
+    except QuellenFehler:
+        return None
+
+
 def _oeffnen(daten: bytes, url: str, code: str | None) -> Paketinhalt:
     try:
         return paket_oeffnen(daten, code=code)
@@ -382,24 +472,99 @@ def _oeffnen(daten: bytes, url: str, code: str | None) -> Paketinhalt:
         raise QuellenFehler(str(e)) from e
 
 
+_ENDUNG = re.compile(r"\.[a-z0-9]{1,5}")
+
+
+def _in_datei(url: str, laden: Callable[[str], bytes], arbeit: Path) -> Path:
+    """Eine große Paketdatei (ZIP bis `MAX_ZIP_BYTES`) nach ``arbeit`` laden — Block für Block,
+    nie ganz im Arbeitsspeicher (K33). Ein übergebener Lader (Tests) liefert Bytes; sie werden
+    geschrieben. Wirft `QuellenFehler`; dann bleibt keine Datei."""
+    endung = Path(urllib.parse.urlsplit(url).path).suffix.lower()
+    ziel = arbeit / f"{GELADEN}{secrets.token_hex(6)}{endung if _ENDUNG.fullmatch(endung) else ''}"
+    zu_gross = QuellenFehler("Die Paketdatei ist zu groß.")
+    try:
+        arbeit.mkdir(parents=True, exist_ok=True)
+        if laden is _laden:
+            anfrage = urllib.request.Request(url, headers={"User-Agent": "trainingsapp-pakete"})
+            menge = 0
+            with OEFFNER.open(anfrage, timeout=_ZEITLIMIT_S) as antwort, ziel.open("wb") as aus:
+                while block := antwort.read(1 << 20):
+                    menge += len(block)
+                    if menge > MAX_ZIP_BYTES + 1024:
+                        raise zu_gross
+                    aus.write(block)
+        else:
+            daten = laden(url)
+            if len(daten) > MAX_ZIP_BYTES + 1024:
+                raise zu_gross
+            ziel.write_bytes(daten)
+    except urllib.error.HTTPError as e:
+        ziel.unlink(missing_ok=True)
+        raise QuellenFehler(f"HTTP {e.code}") from e
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+        ziel.unlink(missing_ok=True)
+        raise QuellenFehler(str(getattr(e, "reason", None) or e)) from e
+    except BaseException:
+        ziel.unlink(missing_ok=True)
+        raise
+    return ziel
+
+
+def _oeffnen_datei(pfad: Path, url: str, code: str | None, arbeit: Path) -> Paketinhalt:
+    """Die geladene Datei öffnen; sie gehört danach zu den Arbeitsdateien des Inhalts (er liest
+    seine Medien aus ihr) — bei einem privaten Paket stattdessen der Klartext daneben, das
+    Verschlüsselte ist dann schon weg. Bei einem Fehler bleibt nichts liegen."""
+    try:
+        name = Path(urllib.parse.urlsplit(url).path).stem
+        inhalt = paket_oeffnen(pfad, name, code=code, arbeit=arbeit)
+    except CodeNoetig:
+        pfad.unlink(missing_ok=True)
+        raise ZugangNoetig(url) from None
+    except PaketFehler as e:
+        pfad.unlink(missing_ok=True)
+        raise QuellenFehler(str(e)) from e
+    except BaseException:
+        pfad.unlink(missing_ok=True)
+        raise
+    if inhalt.code is not None:
+        pfad.unlink(missing_ok=True)
+    else:
+        inhalt.arbeitsdateien.append(pfad)
+    return inhalt
+
+
 def datei_eintrag(
-    url: str, laden: Callable[[str], bytes] = _laden, code: str | None = None
+    url: str,
+    laden: Callable[[str], bytes] = _laden,
+    code: str | None = None,
+    arbeit: Path | None = None,
 ) -> tuple[IndexEintrag, Paketinhalt]:
     """Ein direkter Link auf eine Paketdatei als Eintrag wie aus einem Index (Ben,
     28.10.2026: „eine URL importieren, die updatefähig ist“) — Prüfsumme der geladenen
-    Datei, ``quelle_url`` = der Link selbst. Wirft `QuellenFehler`."""
+    Datei, ``quelle_url`` = der Link selbst. Mit ``arbeit`` geht eine ZIP über eine Datei dort
+    statt durch den Arbeitsspeicher (`Paketinhalt.raeumen` löscht sie). Wirft `QuellenFehler`."""
     gross = ist_zip(url)
-    daten = _holen(url, _holer(url, laden, gross))
-    if len(daten) > (MAX_ZIP_BYTES if gross else MAX_PAKET_BYTES) + 1024:
-        raise QuellenFehler("Die Paketdatei ist zu groß.")
-    inhalt = _oeffnen(daten, url, code)
+    if gross and arbeit is not None:
+        pfad = _in_datei(url, laden, arbeit)
+        try:
+            sha256, groesse = sha256_datei(pfad), pfad.stat().st_size
+        except OSError as e:
+            pfad.unlink(missing_ok=True)
+            raise QuellenFehler(str(e)) from e
+        inhalt = _oeffnen_datei(pfad, url, code, arbeit)
+    else:
+        daten = _holen(url, _holer(url, laden, gross))
+        if len(daten) > (MAX_ZIP_BYTES if gross else MAX_PAKET_BYTES) + 1024:
+            raise QuellenFehler("Die Paketdatei ist zu groß.")
+        inhalt = _oeffnen(daten, url, code)
+        sha256, groesse = hashlib.sha256(daten).hexdigest(), len(daten)
     eintrag = IndexEintrag(
         id=inhalt.paket.id,
         name=inhalt.paket.name,
         version=inhalt.paket.version,
         url=url,
-        sha256=hashlib.sha256(daten).hexdigest(),
-        bytes=len(daten),
+        sha256=sha256,
+        bytes=groesse,
         quelle_url=url,
         beschreibung=inhalt.paket.beschreibung,
         uebungen=len(inhalt.uebungen),
@@ -410,7 +575,10 @@ def datei_eintrag(
 
 
 def link_lesen(
-    url: str, laden: Callable[[str], bytes] = _laden, code: str | None = None
+    url: str,
+    laden: Callable[[str], bytes] = _laden,
+    code: str | None = None,
+    arbeit: Path | None = None,
 ) -> tuple[str, Any]:
     """Was unter einem Link liegt: ``("index", (Name, Einträge))`` für einen Paketindex,
     ``("paket", (Eintrag, Inhalt))`` für eine Paketdatei — sonst `QuellenFehler`.
@@ -431,7 +599,7 @@ def link_lesen(
     if (fehler := url_pruefen(url)) is not None:
         raise QuellenFehler(fehler)
     if ist_zip(url):  # ein Paket mit Dateien (U3) — kein Index
-        return "paket", datei_eintrag(url, laden, code)
+        return "paket", datei_eintrag(url, laden, code, arbeit)
     daten = _holen(url, laden)
     if ist_privat(daten[:8]):  # ein privates Paket (U7) — `ZugangNoetig` ohne Code
         return "paket", datei_eintrag(url, lambda _u: daten, code)
@@ -451,18 +619,37 @@ def link_lesen(
 
 
 def paket_laden(
-    eintrag: IndexEintrag, laden: Callable[[str], bytes] = _laden, code: str | None = None
+    eintrag: IndexEintrag,
+    laden: Callable[[str], bytes] = _laden,
+    code: str | None = None,
+    arbeit: Path | None = None,
 ) -> Paketinhalt:
     """Die Paketdatei eines Eintrags holen, Prüfsumme und Inhalt prüfen — JSON oder ZIP mit
-    Dateien (U3, bis `MAX_ZIP_BYTES`)."""
+    Dateien (U3, bis `MAX_ZIP_BYTES`). Mit ``arbeit`` geht ein großes Paket über eine Datei
+    dort statt durch den Arbeitsspeicher (K33); wer den Inhalt nicht mehr braucht, ruft
+    `Paketinhalt.raeumen`."""
     gross = ist_zip(eintrag.url) or eintrag.bytes > MAX_PAKET_BYTES
-    daten = _holen(eintrag.url, _holer(eintrag.url, laden, gross))
-    if len(daten) > (MAX_ZIP_BYTES if gross else MAX_PAKET_BYTES):
-        raise QuellenFehler("Die Paketdatei ist zu groß.")
-    if hashlib.sha256(daten).hexdigest() != eintrag.sha256:
-        raise QuellenFehler("Die Prüfsumme stimmt nicht — die Datei ist nicht die aus dem Index.")
-    inhalt = _oeffnen(daten, eintrag.url, code)
+    falsch = QuellenFehler("Die Prüfsumme stimmt nicht — die Datei ist nicht die aus dem Index.")
+    if gross and arbeit is not None:
+        pfad = _in_datei(eintrag.url, laden, arbeit)
+        try:
+            passt = sha256_datei(pfad) == eintrag.sha256
+        except OSError as e:
+            pfad.unlink(missing_ok=True)
+            raise QuellenFehler(str(e)) from e
+        if not passt:
+            pfad.unlink(missing_ok=True)
+            raise falsch
+        inhalt = _oeffnen_datei(pfad, eintrag.url, code, arbeit)
+    else:
+        daten = _holen(eintrag.url, _holer(eintrag.url, laden, gross))
+        if len(daten) > (MAX_ZIP_BYTES if gross else MAX_PAKET_BYTES):
+            raise QuellenFehler("Die Paketdatei ist zu groß.")
+        if hashlib.sha256(daten).hexdigest() != eintrag.sha256:
+            raise falsch
+        inhalt = _oeffnen(daten, eintrag.url, code)
     if inhalt.paket.id != eintrag.id:
+        inhalt.raeumen()
         raise QuellenFehler("Die Datei gehört zu einem anderen Paket als im Index angegeben.")
     if (
         eintrag.version is not None
@@ -470,6 +657,7 @@ def paket_laden(
         and inhalt.paket.version != eintrag.version
     ):
         # sonst meldete `updates_finden` nach dem Einspielen dasselbe Update erneut (K23)
+        inhalt.raeumen()
         raise QuellenFehler("Die Datei trägt eine andere Version als im Index angegeben.")
     return inhalt
 
@@ -478,8 +666,16 @@ def pruefen(
     quellen: Iterable[str],
     installierte: Iterable[Paket],
     laden: Callable[[str], bytes] = _laden,
+    *,
+    gross: bool = False,
+    arbeit: Path | None = None,
 ) -> Pruefung:
-    """Alle Quellen abfragen; eine Quelle, die nicht geht, steht in ``fehler``."""
+    """Alle Quellen abfragen; eine Quelle, die nicht geht, steht in ``fehler``.
+
+    Pakete aus einem Datei-Link fragen ihre Standdatei (`stand_url`) — ein paar hundert Bytes.
+    Fehlt sie, wird die Datei selbst geladen: eine JSON immer, eine ZIP (bis 300 MB) nur mit
+    ``gross`` — also wenn die Person „Jetzt prüfen“ tippt, nie von selbst beim Start (und dann
+    mit ``arbeit`` über eine Datei dort, die gleich wieder verschwindet)."""
     eintraege: list[IndexEintrag] = []
     ergebnis = Pruefung()
     for url in quellen:
@@ -493,11 +689,16 @@ def pruefen(
     # Pakete mit einem Datei-Link als Quelle: die Datei selbst fragen (Plan §1)
     for p in installierte:
         if p.quelle and p.quelle_art == DATEI and p.aktiv:
-            try:
-                eintrag, _ = datei_eintrag(p.quelle, laden, p.zugangscode)
-            except QuellenFehler as e:
-                ergebnis.fehler.append(f"{p.name} ({p.quelle}): {e}")
-                continue
+            eintrag = _stand(p, laden)
+            if eintrag is None:
+                if ist_zip(p.quelle) and not gross:
+                    continue  # ohne Standdatei keine 300 MB von selbst
+                try:
+                    eintrag, inhalt = datei_eintrag(p.quelle, laden, p.zugangscode, arbeit)
+                except QuellenFehler as e:
+                    ergebnis.fehler.append(f"{p.name} ({p.quelle}): {e}")
+                    continue
+                inhalt.raeumen()  # hier zählt nur die Version
             eintraege.append(eintrag)
     ergebnis.updates, ergebnis.neue = updates_finden(eintraege, installierte)
     return ergebnis
@@ -510,6 +711,8 @@ __all__ = [
     "INDEX_VERSION",
     "MAX_INDEX_BYTES",
     "QUELLE_VORGABE",
+    "STAND_ENDUNG",
+    "STAND_FORMAT",
     "IndexEintrag",
     "PaketUpdate",
     "Pruefung",
@@ -524,6 +727,9 @@ __all__ = [
     "paket_laden",
     "pruefen",
     "quelle_passt",
+    "stand_json",
+    "stand_lesen",
+    "stand_url",
     "updates_finden",
     "url_pruefen",
 ]

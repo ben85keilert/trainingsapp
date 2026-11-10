@@ -55,6 +55,7 @@ from trainingsapp.core.paketdatei import (
     medienlisten,
     paket_oeffnen,
     paket_zip,
+    sha256_datei,
     toml_oeffnen,
 )
 from trainingsapp.core.pakete import (
@@ -72,10 +73,12 @@ from trainingsapp.core.paketmedien import medium_aus_paket
 from trainingsapp.core.paketquelle import (
     INDEX_FORMAT,
     INDEX_VERSION,
+    STAND_ENDUNG,
     QuellenFehler,
     index_laden,
     link_lesen,
     paket_laden,
+    stand_json,
 )
 from trainingsapp.core.paketquelle import _laden as netz_laden
 from trainingsapp.core.paketstufe import STUFE_TEXT, mindestens, stufen_text, version_reicht
@@ -469,7 +472,13 @@ def privat_bauen(datei: Path, ziel: Path, basis_url: str = "") -> tuple[Path, st
         datei_verschluesseln(klar, pfad, zugang["code"])
     rel = f"p/{zugang['ordner']}/{pfad.name}"
     link = basis_url.rstrip("/") + "/" + rel if basis_url else rel
-    name = paket_oeffnen(pfad, code=zugang["code"]).paket.name
+    gebaut = paket_oeffnen(pfad, code=zugang["code"]).paket
+    name = gebaut.name
+    # Die Standdatei daneben: Version, Prüfsumme, Größe — die App fragt sie statt der ganzen
+    # Datei (`paketquelle.stand_url`); kein Name, kein Inhalt
+    pfad.with_name(pfad.stem + STAND_ENDUNG).write_bytes(
+        stand_json(gebaut.version, sha256_datei(pfad), pfad.stat().st_size)
+    )
     karte = "\n".join(
         [
             f"Privates Paket „{name}“" + (f" für {fuer}" if fuer else ""),
@@ -551,7 +560,7 @@ def index(
             bekannt[str(e["sha256"])] = str(e["veroeffentlicht"])
     pakete: list[dict[str, Any]] = []
     for datei in dateien:
-        if zugangsdatei(datei):
+        if zugangsdatei(datei) or datei.name.endswith(STAND_ENDUNG):
             continue
         daten = datei.read_bytes()
         if ist_privat(daten[:8]):

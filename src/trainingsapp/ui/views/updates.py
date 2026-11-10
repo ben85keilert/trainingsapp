@@ -29,7 +29,7 @@ from collections.abc import Callable
 
 import flet as ft
 
-from trainingsapp.config import app_version, ist_aktiv
+from trainingsapp.config import app_version, importverzeichnis, ist_aktiv
 from trainingsapp.core.pakete import MAX_PAKET_BYTES, Paket, PaketFehler, Paketinhalt
 from trainingsapp.core.paketmedien import groesse_text
 from trainingsapp.core.paketquelle import (
@@ -69,10 +69,12 @@ GROSS_VON_SELBST = 20_000_000
 
 def _lader(eintrag: IndexEintrag, code: str | None) -> Callable[[], Paketinhalt]:
     """`paket_laden` für den Hintergrund — den Code eines privaten Pakets (U7) nur, wenn es
-    einen gibt."""
+    einen gibt. Ein großes Paket geht über eine Datei im Importordner, nicht durch den
+    Arbeitsspeicher (K33) — wer den Inhalt bekommt, ruft danach `Paketinhalt.raeumen`."""
+    arbeit = importverzeichnis()
     if code is None:
-        return functools.partial(paket_laden, eintrag)
-    return functools.partial(paket_laden, eintrag, code=code)
+        return functools.partial(paket_laden, eintrag, arbeit=arbeit)
+    return functools.partial(paket_laden, eintrag, code=code, arbeit=arbeit)
 
 
 def _eintrag_aus_paket(p: Paket) -> IndexEintrag | None:
@@ -91,11 +93,23 @@ def _eintrag_aus_paket(p: Paket) -> IndexEintrag | None:
     )
 
 
-async def pruefung_ausfuehren(state: AppState) -> UpdateStand:
-    """Quellen und App-Release abfragen, Verfügbares vormerken, Modus „auto“ einspielen."""
+async def pruefung_ausfuehren(state: AppState, *, gross: bool = False) -> UpdateStand:
+    """Quellen und App-Release abfragen, Verfügbares vormerken, Modus „auto“ einspielen.
+    ``gross``: auch ZIP-Pakete aus einem Datei-Link ohne Standdatei laden, um ihre Version zu
+    sehen (`paketquelle.pruefen`) — nur auf „Jetzt prüfen“, nie beim Start."""
     quellen = state.paketquellen() if ist_aktiv("paket_quellen") else []
     installierte = [p for p, _ in state.pakete.alle()]
-    ergebnis = await asyncio.to_thread(pruefen, quellen, installierte) if quellen else Pruefung()
+    ergebnis = (
+        await asyncio.to_thread(
+            functools.partial(
+                pruefen, quellen, installierte, gross=True, arbeit=importverzeichnis()
+            )
+            if gross
+            else functools.partial(pruefen, quellen, installierte)
+        )
+        if quellen
+        else Pruefung()
+    )
     stand = UpdateStand(ergebnis)
     if ist_aktiv("update_pruefung"):
         try:
@@ -125,23 +139,26 @@ async def pruefung_ausfuehren(state: AppState) -> UpdateStand:
             ergebnis.fehler.append(f"{u.eintrag.name}: {e}")
             offen.append(u)
             continue
-        stufe = state.pakete.stufe(inhalt)  # die Datenbank im Event-Loop
-        if stufe is not None:
-            stand.stufen[u.eintrag.id] = stufe
-        if not automatisch(modus, stufe.stufe if stufe is not None else MITTEL):
-            offen.append(u)
-            continue
         try:
-            state.pakete.importieren(inhalt, subject_id=state.profil.id)
-            state.pakete.quelle_setzen(
-                u.eintrag.id, u.eintrag.quelle_url or None, u.installiert.quelle_art
-            )
-            state.pakete.verfuegbar_loeschen(u.eintrag.id)
-        except (QuellenFehler, PaketFehler, sqlite3.Error) as e:
-            ergebnis.fehler.append(f"{u.eintrag.name}: {e}")
-            offen.append(u)
-            continue
-        stand.eingespielt.append((u.eintrag.id, u.eintrag.name, u.eintrag.version))
+            stufe = state.pakete.stufe(inhalt)  # die Datenbank im Event-Loop
+            if stufe is not None:
+                stand.stufen[u.eintrag.id] = stufe
+            if not automatisch(modus, stufe.stufe if stufe is not None else MITTEL):
+                offen.append(u)
+                continue
+            try:
+                state.pakete.importieren(inhalt, subject_id=state.profil.id)
+                state.pakete.quelle_setzen(
+                    u.eintrag.id, u.eintrag.quelle_url or None, u.installiert.quelle_art
+                )
+                state.pakete.verfuegbar_loeschen(u.eintrag.id)
+            except (QuellenFehler, PaketFehler, sqlite3.Error) as e:
+                ergebnis.fehler.append(f"{u.eintrag.name}: {e}")
+                offen.append(u)
+                continue
+            stand.eingespielt.append((u.eintrag.id, u.eintrag.name, u.eintrag.version))
+        finally:
+            inhalt.raeumen()  # die geladene Datei — eingespielt oder nicht
     ergebnis.updates = offen
     state.updates = stand
     state.entfallene = state.pakete.entfallene_offen()
@@ -220,7 +237,7 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
         with contextlib.suppress(Exception):
             pruefen_knopf.update()
         try:
-            ergebnis = await pruefung_ausfuehren(state)
+            ergebnis = await pruefung_ausfuehren(state, gross=True)
         except Exception as e:
             melden(f"Prüfung nicht möglich: {e}")
             return

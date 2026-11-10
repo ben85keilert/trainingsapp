@@ -191,7 +191,8 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `medien/<sha256>.<endung>`, Medium `source = "paket"` (Migration 047), Ablage
   `Medien/Pakete/` neben der Datenbank (`data/paketmedien.py`, räumt auf), Lesen/Schreiben
   `core/paketdatei.py` (auch TOML mit `datei = "…"`), **jede Datei vor dem Weitergeben ohne
-  Ortsangaben** (`core/bereinigen.py` — was nicht sicher geht, kommt nicht ins Paket), Anzeige
+  Ortsangaben** (`core/bereinigen.py` — was nicht sicher geht, kommt nicht ins Paket; im PDF
+  werden die Exif-Blöcke eingebetteter JPEGs an Ort und Stelle geleert), Anzeige
   `components/medienliste.py` und `…/paketmedium/<datei>`. **Eigene Pakete** (U4): Karte im
   Paketmanager (`views/eigene_pakete.py`, Migration 048 `own_package`, feste ID, Version
   vorschlagen nach Inhalts-Prüfsumme), „Datei fürs Paket“ in beiden Editoren (sofort bereinigt,
@@ -204,7 +205,13 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   verschlüsselt mit einem 8-stelligen Code (`core/privat.py`, nur stdlib: scrypt, SHAKE-256,
   HMAC), Link in einem Ordner mit Zufallsnamen; die App fragt beim Import nach dem Code
   (`CodeNoetig`/`ZugangNoetig`), merkt ihn sich (`package.access_json`, Migration 050) und
-  öffnet Updates selbst; das Werkzeug legt Ordner und Code einmal an (`[privat]`, Zugangskarte). Paketmanager: Jede
+  öffnet Updates selbst; das Werkzeug legt Ordner und Code einmal an (`[privat]`, Zugangskarte — Link und
+  Code nur am Terminal, nie in umgeleiteter Ausgabe) und schreibt daneben `paket.stand.json`
+  (Version, Prüfsumme, Größe): Pakete aus einem Datei-Link fragen beim Prüfen nur sie
+  (`paketquelle.stand_url`), eine ZIP ohne Standdatei lädt nur „Jetzt prüfen“; große Pakete
+  aus dem Netz gehen über eine Datei in `Import/`, nie durch den Arbeitsspeicher, und wie der
+  Klartext eines privaten Pakets liegen sie dort nur, bis die Rückfrage zu ist
+  (`Paketinhalt.raeumen`). Paketmanager: Jede
   Paketübung trägt ihren Paketstand (`package_standard_json`) für „Auf Paketstand setzen“;
   Entfernen legt die Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück;
   **Deaktivieren** (Migration 017) versteckt alles, ohne zu löschen; was beim Update aus

@@ -256,6 +256,38 @@ def test_datei_link_wird_beim_pruefen_wie_ein_index_behandelt() -> None:
     assert v1 != v2
 
 
+def test_zip_link_ohne_standdatei_wird_nicht_von_selbst_geladen(tmp_path) -> None:
+    """Eine ZIP aus einem Datei-Link (bis 300 MB) lädt die Prüfung beim Start nicht, um ihre
+    Version zu sehen — nur auf „Jetzt prüfen“ (``gross``) oder über die Standdatei daneben."""
+    from trainingsapp.core.paketquelle import stand_json, stand_url
+
+    url = "https://x/knie.zip"
+    alt = Paket(id="p1", name="Knie", version=1, quelle=url, quelle_art="datei")
+    geladen: list[str] = []
+
+    def laden(adresse: str) -> bytes:
+        geladen.append(adresse)
+        raise urllib.error.URLError("HTTP 404")
+
+    ergebnis = pruefen([], [alt], laden)
+    assert geladen == [stand_url(url)] and ergebnis.updates == [] and ergebnis.fehler == []
+    geladen.clear()
+    assert pruefen([], [alt], laden, gross=True).fehler == ["Knie (https://x/knie.zip): HTTP 404"]
+    assert geladen == [stand_url(url), url]
+    # Mit Standdatei: Update gemeldet, die ZIP nicht angefasst; gleiche Version → nichts
+    for version, erwartet in ((2, [2]), ("0.0.1", []), (1, [])):
+        geladen.clear()
+        antwort = stand_json(2, "a" * 64, 123_000_000)
+        if version != 2:
+            antwort = antwort.replace(b'"version": 2', f'"version": {json.dumps(version)}'.encode())
+        gefunden = pruefen([], [alt], lambda _u, a=antwort: a)
+        assert [u.eintrag.version for u in gefunden.updates] == erwartet
+    eintrag = pruefen([], [alt], lambda _u: stand_json(2, "a" * 64, 123_000_000)).updates[0].eintrag
+    assert (eintrag.id, eintrag.url, eintrag.bytes) == ("p1", url, 123_000_000)
+    # Unlesbares unter der Adresse der Standdatei zählt wie „fehlt“
+    assert pruefen([], [alt], lambda _u: b"<html>404</html>").updates == []
+
+
 def test_link_lesen_erkennt_index_und_paket() -> None:
     datei = paket_json(Paket(id="p1", name="Dehnung", version=1), seed_inhalt().uebungen[:1])
     roh = _index(_eintrag())
@@ -268,3 +300,79 @@ def test_link_lesen_erkennt_index_und_paket() -> None:
         link_lesen("http://unsicher/x.json", antworten.__getitem__)
     with pytest.raises(QuellenFehler):
         link_lesen("https://x/t.json", lambda _u: b'{"a": 1}')
+
+
+def test_grosses_paket_geht_ueber_eine_datei_und_wird_geraeumt(tmp_path) -> None:
+    """K33: Ein ZIP-Paket aus Quelle oder Link liegt nicht im Arbeitsspeicher, sondern als Datei
+    im Arbeitsordner — und verschwindet mit `Paketinhalt.raeumen` oder bei jedem Fehler."""
+    import zipfile
+    from dataclasses import replace
+
+    from trainingsapp.core.paketdatei import paket_zip
+    from trainingsapp.core.paketquelle import IndexEintrag, QuellenFehler, link_lesen
+    from trainingsapp.core.privat import verschluesseln
+
+    bild = tmp_path / "bild.png"
+    bild.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 40)
+    name = "medien/" + hashlib.sha256(bild.read_bytes()).hexdigest() + ".png"
+    roh = {
+        "paket": {"id": "p1", "name": "Knie", "version": 2},
+        "exercises": [{"name": "A", "media": [{"source": "paket", "uri": name}]}],
+    }
+    zip_pfad = tmp_path / "knie.zip"
+    paket_zip(zip_pfad, json.dumps(roh).encode(), {name: bild})
+    daten = zip_pfad.read_bytes()
+    assert zipfile.is_zipfile(zip_pfad)
+    arbeit = tmp_path / "Import"
+    url = "https://x/pakete/knie.zip"
+    eintrag = IndexEintrag("p1", "Knie", 2, url, hashlib.sha256(daten).hexdigest(), len(daten), "q")
+
+    inhalt = paket_laden(eintrag, lambda _u: daten, arbeit=arbeit)
+    (datei,) = arbeit.iterdir()
+    assert datei.name.startswith("geladen_") and datei.suffix == ".zip"
+    assert inhalt.arbeitsdateien == [datei] and inhalt.paket.name == "Knie"
+    ziel = tmp_path / "kopie.png"
+    inhalt.medien[name].kopieren(ziel)  # die Medien kommen aus der Datei
+    assert ziel.read_bytes() == bild.read_bytes()
+    inhalt.raeumen()
+    assert not list(arbeit.iterdir()) and inhalt.arbeitsdateien == []
+
+    # Fehler lassen nichts liegen: Prüfsumme, andere Version, nicht erreichbar
+    with pytest.raises(QuellenFehler, match="Prüfsumme"):
+        paket_laden(eintrag, lambda _u: daten + b"x", arbeit=arbeit)
+    with pytest.raises(QuellenFehler, match="andere Version"):
+        paket_laden(replace(eintrag, version=3), lambda _u: daten, arbeit=arbeit)
+
+    def weg(_u: str) -> bytes:
+        raise urllib.error.URLError("HTTP 404")
+
+    with pytest.raises(QuellenFehler, match="404"):
+        paket_laden(eintrag, weg, arbeit=arbeit)
+    assert not list(arbeit.iterdir())
+
+    # Link-Import und „Jetzt prüfen“ ohne Standdatei gehen denselben Weg
+    art, (gefunden, inhalt) = link_lesen(url, lambda _u: daten, arbeit=arbeit)
+    assert art == "paket" and gefunden.sha256 == eintrag.sha256 and gefunden.bytes == len(daten)
+    assert len(list(arbeit.iterdir())) == 1
+    inhalt.raeumen()
+    alt = Paket(id="p1", name="Knie", version=1, quelle=url, quelle_art="datei")
+    antworten = {url: daten}
+
+    def laden(adresse: str) -> bytes:
+        if adresse not in antworten:
+            raise urllib.error.URLError("HTTP 404")
+        return antworten[adresse]
+
+    ergebnis = pruefen([], [alt], laden, gross=True, arbeit=arbeit)
+    assert [u.eintrag.version for u in ergebnis.updates] == [2] and not list(arbeit.iterdir())
+
+    # Privat: das Verschlüsselte verschwindet sofort, der Klartext mit `raeumen`
+    geheim = verschluesseln(daten, "K7QM9XA2")
+    privat = replace(eintrag, sha256=hashlib.sha256(geheim).hexdigest(), bytes=len(geheim))
+    inhalt = paket_laden(privat, lambda _u: geheim, "K7QM9XA2", arbeit=arbeit)
+    (klar,) = arbeit.iterdir()
+    assert klar.name.startswith("klartext_") and inhalt.code == "K7QM9XA2"
+    inhalt.raeumen()
+    with pytest.raises(QuellenFehler, match="Code"):
+        paket_laden(privat, lambda _u: geheim, "K7QM9XA3", arbeit=arbeit)
+    assert not list(arbeit.iterdir())

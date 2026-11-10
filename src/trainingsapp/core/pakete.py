@@ -37,6 +37,7 @@ Video-Links kommen mit.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import re
@@ -44,6 +45,7 @@ import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from . import ablauf as ab
@@ -339,6 +341,18 @@ class Paketinhalt:
     #: Der Code, mit dem die Datei entschlüsselt wurde (privates Paket, U7) — die App merkt
     #: ihn sich beim Import
     code: str | None = None
+    #: Dateien, aus denen dieser Inhalt liest und die nur dafür angelegt wurden — der Klartext
+    #: eines privaten Pakets, ein aus dem Netz geladenes großes Paket (`core/paketdatei.py`,
+    #: `core/paketquelle.py`). Wer den Inhalt nicht mehr braucht, ruft `raeumen`.
+    arbeitsdateien: list[Path] = field(default_factory=list)
+
+    def raeumen(self) -> None:
+        """Die Arbeitsdateien löschen — nach dem Import, nach „Abbrechen“, nach einem Fehler.
+        Danach lassen sich die Dateien des Pakets (``medien``) nicht mehr lesen."""
+        dateien, self.arbeitsdateien = self.arbeitsdateien, []
+        for datei in dateien:
+            with contextlib.suppress(OSError):
+                datei.unlink(missing_ok=True)
 
     def medien_namen(self) -> set[str]:
         """Die Paketdateien, die Übungen, Pläne, Kurse und Ergänzungen nennen (U3, U5)."""

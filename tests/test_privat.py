@@ -7,12 +7,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import urllib.error
 
 import pytest
 
 from trainingsapp.core.paketdatei import CodeNoetig, paket_oeffnen
-from trainingsapp.core.pakete import PaketFehler, paket_lesen
-from trainingsapp.core.paketquelle import ZugangNoetig, link_lesen, pruefen
+from trainingsapp.core.pakete import Paket, PaketFehler, paket_lesen
+from trainingsapp.core.paketquelle import (
+    QuellenFehler,
+    ZugangNoetig,
+    link_lesen,
+    paket_laden,
+    pruefen,
+    stand_json,
+    stand_lesen,
+    stand_url,
+)
 from trainingsapp.core.privat import (
     CodeFalsch,
     code_neu,
@@ -83,7 +93,12 @@ def test_app_merkt_sich_den_code_und_holt_updates(tmp_path) -> None:
     url = "https://x.org/pakete/p/7Hq3vX9aBcDeFgHiJkLmNo/paket.json"
     dateien = {url: verschluesseln(_paket(1), CODE)}
 
+    geladen: list[str] = []
+
     def laden(adresse: str) -> bytes:
+        geladen.append(adresse)
+        if adresse not in dateien:
+            raise urllib.error.URLError("HTTP 404")
         return dateien[adresse]
 
     with pytest.raises(ZugangNoetig):
@@ -98,6 +113,18 @@ def test_app_merkt_sich_den_code_und_holt_updates(tmp_path) -> None:
     dateien[url] = verschluesseln(_paket(2, "Noch langsamer."), CODE)
     ergebnis = pruefen([], [pakete.laden(inhalt.paket.id)], laden)
     assert ergebnis.fehler == [] and [u.eintrag.version for u in ergebnis.updates] == [2]
+    # Mit der Standdatei daneben (`trainingsapp-paket bauen` schreibt sie) fragt die Prüfung
+    # nur sie — das Paket selbst wird erst für das Update geladen und gegen sie geprüft
+    stand = stand_url(url)
+    assert stand == "https://x.org/pakete/p/7Hq3vX9aBcDeFgHiJkLmNo/paket.stand.json"
+    dateien[stand] = stand_json(2, hashlib.sha256(dateien[url]).hexdigest(), len(dateien[url]))
+    geladen.clear()
+    ergebnis = pruefen([], [pakete.laden(inhalt.paket.id)], laden)
+    assert geladen == [stand] and [u.eintrag.version for u in ergebnis.updates] == [2]
+    assert paket_laden(ergebnis.updates[0].eintrag, laden, CODE).paket.version == 2
+    dateien[url] = verschluesseln(_paket(2, "Vertauscht."), CODE)  # passt nicht zur Standdatei
+    with pytest.raises(QuellenFehler, match="Prüfsumme"):
+        paket_laden(ergebnis.updates[0].eintrag, laden, CODE)
     con.close()
 
 
@@ -127,6 +154,13 @@ def test_werkzeug_baut_privat_und_laesst_es_aus_dem_index(tmp_path, capsys) -> N
     with pytest.raises(CodeNoetig):
         paket_oeffnen(pfad)
     assert paket_oeffnen(pfad, code=zugang["code"]).paket.fuer == "Max"
+    # Die Standdatei daneben: Version, Prüfsumme und Größe der verschlüsselten Datei — sonst nichts
+    stand = pfad.with_name("paket.stand.json")
+    eintrag = stand_lesen(stand.read_bytes(), Paket(id="p", name="x", quelle="https://x/p.json"))
+    assert eintrag is not None and eintrag.version == 10000
+    assert eintrag.sha256 == hashlib.sha256(pfad.read_bytes()).hexdigest()
+    assert eintrag.bytes == pfad.stat().st_size
+    assert "Max" not in stand.read_text("utf-8")
     # Neue Fassung: derselbe Ordner, derselbe Code
     assert main(["bauen", str(toml), "--ziel", str(ziel)]) == 0
     assert json.loads((tmp_path / "max.zugang.json").read_text("utf-8")) == zugang

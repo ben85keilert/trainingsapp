@@ -28,6 +28,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.config import importverzeichnis
 from trainingsapp.core.paketquelle import (
     DATEI,
     QuellenFehler,
@@ -56,10 +57,13 @@ async def link_importieren(
         page.show_dialog(ft.SnackBar(ft.Text(fehler)))
         return
     try:
+        # Eine ZIP geht über eine Datei im Importordner, nicht durch den Arbeitsspeicher (K33);
+        # die Rückfrage räumt sie weg, wenn sie zu ist
+        arbeit = importverzeichnis()
         lesen = (
-            functools.partial(link_lesen, url, laden, code)
+            functools.partial(link_lesen, url, laden, code, arbeit)
             if laden is not None
-            else functools.partial(link_lesen, url, code=code)
+            else functools.partial(link_lesen, url, code=code, arbeit=arbeit)
         )
         art, daten = await asyncio.to_thread(lesen)
     except ZugangNoetig:

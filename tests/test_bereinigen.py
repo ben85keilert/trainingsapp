@@ -139,3 +139,39 @@ def test_falsche_art_und_unbekannte_endung() -> None:
             bereinigen(daten, endung)
     with pytest.raises(NichtBereinigbar):
         bereinigen(b"\xff\xd8\xff" + bytes(10), "jpg")  # ohne Ende
+
+
+def test_pdf_eingebettete_fotos_ohne_exif() -> None:
+    """Ein PDF aus Handyfotos trägt deren Exif (mit GPS) im eingebetteten JPEG mit — die Blöcke
+    werden an Ort und Stelle geleert: gleiche Länge, alles andere Byte für Byte gleich."""
+
+    def block(marker: int, inhalt: bytes) -> bytes:
+        return bytes([0xFF, marker]) + (len(inhalt) + 2).to_bytes(2, "big") + inhalt
+
+    exif = block(0xE1, b"Exif\x00\x00MM\x00*GPS 52.5200N 13.4050E")
+    xmp = block(0xE1, b"http://ns.adobe.com/xap/1.0/\x00<x exif:GPSLatitude='52,31N'/>")
+    jfif = block(0xE0, b"JFIF\x00\x01\x01")
+    icc = block(0xE2, b"ICC_PROFILE\x00\x01\x01profil")
+    bild = b"\xff\xd8" + jfif + exif + icc + xmp + block(0xDB, b"\x00" * 65)
+    bild += block(0xDA, b"\x01\x01\x00\x00\x3f\x00") + b"daten\xff\x00mehr\xff\xd9"
+    kopf = b"%%PDF-1.7\n1 0 obj\n<< /Filter /DCTDecode /Length %d >>\nstream\r\n" % len(bild)
+    fuss = b"\nendstream\nendobj\n2 0 obj\n<< /Title (GPS im Text bleibt) >>\nendobj\n%%EOF\n"
+    pdf = kopf + bild + fuss
+    sauber = bereinigen(pdf, "pdf")
+    assert len(sauber) == len(pdf)
+    assert b"52.5200N" not in sauber and b"GPSLatitude" not in sauber and b"Exif" not in sauber
+    assert sauber.startswith(kopf) and sauber.endswith(fuss)
+    for bleibt in (jfif, icc, b"daten\xff\x00mehr\xff\xd9", b"GPS im Text bleibt"):
+        assert bleibt in sauber
+    assert bereinigen(sauber, "pdf") == sauber  # idempotent
+    # Ohne eingebettetes JPEG bleibt das PDF, wie es ist
+    schlicht = b"%PDF-1.4\n1 0 obj\n<< >>\nstream\nabc\xff\xd8\xff\xe1\nendstream\n%%EOF"
+    assert bereinigen(schlicht, "pdf") == schlicht
+    # Ein kaputter Kopf im Bild: nichts hinter dem Datenstrom wird angefasst
+    kaputt = kopf + b"\xff\xd8\xff\xe1\xff\xff" + fuss
+    assert bereinigen(kaputt, "pdf") == kaputt
+
+
+def test_pdf_verschluesselt_wird_abgelehnt() -> None:
+    with pytest.raises(NichtBereinigbar, match="verschlüsselt"):
+        bereinigen(b"%PDF-1.6\ntrailer << /Encrypt 5 0 R >>\n%%EOF", "pdf")

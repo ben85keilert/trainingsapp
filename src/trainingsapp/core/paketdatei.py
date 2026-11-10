@@ -78,14 +78,16 @@ class CodeNoetig(PaketFehler):
         super().__init__("Ein privates Paket — es braucht seinen Code.")
 
 
-#: So heißt der Klartext eines privaten Pakets im Arbeitsordner (`_entschluesselt`)
+#: So heißen Arbeitsdateien des Imports: der Klartext eines privaten Pakets
+#: (`_entschluesselt`) und ein aus dem Netz geladenes großes Paket (`paketquelle`)
 KLARTEXT: Final = "klartext_"
+GELADEN: Final = "geladen_"
 
 
 def klartext_aufraeumen(arbeit: Path) -> int:
-    """Löscht den Klartext privater Pakete (U7) aus ``arbeit`` — nach dem Import, nach
-    „Abbrechen“ und beim Start (falls die App dazwischen endete). Er liegt dort nur, solange
-    der Import aus ihm liest. Wie viele Dateien.
+    """Löscht liegengebliebene Arbeitsdateien des Imports aus ``arbeit`` — den Klartext
+    privater Pakete (U7) und geladene große Pakete. Beim Start, falls die App mitten im Import
+    endete; im Betrieb räumt jeder Import seine eigenen (`Paketinhalt.raeumen`). Wie viele.
 
     >>> import tempfile
     >>> with tempfile.TemporaryDirectory() as t:
@@ -96,7 +98,9 @@ def klartext_aufraeumen(arbeit: Path) -> int:
     """
     weg = 0
     try:
-        dateien = [d for d in arbeit.iterdir() if d.name.startswith(KLARTEXT) and d.is_file()]
+        dateien = [
+            d for d in arbeit.iterdir() if d.name.startswith((KLARTEXT, GELADEN)) and d.is_file()
+        ]
     except OSError:
         return 0
     for datei in dateien:
@@ -190,7 +194,7 @@ def _entschluesselt(
 ) -> Paketinhalt:
     """Ein privates Paket (U7) entschlüsseln und lesen — ohne Code `CodeNoetig`, mit falschem
     `PaketFehler`. Große Dateien gehen über ``arbeit`` (der Klartext liegt dort, bis der Import
-    fertig ist — dann räumt der Aufrufer mit `klartext_aufraeumen`), sonst im Speicher."""
+    fertig ist — dann räumt der Aufrufer mit `Paketinhalt.raeumen`), sonst im Speicher."""
     if code is None:
         raise CodeNoetig()
     try:
@@ -203,6 +207,7 @@ def _entschluesselt(
             except BaseException:
                 ziel.unlink(missing_ok=True)  # kein Paket darin — der Klartext bleibt nicht
                 raise
+            inhalt.arbeitsdateien.append(ziel)
         else:
             daten = quelle.read_bytes() if isinstance(quelle, Path) else quelle
             inhalt = paket_oeffnen(entschluesseln(daten, code), name_vorgabe, endung=endung)
@@ -542,6 +547,8 @@ def paket_zip(ziel: Path, json_daten: bytes, medien: Mapping[str, Path]) -> None
 
 
 __all__ = [
+    "GELADEN",
+    "KLARTEXT",
     "PAKET_JSON",
     "ZIP_KOPF",
     "CodeNoetig",

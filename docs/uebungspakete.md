@@ -156,8 +156,11 @@ PDFs mitbringen — an Übungen (`media`), Planübungen (`medien`) und Kurskapit
   `trainingsapp-paket bauen` und der Export in der App bereinigen jede Datei — JPEG ohne
   Exif/XMP/IPTC und ohne Anhänge hinter dem Bildende, PNG nur mit Bildblöcken, WebP ohne
   EXIF/XMP, MP4/MOV/M4A mit `udta`/`meta`/`uuid` als `free` (gleiche Größe, Versätze bleiben),
-  MP3 ohne ID3; PDF bleibt. **Was sich nicht sicher bereinigen lässt** (andere Formate, ein Video
-  mit Metadatenspur), **kommt nicht ins Paket**. Bereinigen ist idempotent: Eine saubere Datei
+  MP3 ohne ID3; im PDF werden die Exif-Blöcke eingebetteter JPEG-Bilder an Ort und Stelle
+  geleert (gleiche Länge, Durchsicht 10.11.2026 — ein PDF aus Handyfotos trug sie sonst mit),
+  ein verschlüsseltes PDF wird abgelehnt; Autor und Titel des Dokuments und Bilder in anderen
+  Formaten bleiben — ein PDF sieht man vor dem Weitergeben selbst an. **Was sich nicht sicher
+  bereinigen lässt** (andere Formate, ein Video mit Metadatenspur), **kommt nicht ins Paket**. Bereinigen ist idempotent: Eine saubere Datei
   behält ihren Namen.
 - **In der App:** Import nimmt `.json`, `.toml` (ohne Dateien) und `.zip` (über den Pfad, nie
   ganz über die Leitung); die Rückfrage nennt Zahl und Größe der Dateien. Übungsseite, „i“ der
@@ -204,7 +207,19 @@ betreffen … vor allem gegen Bots und andere absichern.“ Zwei Schlösser:
   (`package.access_json`, Migration 050) und **entschlüsselt Updates aus dem Link von selbst**.
   Der Paketmanager zeigt „privat · für Max · x.de/pakete/p/7Hq3…/paket.json“ und **„Zugang
   anzeigen“** (Link und Code für ein zweites Gerät). Große private ZIPs entschlüsselt die App
-  über `<Daten>/Import/`.
+  über `<Daten>/Import/` — der Klartext liegt dort nur, bis die Rückfrage zu ist.
+- **Standdatei** (Durchsicht 10.11.2026): Neben jedem privaten Paket schreibt das Werkzeug
+  `paket.stand.json` — Version, Prüfsumme und Größe der verschlüsselten Datei, kein Name, kein
+  Inhalt (`paketquelle.stand_url`/`stand_json`). Die Prüfung beim Start fragt für ein Paket aus
+  einem Datei-Link **nur sie**; die Paketdatei wird erst für ein Update geladen und gegen ihre
+  Prüfsumme geprüft. Fehlt die Standdatei (anderer Server), lädt die Prüfung eine JSON wie
+  bisher, eine ZIP aber nie von selbst — nur auf „Jetzt prüfen“. Der Code bleibt bei jeder
+  Fassung derselbe; neu ist je Bauen nur das Salz.
+- **Große Pakete aus dem Netz** (K33, 10.11.2026): Eine ZIP aus Quelle oder Link lädt die App
+  Block für Block in eine Datei unter `<Daten>/Import/` (`geladen_…`), nicht in den
+  Arbeitsspeicher; ein privates Paket wird von dort Block für Block entschlüsselt
+  (`klartext_…`). Jeder Import räumt seine Dateien, sobald die Rückfrage zu ist
+  (`Paketinhalt.raeumen`), der Start das Liegengebliebene.
 - **Eigene Pakete** (U4) lassen sich ebenso privat teilen: Schalter „Privat — nur mit Code zu
   öffnen“; der Code bleibt für jede Fassung (`own_package.access_code`) und steht nach dem
   Export da.

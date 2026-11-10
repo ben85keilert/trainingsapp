@@ -93,13 +93,13 @@ def test_pruefung_auto_und_manuell(page, state, monkeypatch) -> None:
     )
     inhalt_v2 = paket_lesen(qigong(2, neuigkeiten="Neu: Lotus"))
 
-    def fake_pruefen(quellen, installierte, laden=None):
+    def fake_pruefen(quellen, installierte, laden=None, **_):
         return Pruefung(
             updates=[PaketUpdate(eintrag, next(p for p in installierte if p.id == pid))]
         )
 
     monkeypatch.setattr(updates, "pruefen", fake_pruefen)
-    monkeypatch.setattr(updates, "paket_laden", lambda e, laden=None: inhalt_v2)
+    monkeypatch.setattr(updates, "paket_laden", lambda e, laden=None, **_: inhalt_v2)
     monkeypatch.setattr(updates, "neuestes_release", lambda: None)
     state.paketquellen_setzen(["https://x/i"])
 
@@ -135,7 +135,7 @@ def test_pruefung_auto_und_manuell(page, state, monkeypatch) -> None:
         lambda q, i, laden=None: Pruefung(updates=[PaketUpdate(eintrag3, jetzt_installiert)]),
     )
     inhalt_v3 = paket_lesen(qigong(3))
-    monkeypatch.setattr(updates, "paket_laden", lambda e, laden=None: inhalt_v3)
+    monkeypatch.setattr(updates, "paket_laden", lambda e, laden=None, **_: inhalt_v3)
     stand = asyncio.run(updates.pruefung_ausfuehren(state))
     assert stand.eingespielt == [] and [u.eintrag.version for u in stand.pruefung.updates] == [3]
     assert state.pakete.laden(pid).verfuegbar == 3 and state.pakete.laden(pid).version == 2
@@ -299,7 +299,7 @@ def test_stufe_aus_dem_unterschied_entscheidet(page, state, monkeypatch) -> None
             "pruefen",
             lambda q, i, laden=None: Pruefung(updates=[PaketUpdate(eintrag, jetzt)]),
         )
-        monkeypatch.setattr(updates, "paket_laden", lambda e, laden=None: paket_lesen(roh))
+        monkeypatch.setattr(updates, "paket_laden", lambda e, laden=None, **_: paket_lesen(roh))
 
     anbieten(fassung(5, symbol="spa"))  # nur das Symbol: klein
     stand = asyncio.run(updates.pruefung_ausfuehren(state))

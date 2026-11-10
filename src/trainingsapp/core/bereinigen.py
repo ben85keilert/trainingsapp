@@ -17,7 +17,12 @@ Bildbibliothek:
   weiter. Ein Video mit **Metadatenspur** (zeitgesteuerte Ortsangaben) lässt sich so nicht
   bereinigen und wird abgelehnt.
 - **MP3:** ID3v2 vorn und ID3v1 hinten fallen weg; APE- und Lyrics-Blöcke → abgelehnt.
-- **PDF:** bleibt, wie es ist (ein Dokument trägt keine Aufnahmeposition).
+- **PDF:** Eingebettete JPEG-Bilder (aus Handyfotos oder Scan-Apps) tragen ihr Exif mit —
+  ihre APP1/APP13-Blöcke werden **an Ort und Stelle** mit Nullen überschrieben (gleiche Länge,
+  alle Verweise im Dokument stimmen weiter, wie bei MP4). Ein verschlüsseltes PDF lässt sich
+  nicht durchsehen und wird abgelehnt. **Was bleibt:** Autor und Titel des Dokuments (sie
+  können in gepackten Teilen stecken) und Bilder in anderen Formaten als JPEG — ein PDF sieht
+  man vor dem Weitergeben selbst an.
 
 Bereinigen ist idempotent: Eine bereinigte Datei bleibt beim zweiten Mal Byte für Byte gleich —
 ihre Prüfsumme (ihr Name im Paket) also auch.
@@ -28,6 +33,7 @@ Dieses Modul kennt kein flet.
 from __future__ import annotations
 
 import io
+import re
 import shutil
 from pathlib import Path
 from typing import BinaryIO, Final
@@ -285,10 +291,40 @@ def _mp3(d: bytes) -> bytes:
 # -- PDF ------------------------------------------------------------------------------------
 
 
+#: Ein Datenstrom im PDF, der mit einem JPEG beginnt (Filter ``DCTDecode``)
+_PDF_JPEG: Final = re.compile(rb"stream\r?\n(?=\xff\xd8\xff)")
+
+
+def _pdf_jpeg_leeren(d: bytearray, i: int, ende: int) -> None:
+    """Die Blöcke vor den Bilddaten eines eingebetteten JPEG durchgehen (ab ``i`` = SOI, bis
+    ``ende``) und leeren, was `_jpeg_behalten` nicht behält — Nullen statt Inhalt, gleiche
+    Länge. Bei allem, was nicht wie ein JPEG-Kopf aussieht, hört es auf."""
+    i += 2
+    while i + 4 <= ende and d[i] == 0xFF:
+        m = d[i + 1]
+        if m == 0xFF:  # Füllbyte
+            i += 1
+            continue
+        if m in (0x00, 0x01, 0xD9, 0xDA) or 0xD0 <= m <= 0xD8:
+            return  # Bilddaten beginnen (oder kein Kopf mehr)
+        laenge = int.from_bytes(d[i + 2 : i + 4], "big")
+        if laenge < 2 or i + 2 + laenge > ende:
+            return
+        if not _jpeg_behalten(m, bytes(d[i + 4 : i + 2 + laenge])):
+            d[i + 4 : i + 2 + laenge] = bytes(laenge - 2)
+        i += 2 + laenge
+
+
 def _pdf(d: bytes) -> bytes:
     if not d.startswith(b"%PDF-"):
         raise NichtBereinigbar("kein PDF")
-    return d
+    if b"/Encrypt" in d:
+        raise NichtBereinigbar("verschlüsseltes PDF — eingebettete Bilder lassen sich nicht prüfen")
+    aus = bytearray(d)
+    for treffer in _PDF_JPEG.finditer(d):
+        ende = d.find(b"endstream", treffer.end())
+        _pdf_jpeg_leeren(aus, treffer.end(), ende if ende >= 0 else len(d))
+    return bytes(aus)
 
 
 _IM_SPEICHER: Final = {

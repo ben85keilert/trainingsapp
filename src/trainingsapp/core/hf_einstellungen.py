@@ -16,7 +16,10 @@ True
 'auto'
 >>> a = HfEinstellungen.aus_dict({"alarm_an": True, "alarm_bpm": 150, "alarm_takt_s": 9})
 >>> a.alarm_grenze(), a.alarm_takt_s, HfEinstellungen.aus_dict({"alarm_bpm": 500}).alarm_bpm
-(150.0, 4, None)
+(150.0, 0, None)
+>>> w = HfEinstellungen.aus_dict({"achse_oben": "fest", "achse_oben_bpm": 180, "erholung_x_s": 95})
+>>> w.achse_oben, w.achse_oben_bpm, w.achse_unten, w.erholung_fenster()
+('fest', 180.0, 'profil', (30, 60, 95, 120))
 """
 
 from __future__ import annotations
@@ -65,12 +68,30 @@ FORMEL_NAMEN: Final[dict[str, str]] = {
 EIGENE_MAX: Final[int] = 8
 #: Signal über einer selbst gesetzten Grenze (Ben, 30.10.2026: „Ein Alarm, piepen alle 3–5
 #: Sekunden, wenn man über einer bestimmten HF ist … nicht aufdringlich“): so oft höchstens (s)
-ALARM_TAKT_S: Final[tuple[int, ...]] = (3, 4, 5, 10)
+#: 0 = **nach Abstand** (Ben, 10.11.2026: „Tonfolge schneller mit der Abweichung“,
+#: `core.hf_ziel.tonfolge_s`) — die Vorgabe; die festen Takte bleiben wählbar
+TAKT_NACH_ABSTAND: Final[int] = 0
+ALARM_TAKT_S: Final[tuple[int, ...]] = (TAKT_NACH_ABSTAND, 3, 4, 5, 10)
 ALARM_KLANG: Final[str] = "schale"
 #: Klang unter dem Zielbereich — tiefer als der obere (`core.klang.KLAENGE`)
 ALARM_KLANG_TIEF: Final[str] = "glocke3"
 ALARM_MIN_BPM: Final[float] = 40.0
 ALARM_MAX_BPM: Final[float] = 230.0
+#: Wertebereich der HF-Achse, **je Seite für sich** (Ben, 10.11.2026, A22): Automatik aus der
+#: Kurve · der Profilwert (oben HFmax, unten Ruhe-HF) · ein fester Wert
+ACHSE_AUTO: Final[str] = "auto"
+ACHSE_PROFIL: Final[str] = "profil"
+ACHSE_FEST: Final[str] = "fest"
+ACHSEN: Final[tuple[str, ...]] = (ACHSE_AUTO, ACHSE_PROFIL, ACHSE_FEST)
+ACHSE_OBEN_FEST: Final[float] = 180.0
+ACHSE_UNTEN_FEST: Final[float] = 60.0
+#: Erholung: die festen Fenster nach dem Belastungsende (s), das frei wählbare „X“ und bis
+#: wann gemessen wird — danach endet die Erholung von selbst
+ERHOLUNG_FENSTER_S: Final[tuple[int, ...]] = (30, 60, 120)
+ERHOLUNG_X_S: Final[int] = 180
+ERHOLUNG_X_MIN_S: Final[int] = 10
+ERHOLUNG_X_MAX_S: Final[int] = 900
+MESSEN_BIS_S: Final[tuple[int, ...]] = (60, 120, 180, 300, 600)
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +120,10 @@ class EigeneGrenze:
         return cls(bpm=bpm, prozent=None if bpm is not None else prozent)
 
 
+def _achse(x: Any) -> str:
+    return x if isinstance(x, str) and x in ACHSEN else ACHSE_PROFIL
+
+
 def _zahl(x: Any) -> float | None:
     if isinstance(x, bool) or not isinstance(x, (int, float)):
         return None
@@ -118,11 +143,50 @@ class HfEinstellungen:
     alarm_an: bool = False
     alarm_bpm: float | None = None
     alarm_klang: str = ALARM_KLANG
-    alarm_takt_s: int = 4
+    alarm_takt_s: int = TAKT_NACH_ABSTAND
     #: Zielbereich (Entscheidung C, 7.11.2026): auch eine **untere** Grenze mit eigenem,
     #: tieferem Klang — ein Ton als Information, keine Steuerung
     ziel_unten_bpm: float | None = None
     alarm_klang_tief: str = ALARM_KLANG_TIEF
+    #: Wertebereich der HF-Achse je Seite (`ACHSEN`) und der feste Wert dazu
+    achse_oben: str = ACHSE_PROFIL
+    achse_oben_bpm: float = ACHSE_OBEN_FEST
+    achse_unten: str = ACHSE_PROFIL
+    achse_unten_bpm: float = ACHSE_UNTEN_FEST
+    #: Erholung: welche der festen Fenster gelten, das Fenster X (0 = keins), Messen bis (s)
+    erholung_fest: list[int] = field(default_factory=lambda: list(ERHOLUNG_FENSTER_S))
+    erholung_x_s: int = ERHOLUNG_X_S
+    messen_bis_s: int = 180
+
+    def erholung_fenster(self) -> tuple[int, ...]:
+        """Die Fenster der Erholung, aufsteigend — die gewählten festen und X.
+
+        >>> HfEinstellungen().erholung_fenster()
+        (30, 60, 120, 180)
+        >>> HfEinstellungen(erholung_fest=[60], erholung_x_s=0).erholung_fenster()
+        (60,)
+        """
+        fenster = {f for f in self.erholung_fest if f in ERHOLUNG_FENSTER_S}
+        if self.erholung_x_s:
+            fenster.add(int(self.erholung_x_s))
+        return tuple(sorted(fenster)) or (ERHOLUNG_FENSTER_S[1],)
+
+    def messen_bis(self) -> int:
+        """So lange läuft eine Erholung höchstens — nie kürzer als das längste Fenster
+        samt seinem Mittel.
+
+        >>> HfEinstellungen(messen_bis_s=60).messen_bis()
+        183
+        """
+        return max(int(self.messen_bis_s), max(self.erholung_fenster()) + 3)
+
+    def messen_bis_anzeige(self) -> int:
+        """„Messen bis“ für die Beschriftung — ohne die Sekunden fürs letzte Mittel.
+
+        >>> HfEinstellungen().messen_bis_anzeige(), HfEinstellungen().messen_bis()
+        (180, 183)
+        """
+        return max(int(self.messen_bis_s), max(self.erholung_fenster()))
 
     def alarm_grenze(self) -> float | None:
         """Die wirksame Grenze — nur mit Schalter und Wert.
@@ -154,6 +218,13 @@ class HfEinstellungen:
             "alarm_takt_s": self.alarm_takt_s,
             "ziel_unten_bpm": self.ziel_unten_bpm,
             "alarm_klang_tief": self.alarm_klang_tief,
+            "achse_oben": self.achse_oben,
+            "achse_oben_bpm": self.achse_oben_bpm,
+            "achse_unten": self.achse_unten,
+            "achse_unten_bpm": self.achse_unten_bpm,
+            "erholung_fest": list(self.erholung_fest),
+            "erholung_x_s": self.erholung_x_s,
+            "messen_bis_s": self.messen_bis_s,
         }
 
     @classmethod
@@ -180,6 +251,11 @@ class HfEinstellungen:
         klang = d.get("alarm_klang")
         unten = _zahl(d.get("ziel_unten_bpm"))
         klang_tief = d.get("alarm_klang_tief")
+        oben_bpm = _zahl(d.get("achse_oben_bpm"))
+        unten_bpm = _zahl(d.get("achse_unten_bpm"))
+        fest_roh = d.get("erholung_fest")
+        x_s = d.get("erholung_x_s")
+        bis_s = d.get("messen_bis_s")
         return cls(
             modell=modell if modell in MODELLE else vorgabe.modell,
             eigene=eigene[:EIGENE_MAX],
@@ -197,6 +273,31 @@ class HfEinstellungen:
             alarm_takt_s=takt
             if isinstance(takt, int) and not isinstance(takt, bool) and takt in ALARM_TAKT_S
             else vorgabe.alarm_takt_s,
+            achse_oben=_achse(d.get("achse_oben")),
+            achse_oben_bpm=(
+                oben_bpm
+                if oben_bpm is not None and ALARM_MIN_BPM <= oben_bpm <= ALARM_MAX_BPM
+                else ACHSE_OBEN_FEST
+            ),
+            achse_unten=_achse(d.get("achse_unten")),
+            achse_unten_bpm=(
+                unten_bpm
+                if unten_bpm is not None and 20.0 <= unten_bpm <= ALARM_MAX_BPM
+                else ACHSE_UNTEN_FEST
+            ),
+            erholung_fest=(
+                [f for f in ERHOLUNG_FENSTER_S if f in fest_roh]
+                if isinstance(fest_roh, list)
+                else list(ERHOLUNG_FENSTER_S)
+            ),
+            erholung_x_s=(
+                x_s
+                if isinstance(x_s, int)
+                and not isinstance(x_s, bool)
+                and (x_s == 0 or ERHOLUNG_X_MIN_S <= x_s <= ERHOLUNG_X_MAX_S)
+                else ERHOLUNG_X_S
+            ),
+            messen_bis_s=bis_s if bis_s in MESSEN_BIS_S and not isinstance(bis_s, bool) else 180,
         )
 
 
@@ -212,17 +313,29 @@ def einstellungen_schreiben(e: HfEinstellungen) -> str:
 
 
 __all__ = [
+    "ACHSEN",
+    "ACHSE_AUTO",
+    "ACHSE_FEST",
+    "ACHSE_OBEN_FEST",
+    "ACHSE_PROFIL",
+    "ACHSE_UNTEN_FEST",
     "ALARM_KLANG",
     "ALARM_MAX_BPM",
     "ALARM_MIN_BPM",
     "ALARM_TAKT_S",
     "EIGENE_MAX",
+    "ERHOLUNG_FENSTER_S",
+    "ERHOLUNG_X_MAX_S",
+    "ERHOLUNG_X_MIN_S",
+    "ERHOLUNG_X_S",
     "FORMELN",
     "FORMEL_NAMEN",
+    "MESSEN_BIS_S",
     "MODELLE",
     "MODELL_AUTO",
     "MODELL_ERKLAERUNG",
     "MODELL_NAMEN",
+    "TAKT_NACH_ABSTAND",
     "EigeneGrenze",
     "HfEinstellungen",
     "einstellungen_lesen",

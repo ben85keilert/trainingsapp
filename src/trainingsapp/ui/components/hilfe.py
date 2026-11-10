@@ -455,6 +455,12 @@ des Teils dahinter. Oben rechts steht die Gesamtzeit des ganzen Timers.
 **Ausführung** (Timer einer Übung mit Variante, Seite, Gewicht oder Winkel): gilt für ihre
 Runde — je Ausführung entsteht ein eigener Eintrag.
 
+**Bibliothek** (Einstellungen → Timer → „Alle“): Ein Timer der Bibliothek lässt sich Übungen und
+Plänen **zuordnen** — er wird dort nicht kopiert, sondern gilt als derselbe. Wer ihn ändert,
+ändert ihn überall; gilt er an mehreren Stellen, fragt Speichern: **Überall ändern** oder **Nur
+hier: Kopie anlegen**. Im Plan steht unter dem Editor „Geändert gilt:“ — für jetzt, in diesem
+Plan (eigene Kopie der Planübung) oder für die Übung.
+
 **Klänge**: dieselben Zeilen auf derselben Höhe — je Abschnitt der Klang, mit dem er beginnt
 (etwa Glocke 1 für Belastung, Glocke 3 für die Pause); ▶ spielt vor. Unten der Klang zu Beginn
 jeder neuen Runde und am Ende; **Signale** stellen Countdown, Vibration und Lautstärke für alle

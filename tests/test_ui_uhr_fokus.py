@@ -350,8 +350,8 @@ async def test_editor_ausfuehrung_je_runde(umgebung) -> None:
 
 
 async def test_alle_timer_gruppen_und_loeschen(umgebung) -> None:
-    """F5: Vorlagen, An Übungen (mit „gilt in …“) und Nur in Plänen; Löschen fragt und nennt die
-    Pläne — danach gilt dort der nächste Timer."""
+    """F5/Z3: Bibliothek, Nur an einer Übung (mit „gilt in …“) und Nur in Plänen; Löschen fragt
+    und nennt die Pläne — danach gilt dort der nächste Timer."""
     from trainingsapp.ui.views.alle_timer import alle_timer_view
 
     state, _, _ = umgebung
@@ -363,7 +363,7 @@ async def test_alle_timer_gruppen_und_loeschen(umgebung) -> None:
     seite = Seite()
     ansicht = alle_timer_view(seite, state, "/einstellungen")
     texte = _texte(ansicht)
-    for kopf in ("VORLAGEN", "AN ÜBUNGEN · GELTEN ÜBERALL", "NUR IN PLÄNEN"):
+    for kopf in ("BIBLIOTHEK · ZUM ZUORDNEN", "NUR AN EINER ÜBUNG", "NUR IN PLÄNEN"):
         assert kopf in texte
     assert any(t.startswith("Nur hier  ·  Rumpf › Seitstütz") for t in texte)
     zeile = next(

@@ -245,7 +245,7 @@ def test_zielbereich_unten_und_zone_im_fokus(tmp_path, monkeypatch) -> None:
 
         zeilen = alarm_zeilen(state)
         felder = [x.label for x in _alle(ft.Column(controls=zeilen)) if isinstance(x, ft.TextField)]
-        assert felder == ["Grenze", "darunter"]
+        assert felder == ["darüber", "darunter"]
         schalter = next(x for x in _alle(ft.Column(controls=zeilen)) if isinstance(x, ft.Switch))
         assert schalter.label == "Ton außerhalb des Zielbereichs"  # Fitness-Sprache
         u = Exercise(name="Planke")

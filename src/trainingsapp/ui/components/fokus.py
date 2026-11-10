@@ -500,22 +500,25 @@ class Fokus:
 
     def _ton_pruefen(self, hf: float) -> None:
         """Zielbereich-Ton (Entscheidung C): hoch über, tief unter dem selbst gesetzten
-        Bereich — gedrosselt wie in der Messansicht, nur Information."""
+        Bereich, die Tonfolge wie eingestellt (nach Abstand oder fest) — dieselbe Regel und
+        dieselbe Uhr wie in der Messansicht (`core.hf_ziel.Zielton`), nur Information."""
         e = self._einst
         if e is None or not getattr(e, "alarm_an", False):
             return
-        oben, unten = e.alarm_grenze(), e.ziel_unten()
-        klang = None
-        if oben is not None and hf > oben:
-            klang = e.alarm_klang
-        elif unten is not None and hf < unten:
-            klang = e.alarm_klang_tief
+        from trainingsapp.core.hf_ziel import Zielton
+
+        zielton = getattr(self.state, "hf_zielton", None)
+        if zielton is None:
+            zielton = Zielton()
+            with contextlib.suppress(Exception):
+                self.state.hf_zielton = zielton
+        stumm = getattr(self.state, "hf_stumm", None)
+        jetzt = time.monotonic()
+        klang = zielton.faellig(
+            hf, e, jetzt, stumm=stumm is not None and jetzt < getattr(stumm, "bis", 0.0)
+        )
         if klang is None:
             return
-        jetzt = time.monotonic()
-        if jetzt - self._ton_zuletzt < e.alarm_takt_s:
-            return
-        self._ton_zuletzt = jetzt
         if hasattr(self.page, "run_task"):
             from trainingsapp.ui.timer_takt import ton_spielen
 

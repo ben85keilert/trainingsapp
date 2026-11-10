@@ -82,7 +82,6 @@ from trainingsapp.core.standards import (
     ziel_von,
 )
 from trainingsapp.core.takt import AUS, Takt
-from trainingsapp.core.timer import Abschnitt, TimerProfil
 from trainingsapp.core.uebung_timer import TimerWahl, timer_fuer
 from trainingsapp.core.zaehlen import VORLAGE_AUTO, VORLAGEN_ANGEBOT, SensorWahl, vorlagen_angebot
 from trainingsapp.ui import paketdatei
@@ -97,10 +96,17 @@ from trainingsapp.ui.components.planstand import schild
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.takt_blatt import SYMBOL as TAKT_SYMBOL
 from trainingsapp.ui.components.takt_blatt import takt_blatt, takt_zeile_text
-from trainingsapp.ui.components.timer_wahl import timer_waehlen
+from trainingsapp.ui.components.timer_zeile import (
+    jetzt_grund,
+    neuer_timer,
+    timer_im_fenster,
+    timer_zeile,
+)
+from trainingsapp.ui.components.uhr_blatt import PLAN, UEBUNG, uhr_blatt
 from trainingsapp.ui.components.wege_form import wege_karte
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.timer_bibliothek import in_uebung_speichern
 from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route, kamera_moeglich
 from trainingsapp.ui.views.anhang_hochladen import hochladen_route
 
@@ -731,24 +737,72 @@ def plan_einstellen(
 
     def timer_zurueck() -> None:
         wahl.profil_id, wahl.eigen = "", None
+        timer_editor_stand["offen"] = False
         neu_zeichnen()
 
-    def timer_waehlen_dialog() -> None:
-        """„Anderen Timer nur hier …“ — der gemeinsame Dialog (`components/timer_wahl.py`)."""
+    #: Der Editor in der Zeile (Z2): aufgeklappt? und wo Geändertes gilt
+    timer_editor_stand: dict[str, Any] = {"offen": False}
+    timer_geltung: dict[str, str] = {}
 
-        def gewaehlt(profil_id: str, eigen: TimerProfil | None) -> None:
-            wahl.profil_id, wahl.eigen = profil_id, eigen
-            neu_zeichnen()
-
-        timer_waehlen(
-            page,
-            state,
-            uebung=uebung,
-            plan=plan,
-            wahl=wahl,
-            gewaehlt=gewaehlt,
-            wirksam=timer_fuer(uebung, plan, replace(item, timer=wahl.als_dict())),
+    def wahl_jetzt() -> TimerWahl:
+        """Die Timer-Wahl, wie sie im Formular steht — mit Uhr und „zählt“ der Schalter."""
+        return TimerWahl(
+            wahl.profil_id,
+            wahl.eigen,
+            uhr={"an": True, "aus": False}.get(uhr_wert()),
+            zaehlt={"an": True, "aus": False}.get(zaehlt_wert()),
         )
+
+    def wahl_aus_editor(neu: TimerWahl) -> None:
+        """Aus dem Editor in der Zeile: gilt im Formular, gespeichert mit Speichern oder Zurück
+        — ohne neu zu zeichnen (das Feld, in dem gerade getippt wird, bliebe sonst nicht)."""
+        wahl.profil_id, wahl.eigen = neu.profil_id, neu.eigen
+
+    def wahl_aus_blatt(neu: TimerWahl) -> None:
+        """Aus dem Uhr-Blatt („In Plan“): Timer und — bei „Ohne Uhr“ — die Uhr."""
+        wahl.profil_id, wahl.eigen = neu.profil_id, neu.eigen
+        if neu.uhr is False:
+            uhr_wahl.selected = ["aus"]
+        elif uhr_wert() == "aus":
+            uhr_wahl.selected = ["uebung"]
+        timer_editor_stand["offen"] = False
+
+    def neu_im_editor(g: str) -> None:
+        """„+ Neuer Timer“ aus dem Blatt: für die Planübung eine eigene Kopie im Formular, für
+        die Übung gleich an der Übung — der Editor klappt in der Zeile auf."""
+        frisch = neuer_timer()
+        if g == UEBUNG:
+            in_uebung_speichern(state, uebung, frisch)
+            wahl.profil_id, wahl.eigen = frisch.id, None
+        else:
+            wahl.profil_id, wahl.eigen = "", frisch
+        timer_geltung["g"] = UEBUNG if g == UEBUNG else PLAN
+        timer_editor_stand["offen"] = True
+        neu_zeichnen()
+
+    def timer_waehlen_dialog(_e: Any = None) -> None:
+        """Tipp auf den Namen: das Uhr-Blatt mit Für jetzt · In „Plan“ · Übung (Z1) — „In
+        Plan“ schreibt in dieses Formular."""
+        page.show_dialog(
+            uhr_blatt(
+                page,
+                state,
+                uebung=uebung,
+                plan=plan,
+                item=item,
+                basis=f"{basis}/ziel/{item.id}",
+                im_editor=True,
+                jetzt_grund=jetzt_grund(state),
+                wahl=wahl_jetzt(),
+                wahl_setzen=wahl_aus_blatt,
+                danach=neu_zeichnen,
+                neuer_timer_im_editor=neu_im_editor,
+            )
+        )
+
+    def timer_editor_umschalten(_e: Any = None) -> None:
+        timer_editor_stand["offen"] = not timer_editor_stand["offen"]
+        neu_zeichnen()
 
     # -- Takt (A6, `docs/plan_taktgeber.md` §5): die Zeile wie in „Übung bearbeiten“, der Stift
     # öffnet das Takt-Blatt mit „In diesen Plan“, ✕ heißt ausdrücklich keiner, ↺ wie die Übung —
@@ -946,6 +1000,9 @@ def plan_einstellen(
         eigen_uhr = uhr_wert() != "uebung"
         eigen_timer = bool(wahl.profil_id) or wahl.eigen is not None
         profil = timer_fuer(uebung, plan, replace(item, timer=wahl.als_dict()))
+        editor_auf = (
+            bool(timer_editor_stand["offen"]) and profil is not None and not profil.ist_stoppuhr
+        )
         return [
             ft.Row(
                 spacing=8,
@@ -956,30 +1013,42 @@ def plan_einstellen(
                 ],
             ),
             uhr_wahl,
+            # Eine Zeile statt „Anderen Timer nur hier …“ und „Neuer Timer — nur hier“ (Ben,
+            # 10.11.2026, Skizze Z1): Name ▾ = Uhr-Blatt mit den drei Geltungen, ✎ = Editor hier
             ft.Row(
                 spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
-                    ft.Text("Timer", weight=ft.FontWeight.W_600),
-                    ft.Text(profil.name if profil is not None else "keiner", expand=True),
+                    ft.Text("Timer", weight=ft.FontWeight.W_600, expand=True),
                     schild(eigen_timer, timer_zurueck if eigen_timer else None),
                 ],
             ),
-            ft.Row(
-                wrap=True,
-                spacing=4,
-                controls=[
-                    ft.TextButton(
-                        "Anderen Timer nur hier …",
-                        icon=ft.Icons.TIMER_OUTLINED,
-                        on_click=timer_waehlen_dialog,
-                    ),
-                    # Ben, 8.11.2026 (`docs/plan_uhr_fokus.md` §4): „Timer hinzufügen geht in
-                    # der Übung im Plan nicht wirklich. Das muss schnell möglich sein“
-                    ft.TextButton(
-                        "Neuer Timer — nur hier", icon=ft.Icons.ADD, on_click=neuer_timer_hier
-                    ),
-                ],
+            timer_zeile(
+                uebung=uebung,
+                plan=plan,
+                wahl=wahl,
+                profil=profil,
+                offen=editor_auf,
+                blatt_oeffnen=timer_waehlen_dialog,
+                editor_umschalten=timer_editor_umschalten,
+            ),
+            *(
+                [
+                    timer_im_fenster(
+                        page,
+                        state,
+                        uebung=uebung,
+                        plan=plan,
+                        item=item,
+                        profil=profil,
+                        wahl=wahl_jetzt,
+                        wahl_setzen=wahl_aus_editor,
+                        geltung=timer_geltung,
+                        spec=spec_aktuell(),
+                    )
+                ]
+                if editor_auf and profil is not None
+                else []
             ),
             takt_teil(),
             zaehlt_teil(),
@@ -1183,17 +1252,6 @@ def plan_einstellen(
 
     async def abbrechen() -> None:
         await zurueckgehen()
-
-    async def neuer_timer_hier() -> None:
-        """„Neuer Timer — nur hier“: eine eigene Kopie für diese Planübung anlegen, das Formular
-        speichern (die Ansichten werden beim Wechsel neu gebaut) und gleich in den Editor."""
-        neu = TimerProfil(
-            id=new_id(), name="", abschnitte=[Abschnitt("Belastung", 30), Abschnitt("Pause", 15)]
-        )
-        wahl.profil_id, wahl.eigen = "", neu
-        if sichern() is None:
-            ziel = f"{basis}/ziel/{item.id}/timer/uebung/{uebung.id}/{item.id}"
-            await page.push_route(f"{ziel}/bearbeiten/{neu.id}")
 
     async def uebung_ansehen() -> None:
         if sichern() is None:

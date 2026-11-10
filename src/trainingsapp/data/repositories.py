@@ -63,6 +63,13 @@ from ..core.pakete import stand_tag_nachziehen
 from ..core.parameter import kontextfelder, modus_aus_felder
 from ..core.result_spec import FieldType, ResultSpec, basis_key, werte_modernisieren
 from ..core.takt import AUS, Takt
+from ..core.timer import (
+    BIBLIOTHEK,
+    TimerProfil,
+    verweise_aufloesen,
+    verweise_schreiben,
+    zugeordnete,
+)
 from ..core.zaehlen import SensorWahl
 from .db import transaktion
 
@@ -180,7 +187,7 @@ class ExerciseRepo:
                     uebung.created_at.isoformat(),
                     uebung.updated_at.isoformat(),
                     uebung.package_id,
-                    json.dumps(uebung.timer, ensure_ascii=False),
+                    _timer_json(self.con, uebung.timer),
                     int(uebung.uhr),
                     uebung.zaehlt_als,
                     int(uebung.zeit_zaehlt),
@@ -503,8 +510,7 @@ class ExerciseRepo:
             u.media = nach_uebung.get(u.id, [])
         return uebungen
 
-    @staticmethod
-    def _zeile(r: sqlite3.Row) -> Exercise:
+    def _zeile(self, r: sqlite3.Row) -> Exercise:
         return Exercise(
             id=r["id"],
             name=r["name"],
@@ -522,7 +528,7 @@ class ExerciseRepo:
             updated_at=datetime.fromisoformat(r["updated_at"]),
             deleted_at=datetime.fromisoformat(r["deleted_at"]) if r["deleted_at"] else None,
             package_id=r["package_id"],
-            timer=_json_lesen(r["timer_json"], []),
+            timer=_timer_lesen(self.con, r["timer_json"], []),
             uhr=bool(r["clock_on"]),
             zaehlt_als=r["clock_counts_as"] or "",
             zeit_zaehlt=bool(r["clock_counts"]),
@@ -622,6 +628,39 @@ def _json_lesen(text: str | None, vorgabe: Any) -> Any:
     except (TypeError, ValueError):
         return vorgabe
     return wert if isinstance(wert, type(vorgabe)) else vorgabe
+
+
+def _timer_lesen(con: sqlite3.Connection, text: str | None, vorgabe: Any) -> Any:
+    """Timer-JSON von Übung, Plan oder Planübung — Verweise in die Bibliothek (``{"ref": …}``,
+    Migration 052) werden das Profil mit dem Vermerk ``bibliothek`` (`verweise_aufloesen`). Die
+    Bibliothek wird nur gelesen, wenn der Text einen Verweis enthält."""
+    wert = _json_lesen(text, vorgabe)
+    if text and '"ref"' in text:
+        wert = verweise_aufloesen(wert, TimerRepo(con).roh())
+        if wert is None:
+            return vorgabe
+    return wert
+
+
+def _timer_json(con: sqlite3.Connection, wert: Any) -> str:
+    """Das Gegenstück: Profile mit Vermerk werden Verweise. **Was am zugeordneten Timer geändert
+    wurde, kommt dabei in die Bibliothek** — er ändert sich überall, wo er gilt (ob das gewollt
+    ist, fragt die Oberfläche vorher: „Überall ändern · Nur hier: Kopie anlegen“,
+    `docs/plan_timer_zuordnen.md` §5). Gibt es den Timer nicht (mehr), bleibt eine Kopie."""
+    treffer = zugeordnete(wert)
+    if not treffer:
+        return json.dumps(wert, ensure_ascii=False)
+    repo = TimerRepo(con)
+    vorhanden = repo.roh()
+    for d in treffer:
+        profil = TimerProfil.aus_dict({k: v for k, v in d.items() if k != BIBLIOTHEK})
+        alt = vorhanden.get(str(d[BIBLIOTHEK]))
+        if profil is None or alt is None:
+            continue
+        profil.id = str(d[BIBLIOTHEK])
+        if TimerProfil.aus_dict(alt) != profil:
+            repo.speichern(profil)
+    return json.dumps(verweise_schreiben(wert, set(vorhanden)), ensure_ascii=False)
 
 
 def _felder_lesen(text: str | None) -> list[str] | None:
@@ -807,6 +846,109 @@ class SettingRepo:
 
 
 # ---------------------------------------------------------------------------
+# Timer-Bibliothek
+# ---------------------------------------------------------------------------
+
+
+class TimerRepo:
+    """Die Timer-Bibliothek (Migration 052, Ben 10.11.2026: Timer zuordnen statt kopieren).
+
+    Vorher lag sie als JSON-Liste in der Einstellung ``timer_profile``; die zieht beim ersten
+    Lesen hierher um, die IDs bleiben. Übung, Plan und Planübung verweisen auf eine Zeile
+    (``{"ref": "<id>"}``) — aufgelöst und zurückgeschrieben in `_timer_lesen`/`_timer_json`.
+    Gelöscht wird weich; ein Verweis auf einen gelöschten Timer gilt als „keiner“.
+    """
+
+    def __init__(self, con: sqlite3.Connection) -> None:
+        self.con = con
+
+    def _umziehen(self) -> None:
+        """Einmalig: die Einstellung ``timer_profile`` in die Tabelle — danach ist sie weg."""
+        r = self.con.execute(
+            "SELECT value FROM app_setting WHERE key = ?", (SettingRepo.TIMER_PROFILE,)
+        ).fetchone()
+        if r is None:
+            return
+        try:
+            roh = json.loads(r["value"] or "[]")
+        except (TypeError, ValueError):
+            roh = []
+        profile = [p for d in roh if (p := TimerProfil.aus_dict(d)) is not None] if roh else []
+        with transaktion(self.con):
+            leer = self.con.execute("SELECT 1 FROM timer LIMIT 1").fetchone() is None
+            if leer:
+                for n, p in enumerate(profile):
+                    self._schreiben(p, n)
+            self.con.execute("DELETE FROM app_setting WHERE key = ?", (SettingRepo.TIMER_PROFILE,))
+
+    def _schreiben(self, profil: TimerProfil, position: int | None) -> None:
+        stempel = jetzt().isoformat()
+        d = profil.als_dict()
+        d.pop(BIBLIOTHEK, None)
+        if position is None:
+            r = self.con.execute(
+                "SELECT position FROM timer WHERE id = ? AND deleted_at IS NULL", (profil.id,)
+            ).fetchone()
+            if r is not None:
+                position = int(r["position"])
+            else:
+                m = self.con.execute("SELECT MAX(position) AS m FROM timer").fetchone()
+                position = 0 if m["m"] is None else int(m["m"]) + 1
+        self.con.execute(
+            "INSERT INTO timer (id, name, json, position, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET name = excluded.name, json = excluded.json, "
+            "position = excluded.position, updated_at = excluded.updated_at, "
+            "revision = revision + 1, deleted_at = NULL",
+            (profil.id, profil.name, json.dumps(d, ensure_ascii=False), position, stempel, stempel),
+        )
+
+    def roh(self) -> dict[str, dict[str, Any]]:
+        """ID → Profil als Tabelle, in der Reihenfolge der Bibliothek."""
+        self._umziehen()
+        out: dict[str, dict[str, Any]] = {}
+        for r in self.con.execute(
+            "SELECT id, json FROM timer WHERE deleted_at IS NULL ORDER BY position, created_at"
+        ):
+            d = _json_lesen(r["json"], {})
+            if d:
+                out[r["id"]] = {**d, "id": r["id"]}
+        return out
+
+    def alle(self) -> list[TimerProfil]:
+        """Die Timer der Bibliothek — leer, wenn es keine eigenen gibt."""
+        return [p for d in self.roh().values() if (p := TimerProfil.aus_dict(d)) is not None]
+
+    def speichern(self, profil: TimerProfil) -> None:
+        """Legt an oder ändert — überall, wo der Timer zugeordnet ist."""
+        self._umziehen()
+        with transaktion(self.con):
+            self._schreiben(profil, None)
+
+    def setzen(self, profile: Iterable[TimerProfil]) -> None:
+        """Die ganze Bibliothek in dieser Reihenfolge; was fehlt, ist gelöscht."""
+        self._umziehen()
+        liste = list(profile)
+        with transaktion(self.con):
+            bleibt = {p.id for p in liste}
+            for r in self.con.execute("SELECT id FROM timer WHERE deleted_at IS NULL").fetchall():
+                if r["id"] not in bleibt:
+                    self._loeschen(r["id"])
+            for n, p in enumerate(liste):
+                self._schreiben(p, n)
+
+    def _loeschen(self, timer_id: str) -> None:
+        self.con.execute(
+            "UPDATE timer SET deleted_at = ?, revision = revision + 1 WHERE id = ?",
+            (jetzt().isoformat(), timer_id),
+        )
+
+    def loeschen(self, timer_id: str) -> None:
+        with transaktion(self.con):
+            self._loeschen(timer_id)
+
+
+# ---------------------------------------------------------------------------
 # Pläne
 # ---------------------------------------------------------------------------
 
@@ -872,7 +1014,7 @@ class PlanRepo:
                     int(plan.aktiv),
                     json.dumps(sorted(set(plan.wochentage))),
                     plan.kurs_kapitel_id,
-                    json.dumps(plan.timer, ensure_ascii=False) if plan.timer else None,
+                    _timer_json(self.con, plan.timer) if plan.timer else None,
                     int(plan.weiter_automatisch),
                     int(plan.pause_ohne_timer),
                     plan.package_id,
@@ -1222,7 +1364,7 @@ class PlanRepo:
         with transaktion(self.con):
             self.con.execute(
                 "UPDATE plan_item SET timer_json = ? WHERE id = ?",
-                (json.dumps(timer, ensure_ascii=False), item_id),
+                (_timer_json(self.con, timer), item_id),
             )
             self._beruehrt(zeile["plan_id"])
 
@@ -1281,7 +1423,7 @@ class PlanRepo:
                 "UPDATE plan SET timer_json = ?, auto_next = ?, "
                 "pause_no_timer = COALESCE(?, pause_no_timer) WHERE id = ?",
                 (
-                    json.dumps(timer, ensure_ascii=False) if timer else None,
+                    _timer_json(self.con, timer) if timer else None,
                     int(weiter_automatisch),
                     None if pause_ohne_timer is None else int(pause_ohne_timer),
                     plan_id,
@@ -1398,7 +1540,7 @@ class PlanRepo:
                 modus_aus_felder(item.felder),
                 json.dumps(item.quick, ensure_ascii=False),
                 _felder_json(item.felder),
-                json.dumps(item.timer, ensure_ascii=False),
+                _timer_json(self.con, item.timer),
                 _sensor_json(item.acc),
                 _takt_json(item.takt),
                 _bedingung_json(item.bedingung),
@@ -1438,8 +1580,7 @@ class PlanRepo:
             p.ablauf = fuer_plan(p.ablauf, p.workout, [(it.id, it.bedingung) for it in p.items])
         return plaene
 
-    @staticmethod
-    def _item_zeile(r: sqlite3.Row) -> PlanItem:
+    def _item_zeile(self, r: sqlite3.Row) -> PlanItem:
         return PlanItem(
             id=r["id"],
             plan_id=r["plan_id"],
@@ -1450,7 +1591,7 @@ class PlanRepo:
             input_mode=r["input_mode"],
             quick=json.loads(r["quick_json"]),
             felder=_felder_lesen(r["fields_json"]),
-            timer=_json_lesen(r["timer_json"], {}),
+            timer=_timer_lesen(self.con, r["timer_json"], {}),
             acc=_sensor_lesen(r["acc_json"]),
             takt=_takt_lesen(r["takt_json"]),
             bedingung=Bedingung.aus_dict(_tabelle_lesen(r["bedingung_json"])),
@@ -1459,8 +1600,7 @@ class PlanRepo:
             media=[m for roh in _json_lesen(r["media_json"], []) if (m := medium_aus_dict(roh))],
         )
 
-    @staticmethod
-    def _zeile(r: sqlite3.Row) -> Plan:
+    def _zeile(self, r: sqlite3.Row) -> Plan:
         return Plan(
             id=r["id"],
             name=r["name"],
@@ -1471,7 +1611,7 @@ class PlanRepo:
             aktiv=bool(r["active"]),
             wochentage=json.loads(r["weekdays_json"]),
             kurs_kapitel_id=r["course_chapter_id"],
-            timer=_json_lesen(r["timer_json"], {}) or None,
+            timer=_timer_lesen(self.con, r["timer_json"], {}) or None,
             weiter_automatisch=bool(r["auto_next"]),
             pause_ohne_timer=bool(r["pause_no_timer"]),
             workout=bool(r["workout"]),
@@ -3425,5 +3565,6 @@ __all__ = [
     "StreckeRepo",
     "SubjectRepo",
     "TagRepo",
+    "TimerRepo",
     "new_id",
 ]

@@ -189,13 +189,14 @@ async def test_erholung_setzt_marke_und_bezug_wechselt(daten) -> None:
         ansicht = messung(seite, state)
         texte = _texte(ansicht)
         assert "HF am Ende" in texte and "HRR30" in texte and "HRR120" in texte
+        assert "HRR180" in texte  # das freie Fenster X, Vorgabe 180 s (A22)
         # Haltung ändern schreibt in die Marke der Datei
         haltung = next(
             c for c in _alle(ansicht) if isinstance(c, ft.Dropdown) and c.label == "Haltung"
         )
         haltung.on_select(SimpleNamespace(control=SimpleNamespace(value="liegt")))
         assert marken[0]["haltung"] == "liegt"
-        _knopf(messung(seite, state), "Beenden").on_click()
+        _knopf(messung(seite, state), "Erholung beenden").on_click()
         assert state.hf_erholung is None
         # Bezug 5 min / Aufnahme; Abschnitt nur, wenn einer läuft
         bezug = _segment(messung(seite, state), ["aufnahme", "abschnitt", "fenster"])
@@ -395,9 +396,10 @@ async def _aufgaben(seite) -> None:
 
 
 async def test_hf_blatt_mittel_bereiche_und_signal(daten) -> None:
-    """Ben, 30.10.2026: In der HF-Sicht hat „Fenster & Darstellung“ HF-Einstellungen (Mittel,
-    Bereiche im Bild oder alle, HF-Achse, Signal an der Grenze) — keine Verlaufskurven. Das
-    Signal spielt leise höchstens alle paar Sekunden, solange die HF über der Grenze liegt."""
+    """Ben, 30.10.2026: In der HF-Sicht hat „Fenster & Darstellung“ HF-Einstellungen — keine
+    Verlaufskurven. Seit dem 10.11.2026 (A22): Wertebereich je Seite statt „Bereiche im Bild |
+    alle“, „Zielbereich und Ton“ mit − und + statt des Felds, „Erholung messen“. Der Ton
+    spielt, solange die HF außerhalb liegt — die Tonfolge nach Abstand."""
     state, tmp_path = daten
     _profil_fuellen(state)
     ton = _Ton()
@@ -409,14 +411,21 @@ async def test_hf_blatt_mittel_bereiche_und_signal(daten) -> None:
     try:
         seite = _seite()
         ansicht = messung(seite, state)
-        texte = _texte(ansicht)
-        assert any(t.startswith("Signal ab 40 bpm") and "Klangschale" in t for t in texte)
+        # Die Zeile „Zielbereich bis 40 − + Ton an“ (Skizze H4)
+        assert _knopf(ansicht, "Ton an") is not None
         await _aufgaben(seite)
         assert [g[0] for g in ton.gespielt] == ["schale"]
-        # Innerhalb des Takts kein zweiter Klang
+        # Innerhalb der Tonfolge kein zweiter Klang
         lauf.beobachter(False)
         await _aufgaben(seite)
         assert len(ton.gespielt) == 1
+        # Vorgabe des Wertebereichs: Ruhe-HF bis HFmax im Bild
+        chart = next(
+            c
+            for c in _alle(ansicht)
+            if isinstance(c, fc.LineChart) and c.left_axis.title.value == "HF bpm"
+        )
+        assert chart.min_y <= 55 and chart.max_y >= 185
         # Das Blatt der HF-Sicht
         knopf = next(
             c
@@ -427,8 +436,9 @@ async def test_hf_blatt_mittel_bereiche_und_signal(daten) -> None:
         blatt = seite.aufrufe[-1]
         assert isinstance(blatt, ft.BottomSheet)
         btexte = _texte(blatt)
-        assert "ZEITACHSE" in btexte and "HERZFREQUENZ" in btexte and "SIGNAL" in btexte
-        assert "WERTEACHSEN" in btexte and "KURVEN" not in btexte
+        assert "ZEITACHSE" in btexte and "HERZFREQUENZ" in btexte
+        assert "WERTEBEREICH" in btexte and "ZIELBEREICH UND TON" in btexte
+        assert "ERHOLUNG MESSEN" in btexte and "KURVEN" not in btexte
         assert not any(t.startswith("RMSSD") for t in btexte)
         mittel = next(
             c
@@ -437,31 +447,98 @@ async def test_hf_blatt_mittel_bereiche_und_signal(daten) -> None:
         )
         mittel.on_select(SimpleNamespace(control=SimpleNamespace(value="10")))
         assert state.hrv_einstellungen().hf_mittel_s == 10
-        bereiche = _segment(blatt, ["bild", "alle"])
-        bereiche.on_change(SimpleNamespace(control=SimpleNamespace(selected=["alle"])))
-        assert state.hrv_einstellungen().hf_bereiche_alle
+        # Wertebereich: oben Automatik, unten fest 60 — jede Seite für sich
+        oben, unten = (
+            c
+            for c in _alle(blatt)
+            if isinstance(c, ft.SegmentedButton)
+            and [s.value for s in c.segments] == ["auto", "profil", "fest"]
+        )
+        assert oben.selected == ["profil"] and unten.selected == ["profil"]
+        oben.on_change(SimpleNamespace(control=SimpleNamespace(selected=["auto"])))
+        feld = next(
+            c for c in _alle(blatt) if isinstance(c, ft.TextField) and c.label == "Fest unten"
+        )
+        feld.value = "60"
+        feld.on_submit(None)
+        e = state.hf_einstellungen()
+        assert (e.achse_oben, e.achse_unten, e.achse_unten_bpm) == ("auto", "fest", 60.0)
         chart = next(
             c
             for c in _alle(messung(seite, state))
             if isinstance(c, fc.LineChart) and c.left_axis.title.value == "HF bpm"
         )
-        assert chart.min_y <= 55 and chart.max_y >= 185  # Ruhe-HF bis HFmax im Bild
-        grenze = next(
-            c for c in _alle(blatt) if isinstance(c, ft.TextField) and c.label == "Grenze"
+        assert chart.max_y < 185  # oben folgt der Kurve, nicht mehr der HFmax
+        feld.value = "500"  # außerhalb: Hinweis, der alte Wert bleibt
+        feld.on_submit(None)
+        assert feld.error and state.hf_einstellungen().achse_unten_bpm == 60.0
+        # Zielbereich: + rückt die obere Linie, der Schalter stellt den Ton ab
+        plus = next(
+            c for c in _alle(blatt) if isinstance(c, ft.IconButton) and c.tooltip == "Oben erhöhen"
         )
-        grenze.value = "150"
-        grenze.on_submit(None)
-        assert state.hf_einstellungen().alarm_bpm == 150
+        plus.on_click()
+        assert state.hf_einstellungen().alarm_bpm == 41
+        plus.on_long_press()
+        assert state.hf_einstellungen().alarm_bpm == 46
         schalter = next(
-            c
-            for c in _alle(blatt)
-            if isinstance(c, ft.Switch) and c.label == "Ton außerhalb des Zielbereichs"
+            c for c in _alle(blatt) if isinstance(c, ft.Switch) and c.label == "Ton außerhalb"
         )
         schalter.on_change(SimpleNamespace(control=SimpleNamespace(value=False)))
         assert state.hf_einstellungen().alarm_grenze() is None
-        grenze.value = "500"  # außerhalb 40–230: Hinweis, der alte Wert bleibt
-        grenze.on_submit(None)
-        assert grenze.error and state.hf_einstellungen().alarm_bpm == 150
+        # Erholung messen: X ändern, ein festes Fenster abwählen
+        x = next(c for c in _alle(blatt) if isinstance(c, ft.TextField) and c.label == "X")
+        x.value = "95"
+        x.on_submit(None)
+        chip60 = next(
+            c
+            for c in _alle(blatt)
+            if isinstance(c, ft.Chip) and isinstance(c.label, ft.Text) and c.label.value == "60"
+        )
+        chip60.on_select(SimpleNamespace(control=SimpleNamespace(selected=False)))
+        assert state.hf_einstellungen().erholung_fenster() == (30, 95, 120)
+    finally:
+        await _ende(lauf, task)
+
+
+async def test_zielbereich_zeile_stumm_und_ton_darunter(daten) -> None:
+    """A22: − und + rücken den ganzen Zielbereich um 5 bpm; unter der unteren Linie klingt der
+    tiefere Klang; „stumm“ schweigt, bis man es aufhebt."""
+    state, tmp_path = daten
+    _profil_fuellen(state)
+    ton = _Ton()
+    state.ton, state.toene_geladen = ton, True
+    e = state.hf_einstellungen()
+    e.alarm_an, e.alarm_bpm, e.ziel_unten_bpm = True, 228, 220  # der Simulator liegt darunter
+    state.hf_einstellungen_setzen(e)
+    lauf, task = await _lauf(state, tmp_path)
+    try:
+        seite = _seite()
+        ansicht = messung(seite, state)
+        await _aufgaben(seite)
+        assert [g[0] for g in ton.gespielt] == ["glocke3"]
+        plus = next(
+            c
+            for c in _alle(ansicht)
+            if isinstance(c, ft.IconButton) and str(c.tooltip).startswith("Zielbereich senken")
+        )
+        plus.on_click()
+        e = state.hf_einstellungen()
+        assert (e.alarm_bpm, e.ziel_unten_bpm) == (223, 215)
+        # Stumm bis Messende: kein Ton mehr, der Knopf hebt es auf
+        from trainingsapp.core.hf_ziel import BIS_MESSENDE
+        from trainingsapp.ui.hf_live import HfLive
+
+        hl = HfLive(seite, state, lauf)
+        hl.stumm_setzen(BIS_MESSENDE)
+        state.hf_zielton.zuletzt = -1e9
+        ansicht = messung(seite, state)
+        await _aufgaben(seite)
+        assert len(ton.gespielt) == 1
+        state.hf_zielton.zuletzt = -1e9
+        _knopf(ansicht, "Ton stumm").on_click()  # hebt es auf — der Ton ist gleich wieder da
+        assert state.hf_stumm is None
+        await _aufgaben(seite)
+        assert len(ton.gespielt) == 2
     finally:
         await _ende(lauf, task)
 
@@ -472,7 +549,7 @@ def test_einstellungen_herzfrequenz_signal_karte(daten) -> None:
     state.ton, state.toene_geladen = ton, True
     seite = _seite()
     view = einstellungen_herzfrequenz(seite, state)
-    assert "SIGNAL ÜBER EINER GRENZE" in _texte(view)
+    assert "ZIELBEREICH UND TON" in _texte(view)
     klang = next(
         c for c in _alle(view) if isinstance(c, ft.Dropdown) and c.label == "Klang darüber"
     )
@@ -482,8 +559,8 @@ def test_einstellungen_herzfrequenz_signal_karte(daten) -> None:
     assert state.hf_einstellungen().alarm_klang == "holz"
     asyncio.run(_aufgaben(seite))
     assert [g[0] for g in ton.gespielt] == ["holz"]  # vorgespielt
-    takt = next(
-        c for c in _alle(view) if isinstance(c, ft.Dropdown) and c.label == "höchstens alle"
-    )
+    takt = next(c for c in _alle(view) if isinstance(c, ft.Dropdown) and c.label == "Tonfolge")
+    assert [o.text for o in takt.options][:2] == ["nach Abstand", "alle 3 s"]  # A22
+    assert takt.value == "0"
     takt.on_select(SimpleNamespace(control=SimpleNamespace(value="10")))
     assert state.hf_einstellungen().alarm_takt_s == 10

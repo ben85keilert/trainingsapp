@@ -4,6 +4,8 @@ Kopie, Chips Uhr / Zeit zählt (P104), Takt für alle (P105), Bedingung mit Wege
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 ft = pytest.importorskip("flet")
@@ -115,7 +117,18 @@ def test_zeile_im_plan_editor_und_zusammenfassung(umgebung) -> None:
     assert "Workout und Ablauf" not in [t.upper() for t in _texte(editor)]
 
 
-def test_uhrenplan_zeigt_jede_planuebung_als_zeile_und_liste(umgebung) -> None:
+def _editor_auf(ansicht) -> None:
+    """✎ in der Timer-Zeile der ersten Karte — klappt den Editor in der Karte auf."""
+    next(
+        x for x in _alle(ansicht) if isinstance(x, ft.IconButton) and x.data == "timer_editor_auf"
+    ).on_click()
+
+
+def _feld(ansicht, data):
+    return next(x for x in _alle(ansicht) if getattr(x, "data", None) == data)
+
+
+def test_uhrenplan_zeigt_jede_planuebung_als_zeile_und_editor(umgebung) -> None:
     state, plan, _kniebeuge, _katze = umgebung
     basis = f"/plan/{plan.id}/bearbeiten"
     ansicht = plan_uhren_view(Seite(), state, plan, basis)
@@ -124,13 +137,18 @@ def test_uhrenplan_zeigt_jede_planuebung_als_zeile_und_liste(umgebung) -> None:
     # Zugeklappt sagt eine Zeile alles — die Bedingung gehört der Planübung (hier keine)
     assert any(t.startswith("Satz · 2:30 · kein Takt · zählt · weiter: abhaken") for t in texte)
     assert "Uhr aus · weiter: abhaken" in texte
-    # Aufgeklappt: die Abschnitte als Liste mit Dauer und „zählt“
     kacheln = [x for x in _alle(ansicht) if isinstance(x, ft.ExpansionTile)]
     assert len(kacheln) == 2 and not kacheln[0].expanded
-    assert "Bewegung" in texte and "Pause" in texte
-    assert _knopf(ansicht, "0:30") is not None and _knopf(ansicht, "0:20") is not None
-    assert _knopf(ansicht, "+ Abschnitt") is not None
+    # Die Timer-Zeile (Z1): Name, Zeit und Abschnitte, Herkunft; darunter die Zeiten als Zeile
+    assert "Satz" in texte and "2:30 · 2 Abschnitte" in texte and "Übung" in texte
+    assert "0:30 Bewegung · 0:20 Pause · 3 Runden" in texte
     assert "FÜR DEN GANZEN PLAN" in texte
+    # ✎ klappt denselben Editor wie beim Haupttimer in der Karte auf (Z2): Zeiten · Klänge
+    _editor_auf(ansicht)
+    assert _knopf(ansicht, "0:30") is not None and _knopf(ansicht, "0:20") is not None
+    assert _knopf(ansicht, "Abschnitt hinzufügen") is not None
+    assert _feld(ansicht, "reiter") is not None and _feld(ansicht, "geaendert_gilt") is not None
+    assert "Geändert gilt:" in _texte(ansicht)
 
 
 def test_abschnitt_aendern_macht_eigene_kopie_und_chips_wechseln(umgebung) -> None:
@@ -139,27 +157,24 @@ def test_abschnitt_aendern_macht_eigene_kopie_und_chips_wechseln(umgebung) -> No
     seite = Seite()
     ansicht = plan_uhren_view(seite, state, plan, basis)
     item = plan.items[0]
-    # Runden +1 → eigene Kopie der Planübung, die Übung bleibt
-    _symbolknopf(ansicht, ft.Icons.ADD, "Eine Runde mehr").on_click()
+    # Im Editor der Karte Runden +1 (Geltung: In „Beine“) → eigene Kopie der Planübung, die
+    # Übung bleibt
+    _editor_auf(ansicht)
+    fuss = _feld(ansicht, ("teil", 0))
+    next(
+        x for x in _alle(fuss) if isinstance(x, ft.IconButton) and x.icon == ft.Icons.ADD
+    ).on_click()
     wahl = TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer)
     assert wahl.eigen is not None and wahl.eigen.runden == 4
+    assert wahl.eigen.name == "Satz (Beine)" and wahl.eigen.id != "satz"
     assert state.uebungen.laden(kniebeuge.id).timer[0]["runden"] == 3
+    # „zählt“ eines Abschnitts umschalten → in derselben Kopie
+    _feld(ansicht, ("zaehlt", 0, 1)).on_click()
+    kopie = TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer).eigen
+    assert kopie is not None and kopie.id == wahl.eigen.id and kopie.abschnitte[1].zaehlt is True
     ansicht = plan_uhren_view(seite, state, plan, basis)
     assert any("nur hier" in t for t in _texte(ansicht))
-    # „zählt“ eines Abschnitts umschalten → in der Kopie
-    pause_chip = [
-        x
-        for x in _alle(ansicht)
-        if isinstance(x, ft.Chip)
-        and isinstance(x.label, ft.Text)
-        and x.label.value == "zählt nicht"
-    ]
-    assert pause_chip
-    pause_chip[0].on_select()
-    kopie = TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer).eigen
-    assert kopie is not None and kopie.abschnitte[1].zaehlt is True
     # Uhr-Chip: wie die Übung → an → aus; „Zeit zählt“ (P104) genauso
-    ansicht = plan_uhren_view(seite, state, plan, basis)
     _chip(ansicht, "Uhr an · wie die Übung").on_click()
     assert TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer).uhr is True
     ansicht = plan_uhren_view(seite, state, plan, basis)
@@ -179,6 +194,60 @@ def test_abschnitt_aendern_macht_eigene_kopie_und_chips_wechseln(umgebung) -> No
     )
     schild.on_click()
     assert state.plaene.item_laden(item.id).timer == {}
+
+
+def test_geaendert_gilt_uebung_schreibt_an_die_uebung(umgebung) -> None:
+    """„Geändert gilt: Übung“ — die Übung bekommt die Änderung, die Planübung keine Kopie;
+    „Für jetzt“ gibt es im Editor nur, wenn gerade geübt wird (P171)."""
+    state, plan, kniebeuge, _katze = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    ansicht = plan_uhren_view(Seite(), state, plan, basis)
+    _editor_auf(ansicht)
+    gilt = _feld(ansicht, "geaendert_gilt")
+    assert gilt.selected == ["plan"]
+    gilt.selected = ["jetzt"]
+    gilt.on_change(SimpleNamespace(control=gilt))
+    assert gilt.selected == ["plan"]  # ausgegraut: gilt erst beim Üben
+    gilt.selected = ["uebung"]
+    gilt.on_change(SimpleNamespace(control=gilt))
+    _feld(ansicht, ("zaehlt", 0, 1)).on_click()
+    assert state.plaene.item_laden(plan.items[0].id).timer == {}
+    assert state.uebungen.laden(kniebeuge.id).timer[0]["abschnitte"][1].get("zaehlt") is None
+
+
+def test_uhr_blatt_im_editor_wie_die_uebung_und_bibliothek(umgebung) -> None:
+    """Z1: Der Name öffnet das Uhr-Blatt — „Wie die Übung“, die Geltungen, und „Aus der
+    Bibliothek …“ ordnet zu (Verweis, keine Kopie)."""
+    from trainingsapp.ui.components.uhr_blatt import WIE_UEBUNG
+
+    state, plan, kniebeuge, _katze = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    seite = Seite()
+    ansicht = plan_uhren_view(seite, state, plan, basis)
+    item = plan.items[0]
+    _feld(ansicht, "timer_name").on_click()
+    blatt = seite.dialoge[-1]
+    assert isinstance(blatt, ft.BottomSheet)
+    texte = _texte(blatt)
+    assert "Wie die Übung" in texte and "Aus der Bibliothek …" in texte
+    assert _feld(blatt, ("uhr", WIE_UEBUNG)).bgcolor is not None  # gewählt
+    # ein Timer der Bibliothek, der Planübung zugeordnet
+    menue = next(x for x in _alle(blatt) if isinstance(x, ft.PopupMenuButton))
+    menue.items[0].on_click()
+    _knopf(blatt, "Übernehmen").on_click()
+    roh = state.con.execute("SELECT timer_json FROM plan_item WHERE id = ?", (item.id,))
+    assert '"ref": "vorlage-intervall"' in roh.fetchone()[0]
+    geladen = state.plaene.laden(plan.id)
+    wirksam = timer_fuer(kniebeuge, geladen, geladen.items[0])
+    assert (wirksam.name, wirksam.bibliothek) == ("Intervall 30/15", "vorlage-intervall")
+    ansicht = plan_uhren_view(seite, state, geladen, basis)
+    assert "Bibliothek · nur hier" in _texte(ansicht)
+    # zurück: Wie die Übung
+    _feld(ansicht, "timer_name").on_click()
+    blatt = seite.dialoge[-1]
+    _feld(blatt, ("uhr", WIE_UEBUNG)).content.controls[0].on_click()
+    _knopf(blatt, "Übernehmen").on_click()
+    assert TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer).eigen is None
 
 
 def test_takt_fuer_alle_und_bedingung_der_uebung_im_workout(umgebung) -> None:
@@ -234,16 +303,18 @@ def _wie_flet(handler) -> None:
 
 def test_abschnitt_hinzufuegen_mit_event(umgebung) -> None:
     """Regression (Ben, 9.11.2026): „+ Abschnitt“ im Uhrenplan stürzte mit „unsupported operand
-    type(s) for -: 'Event' and 'int'“ ab — der Handler nahm das Event für den Teil-Index."""
+    type(s) for -: 'Event' and 'int'“ ab — der Handler nahm das Event für den Teil-Index. Seit
+    dem 10.11.2026 ist es der Editor in der Karte; seine Handler vertragen das Event ebenso."""
     state, plan, _kniebeuge, _katze = umgebung
     basis = f"/plan/{plan.id}/bearbeiten"
     ansicht = plan_uhren_view(Seite(), state, plan, basis)
     item = plan.items[0]
-    _wie_flet(_knopf(ansicht, "+ Abschnitt").on_click)
+    _editor_auf(ansicht)
+    _wie_flet(_knopf(ansicht, "Abschnitt hinzufügen").on_click)
     kopie = TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer).eigen
     assert kopie is not None
-    assert [a.name for a in kopie.abschnitte] == ["Bewegung", "Pause", "Pause"]
-    # Runden ± (Fabrik mit Vorgaben) verträgt das Event ebenso
-    ansicht = plan_uhren_view(Seite(), state, state.plaene.laden(plan.id), basis)
-    _wie_flet(_symbolknopf(ansicht, ft.Icons.ADD, "Eine Runde mehr").on_click)
+    assert [a.dauer_s for a in kopie.abschnitte] == [30, 20, 60]
+    fuss = _feld(ansicht, ("teil", 0))
+    plus = next(x for x in _alle(fuss) if isinstance(x, ft.IconButton) and x.icon == ft.Icons.ADD)
+    _wie_flet(plus.on_click)
     assert TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer).eigen.runden == 4

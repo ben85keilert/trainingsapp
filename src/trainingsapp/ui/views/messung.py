@@ -61,16 +61,8 @@ from hrv_core.trends import KENNZAHLEN
 
 from trainingsapp import config
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
-from trainingsapp.core.hf_profil import bereiche_fuer, grenzen_bpm
-from trainingsapp.core.hf_training import (
-    BEZUG_ABSCHNITT,
-    BEZUG_AUFNAHME,
-    BEZUG_FENSTER,
-    BEZUG_NAMEN,
-    LiveHf,
-    fenster_zusammenfassung,
-    hf_je_schlag,
-)
+from trainingsapp.core.hf_training import BEZUG_AUFNAHME, BEZUG_NAMEN
+from trainingsapp.core.hf_ziel import wertebereich, ziel_grenzen
 from trainingsapp.core.hrv_ansicht import HF_SPANNE_MIN_BPM, ROH, ROH_MAX_MS, ROH_MIN_MS
 from trainingsapp.core.hrv_einstellungen import (
     HF_MITTEL_S,
@@ -120,16 +112,21 @@ from trainingsapp.ui.components.hf_sicht import (
 )
 from trainingsapp.ui.components.hf_sicht import (
     HF_INFO,
+    ZIEL_FARBE,
     alarm_text,
-    alarm_zeilen,
     bezug_wahl,
     erholung_block,
+    erholung_gruppe,
     hf_baender,
     hf_kacheln,
     hf_kopf,
     sicht_wahl,
     skala,
+    wertebereich_gruppe,
     zeit_je_bereich,
+    ziel_blatt,
+    ziel_seite,
+    ziel_zeile,
 )
 from trainingsapp.ui.components.kacheln import (
     HF_KACHELN,
@@ -139,7 +136,7 @@ from trainingsapp.ui.components.kacheln import (
 from trainingsapp.ui.components.karte import gruppe, info_eintrag, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_eintrag
-from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
+from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve, y_grenzen
 from trainingsapp.ui.components.live_abschnitte import LiveAbschnitte
 from trainingsapp.ui.components.notizen import (
     Notizfeld,
@@ -157,7 +154,6 @@ from trainingsapp.ui.components.titel import (
     titel_vorschlaege,
 )
 from trainingsapp.ui.components.verlauf import (
-    ECKIG,
     ECKIG_RADIUS,
     FARBEN,
     Werteachse,
@@ -187,8 +183,8 @@ from trainingsapp.ui.components.zeitfenster import (
     breiten_wahl,
     wischbar,
 )
+from trainingsapp.ui.hf_live import HfLive, stumm_knoepfe_zeiten
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.timer_takt import ton_spielen
 from trainingsapp.ui.training import bewegung_packen, bewegung_vorbereiten
 
 
@@ -902,20 +898,11 @@ def _live_teil(
     # (Zeit je Bereich, Ø, Gipfel, TRIMP je Aufnahme und Abschnitt) liegen im Zustand, damit
     # sie den Neuaufbau der Ansicht überleben (`core.hf_training.LiveHf`).
     sicht = {"wert": SICHT_HF if modus["puls"] else state.hrv_sicht()}
-    hf_profil_ = state.hf_profil()
-    hf_bereiche = bereiche_fuer(hf_profil_, state.hf_einstellungen())
-    hf_grenzen = grenzen_bpm(hf_bereiche)
-    hf_schluessel = (
-        state.profil.id,
-        hf_profil_.ruhe_bpm,
-        hf_profil_.hfmax_bpm,
-        tuple(hf_grenzen),
-        hf_profil_.geschlecht,
-    )
-    if state.live_hf is None or state.live_hf_schluessel != hf_schluessel:
-        state.live_hf = LiveHf(hf_profil_, hf_grenzen)
-        state.live_hf_schluessel = hf_schluessel
-    live_hf: LiveHf = state.live_hf
+    # Werte, Zielbereich-Ton, Erholung und Marken teilt die Ansicht mit dem HF-Vollbild
+    # (`ui.hf_live.HfLive`, Ben 10.11.2026, A22)
+    hl = HfLive(page, state, lauf)
+    hf_profil_ = hl.profil
+    hf_bereiche = hl.bereiche
     hf_box = ft.Container(visible=False)
 
     def anfang() -> float:
@@ -1552,38 +1539,17 @@ def _live_teil(
     def hf_einstellungen_oeffnen() -> None:
         page.run_task(zu_hf_einstellungen)
 
-    # -- Signal über einer Grenze (Ben, 30.10.2026; P90): ein leiser Klang höchstens alle
-    # `alarm_takt_s` Sekunden, solange die HF der letzten 5 s über der Grenze liegt. Die
-    # Einstellungen liest die Ansicht alle paar Sekunden neu (das Blatt und Einstellungen →
-    # Herzfrequenz ändern sie); gespielt wird über den Tondienst des Timers.
-    alarm_stand: dict[str, Any] = {"zuletzt": 0.0, "einst": None, "gelesen": 0.0}
-
+    # -- Ton außerhalb des Zielbereichs (Ben, 30.10.2026, P90; 10.11.2026, A22): zwei Linien,
+    # darüber ein anderer Klang als darunter, die Tonfolge dichter mit dem Abstand, stumm für
+    # eine Zeit — Regel in `core.hf_ziel`, Zustand und Spielen in `ui.hf_live.HfLive`.
     def alarm_einst() -> Any:
-        jetzt = time.monotonic()
-        if alarm_stand["einst"] is None or jetzt - alarm_stand["gelesen"] > 5.0:
-            alarm_stand["einst"] = state.hf_einstellungen()
-            alarm_stand["gelesen"] = jetzt
-        return alarm_stand["einst"]
+        return hl.einst()
 
     def alarm_an() -> bool:
-        return alarm_einst().alarm_grenze() is not None
-
-    def klang_vorspielen(klang: str) -> None:
-        alarm_stand["einst"] = None  # frisch lesen: der Klang wurde eben gewählt
-        with contextlib.suppress(Exception):
-            page.run_task(ton_spielen, state, klang)
+        return bool(alarm_text(hl.einst()))
 
     def alarm_pruefen(hf: float | None) -> None:
-        e = alarm_einst()
-        grenze = e.alarm_grenze()
-        if grenze is None or hf is None or hf <= grenze:
-            return
-        jetzt = time.monotonic()
-        if jetzt - alarm_stand["zuletzt"] < e.alarm_takt_s:
-            return
-        alarm_stand["zuletzt"] = jetzt
-        with contextlib.suppress(Exception):
-            page.run_task(ton_spielen, state, e.alarm_klang)
+        hl.ton_pruefen(hf)
 
     def sicht_waehlen(neu: str) -> None:
         if (neu == SICHT_HRV and modus["puls"]) or neu == sicht["wert"]:
@@ -1612,56 +1578,12 @@ def _live_teil(
         state.hf_bezug = bezug
         aktualisieren(erzwingen=True)
 
-    def hf_punkte(seit_s: float) -> list[tuple[float, float, float, bool]]:
-        return [
-            (p.t_s, float(p.rr_ms), float(p.hf_bpm), p.artefakt or p.verworfen)
-            for p in lauf.live.punkte(seit_s=seit_s)
-        ]
-
     def hf_jetzt() -> float | None:
-        """Die Herzfrequenz der letzten 5 s aus RR (bpm-Rückfall) — sonst die des Geräts."""
-        jetzt = lauf.jetzt_s()
-        werte = [
-            w
-            for _, rr, hf, art in hf_punkte(jetzt - 5.0)
-            if (w := hf_je_schlag(0.0 if art else rr, hf)) is not None
-        ]
-        if werte:
-            return sum(werte) / len(werte)
-        k = lauf.live.kennzahlen()
-        return (
-            float(k.hf_bpm)
-            if k.hf_bpm
-            else (float(lauf.status.hf_bpm) if lauf.status.hf_bpm else None)
-        )
+        return hl.hf_jetzt()
 
     def hf_live_werte() -> tuple[float | None, dict[str, Any] | None, str, bool]:
         """``(HF, Zusammenfassung des Bezugs, Name des Bezugs, Abschnitt läuft?)``."""
-        jetzt = lauf.jetzt_s()
-        abschnitt_laeuft = False
-        if lauf.aufnahme is not None:
-            live_hf.nachfuehren(lauf.aufnahme.beats)
-            offen = lauf.offener_abschnitt()
-            if offen is not None:
-                von = next((a.von_s for a in lauf.abschnitte() if a.id == offen[0]), None)
-                if von is not None:
-                    live_hf.abschnitt_setzen(offen[0], von, lauf.aufnahme.beats)
-                    abschnitt_laeuft = True
-            if not abschnitt_laeuft:
-                live_hf.abschnitt_setzen(None, 0.0, [])
-        bezug = state.hf_bezug
-        if bezug == BEZUG_ABSCHNITT and not abschnitt_laeuft:
-            bezug = BEZUG_AUFNAHME
-        if bezug == BEZUG_AUFNAHME and lauf.aufnahme is None:
-            bezug = BEZUG_FENSTER
-        zus: dict[str, Any] | None
-        if bezug == BEZUG_FENSTER:
-            punkte = [(t, rr, hf) for t, rr, hf, art in hf_punkte(jetzt - 300.0) if not art]
-            zus = fenster_zusammenfassung(punkte, hf_profil_, hf_grenzen, jetzt)
-        else:
-            akk = live_hf.fuer(bezug)
-            zus = akk.zusammenfassung() if akk is not None else None
-        return hf_jetzt(), zus, BEZUG_NAMEN[bezug], abschnitt_laeuft
+        return hl.live_werte()
 
     def hf_kurve(
         x_von: float,
@@ -1672,35 +1594,31 @@ def _live_teil(
         x_null: float,
     ) -> ft.Control:
         """HF aus RR als Mittel über `hf_mittel_s` (bpm-Rückfall) mit den Bereichen als
-        Bändern — alle Bereiche, wenn so eingestellt (Blatt „Fenster & Darstellung“)."""
-        mittel = float(einst.hf_mittel_s)
-        roh = hf_punkte(x_von - mittel - 5.0)
-        punkte: list[tuple[float, float]] = []
-        if roh:
-            reihe = hz.hf_reihe(
-                [p[0] for p in roh],
-                [p[1] for p in roh],
-                [p[2] for p in roh],
-                artefakt=[p[3] for p in roh],
-            )
-            glatt = hz.rollmittel(reihe.hf, mittel, min_anteil=0.5)
-            punkte = [
-                (float(t) + 1.0, float(w))
-                for t, w in zip(reihe.t, glatt, strict=True)
-                if w == w and x_von <= t + 1.0 <= x_bis
-            ]
+        Bändern und dem Zielbereich als zwei Linien. Der Wertebereich gilt je Seite für sich
+        (Automatik · Profilwert · fest, `core.hf_ziel.wertebereich`) — derselbe wie im
+        Vollbild."""
+        punkte = hl.kurvenpunkte(x_von, x_bis, float(einst.hf_mittel_s))
         # Das Einatmen der letzten 60 s hinter der Kurve, solange die Atmung erfasst wird
         # (Plan Beschleunigung §7.3, `components.atem_live`)
-        reihen = [
-            *einatem_schatten(state, lauf.jetzt_s(), x_von, x_bis),
-            Reihe(punkte, farbe=ft.Colors.PRIMARY),
-        ]
-        y_von = y_bis = None
-        if einst.hf_bereiche_alle and hf_bereiche:
-            # Die Achse reicht über alle Bereiche — und weiter, wenn die Kurve darüber liegt
-            werte = [w for _, w in punkte]
-            y_von = min(hf_bereiche[0].von_bpm, *werte) if werte else hf_bereiche[0].von_bpm
-            y_bis = max(hf_bereiche[-1].bis_bpm, *werte) if werte else hf_bereiche[-1].bis_bpm
+        haupt = Reihe(punkte, farbe=ft.Colors.PRIMARY)
+        reihen = [*einatem_schatten(state, lauf.jetzt_s(), x_von, x_bis), haupt]
+        e = hl.einst()
+        y_von, y_bis = wertebereich(
+            e, hf_profil_.ruhe_bpm, hf_profil_.hfmax_bpm, [w for _, w in punkte]
+        )
+        grenzen = y_grenzen([haupt], y_von=y_von, y_bis=y_bis, y_spanne_min=HF_SPANNE_MIN_BPM)
+        if grenzen is not None:
+            for linie in ziel_grenzen(e):
+                if linie is not None and grenzen[0] < linie < grenzen[1]:
+                    reihen.append(
+                        Reihe(
+                            [(x_von, linie), (x_bis, linie)],
+                            farbe=ZIEL_FARBE,
+                            breite=1.5,
+                            gestrichelt=True,
+                            skala=False,
+                        )
+                    )
         return kurve(
             [*reihen, *marken],
             einheit="HF bpm",
@@ -1712,75 +1630,27 @@ def _live_teil(
             y_spanne_min=HF_SPANNE_MIN_BPM,
             x_text=x_text,
             x_null=x_null,
-            y_fest=state.ansicht().y_bereich(werteachse("hf_geraet")),
             baender=hf_baender(hf_bereiche),  # Belastungszonen hinter der Kurve
         )
 
-    def erholung_reihe(t0: float) -> hz.HfReihe:
-        roh = hf_punkte(t0 - 10.0)
-        if not roh:
-            return hz.hf_reihe([], [], anfang=t0 - 10.0, ende=t0)
-        return hz.hf_reihe(
-            [p[0] for p in roh],
-            [p[1] for p in roh],
-            [p[2] for p in roh],
-            artefakt=[p[3] for p in roh],
-        )
-
     def erholung_live() -> tuple[hz.Erholung | None, dict[int, float]]:
-        e = state.hf_erholung
-        if e is None:
-            return None, {}
-        t0 = float(e["t0_s"])
-        jetzt = lauf.jetzt_s()
-        erg = hz.hrr_erholung(
-            erholung_reihe(t0), t0, kontext=e.get("kontext", ""), haltung=e.get("haltung", "")
-        )
-        rest = {f: max(0.0, t0 + f - jetzt) for f in erg.hrr}
-        return erg, rest
-
-    def erholung_marke_schreiben() -> None:
-        """Kontext und Haltung in die Marke der Notiz — die Datei ist die Wahrheit."""
-        e = state.hf_erholung
-        if e is None or e.get("notiz") is None:
-            return
-        marke = e["notiz"].get("marke")
-        if isinstance(marke, dict):
-            marke["kontext"], marke["haltung"] = e["kontext"], e["haltung"]
+        return hl.erholung_live()
 
     def erholung_starten() -> None:
-        t0 = lauf.jetzt_s()
-        vorher = state.hf_erholung or {}
-        state.hf_erholung = {
-            "t0_s": t0,
-            "kontext": vorher.get("kontext", "dauer"),
-            "haltung": vorher.get("haltung", "steht"),
-            "notiz": None,
-        }
-        if lauf.aufnahme is not None:
-            state.hf_erholung["notiz"] = lauf.notiz_hinzufuegen(
-                "Belastung beendet",
-                marke={
-                    "quelle": "person",
-                    "art": "erholung",
-                    "kontext": state.hf_erholung["kontext"],
-                    "haltung": state.hf_erholung["haltung"],
-                },
-            )
-            notizfeld.auffrischen()
+        hl.erholung_starten()
+        notizfeld.auffrischen()
         aktualisieren(erzwingen=True)
 
     def erholung_beenden() -> None:
-        state.hf_erholung = None
+        hl.erholung_beenden()
         aktualisieren(erzwingen=True)
 
     def talk_marke() -> None:
         """Talk-Test (Entscheidung 18): „Sprechen wird schwer“ — die HF der 30 s davor wird in
         der Auswertung als Schwelle 1 (Talk-Test) angeboten."""
-        if lauf.aufnahme is None:
+        if not hl.talk_marke():
             page.show_dialog(ft.SnackBar(ft.Text("Erst eine Aufnahme starten.")))
             return
-        lauf.notiz_hinzufuegen("Sprechen wird schwer", marke={"quelle": "person", "art": "talk"})
         notizfeld.auffrischen()
         page.show_dialog(
             ft.SnackBar(
@@ -1790,41 +1660,21 @@ def _live_teil(
         aktualisieren(erzwingen=True)
 
     def erholung_kontext(k: str) -> None:
-        if state.hf_erholung is not None:
-            state.hf_erholung["kontext"] = k
-            erholung_marke_schreiben()
-            aktualisieren(erzwingen=True)
+        hl.erholung_setzen(kontext=k)
+        aktualisieren(erzwingen=True)
 
     def erholung_haltung(h: str) -> None:
-        if state.hf_erholung is not None:
-            state.hf_erholung["haltung"] = h
-            erholung_marke_schreiben()
-            aktualisieren(erzwingen=True)
+        hl.erholung_setzen(haltung=h)
+        aktualisieren(erzwingen=True)
 
     def fruehere_erholungen() -> list[hz.Erholung]:
-        """Die Erholungen dieser Aufnahme aus den Marken ``person/erholung`` — ohne die
-        laufende."""
-        if lauf.aufnahme is None:
-            return []
-        zb = lauf.notiz_zeitbezug()
-        laufend = state.hf_erholung["t0_s"] if state.hf_erholung else None
-        out: list[hz.Erholung] = []
-        for e in lauf.aufnahme.ereignisse:
-            marke = e.get("marke") if isinstance(e, dict) else None
-            if not isinstance(marke, dict) or marke.get("art") != "erholung":
-                continue
-            x = zb.x(dict(e))
-            if x is None or (laufend is not None and abs(x - laufend) < 0.5):
-                continue
-            out.append(
-                hz.hrr_erholung(
-                    erholung_reihe(x),
-                    x,
-                    kontext=str(marke.get("kontext") or ""),
-                    haltung=str(marke.get("haltung") or ""),
-                )
-            )
-        return out
+        return hl.fruehere_erholungen()
+
+    def ziel_oeffnen() -> None:
+        """„Zielbereich und Ton“ als Blatt — hochkant ist keine Seitenleiste."""
+        page.show_dialog(
+            ziel_blatt(hl, lambda: aktualisieren(erzwingen=True), stumm_knoepfe_zeiten())
+        )
 
     def hf_teil(
         hf: float | None, zus: dict[str, Any] | None, bezug_name: str, abschnitt_laeuft: bool
@@ -1836,7 +1686,7 @@ def _live_teil(
             controls=[
                 hf_kopf(hf, hf_profil_, hf_bereiche, einstellungen=hf_einstellungen_oeffnen),
                 skala(hf_bereiche, hf_profil_, hf),
-                ft.Text(alarm_text(alarm_einst()), size=11, opacity=0.65, visible=alarm_an()),
+                ziel_zeile(hl, lambda: aktualisieren(erzwingen=True), ziel_oeffnen),
                 ft.Row(
                     spacing=6,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -1875,16 +1725,29 @@ def _live_teil(
                     kontext_setzen=erholung_kontext,
                     haltung_setzen=erholung_haltung,
                     fruehere=fruehere_erholungen(),
+                    knopf=False,
                 ),
                 ft.Row(
-                    spacing=6,
+                    spacing=8,
                     controls=[
-                        ft.TextButton(
+                        ft.FilledTonalButton(
                             "Sprechen wird schwer",
-                            icon=ft.Icons.RECORD_VOICE_OVER,
                             tooltip="Talk-Test: Marke für Schwelle 1 setzen",
+                            expand=True,
                             on_click=lambda _=None: talk_marke(),
-                        )
+                        ),
+                        ft.FilledTonalButton(
+                            "Erholung beenden"
+                            if state.hf_erholung is not None
+                            else "Belastung endet jetzt",
+                            tooltip="Erholung messen: HF jetzt und in den Fenstern danach",
+                            expand=True,
+                            on_click=lambda _=None: (
+                                erholung_beenden()
+                                if state.hf_erholung is not None
+                                else erholung_starten()
+                            ),
+                        ),
                     ],
                 ),
             ],
@@ -2079,16 +1942,12 @@ def _live_teil(
 
     def hf_gruppen() -> list[tuple[str, list[ft.Control]]]:
         """Die Gruppe „Herzfrequenz“ des Blatts (Ben, 30.10.2026: „In HF braucht es
-        Fenstereinstellungen für HF, wie Bereiche nur teilweise oder alle anzeigen“)."""
+        Fenstereinstellungen für HF“) — seit dem 10.11.2026 (A22) steht statt „Bereiche im
+        Bild | alle“ der Wertebereich je Seite davor (`hf_sicht.wertebereich_gruppe`)."""
 
         def mittel_gewaehlt(e: ft.Event[ft.Dropdown]) -> None:
             if e.control.value is not None:
                 einstellung_merken(hf_mittel_s=int(e.control.value))
-                aktualisieren(erzwingen=True)
-
-        def bereiche_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
-            if e.control.selected:
-                einstellung_merken(hf_bereiche_alle=e.control.selected[0] == "alle")
                 aktualisieren(erzwingen=True)
 
         return [
@@ -2102,29 +1961,6 @@ def _live_teil(
                         on_select=mittel_gewaehlt,
                         dense=True,
                         border=ft.OutlineInputBorder(border_radius=ECKIG_RADIUS),
-                    ),
-                    ft.Row(
-                        spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        controls=[
-                            ft.Text("Bereiche in der Kurve", size=13, expand=True),
-                            ft.SegmentedButton(
-                                selected=["alle" if einst.hf_bereiche_alle else "bild"],
-                                show_selected_icon=False,
-                                style=ECKIG,
-                                segments=[
-                                    ft.Segment(value="bild", label=ft.Text("im Bild", size=12)),
-                                    ft.Segment(value="alle", label=ft.Text("alle", size=12)),
-                                ],
-                                on_change=bereiche_gewaehlt,
-                            ),
-                        ],
-                    ),
-                    ft.Text(
-                        "Im Bild: Die Achse folgt der Kurve, Bereiche sind nur zu sehen, wo sie "
-                        "liegt. Alle: Die Achse reicht von der untersten bis zur obersten Grenze.",
-                        size=11,
-                        opacity=0.65,
                     ),
                 ],
             )
@@ -2147,24 +1983,32 @@ def _live_teil(
             puffer_setzen=lambda s: einstellung_merken(puffer_s=s),
         )
         if sicht["wert"] == SICHT_HF or modus["puls"]:
+
+            def hf_geaendert() -> None:
+                aktualisieren(erzwingen=True)
+
+            # Reine Pulsgeber zeichnen die Kurve des Geräts (`pulskurve`) mit der festen
+            # Werteachse der Ansicht; sonst gilt der Wertebereich je Seite
             page.show_dialog(
                 darstellung_blatt(
                     page,
                     state,
-                    lambda: aktualisieren(erzwingen=True),
-                    achsen=[Werteachse(werteachse("hf_geraet") or "bpm", "Herzfrequenz", "bpm")],
+                    hf_geaendert,
+                    achsen=[Werteachse(werteachse("hf_geraet") or "bpm", "Herzfrequenz", "bpm")]
+                    if modus["puls"]
+                    else [],
                     zeitachse=zeit,
                     kurven_teil=False,
-                    gruppen_vor=hf_gruppen(),
+                    gruppen_vor=[
+                        *([] if modus["puls"] else [wertebereich_gruppe(hl, hf_geaendert)]),
+                        *hf_gruppen(),
+                    ],
                     gruppen_nach=[
                         (
-                            "Signal",
-                            alarm_zeilen(
-                                state,
-                                vorspielen=klang_vorspielen,
-                                geaendert=lambda: aktualisieren(erzwingen=True),
-                            ),
-                        )
+                            "Zielbereich und Ton",
+                            [ziel_seite(hl, hf_geaendert, stumm_knoepfe=stumm_knoepfe_zeiten())],
+                        ),
+                        erholung_gruppe(hl, hf_geaendert),
                     ],
                 )
             )

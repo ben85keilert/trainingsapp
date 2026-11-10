@@ -5,13 +5,16 @@ können in einer View (+Taktung)“; `docs/plan_uhren.md` §4.6, Skizzen D1/D2).
 Route ``<Plan bearbeiten>/uhren``. Oben, was für den ganzen Plan gilt: Workout und Übergang,
 „Timer für alle“, „Takt für alle“ (P105), Signale. Darunter je Planübung eine aufklappbare
 Karte: zugeklappt eine Zeile, die alles sagt („Halten 2 × 30 s · kein Takt · zählt · weiter:
-Zeit ab“); aufgeklappt der Timer als **Liste** — Kopfzeile (Name ▾, Gesamtdauer), je Abschnitt
-Beschriftung · Dauer (Zeit-Blatt) · Takt (Takt-Blatt) · zählt, „+ Abschnitt“, Runden; darunter
-die Chips Uhr · Zeit zählt (P104) · Weiter-Bedingung und die Takt-Zeile der Planübung.
+Zeit ab“); aufgeklappt die **Timer-Zeile** (Ben, 10.11.2026, `docs/plan_timer_zuordnen.md`,
+Skizzen Z1/Z2: Name ▾ öffnet das Uhr-Blatt mit Für jetzt · In „Plan“ · Übung, ✎ klappt
+**denselben Editor wie beim Haupttimer** in der Karte auf — Zeiten · Klänge, die anderen
+Karten bleiben sichtbar), zugeklappt die Zeiten als eine Zeile; darunter die Chips Uhr · Zeit
+zählt (P104) · Weiter-Bedingung und die Takt-Zeile der Planübung.
 
 Jede Änderung speichert sofort je Planübung (`PlanRepo.timer_setzen`, `sensor_takt_setzen`);
-ändert man die Abschnitte eines Timers, bekommt die Planübung eine **eigene Kopie**
-(`TimerWahl.eigen`) — die Übung bleibt, wie sie ist. Grün gefüllt = nur hier, ↺ je Karte.
+ändert man die Abschnitte mit „Geändert gilt: In Plan“, bekommt die Planübung eine **eigene
+Kopie** (`TimerWahl.eigen`) — die Übung bleibt, wie sie ist. Grün gefüllt = nur hier, ↺ je
+Karte. „Timer für alle Übungen“ **verweist** auf die Bibliothek (keine Kopie).
 """
 
 from __future__ import annotations
@@ -23,9 +26,9 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem
-from trainingsapp.core.standards import abweichungen
+from trainingsapp.core.standards import abweichungen, mit_plan_spec
 from trainingsapp.core.takt import AUS, Takt
-from trainingsapp.core.timer import Abschnitt, TimerProfil, dauer_text
+from trainingsapp.core.timer import dauer_text
 from trainingsapp.core.uebung_timer import (
     TimerWahl,
     takt_der_uebung,
@@ -40,9 +43,15 @@ from trainingsapp.ui.components.plan_reiter import plan_reiter
 from trainingsapp.ui.components.planstand import nur_hier, wie_die_uebung
 from trainingsapp.ui.components.takt_blatt import SYMBOL as TAKT_SYMBOL
 from trainingsapp.ui.components.takt_blatt import takt_blatt, takt_zeile_text
-from trainingsapp.ui.components.timer_wahl import kopie_von, timer_waehlen
-from trainingsapp.ui.components.zeit_stellen import zeit_blatt
+from trainingsapp.ui.components.timer_zeile import (
+    jetzt_grund,
+    neuer_timer,
+    timer_im_fenster,
+    timer_zeile,
+)
+from trainingsapp.ui.components.uhr_blatt import PLAN, UEBUNG, uhr_blatt
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.timer_bibliothek import in_uebung_speichern
 from trainingsapp.ui.views.ablauf import ablauf_ausschalten, ablauf_einschalten
 from trainingsapp.ui.views.timer import timer_knopf
 
@@ -102,6 +111,9 @@ def plan_uhren_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.Vi
     route = f"{basis}/uhren"
     offen = state.uhren_offen.setdefault(plan.id, set())
     inhalt = ft.Column(spacing=10)
+    #: Planübungen, deren Editor in der Karte aufgeklappt ist, und ihre Geltung „Geändert gilt“
+    editor_offen: set[str] = set()
+    geltungen: dict[str, dict[str, str]] = {}
 
     def melden(text: str) -> None:
         with contextlib.suppress(Exception):
@@ -153,7 +165,8 @@ def plan_uhren_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.Vi
                 timer = None
             else:
                 v = next((x for x in bibliothek if x.id == wert), None)
-                timer = v.als_dict() if v is not None else p.timer
+                # zugeordnet, nicht kopiert: der Plan verweist auf die Bibliothek
+                timer = state.timer_in_bibliothek(v).als_dict() if v is not None else p.timer
             state.plaene.plan_timer_setzen(p.id, timer, p.weiter_automatisch, p.pause_ohne_timer)
             neu_zeichnen()
 
@@ -247,160 +260,11 @@ def plan_uhren_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.Vi
         state.plaene.timer_setzen(item.id, wahl.als_dict())
         neu_zeichnen()
 
-    def mit_kopie(
-        item: PlanItem, profil: TimerProfil, aendern: Callable[[TimerProfil], None]
-    ) -> None:
-        """Abschnitte nur hier ändern: die eigene Kopie der Planübung (angelegt beim ersten
-        Mal), geändert und gespeichert."""
-        wahl = TimerWahl.aus_dict(item.timer)
-        kopie = wahl.eigen if wahl.eigen is not None else kopie_von(profil)
-        aendern(kopie)
-        wahl.profil_id, wahl.eigen = "", kopie
-        wahl_speichern(item, wahl)
-
-    def teil_abschnitte(kopie: TimerProfil, k: int) -> list[Abschnitt]:
-        return kopie.abschnitte if k == 0 else kopie.teile[k - 1].abschnitte
-
-    def runden_setzen(kopie: TimerProfil, k: int, runden: int) -> None:
-        if k == 0:
-            kopie.runden = runden
-        else:
-            kopie.teile[k - 1].runden = runden
-
-    def abschnitt_zeile(
-        item: PlanItem, uebung: Exercise, profil: TimerProfil, k: int, i: int, a: Abschnitt
-    ) -> ft.Control:
-        def dauer_stellen() -> None:
-            def gestellt(sekunden: int) -> None:
-                mit_kopie(
-                    item, profil, lambda kp: setattr(teil_abschnitte(kp, k)[i], "dauer_s", sekunden)
-                )
-
-            page.show_dialog(
-                zeit_blatt(
-                    a.dauer_s,
-                    starten=gestellt,
-                    untertitel=a.name or f"Abschnitt {i + 1}",
-                    start_text="Übernehmen",
-                    schnell=state.schnellzeiten(),
-                )
-            )
-
-        def takt_abschnitt(neu: Takt | None) -> None:
-            mit_kopie(
-                item,
-                profil,
-                lambda kp: setattr(
-                    teil_abschnitte(kp, k)[i],
-                    "takt",
-                    neu if neu is not None and not neu.leer else None,
-                ),
-            )
-
-        def takt_oeffnen() -> None:
-            page.show_dialog(
-                takt_blatt(
-                    page,
-                    state,
-                    takt=a.takt,
-                    titel=f"Takt · {a.name or 'Abschnitt'}",
-                    in_den_abschnitt=takt_abschnitt,
-                )
-            )
-
-        def zaehlt_umschalten() -> None:
-            mit_kopie(
-                item, profil, lambda kp: setattr(teil_abschnitte(kp, k)[i], "zaehlt", not a.zaehlt)
-            )
-
-        takt_an = a.takt is not None and not a.takt.leer
-        return ft.Row(
-            spacing=6,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                ft.Text(a.name or f"Abschnitt {i + 1}", size=13, width=96, max_lines=1),
-                ft.OutlinedButton(
-                    dauer_text(a.dauer_s), tooltip="Dauer stellen", on_click=dauer_stellen
-                ),
-                ft.FilledTonalButton(
-                    a.takt.anzeigename if takt_an and a.takt is not None else "Takt —",
-                    icon=TAKT_SYMBOL,
-                    tooltip="Takt dieses Abschnitts",
-                    on_click=takt_oeffnen,
-                    style=None if takt_an else ft.ButtonStyle(bgcolor=ft.Colors.TRANSPARENT),
-                ),
-                ft.Container(expand=True),
-                ft.Chip(
-                    label=ft.Text("zählt" if a.zaehlt else "zählt nicht", size=11),
-                    selected=a.zaehlt,
-                    show_checkmark=False,
-                    on_select=zaehlt_umschalten,
-                ),
-            ],
+    def zeiten_zeile(profil: Any) -> ft.Control:
+        """Zugeklappt: die Zeiten als eine Zeile — „Halten 0:30 · hard 0:15 · heftig 10:00“."""
+        return ft.Text(
+            profil.kurztext(), size=12, opacity=0.7, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS
         )
-
-    def timer_liste(item: PlanItem, uebung: Exercise, profil: TimerProfil) -> list[ft.Control]:
-        zeilen: list[ft.Control] = []
-        teile = profil.alle_teile()
-        for k, teil in enumerate(teile):
-            if len(teile) > 1:
-                zeilen.append(
-                    ft.Text(
-                        teil.name or f"Teil {k + 1}",
-                        size=12,
-                        weight=ft.FontWeight.W_600,
-                        color=ft.Colors.PRIMARY,
-                    )
-                )
-            for i, a in enumerate(teil.abschnitte):
-                zeilen.append(abschnitt_zeile(item, uebung, profil, k, i, a))
-
-            def hinzufuegen(k: int) -> Callable[[], None]:
-                # Fabrik statt ``def handler(k=k)``: Flet reicht einem Handler mit Parameter das
-                # Event als erstes Argument — ``k`` wäre dann das Event (Absturz „Event - int“,
-                # Ben 9.11.2026 beim Ändern der Uhren eines Workouts)
-                def handler() -> None:
-                    mit_kopie(
-                        item,
-                        profil,
-                        lambda kp: teil_abschnitte(kp, k).append(Abschnitt("Pause", 30)),
-                    )
-
-                return handler
-
-            def runden(k: int = k, delta: int = 0, jetzt: int = teil.runden) -> Callable[[], None]:
-                def handler() -> None:
-                    neu = max(1, jetzt + delta)
-                    mit_kopie(item, profil, lambda kp: runden_setzen(kp, k, neu))
-
-                return handler
-
-            zeilen.append(
-                ft.Row(
-                    spacing=6,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.TextButton("+ Abschnitt", on_click=hinzufuegen(k)),
-                        ft.Container(expand=True),
-                        ft.Text("Runden", size=12, opacity=0.6),
-                        ft.IconButton(
-                            ft.Icons.REMOVE,
-                            icon_size=18,
-                            tooltip="Eine Runde weniger",
-                            on_click=runden(k, -1),
-                            disabled=teil.runden <= 1,
-                        ),
-                        ft.Text(str(max(teil.runden, 1)), size=13, weight=ft.FontWeight.W_600),
-                        ft.IconButton(
-                            ft.Icons.ADD,
-                            icon_size=18,
-                            tooltip="Eine Runde mehr",
-                            on_click=runden(k, 1),
-                        ),
-                    ],
-                )
-            )
-        return zeilen
 
     def chip(text: str, an: bool, tipp: str, on_click: Callable[[], Any]) -> ft.Control:
         return ft.Chip(
@@ -428,14 +292,53 @@ def plan_uhren_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.Vi
             wahl.zaehlt = True if wahl.zaehlt is None else (False if wahl.zaehlt else None)
             wahl_speichern(item, wahl)
 
-        def timer_dialog() -> None:
-            def gewaehlt(profil_id: str, eigen: TimerProfil | None) -> None:
-                wahl.profil_id, wahl.eigen = profil_id, eigen
-                wahl_speichern(item, wahl)
+        def wahl_frisch() -> TimerWahl:
+            return TimerWahl.aus_dict((state.plaene.item_laden(item.id) or item).timer)
 
-            timer_waehlen(
-                page, state, uebung=uebung, plan=p, wahl=wahl, gewaehlt=gewaehlt, wirksam=profil
+        def wahl_still(neu: TimerWahl) -> None:
+            # aus dem Editor in der Karte: speichern, ohne die Karte neu zu bauen (das Feld,
+            # in dem gerade getippt wird, bliebe sonst nicht stehen)
+            state.plaene.timer_setzen(item.id, neu.als_dict())
+
+        def neu_im_editor(g: str) -> None:
+            """„+ Neuer Timer“ aus dem Blatt: anlegen, wo die Geltung es sagt, und den Editor
+            gleich in der Karte aufklappen."""
+            frisch = neuer_timer()
+            if g == UEBUNG:
+                in_uebung_speichern(state, uebung, frisch)
+                state.plaene.timer_setzen(
+                    item.id, TimerWahl(frisch.id, None, uhr=wahl.uhr, zaehlt=wahl.zaehlt).als_dict()
+                )
+            else:
+                state.plaene.timer_setzen(
+                    item.id, TimerWahl("", frisch, uhr=wahl.uhr, zaehlt=wahl.zaehlt).als_dict()
+                )
+            geltungen[item.id] = {"g": UEBUNG if g == UEBUNG else PLAN}
+            editor_offen.add(item.id)
+            neu_zeichnen()
+
+        def timer_dialog(_e: Any = None) -> None:
+            page.show_dialog(
+                uhr_blatt(
+                    page,
+                    state,
+                    uebung=uebung,
+                    plan=p,
+                    item=item,
+                    basis=route,
+                    im_editor=True,
+                    jetzt_grund=jetzt_grund(state),
+                    danach=neu_zeichnen,
+                    neuer_timer_im_editor=neu_im_editor,
+                )
             )
+
+        def editor_umschalten(_e: Any = None) -> None:
+            if item.id in editor_offen:
+                editor_offen.discard(item.id)
+            else:
+                editor_offen.add(item.id)
+            neu_zeichnen()
 
         def takt_setzen(neu: Takt | None) -> None:
             state.plaene.sensor_takt_setzen(
@@ -475,32 +378,37 @@ def plan_uhren_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.Vi
         inhalt: list[ft.Control] = []
         if eigenes:
             inhalt.append(ft.Text("nur hier: " + ", ".join(eigenes), size=11, opacity=0.6))
-        # Kopfzeile des Timers
+        # Die Timer-Zeile (Z1): Name ▾ = Uhr-Blatt, ✎ = Editor in der Karte (Z2)
+        hat_ablauf = profil is not None and not profil.ist_stoppuhr
+        editor_auf = hat_ablauf and item.id in editor_offen
         inhalt.append(
-            ft.Row(
-                spacing=6,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.Icon(ft.Icons.TIMER_OUTLINED, size=18, opacity=0.8),
-                    ft.TextButton(
-                        (profil.name if profil is not None else "Stoppuhr") + " ▾",
-                        tooltip="Timer wählen",
-                        on_click=timer_dialog,
-                        style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=6)),
-                    ),
-                    ft.Container(expand=True),
-                    ft.Text(
-                        dauer_text(profil.gesamt_s())
-                        if profil is not None and not profil.ist_stoppuhr
-                        else "",
-                        size=12,
-                        opacity=0.6,
-                    ),
-                ],
+            timer_zeile(
+                uebung=uebung,
+                plan=p,
+                wahl=wahl,
+                profil=profil,
+                offen=editor_auf,
+                blatt_oeffnen=timer_dialog,
+                editor_umschalten=editor_umschalten,
             )
         )
-        if profil is not None and not profil.ist_stoppuhr:
-            inhalt.extend(timer_liste(item, uebung, profil))
+        if editor_auf and profil is not None:
+            inhalt.append(
+                timer_im_fenster(
+                    page,
+                    state,
+                    uebung=uebung,
+                    plan=p,
+                    item=item,
+                    profil=profil,
+                    wahl=wahl_frisch,
+                    wahl_setzen=wahl_still,
+                    geltung=geltungen.setdefault(item.id, {"g": PLAN}),
+                    spec=mit_plan_spec(item, uebung).result_spec,
+                )
+            )
+        elif hat_ablauf and profil is not None:
+            inhalt.append(zeiten_zeile(profil))
         inhalt.append(
             ft.Row(
                 wrap=True,

@@ -633,7 +633,7 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
             ),
         )
 
-    # -- Signal über einer Grenze (Ben, 30.10.2026; P90) -------------------------------
+    # -- Zielbereich und Ton (Ben, 30.10.2026, P90; 10.11.2026, A22) -------------------
 
     def alarm_karte() -> ft.Control:
         def vorspielen(klang: str) -> None:
@@ -645,11 +645,12 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
                 page.run_task(spielen)
 
         return karte(
-            titel("Signal über einer Grenze"),
+            titel("Zielbereich und Ton"),
             *alarm_zeilen(state, vorspielen=vorspielen),
             hinweis(
                 "Gilt live in beiden Sichten, mit Lautstärke und Regler der Timer-Signale. "
-                "Auch im Blatt „Fenster & Darstellung“ der Herzfrequenz-Sicht einstellbar."
+                "Auch in der Herzfrequenz-Sicht einstellbar: in der Zeile „Zielbereich“ und im "
+                "Vollbild über den Knopf „Ton“ — dort lassen sich die Linien auch ziehen."
             ),
         )
 

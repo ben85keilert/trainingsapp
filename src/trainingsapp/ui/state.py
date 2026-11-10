@@ -79,8 +79,7 @@ from trainingsapp.core.timer import (
     einmaluhren_schreiben,
     schnellzeiten_lesen,
     schnellzeiten_text,
-    timer_profile_lesen,
-    timer_profile_schreiben,
+    standard_profile,
     timer_signale_lesen,
     timer_signale_schreiben,
 )
@@ -111,6 +110,7 @@ from trainingsapp.data.repositories import (
     StreckeRepo,
     SubjectRepo,
     TagRepo,
+    TimerRepo,
 )
 from trainingsapp.data.seed import pakete_aus_ordner, seed_einspielen
 from trainingsapp.data.strecken import verwaiste as strecken_verwaiste
@@ -245,6 +245,8 @@ class AppState:
     katalog_filter: Uebungsfilter = field(default_factory=Uebungsfilter)
     #: „Übung hinzufügen“ im Plan: derselbe Filter, eigene Wahl
     hinzufuegen_filter: Uebungsfilter = field(default_factory=Uebungsfilter)
+    #: Filter der Seite „Zuordnen“ eines Timers (`views/timer_zuordnen.py`)
+    zuordnen_filter: Uebungsfilter = field(default_factory=Uebungsfilter)
     #: Wie viele Übungen der letzte Start neu angelegt hat (für den Startbildschirm)
     neu_eingespielt: int = field(default=0)
     #: Je Paket, was beim Update aus dem Paket fiel und auf „übernehmen oder löschen“
@@ -392,6 +394,12 @@ class AppState:
     hf_bezug: str = "aufnahme"
     #: Laufende Erholung: t0 auf der Live-Achse, Kontext, Haltung — None: keine
     hf_erholung: dict[str, Any] | None = None
+    #: Zielbereich-Ton (A22, `core.hf_ziel`): die Uhr der Tonfolge — eine für alle Ansichten —
+    #: und „stumm“ (für eine Zeit oder bis zum Ende der Messung)
+    hf_zielton: Any = None
+    hf_stumm: Any = None
+    #: HF-Vollbild: das Ablese-Intervall (von, bis, Bezug) — überlebt den Neuaufbau
+    hf_intervall: dict[str, Any] | None = None
     #: Einstellungen → HRV-Messung: Teil „Erweitert" aufgeklappt
     hrv_erweitert_offen: bool = False
     #: Notizen: Übungen zum Antippen eingeblendet, und aus welchem Plan
@@ -1032,11 +1040,26 @@ class AppState:
     # -- Timer -------------------------------------------------------------------
 
     def timer_profile(self) -> list[TimerProfil]:
-        """Gespeicherte Profile; ohne eigene die zwei Vorlagen."""
-        return timer_profile_lesen(self.einstellungen.lesen(SettingRepo.TIMER_PROFILE))
+        """Die Timer-Bibliothek (Tabelle ``timer``, Migration 052); ohne eigene die zwei
+        Vorlagen."""
+        return TimerRepo(self.con).alle() or standard_profile()
 
     def timer_profile_setzen(self, profile: list[TimerProfil]) -> None:
-        self.einstellungen.setzen(SettingRepo.TIMER_PROFILE, timer_profile_schreiben(profile))
+        TimerRepo(self.con).setzen(profile)
+
+    def timer_in_bibliothek(self, profil: TimerProfil) -> TimerProfil:
+        """Legt ``profil`` in die Bibliothek (oder ändert es dort) und gibt es mit dem Vermerk
+        zurück, mit dem Übung, Plan und Planübung darauf **verweisen** statt es zu kopieren
+        (Ben, 10.11.2026). Die zwei Beispiel-Vorlagen werden dabei eigene Zeilen."""
+        repo = TimerRepo(self.con)
+        if not repo.roh():
+            repo.setzen(standard_profile())
+        kopie = TimerProfil.aus_dict(profil.als_dict())
+        assert kopie is not None
+        kopie.bibliothek = ""
+        repo.speichern(kopie)
+        kopie.bibliothek = kopie.id
+        return kopie
 
     def timer_profil(self) -> TimerProfil:
         """Die zuletzt benutzte Uhr: Stoppuhr oder Einmal-Timer (`timer_einmal`) oder ein

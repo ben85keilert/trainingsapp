@@ -420,6 +420,40 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `views.uebung_timer.jetzt_profilziel` — `AppState.uhr_einmal` hält Profile, gespeichert wird nur
   per „Als Timer der Übung speichern …“.
 
+- **Herzfrequenz-Sicht und HF-Vollbild** (Ben, 10.11.2026, A22, Vertrag
+  `docs/plan_hf_vollbild.md`): `/live` zeigt in der Sicht „Herzfrequenz“ (und bei reinen
+  Pulsgebern) `views/hf_vollbild.py`, sonst das HRV-Vollbild; ein Knopf wechselt
+  (`state.hrv_sicht_setzen`). Werte, Erholung, Marken und Ton teilen hochkant und Vollbild über
+  `ui/hf_live.HfLive`; Zustand im `AppState` (`hf_erholung`, `hf_zielton`, `hf_stumm`,
+  `hf_intervall`). **Zielbereich** = zwei selbst gesetzte Linien
+  (`HfEinstellungen.alarm_bpm`/`ziel_unten_bpm`), Ton darüber/darunter verschieden, **Tonfolge
+  nach Abstand** (`core.hf_ziel.TONFOLGE`, Takt 0; feste Takte bleiben), eine Uhr für Messung,
+  Vollbild und Fokus (`Zielton`), Stumm für eine Zeit oder bis Messende — sichtbar immer
+  „Zielbereich“, nie „Warnung/Grenze/Alarm“, keine Steuerung. **Wertebereich** der HF-Achse je
+  Seite (Automatik · Profil · fest, `core.hf_ziel.wertebereich`), weicht der Kurve.
+  **Erholung:** Fenster 30/60/120 und ein freies X, „Messen bis“ beendet sie. **Intervall**
+  (nur Vollbild): abgelesene Erholung aus hrv-core `intervall_erholung` — nur 5-s-Mittel, Bezug
+  Spitze (Plateau: letzte Stelle) oder Anfang, HRR = Bezug − Ende, Hinweis, wenn das Ende über
+  dem tiefsten Wert liegt; nichts gespeichert außer auf Wunsch als Notiz.
+
+- **Timer zuordnen statt kopieren** (Ben, 10.11.2026, Vertrag `docs/plan_timer_zuordnen.md`,
+  Stand §7, Skizzen Z1–Z4): Die **Timer-Bibliothek** ist die Tabelle `timer` (Migration 052,
+  `TimerRepo`; vorher die Einstellung `timer_profile`, sie zieht beim ersten Lesen um). Übung
+  (`exercise.timer_json`), Plan (`plan.timer_json`) und Planübung (`TimerWahl.eigen`) dürfen
+  statt einer Kopie **verweisen**: gespeichert ``{"ref": "<id>"}``, geladen das Profil mit dem
+  Vermerk `TimerProfil.bibliothek` (`core.timer.verweise_aufloesen`/`verweise_schreiben`, im
+  Repo `_timer_lesen`/`_timer_json`). **Wer ein Profil mit Vermerk speichert, ändert den Timer
+  überall** — die Oberfläche fragt ab zwei Stellen vorher „Überall ändern · Nur hier: Kopie
+  anlegen“ (`components/timer_stellen.py`, auch bei Zurück); „nur hier“ heißt Vermerk weg und
+  neue ID (`ui/timer_bibliothek.kopie`). Keine Zuordnungstabelle: wo ein Timer gilt, rechnet
+  `core.uebung_timer.stellen`. Zuordnen unter Einstellungen → Timer → „Alle“ → „Zuordnen …“
+  (`views/timer_zuordnen.py`: Filter der Übungsauswahl, „Alle n ankreuzen“), „Gleiche
+  zusammenlegen …“ nie still. Pakete und alles, was das Gerät verlässt: `ohne_verweise`
+  (eingebettete Kopie). Im Plan-Editor **eine Timer-Zeile** (`components/timer_zeile.py`: Name ▾
+  = Uhr-Blatt mit Für jetzt · In „Plan“ · Übung, ✎ = derselbe Editor wie beim Haupttimer in der
+  Karte, `components/timer_editor.py`, darunter „Geändert gilt:“); „Für jetzt“ gibt es dort
+  nur, solange geübt wird.
+
 - **Taktgeber** (Ben, 5.11.2026, Vertrag `docs/plan_taktgeber.md`; Teil 1 T1–T3 gebaut): ein
   **Takt** ist eine Folge von Phasen (Name, Sekunden, Art `ein`/`aus`/`halten`/`ab`/`auf`/`frei`,
   Klang) mit Tempo, als Schleife, solange die Uhr läuft. Die Rechnung lebt **nur** in `core/takt.py`

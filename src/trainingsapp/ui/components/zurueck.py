@@ -52,7 +52,8 @@ def zurueck_speichert(
     Args:
         geaendert: Unterscheidet sich das Formular vom Stand beim Öffnen?
         speichern: Prüfen und speichern, ohne wegzugehen — ``None`` = gespeichert,
-            sonst der Grund (die Felder markiert es selbst).
+            sonst der Grund (die Felder markiert es selbst); ``""``: nicht gespeichert, aber
+            schon selbst gefragt (Timer „Überall ändern · Nur hier“) — man bleibt, ohne Dialog.
         danach: Wohin nach dem Speichern; ohne Angabe zur Ansicht darunter. Ein
             ``speichern``, das selbst meldet und weitergeht, bekommt hier eine
             Funktion, die nichts tut, und ``meldung=""``.
@@ -77,6 +78,8 @@ def zurueck_speichert(
         grund = speichern()
         if inspect.isawaitable(grund):
             grund = await grund
+        if grund == "":  # eine eigene Rückfrage wurde abgebrochen — bleiben, ohne Dialog
+            return
         if grund is None:
             if meldung:
                 page.show_dialog(ft.SnackBar(ft.Text(meldung)))

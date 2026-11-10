@@ -5,7 +5,8 @@ Route ``/live`` (Ben, 15.10.2026). Der Knopf an der Tachogramm-Karte öffnet es,
 hochkant wieder her.
 
 Seit dem 16.10.2026 (Ben) gebaut wie das Vollbild der Aufzeichnung
-(`components.vollbild`):
+(`components.vollbild`). In der Sicht „Herzfrequenz“ zeigt dieselbe Route das **HF-Vollbild**
+(`views.hf_vollbild`, Ben 10.11.2026); ein Knopf wechselt hin und her.
 
 - **Zwei y-Achsen:** links standardmäßig das Tachogramm, rechts RMSSD — je
   Achse ‹ Name ▾ › in der Kopfzeile; die Pfeile blättern, die Liste wählt
@@ -44,7 +45,7 @@ import flet as ft
 from hrv_core.atmung import ATEMUEBUNG, RUHE
 
 from trainingsapp.core.hrv_ansicht import LINKS, RECHTS, ROH
-from trainingsapp.core.hrv_einstellungen import HrvEinstellungen
+from trainingsapp.core.hrv_einstellungen import SICHT_HF, SICHT_HRV, HrvEinstellungen
 from trainingsapp.core.laufend import minuten
 from trainingsapp.core.zeitangabe import DAUER, UHR
 from trainingsapp.devices.base import Verbindung
@@ -89,6 +90,7 @@ from trainingsapp.ui.components.zeitfenster import (
     wischbar,
 )
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.hf_vollbild import hf_vollbild
 from trainingsapp.ui.views.messung import (
     ablese_kopf_live,
     ablese_werte_live,
@@ -170,11 +172,32 @@ def live_vollbild_view(page: ft.Page, state: AppState) -> ft.View:
                 )
             ],
         )
-    return _vollbild(page, state, lauf, schliessen)
+
+    def sicht_wechseln(neu: str) -> Callable[[], None]:
+        """„⇄ HRV“ bzw. „⇄ HF“: dieselbe Wahl wie hochkant, die Ansicht baut sich neu."""
+
+        def wechseln() -> None:
+            state.hrv_sicht_setzen(neu)
+            state.neu_zeichnen()
+
+        return wechseln
+
+    # Herzfrequenz-Sicht (Ben, 10.11.2026, A22): ein eigenes Vollbild — auch, wenn das Gerät
+    # nur den Puls sendet (dann ohne den Wechsel zur HRV)
+    puls = lauf.nur_puls()
+    if puls or state.hrv_sicht() == SICHT_HF:
+        return hf_vollbild(
+            page, state, lauf, schliessen, zur_hrv=None if puls else sicht_wechseln(SICHT_HRV)
+        )
+    return _vollbild(page, state, lauf, schliessen, sicht_wechseln(SICHT_HF))
 
 
 def _vollbild(
-    page: ft.Page, state: AppState, lauf: Messlauf, schliessen: Callable[[], Any]
+    page: ft.Page,
+    state: AppState,
+    lauf: Messlauf,
+    schliessen: Callable[[], Any],
+    zur_hf: Callable[[], None] | None = None,
 ) -> ft.View:
     state.live_ansicht += 1  # die Live-Ansicht darunter rechnet nicht mehr
     meine_nummer = state.live_ansicht
@@ -632,6 +655,12 @@ def _vollbild(
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
         controls=[
             ft.IconButton(ft.Icons.CLOSE, tooltip="Vollbild verlassen", on_click=schliessen),
+            ft.IconButton(
+                ft.Icons.FAVORITE_BORDER,
+                tooltip="Zur Herzfrequenz-Ansicht wechseln",
+                visible=zur_hf is not None,
+                on_click=lambda _=None: zur_hf() if zur_hf is not None else None,
+            ),
             links_box,
             ft.Container(expand=True),
             takt_text,

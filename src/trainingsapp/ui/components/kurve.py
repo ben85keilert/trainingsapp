@@ -687,6 +687,38 @@ def kurve(
     )
 
 
+def y_grenzen(
+    reihen: Sequence[Reihe],
+    *,
+    y_von: float | None = None,
+    y_bis: float | None = None,
+    y_spanne_min: float = 0.0,
+    y_schritt_min: float = 1.0,
+    y_fest: tuple[float, float] | None = None,
+) -> tuple[float, float] | None:
+    """``(unten, oben)`` der Werteachse, wie `kurve` sie mit denselben Angaben zeichnet (ohne
+    rechte Achse) — für Griffe und Linien, die über der Kurve liegen (Zielbereich im
+    HF-Vollbild). None ohne Punkte.
+
+    >>> y_grenzen([Reihe([(0, 71), (1, 81)])])
+    (70.8, 81.2)
+    >>> y_grenzen([Reihe([(0, 100), (1, 120)])], y_von=60, y_bis=180) == y_raster(60, 180)[:2]
+    True
+    """
+    alle = [p for r in reihen if not r.marke for p in r.punkte]
+    if not alle:
+        return None
+    if y_fest is not None:
+        return y_raster_fest(y_fest[0], y_fest[1], y_schritt_min)[:2]
+    ys = [p[1] for r in reihen if r.skala for p in r.punkte] or [p[1] for p in alle]
+    return y_raster(
+        y_von if y_von is not None else min(ys, default=0.0),
+        y_bis if y_bis is not None else max(ys, default=1.0),
+        y_spanne_min,
+        y_schritt_min,
+    )[:2]
+
+
 def _band_serien(
     baender: Sequence[Band], unten: float, oben: float, x0: float, x1: float
 ) -> list[fc.LineChartData]:
@@ -817,6 +849,7 @@ __all__ = [
     "kurve",
     "x_marken_max",
     "x_schritt",
+    "y_grenzen",
     "y_raster",
     "y_raster_fest",
     "zahl_text",

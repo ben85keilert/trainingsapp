@@ -23,6 +23,7 @@ hier werden sie gelesen und gewählt.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -472,6 +473,8 @@ class TimerOrt:
     item_id: str = ""
     #: die Pläne, in denen er gilt (`timer_fuer` ergibt ihn) — Namen, ohne Doppelte
     benutzt: tuple[str, ...] = ()
+    #: Bibliothek: wo er zugeordnet ist (`stellen`)
+    stellen: tuple[Stelle, ...] = ()
 
 
 def alle_timer(
@@ -492,10 +495,14 @@ def alle_timer(
     [('uebung', 'Halten', ('Rumpf',)), ('planuebung', 'Kopie', ('Rücken',))]
     """
     nach_id = {u.id: u for u in uebungen}
-    out: list[TimerOrt] = [TimerOrt(VORLAGE, v) for v in vorlagen]
+    out: list[TimerOrt] = [
+        TimerOrt(VORLAGE, v, stellen=tuple(stellen(v.id, uebungen, plaene))) for v in vorlagen
+    ]
     for u in uebungen:
         for p in profile_der_uebung(u):
-            if not u.timer:  # aus einer Timer-Regel — nicht in der Übung gespeichert
+            # aus einer Timer-Regel — nicht in der Übung gespeichert; zugeordnet — steht
+            # schon in der Bibliothek
+            if not u.timer or p.bibliothek:
                 continue
             benutzt = tuple(
                 dict.fromkeys(
@@ -511,7 +518,7 @@ def alle_timer(
     for plan in plaene:
         for item in plan.items:
             eigen = TimerWahl.aus_dict(item.timer).eigen
-            if eigen is None:
+            if eigen is None or eigen.bibliothek:
                 continue
             zu = nach_id.get(item.exercise_id)
             out.append(
@@ -526,7 +533,7 @@ def alle_timer(
                     (plan.name,),
                 )
             )
-        if (fuer_alle := plan_timer(plan)) is not None:
+        if (fuer_alle := plan_timer(plan)) is not None and not fuer_alle.bibliothek:
             out.append(
                 TimerOrt(
                     IM_PLAN, fuer_alle, plan_id=plan.id, plan_name=plan.name, benutzt=(plan.name,)
@@ -535,24 +542,189 @@ def alle_timer(
     return out
 
 
+@dataclass(frozen=True)
+class Stelle:
+    """Eine Stelle, an der ein Timer der Bibliothek gilt (`stellen`)."""
+
+    #: `AN_UEBUNG`, `IM_PLAN` („für alle Übungen“) oder `IN_PLANUEBUNG`
+    art: str
+    #: so steht sie in Listen: „Planke“, „Plan „Morgens“ (für alle Übungen)“
+    name: str
+    uebung_id: str = ""
+    plan_id: str = ""
+    item_id: str = ""
+
+
+def stellen(timer_id: str, uebungen: Sequence[Exercise], plaene: Sequence[Plan]) -> list[Stelle]:
+    """Wo ein Timer der Bibliothek **zugeordnet** ist (Ben, 10.11.2026,
+    `docs/plan_timer_zuordnen.md` §4): an Übungen, an Plänen „für alle Übungen“ und an
+    einzelnen Planübungen. Gerechnet aus den Verweisen — es gibt keine Zuordnungstabelle.
+
+    >>> h = TimerProfil(id="h", name="Halten", abschnitte=[Abschnitt("H", 30)], bibliothek="h")
+    >>> u = Exercise(id="u", name="Planke", timer=[h.als_dict()])
+    >>> v = Exercise(id="v", name="Brücke")
+    >>> plan = Plan(id="p", name="Morgens", timer=h.als_dict(), items=[
+    ...     PlanItem(id="i", exercise_id="v", timer=TimerWahl("", h).als_dict())])
+    >>> for s in stellen("h", [u, v], [plan]):
+    ...     print(s.art, s.name)
+    uebung Planke
+    plan Plan „Morgens“ (für alle Übungen)
+    planuebung Brücke in „Morgens“
+    >>> stellen("x", [u, v], [plan])
+    []
+    """
+    if not timer_id:
+        return []
+    nach_id = {u.id: u for u in uebungen}
+    out = [
+        Stelle(AN_UEBUNG, u.name, uebung_id=u.id)
+        for u in uebungen
+        if any(isinstance(d, dict) and d.get("bibliothek") == timer_id for d in u.timer)
+    ]
+    for plan in plaene:
+        if plan.timer and plan.timer.get("bibliothek") == timer_id:
+            out.append(Stelle(IM_PLAN, f"Plan „{plan.name}“ (für alle Übungen)", plan_id=plan.id))
+        for item in plan.items:
+            eigen = TimerWahl.aus_dict(item.timer).eigen
+            if eigen is not None and eigen.bibliothek == timer_id:
+                zu = nach_id.get(item.exercise_id)
+                name = zu.name if zu is not None else "Planübung"
+                out.append(
+                    Stelle(
+                        IN_PLANUEBUNG,
+                        f"{name} in „{plan.name}“",
+                        uebung_id=item.exercise_id,
+                        plan_id=plan.id,
+                        item_id=item.id,
+                    )
+                )
+    return out
+
+
+def stellen_text(orte: Sequence[Stelle]) -> str:
+    """„gilt in 3 Übungen, 1 Plan“ — leer: „nicht zugeordnet“.
+
+    >>> a = [Stelle(AN_UEBUNG, "Planke"), Stelle(IM_PLAN, "x"), Stelle(IN_PLANUEBUNG, "y")]
+    >>> stellen_text(a), stellen_text(a[:1]), stellen_text([])
+    ('gilt in 1 Übung, 2 Plänen', 'gilt in 1 Übung', 'nicht zugeordnet')
+    """
+    u = sum(1 for s in orte if s.art == AN_UEBUNG)
+    p = len({s.plan_id or s.name for s in orte if s.art != AN_UEBUNG})
+    teile = []
+    if u:
+        teile.append("1 Übung" if u == 1 else f"{u} Übungen")
+    if p:
+        teile.append("1 Plan" if p == 1 else f"{p} Plänen")
+    return "gilt in " + ", ".join(teile) if teile else "nicht zugeordnet"
+
+
+def hat_ausfuehrung(profil: TimerProfil) -> bool:
+    """Trägt ein Abschnitt eine Ausführung? Die gehört zur Übung — so ein Timer wird nicht
+    gemeinsam (P174).
+
+    >>> hat_ausfuehrung(TimerProfil(abschnitte=[Abschnitt("L", 30, ausfuehrung={"variant": "l"})]))
+    True
+    """
+    return any(a.ausfuehrung for a in profil.alle_abschnitte())
+
+
+def uebung_zuordnen(uebung: Exercise, profil: TimerProfil) -> bool:
+    """Hängt einen Timer der Bibliothek (``profil.bibliothek`` gesetzt) an die Übung — hinter
+    ihre Timer; hat sie keinen, ist er ihre Vorgabe. ``False``: war schon zugeordnet.
+
+    >>> h = TimerProfil(id="h", name="Halten", abschnitte=[Abschnitt("H", 30)], bibliothek="h")
+    >>> u = Exercise(name="Planke")
+    >>> uebung_zuordnen(u, h), uebung_zuordnen(u, h), [d["bibliothek"] for d in u.timer]
+    (True, False, ['h'])
+    >>> uebung_loesen(u, "h"), u.timer
+    (True, [])
+    """
+    if any(
+        isinstance(d, dict) and d.get("bibliothek") == profil.bibliothek for d in u_timer(uebung)
+    ):
+        return False
+    uebung.timer = [*u_timer(uebung), profil.als_dict()]
+    return True
+
+
+def u_timer(uebung: Exercise) -> list[dict[str, Any]]:
+    """Die gespeicherten Timer der Übung (nur Tabellen)."""
+    return [d for d in uebung.timer if isinstance(d, dict)]
+
+
+def uebung_loesen(uebung: Exercise, timer_id: str) -> bool:
+    """Nimmt die Zuordnung zurück — ``False``: war nicht zugeordnet."""
+    bleibt = [d for d in u_timer(uebung) if d.get("bibliothek") != timer_id]
+    geaendert = len(bleibt) != len(u_timer(uebung))
+    uebung.timer = bleibt
+    return geaendert
+
+
+def inhalt(profil: TimerProfil) -> str:
+    """Der Inhalt eines Timers ohne ID und Vermerk — zwei Timer mit demselben `inhalt` sind
+    gleich („Gleiche zusammenlegen …“, P173).
+
+    >>> a = TimerProfil(id="a", name="Halten", abschnitte=[Abschnitt("H", 30)])
+    >>> b = TimerProfil(id="b", name="Halten", abschnitte=[Abschnitt("H", 30)], bibliothek="b")
+    >>> inhalt(a) == inhalt(b), inhalt(a) == inhalt(replace(a, runden=2))
+    (True, False)
+    """
+    d = profil.als_dict()
+    d.pop("id", None)
+    d.pop("bibliothek", None)
+    return json.dumps(d, sort_keys=True, ensure_ascii=False)
+
+
+def gleiche(orte: Sequence[TimerOrt]) -> list[list[TimerOrt]]:
+    """Gruppen inhaltsgleicher Timer aus der Bibliothek und von Übungen (ab zwei, ohne
+    Ausführungen) — der Vorschlag für „Gleiche zusammenlegen …“. Ein Timer der Bibliothek steht
+    in seiner Gruppe vorn.
+
+    >>> h = TimerProfil(id="h", name="Halten", abschnitte=[Abschnitt("H", 30)])
+    >>> k = replace(h, id="k")
+    >>> orte = [TimerOrt(AN_UEBUNG, h, "u", "Planke"), TimerOrt(AN_UEBUNG, k, "v", "Brücke"),
+    ...         TimerOrt(VORLAGE, replace(h, id="b", name="Anders"))]
+    >>> [[o.uebung_name for o in g] for g in gleiche(orte)]
+    [['Planke', 'Brücke']]
+    """
+    gruppen: dict[str, list[TimerOrt]] = {}
+    for o in orte:
+        if o.art not in (VORLAGE, AN_UEBUNG) or hat_ausfuehrung(o.profil) or o.profil.ist_stoppuhr:
+            continue
+        gruppen.setdefault(inhalt(o.profil), []).append(o)
+    return [
+        sorted(g, key=lambda o: o.art != VORLAGE)
+        for g in gruppen.values()
+        if len(g) > 1 and sum(1 for o in g if o.art == VORLAGE) <= 1
+    ]
+
+
 __all__ = [
     "AN_UEBUNG",
     "IM_PLAN",
     "IN_PLANUEBUNG",
     "VORLAGE",
+    "Stelle",
     "TimerOrt",
     "TimerWahl",
     "alle_timer",
     "ausfuehrung_text",
     "ausfuehrungs_vorschau",
     "ausfuehrungsfelder",
+    "gleiche",
+    "hat_ausfuehrung",
+    "inhalt",
     "mit_zeitfeldern",
     "plan_timer",
     "profile_der_uebung",
     "profile_zur_wahl",
+    "stellen",
+    "stellen_text",
     "takt_der_uebung",
     "takt_fuer",
     "timer_fuer",
+    "uebung_loesen",
+    "uebung_zuordnen",
     "uhr_an",
     "zaehlt_als",
     "zeit_werte",

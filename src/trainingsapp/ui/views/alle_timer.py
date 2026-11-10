@@ -2,12 +2,15 @@
 alle Timer an einem Ort — „Letztendlich entwickelt man sich eine Handvoll Timer, das muss leicht
 editierbar sein“.
 
-Route ``<basis>/timer/alle`` (über der Timer-Seite). Gruppen: **Vorlagen**, **An Übungen**
-(gelten überall) und **Nur in Plänen** (eigene Kopien der Planübungen und der Timer „für alle
-Übungen“ eines Plans); Suche und Chips filtern. Je Zeile Name, Kurztext, **„gilt in …“**, ✎ (der
-Editor an seinem Ort) und ⋮: Kopieren · Als Vorlage speichern · In andere Übung kopieren … ·
-Löschen. **Löschen fragt** und nennt die Pläne, in denen er gilt — dort gilt danach der nächste
-Timer (Planübung > Plan > Übung). Wo er gilt, rechnet `core.uebung_timer.alle_timer`.
+Route ``<basis>/timer/alle`` (über der Timer-Seite). Gruppen seit dem 10.11.2026
+(`docs/plan_timer_zuordnen.md` §4, Skizze Z3): **Bibliothek** (gemeinsame Timer — an Übungen
+und Plänen **zugeordnet**, nicht kopiert), **Nur an einer Übung** und **Nur in Plänen** (eigene
+Kopien der Planübungen und der Timer „für alle Übungen“ eines Plans); Suche und Chips filtern.
+Je Zeile Name, Kurztext, **„gilt in …“**, ✎ (der Editor an seinem Ort) und ⋮: Kopieren ·
+**Zuordnen …** (`views/timer_zuordnen.py`) · In die Bibliothek · Löschen. **Löschen fragt** und
+nennt die Stellen, an denen er gilt — dort gilt danach der nächste Timer (Planübung > Plan >
+Übung). Sind Timer inhaltsgleich, steht oben **„Gleiche zusammenlegen …“** (P173: nie still).
+Wo er gilt, rechnen `core.uebung_timer.alle_timer` und `stellen`.
 """
 
 from __future__ import annotations
@@ -28,15 +31,25 @@ from trainingsapp.core.uebung_timer import (
     TimerOrt,
     TimerWahl,
     alle_timer,
+    gleiche,
+    hat_ausfuehrung,
     profile_der_uebung,
+    stellen_text,
 )
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.timer_bibliothek import in_die_bibliothek, ueberall_loeschen, zusammenlegen
+from trainingsapp.ui.views.timer_zuordnen import zuordnen_route
 
 #: Die Filter-Chips: Schlüssel → Beschriftung
-FILTER = {"": "Alle", VORLAGE: "Vorlagen", AN_UEBUNG: "An Übungen", "plaene": "In Plänen"}
+FILTER = {
+    "": "Alle",
+    VORLAGE: "Bibliothek",
+    AN_UEBUNG: "Nur an einer Übung",
+    "plaene": "Nur in Plänen",
+}
 
 
 def _ohne_ausfuehrung(p: TimerProfil, name: str | None = None) -> TimerProfil:
@@ -115,56 +128,74 @@ def alle_timer_view(page: Any, state: AppState, basis: str) -> ft.View:
 
         return handler
 
-    def in_andere_uebung(o: TimerOrt) -> Callable[..., None]:
-        """Eine Übung wählen — der Timer kommt als Kopie dazu (ohne Ausführungen)."""
+    def zuordnen(o: TimerOrt) -> Callable[..., Any]:
+        """„Zuordnen …“: Ein Timer, der noch an einer Stelle liegt, kommt dafür in die
+        Bibliothek (die Stelle verweist dann darauf); mit Ausführungen als Kopie ohne sie —
+        die gehören zur Übung (P174)."""
 
-        def handler(_e: Any = None) -> None:
-            nachher = Nachher()
-            dialog: ft.AlertDialog
-            treffer = ft.Column(spacing=0, scroll=ft.ScrollMode.AUTO, height=320)
-            alle = sorted(state.uebungen.alle(), key=lambda u: u.name.lower())
-
-            def waehlen(uebung_id: str) -> Callable[..., None]:
-                def gewaehlt(_e: Any = None) -> None:
-                    in_uebung_anhaengen(uebung_id, _ohne_ausfuehrung(o.profil))
-                    nachher.danach(neu_zeichnen)
-                    schliessen(dialog)
-
-                return gewaehlt
-
-            def filtern(e: Any = None) -> None:
-                text = str(getattr(getattr(e, "control", None), "value", "") or "").lower()
-                zeilen: list[ft.Control] = [
-                    ft.ListTile(title=ft.Text(u.name), on_click=waehlen(u.id))
-                    for u in alle
-                    if text in u.name.lower() and u.id != o.uebung_id
-                ]
-                treffer.controls = zeilen[:60]
-                with contextlib.suppress(Exception):
-                    treffer.update()
-
-            filtern()
-            dialog = ft.AlertDialog(
-                title=ft.Text(f"„{o.profil.anzeigename}“ in welche Übung?"),
-                content=ft.Column(
-                    tight=True,
-                    width=360,
-                    controls=[
-                        ft.TextField(
-                            hint_text="Übung suchen",
-                            prefix_icon=ft.Icons.SEARCH,
-                            on_change=filtern,
-                            dense=True,
-                        ),
-                        treffer,
-                    ],
-                ),
-                actions=[ft.TextButton("Abbrechen", on_click=lambda _e=None: schliessen(dialog))],
-                on_dismiss=nachher.bei_schliessen,
-            )
-            page.show_dialog(dialog)
+        async def handler(_e: Any = None) -> None:
+            if o.art != VORLAGE and hat_ausfuehrung(o.profil):
+                gemeinsam: TimerProfil | None = _ohne_ausfuehrung(o.profil)
+                assert gemeinsam is not None
+                vorlage_anhaengen(gemeinsam)
+            else:
+                gemeinsam = in_die_bibliothek(state, o)
+            if gemeinsam is not None:
+                await page.push_route(zuordnen_route(basis, gemeinsam.id))
 
         return handler
+
+    def bibliothek(o: TimerOrt) -> Callable[..., None]:
+        """„In die Bibliothek“: der Timer wird gemeinsam, seine Stelle verweist darauf."""
+
+        def handler(_e: Any = None) -> None:
+            in_die_bibliothek(state, o)
+            neu_zeichnen()
+
+        return handler
+
+    def zusammenlegen_fragen(_e: Any = None) -> None:
+        """„Gleiche zusammenlegen …“ (P173): nennt die Gruppen, legt erst auf Bestätigung
+        zusammen."""
+        gruppen = gleiche(orte())
+        nachher = Nachher()
+        dialog: ft.AlertDialog
+
+        def los(_e: Any = None) -> None:
+            for g in gruppen:
+                zusammenlegen(state, g)
+            nachher.danach(neu_zeichnen)
+            schliessen(dialog)
+
+        zeilen: list[ft.Control] = []
+        for g in gruppen:
+            wo = ", ".join(x.uebung_name or "Bibliothek" for x in g)
+            zeilen.append(
+                ft.Text(f"„{g[0].profil.anzeigename}“ · {g[0].profil.kurztext()}\n{wo}", size=13)
+            )
+        dialog = ft.AlertDialog(
+            title=ft.Text("Gleiche zusammenlegen?"),
+            content=ft.Column(
+                tight=True,
+                spacing=10,
+                scroll=ft.ScrollMode.AUTO,
+                controls=[
+                    *zeilen,
+                    ft.Text(
+                        "Aus den Kopien wird je ein Timer in der Bibliothek; die Übungen "
+                        "verweisen darauf. Wer ihn danach ändert, ändert ihn überall.",
+                        size=12,
+                        opacity=0.7,
+                    ),
+                ],
+            ),
+            actions=[
+                ft.TextButton("Abbrechen", on_click=lambda _e=None: schliessen(dialog)),
+                ft.FilledButton("Zusammenlegen", on_click=los),
+            ],
+            on_dismiss=nachher.bei_schliessen,
+        )
+        page.show_dialog(dialog)
 
     def loeschen_fragen(o: TimerOrt) -> Callable[..., None]:
         def handler(_e: Any = None) -> None:
@@ -173,9 +204,7 @@ def alle_timer_view(page: Any, state: AppState, basis: str) -> ft.View:
 
             def loeschen(_e: Any = None) -> None:
                 if o.art == VORLAGE:
-                    state.timer_profile_setzen(
-                        [p for p in state.timer_profile() if p.id != o.profil.id]
-                    )
+                    ueberall_loeschen(state, o.profil.id)
                 elif o.art == AN_UEBUNG:
                     u = state.uebungen.laden(o.uebung_id)
                     if u is not None:
@@ -196,19 +225,29 @@ def alle_timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                 nachher.danach(neu_zeichnen)
                 schliessen(dialog)
 
-            gilt = (
-                f"Er gilt in: {', '.join(o.benutzt)} — dort gilt danach der nächste Timer "
-                "(Planübung, dann Plan, dann Übung)."
-                if o.benutzt
-                else "Er gilt in keinem Plan."
-            )
+            if o.art == VORLAGE:
+                gilt = (
+                    f"Er gilt an {len(o.stellen)} Stellen: "
+                    f"{', '.join(x.name for x in o.stellen)} — dort gilt danach der nächste "
+                    "Timer (Planübung, dann Plan, dann Übung). Nur an einer Stelle entfernen: "
+                    "„Zuordnen …“ und dort abwählen."
+                    if o.stellen
+                    else "Er ist nirgends zugeordnet."
+                )
+            else:
+                gilt = (
+                    f"Er gilt in: {', '.join(o.benutzt)} — dort gilt danach der nächste Timer "
+                    "(Planübung, dann Plan, dann Übung)."
+                    if o.benutzt
+                    else "Er gilt in keinem Plan."
+                )
             dialog = ft.AlertDialog(
                 title=ft.Text(f"„{o.profil.anzeigename}“ löschen?"),
                 content=ft.Text(gilt),
                 actions=[
                     ft.TextButton("Abbrechen", on_click=lambda _e=None: schliessen(dialog)),
                     ft.TextButton(
-                        "Löschen",
+                        "Überall löschen" if o.art == VORLAGE and o.stellen else "Löschen",
                         style=ft.ButtonStyle(color=ft.Colors.ERROR),
                         on_click=loeschen,
                     ),
@@ -234,17 +273,29 @@ def alle_timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         unter = o.profil.kurztext()
         if o.art == AN_UEBUNG:
             unter += " · " + (f"gilt in {', '.join(o.benutzt)}" if o.benutzt else "in keinem Plan")
+        if o.art == VORLAGE:
+            unter += " · " + stellen_text(o.stellen)
         menue: list[ft.PopupMenuItem] = []
         if o.art in (VORLAGE, AN_UEBUNG):
             menue.append(ft.PopupMenuItem(content=ft.Text("Kopieren"), on_click=kopieren(o)))
         if o.art != VORLAGE:
             menue.append(
-                ft.PopupMenuItem(content=ft.Text("Als Vorlage speichern"), on_click=als_vorlage(o))
+                ft.PopupMenuItem(
+                    content=ft.Text("Kopie in die Bibliothek"), on_click=als_vorlage(o)
+                )
+                if hat_ausfuehrung(o.profil)
+                else ft.PopupMenuItem(
+                    icon=ft.Icons.LIBRARY_ADD_OUTLINED,
+                    content=ft.Text("In die Bibliothek"),
+                    on_click=bibliothek(o),
+                )
             )
         menue.extend(
             [
                 ft.PopupMenuItem(
-                    content=ft.Text("In andere Übung kopieren …"), on_click=in_andere_uebung(o)
+                    icon=ft.Icons.CHECKLIST,
+                    content=ft.Text("Zuordnen …"),
+                    on_click=zuordnen(o),
                 ),
                 ft.PopupMenuItem(),
                 ft.PopupMenuItem(
@@ -333,11 +384,21 @@ def alle_timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         )
         sichtbar = [o for o in alle if passt(o)]
         gruppen = [
-            ("VORLAGEN", [o for o in sichtbar if o.art == VORLAGE]),
-            ("AN ÜBUNGEN · GELTEN ÜBERALL", [o for o in sichtbar if o.art == AN_UEBUNG]),
+            ("BIBLIOTHEK · ZUM ZUORDNEN", [o for o in sichtbar if o.art == VORLAGE]),
+            ("NUR AN EINER ÜBUNG", [o for o in sichtbar if o.art == AN_UEBUNG]),
             ("NUR IN PLÄNEN", [o for o in sichtbar if o.art in (IN_PLANUEBUNG, IM_PLAN)]),
         ]
         inhalt: list[ft.Control] = [chips]
+        if doppelt := gleiche(alle):
+            inhalt.append(
+                ft.OutlinedButton(
+                    f"Gleiche zusammenlegen … ({sum(len(g) for g in doppelt)})",
+                    icon=ft.Icons.MERGE_TYPE,
+                    tooltip="Inhaltsgleiche Timer werden einer in der Bibliothek",
+                    on_click=zusammenlegen_fragen,
+                    data="zusammenlegen",
+                )
+            )
         for titel, gruppe in gruppen:
             if not gruppe:
                 continue
@@ -380,8 +441,9 @@ def alle_timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                         ),
                         liste,
                         hinweis(
-                            "✎ öffnet den Timer dort, wo er liegt. Löschen fragt und nennt die "
-                            "Pläne, in denen er gilt — dort gilt danach der nächste Timer."
+                            "Ein Timer der Bibliothek gilt überall, wo er zugeordnet ist — "
+                            "ändern ändert ihn dort überall. ✎ öffnet den Timer dort, wo er "
+                            "liegt. Löschen fragt und nennt die Stellen, an denen er gilt."
                         ),
                     ],
                 ),

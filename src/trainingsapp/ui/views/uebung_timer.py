@@ -74,6 +74,13 @@ from trainingsapp.ui.components.uhr import fuer_jetzt_oeffnen, schluessel
 from trainingsapp.ui.components.uhr_blatt import uhr_blatt
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.timer_bibliothek import (
+    in_uebung_speichern,
+    kopie,
+    kopie_name,
+    nur_in_uebung,
+    stellen_von,
+)
 from trainingsapp.ui.views.timer import Profilziel
 
 #: Feldnamen im Tagebuch — nach der Art des Zeitfelds (`feldname`)
@@ -126,10 +133,23 @@ def uebung_profilziel(
 
     if item is not None:
 
-        def in_planuebung(neu: TimerProfil) -> None:
+        def zugeordnet(p: TimerProfil) -> bool:
+            """Ist ``p`` der Bibliotheks-Timer, der dieser Planübung zugeordnet ist?"""
+            eigen = TimerWahl.aus_dict(item.timer).eigen
+            return bool(p.bibliothek) and eigen is not None and eigen.bibliothek == p.bibliothek
+
+        def als_eigen(neu: TimerProfil) -> None:
             wahl = TimerWahl.aus_dict(item.timer)
-            item.timer = TimerWahl("", neu, uhr=wahl.uhr).als_dict()
+            item.timer = TimerWahl("", neu, uhr=wahl.uhr, zaehlt=wahl.zaehlt).als_dict()
             state.plaene.timer_setzen(item.id, item.timer)
+
+        def in_planuebung(neu: TimerProfil) -> None:
+            # Ein Timer der Übung, im Plan geändert, wird die eigene Kopie der Planübung — auch
+            # wenn die Übung ihn aus der Bibliothek hat (dort bleibt er, wie er ist). Nur der
+            # dieser Planübung zugeordnete ändert sich überall (danach fragt der Editor).
+            if neu.bibliothek and not zugeordnet(neu):
+                neu = kopie(neu, kopie_name(neu, plan.name if plan is not None else ""))
+            als_eigen(neu)
 
         return Profilziel(
             profile,
@@ -140,6 +160,9 @@ def uebung_profilziel(
             "Timer der Planübung",
             "Neuer Timer der Planübung",
             spec=mit_plan_spec(item, uebung).result_spec,
+            stellen=lambda p: stellen_von(state, p.bibliothek) if zugeordnet(p) else [],
+            nur_hier=lambda _alt, neu: als_eigen(neu),
+            hier=f"{uebung.name} in „{plan.name}“" if plan is not None else uebung.name,
         )
 
     return Profilziel(
@@ -151,6 +174,9 @@ def uebung_profilziel(
         "Timer der Übung",
         "Neuer Timer der Übung",
         spec=uebung.result_spec,
+        stellen=lambda p: stellen_von(state, p.bibliothek),
+        nur_hier=_nur_in_uebung(state, uebung),
+        hier=uebung.name,
     )
 
 
@@ -203,17 +229,12 @@ def jetzt_profilziel(
 
 def _in_uebung(state: AppState, uebung: Exercise) -> Callable[[TimerProfil], None]:
     """Ein Profil in die Übung speichern — ein vorhandenes ersetzen, ein neues anhängen."""
+    return lambda neu: in_uebung_speichern(state, uebung, neu)
 
-    def speichern(neu: TimerProfil) -> None:
-        eigene = profile_der_uebung(uebung)
-        if any(p.id == neu.id for p in eigene):
-            uebung.timer = [(neu if p.id == neu.id else p).als_dict() for p in eigene]
-        else:
-            uebung.timer = [*(p.als_dict() for p in eigene), neu.als_dict()]
-        state.uebungen.speichern(uebung)
-        state.uebung_timer.setdefault(uebung.id, {})["profil"] = neu.id
 
-    return speichern
+def _nur_in_uebung(state: AppState, uebung: Exercise) -> Callable[[TimerProfil, TimerProfil], None]:
+    """„Nur hier: Kopie anlegen“ (Ben, 10.11.2026, `ui/timer_bibliothek.nur_in_uebung`)."""
+    return lambda alt, neu: nur_in_uebung(state, uebung, alt, neu)
 
 
 def _aus_uebung(state: AppState, uebung: Exercise) -> Callable[[TimerProfil], None]:
@@ -248,6 +269,9 @@ def formular_profilziel(state: AppState, formular: str, uebung: Exercise) -> Pro
         "Timer der Übung",
         "Neuer Timer der Übung",
         spec=uebung.result_spec,
+        stellen=lambda p: stellen_von(state, p.bibliothek),
+        nur_hier=_nur_in_uebung(state, uebung),
+        hier=uebung.name,
     )
 
 

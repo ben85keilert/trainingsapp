@@ -157,6 +157,7 @@ from trainingsapp.ui.views.timer import (
     timer_view,
     toene_laden,
 )
+from trainingsapp.ui.views.timer_zuordnen import timer_zuordnen_view
 from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
 from trainingsapp.ui.views.uebung_detail import uebung_detail
 from trainingsapp.ui.views.uebung_timer import (
@@ -809,6 +810,12 @@ def main(page: ft.Page) -> None:
                     ablegen(lambda: timer_signale_view(page, state, basis))
                 elif teile[i + 1 : i + 2] == ["alle"]:  # alle Timer (`docs/plan_uhr_fokus.md` §5)
                     ablegen(lambda: alle_timer_view(page, state, basis))
+                    if teile[i + 2 : i + 3] == ["zuordnen"] and len(teile) > i + 3:
+                        gemeinsam = next(
+                            (p for p in state.timer_profile() if p.id == teile[i + 3]), None
+                        )
+                        if gemeinsam is not None:
+                            ablegen(lambda: timer_zuordnen_view(page, state, basis, gemeinsam))
                 elif teile[i + 1 : i + 2] == ["ablauf"] and teile[:1] == ["plan"] and i == 2:
                     # Die alte Ablauf-Route (bis 8.11.2026) zeigt das Workout — ein Motor, ein
                     # Einstieg (K4, `docs/plan_uhren.md` §4.7)

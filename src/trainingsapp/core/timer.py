@@ -1,9 +1,11 @@
 """Timer als Werkzeug: Profile aus benannten Abschnitten und ihr Ablauf.
 
 Ein **Profil** ist eine Folge benannter Abschnitte mit Dauer („Belastung
-0:30", „Pause 0:15"), die sich als Ganzes wiederholen lässt (Runden). Profile
-liegen gerätelokal als JSON in ``app_setting`` (`timer_profile_lesen`); das
-zuletzt benutzte ist beim nächsten Öffnen wieder aktiv.
+0:30", „Pause 0:15"), die sich als Ganzes wiederholen lässt (Runden). Die Profile
+der Bibliothek liegen in der Tabelle ``timer`` (Migration 052, `data.repositories.TimerRepo`;
+bis 10.11.2026 als JSON in ``app_setting``, `timer_profile_lesen`) — Übungen und Pläne dürfen
+auf sie **verweisen** statt sie zu kopieren (`verweise_aufloesen`, `verweise_schreiben`,
+`docs/plan_timer_zuordnen.md`). Das zuletzt benutzte ist beim nächsten Öffnen wieder aktiv.
 
 Der **Ablauf** (`TimerLauf`) rechnet auf einer monotonen Uhr und zählt keine
 Ticks: Wie weit der Timer ist, ergibt sich aus der vergangenen Laufzeit. So
@@ -60,7 +62,7 @@ import json
 import math
 import re
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Any, Final
 
@@ -270,6 +272,10 @@ class TimerProfil:
     #: Steht der Name in den Marken der Messung und der Strecke? Nur bei den Einmaluhren
     #: abschaltbar (Ben, 19.10.2026) — sonst heißt es dort „Stoppuhr“ bzw. „Timer“
     name_in_marken: bool = True
+    #: Die ID in der Timer-Bibliothek, wenn dieser Timer **zugeordnet** ist statt kopiert
+    #: (Ben, 10.11.2026, `docs/plan_timer_zuordnen.md` §4) — leer: eine eingebettete Kopie.
+    #: Gespeichert wird dann nur der Verweis (`verweise_schreiben`).
+    bibliothek: str = ""
 
     @property
     def ist_stoppuhr(self) -> bool:
@@ -395,6 +401,8 @@ class TimerProfil:
             d["art"] = STOPPUHR
         if not self.name_in_marken:
             d["name_in_marken"] = False
+        if self.bibliothek:
+            d[BIBLIOTHEK] = self.bibliothek
         return d
 
     @classmethod
@@ -426,7 +434,101 @@ class TimerProfil:
             teil_name=str(d.get("teil_name") or "") if teile else "",
             teile=teile,
             name_in_marken=in_marken if einmal else True,
+            bibliothek=str(d.get(BIBLIOTHEK) or ""),
         )
+
+
+#: Schlüssel eines Verweises in die Timer-Bibliothek (``{"ref": "<id>"}``) und der Vermerk am
+#: aufgelösten Profil (``"bibliothek": "<id>"``) — `verweise_aufloesen`, `verweise_schreiben`
+REF, BIBLIOTHEK = "ref", "bibliothek"
+
+
+def verweise_aufloesen(wert: Any, bibliothek: Mapping[str, Mapping[str, Any]]) -> Any:
+    """Verweise in die Timer-Bibliothek durch das Profil ersetzen (Ben, 10.11.2026: Timer
+    zuordnen statt kopieren). ``wert`` ist, was an Übung (Liste), Plan (ein Profil) oder
+    Planübung (`TimerWahl`, Schlüssel ``eigen``) liegt. Ein Verweis auf einen gelöschten Timer
+    gilt als „keiner“ — der nächste im Vorrang greift.
+
+    >>> bib = {"t1": {"id": "t1", "name": "Halten", "abschnitte": [{"name": "H", "dauer_s": 30}]}}
+    >>> verweise_aufloesen([{"ref": "t1"}, {"ref": "weg"}, {"id": "x"}], bib)[0]["bibliothek"]
+    't1'
+    >>> len(verweise_aufloesen([{"ref": "t1"}, {"ref": "weg"}, {"id": "x"}], bib))
+    2
+    >>> verweise_aufloesen({"ref": "weg"}, bib) is None
+    True
+    >>> verweise_aufloesen({"eigen": {"ref": "t1"}, "uhr": True}, bib)["eigen"]["name"]
+    'Halten'
+    >>> verweise_aufloesen({"eigen": {"ref": "weg"}, "uhr": True}, bib)
+    {'uhr': True}
+    """
+    if isinstance(wert, list):
+        return [a for d in wert if (a := verweise_aufloesen(d, bibliothek)) is not None]
+    if not isinstance(wert, dict):
+        return wert
+    if REF in wert:
+        ziel = bibliothek.get(str(wert[REF]))
+        return None if ziel is None else {**ziel, BIBLIOTHEK: str(wert[REF])}
+    if isinstance(wert.get("eigen"), dict) and REF in wert["eigen"]:
+        eigen = verweise_aufloesen(wert["eigen"], bibliothek)
+        rest = {k: v for k, v in wert.items() if k != "eigen"}
+        return rest if eigen is None else {**rest, "eigen": eigen}
+    return wert
+
+
+def verweise_schreiben(wert: Any, vorhanden: Collection[str]) -> Any:
+    """Das Gegenstück: ein Profil mit Vermerk wird der Verweis — wenn es den Timer in der
+    Bibliothek (``vorhanden``) gibt; sonst bleibt es eine eingebettete Kopie ohne Vermerk
+    (ein Paket von einem anderen Gerät, ein gelöschter Timer).
+
+    >>> d = {"id": "t1", "name": "Halten", "bibliothek": "t1"}
+    >>> verweise_schreiben([d, {"id": "x"}], {"t1"})
+    [{'ref': 't1'}, {'id': 'x'}]
+    >>> verweise_schreiben(d, set())
+    {'id': 't1', 'name': 'Halten'}
+    >>> verweise_schreiben({"eigen": d, "uhr": True}, {"t1"})
+    {'eigen': {'ref': 't1'}, 'uhr': True}
+    """
+    if isinstance(wert, list):
+        return [verweise_schreiben(d, vorhanden) for d in wert]
+    if not isinstance(wert, dict):
+        return wert
+    if BIBLIOTHEK in wert:
+        if str(wert[BIBLIOTHEK]) in vorhanden:
+            return {REF: str(wert[BIBLIOTHEK])}
+        return {k: v for k, v in wert.items() if k != BIBLIOTHEK}
+    if isinstance(wert.get("eigen"), dict) and BIBLIOTHEK in wert["eigen"]:
+        return {**wert, "eigen": verweise_schreiben(wert["eigen"], vorhanden)}
+    return wert
+
+
+def zugeordnete(wert: Any) -> list[dict[str, Any]]:
+    """Die Profile mit Vermerk in ``wert`` (Liste, Profil oder Wahl) — was beim Speichern in
+    die Bibliothek zurückgeschrieben wird.
+
+    >>> [d["id"] for d in zugeordnete([{"id": "a", "bibliothek": "a"}, {"id": "b"}])]
+    ['a']
+    >>> zugeordnete({"eigen": {"id": "a", "bibliothek": "a"}})[0]["id"], zugeordnete(None)
+    ('a', [])
+    """
+    if isinstance(wert, list):
+        return [d for w in wert for d in zugeordnete(w)]
+    if not isinstance(wert, dict):
+        return []
+    if BIBLIOTHEK in wert:
+        return [wert]
+    if isinstance(wert.get("eigen"), dict):
+        return zugeordnete(wert["eigen"])
+    return []
+
+
+def ohne_verweise(wert: Any) -> Any:
+    """Für alles, was das Gerät verlässt (Pakete): zugeordnete Timer reisen als eingebettete
+    Kopie, ohne Vermerk (P175).
+
+    >>> ohne_verweise([{"id": "a", "bibliothek": "a"}])
+    [{'id': 'a'}]
+    """
+    return verweise_schreiben(wert, ())
 
 
 def _abschnitte_lesen(roh: Any) -> list[Abschnitt]:
@@ -1505,6 +1607,7 @@ class TimerLauf:
 
 
 __all__ = [
+    "BIBLIOTHEK",
     "COUNTDOWN",
     "COUNTDOWN_S",
     "EINMAL",
@@ -1515,6 +1618,7 @@ __all__ = [
     "MAX_RUNDEN",
     "MESSDAUERN_MIN",
     "QUELLEN",
+    "REF",
     "SCHNELLZEITEN_S",
     "STANDARD_KLANG",
     "STOPPUHR",
@@ -1536,6 +1640,7 @@ __all__ = [
     "ende_frage",
     "klang_fuer",
     "messdauer",
+    "ohne_verweise",
     "schnellzeit_text",
     "schnellzeiten_lesen",
     "schnellzeiten_text",
@@ -1547,5 +1652,8 @@ __all__ = [
     "timer_profile_schreiben",
     "timer_signale_lesen",
     "timer_signale_schreiben",
+    "verweise_aufloesen",
+    "verweise_schreiben",
     "wechsel",
+    "zugeordnete",
 ]

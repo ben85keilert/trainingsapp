@@ -123,6 +123,7 @@ async def test_live_vollbild_zwei_achsen_ablesen_und_notizen(daten) -> None:
     einst.fenster_s = 60  # schmal genug, dass sich bei ~90 s schon blättern lässt
     einst.nichtlinear = True  # DFA α1 wählbar
     state.hrv_einstellungen_setzen(einst)
+    state.hrv_sicht_setzen("hrv")  # in der Sicht „Herzfrequenz“ zeigt /live das HF-Vollbild
     lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
     await lauf.verbinden(SIM_SYNTH, "Simulator H10")
     task = asyncio.create_task(lauf.laufen())
@@ -412,6 +413,7 @@ async def test_live_vollbild_abschnitte_seitenleiste(daten) -> None:
     state.messlauf = lauf
     seite = _seite()
     seite.height, seite.width = 412, 915
+    state.hrv_sicht_setzen("hrv")  # in der Sicht „Herzfrequenz“ zeigt /live das HF-Vollbild
     lauf.aufnahme_starten()
     while lauf.aufnahme_dauer_s() < 20:
         await asyncio.sleep(0.01)

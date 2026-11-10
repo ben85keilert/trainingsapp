@@ -1,7 +1,9 @@
 # Timer: eine Wahl überall, Editor im Fenster, Bibliothek mit Zuordnung
 
-Stand: 10.11.2026 — **Entwurf, nichts gebaut.** Offen: P171–P176 (`docs/offene_fragen.md`).
-Skizzen: noch keine.
+Stand: 10.11.2026 — **Z1–Z4 gebaut** (Ben, 10.11.: „Baue alles andere so ein, wie in der
+Skizze“; P171–P176 damit wie vorgeschlagen entschieden). Skizzen Z1–Z4:
+https://claude.ai/artifact/HdxYb75e9kzhX3GFQc1Xxp. Was gebaut ist und wo es von §2–§5 abweicht,
+steht in **§7**; Gerätetest T119.
 
 ## 0. Anlass
 
@@ -155,3 +157,78 @@ Braucht Z3.
 
 Jede Stufe eine Version; Z1 und Z2 sind ohne Z3 nützlich. Gerätetests kommen je Stufe in den
 Katalog. Nicht berührt: Vorrang, Takt, Zeitleiste, Workout.
+
+## 7. Gebaut (10.11.2026) — und was anders ist als oben
+
+**Ablage (Z3).** Migration 052 legt die Tabelle `timer` an (`TimerRepo` in
+`data/repositories.py`); die Einstellung `timer_profile` zieht beim ersten Lesen um und ist
+danach weg, die IDs bleiben. `AppState.timer_profile()`/`timer_profile_setzen()` lesen und
+schreiben die Tabelle — alle bisherigen Aufrufer bleiben. Ohne eigene Timer gibt es weiter die
+zwei Beispiele; sie werden Zeilen, sobald einer zugeordnet wird (`AppState.timer_in_bibliothek`).
+
+**Verweis.** Gespeichert wird `{"ref": "<id>"}` — in `exercise.timer_json` (Listeneintrag), in
+`plan.timer_json` und in der Planübung unter `eigen` (nicht, wie in §4 gedacht, als
+`profil_id`: so bleibt `timer_fuer` unverändert). Das Repo löst beim Laden auf
+(`core.timer.verweise_aufloesen`): `core/` und `ui/` sehen das Profil mit dem Vermerk
+`TimerProfil.bibliothek`. Beim Speichern wird aus dem Vermerk wieder der Verweis
+(`verweise_schreiben`) — **und was am Profil geändert wurde, kommt dabei in die Bibliothek**
+(`_timer_json`). „Überall ändern“ ist also einfach Speichern; „Nur hier“ nimmt vorher den
+Vermerk weg (`ui/timer_bibliothek.kopie`). Ein Vermerk, zu dem es keinen Timer gibt (gelöscht,
+Paket von einem anderen Gerät), bleibt eine eingebettete Kopie; ein Verweis auf einen gelöschten
+Timer gilt als „keiner“. Pakete: `core.timer.ohne_verweise` beim Export (P175).
+
+**Wo er gilt.** `core.uebung_timer.stellen` (Übung · Plan „für alle Übungen“ · einzelne
+Planübung), `stellen_text` („gilt in 3 Übungen, 1 Plan“); `alle_timer` nennt einen zugeordneten
+Timer einmal, in der Bibliothek.
+
+**„Alle Timer“.** Gruppen Bibliothek · Nur an einer Übung · Nur in Plänen. ⋮: Kopieren ·
+**In die Bibliothek** (die Stelle verweist danach; mit Ausführungen stattdessen „Kopie in die
+Bibliothek“ ohne sie, P174) · **Zuordnen …** · Löschen („Überall löschen“ nennt die Stellen).
+**„Gleiche zusammenlegen …“** erscheint nur, wenn es inhaltsgleiche Timer gibt, nennt sie und
+legt erst auf Bestätigung zusammen (`core.uebung_timer.gleiche`, `ui/timer_bibliothek.zusammenlegen`
+— Planübungen, die eine der Kopien gewählt hatten, wählen den gemeinsamen).
+
+**Zuordnen — anders als die erste Skizze Z3** (Ben, 10.11.: „gleiche den Filter so an, wie bei
+der Übungsauswahl … so kann man jeder Isometrieübung einen Timer direkt zuweisen oder nur jeder
+Isometrieübung aus dem Paket ‚Bodentraining‘“): eine **Seite** statt eines Blatts
+(`views/timer_zuordnen.py`, Route `…/timer/alle/zuordnen/<id>`) — der Filter ist selbst ein
+Blatt, und ein Blatt über einem Blatt habe ich nicht erprobt (die App schließt Dialoge gezielt,
+`components/dialoge.schliessen`; zwei offene Blätter gibt es bisher nirgends). Suchzeile mit dem
+Filterknopf rechts (`FilterLeiste`: Typ · Region · Paket, Labels darunter,
+`AppState.zuordnen_filter`), **„Alle n ankreuzen“** für das, was gerade passt, Übungen und Pläne
+zum Ankreuzen, Schalter „Neu zugeordnet wird er die Vorgabe der Übung“ (an: er steht vorn und
+gilt, wo nichts anderes eingestellt ist). Geschrieben wird mit „Zuordnen“ oder Zurück.
+
+**Dialog (Z4).** `components/timer_stellen.ueberall_oder_hier`: ab zwei Stellen und nur, wenn
+etwas geändert wurde — im Editor der Übung, der Bibliothek („Als Kopie speichern“: eine neue,
+nirgends zugeordnete Vorlage) und für einen Timer, der einer einzelnen Planübung zugeordnet ist;
+auch bei „Zurück speichert“ (`zurueck_speichert`: ein leerer Grund heißt „selbst gefragt,
+bleiben“). „Nur hier“ an der Übung: die Kopie nimmt den Platz ein, Planübungen dieser Übung, die
+ihn gewählt hatten, wählen die Kopie. Im Plan geändert (Editor der Planübung) wird ein Timer der
+Übung **ohne Frage** die eigene Kopie der Planübung. Löschen an der Übung heißt für einen
+zugeordneten Timer „nur hier entfernen“.
+
+**Timer-Zeile und Uhr-Blatt (Z1).** `components/timer_zeile.timer_zeile` in „Im Plan einstellen“
+(statt „Anderen Timer nur hier …“ und „Neuer Timer — nur hier“) und in jeder Karte des
+Uhrenplans; der Dialog `components/timer_wahl.py` ist entfernt. Das Uhr-Blatt hat im Editor
+(`im_editor`) die Zeile „Wie die Übung“ (mit einem Plan-Timer: „Wie der Plan“), keine Stifte
+(✎ steht in der Zeile), „Zeit zählt“ und Takt bleiben im Editor; **„Aus der Bibliothek …“
+ordnet zu** (vorher „Vorlage als Kopie …“) — auch beim Üben. „Für jetzt“ ist ausgegraut,
+solange keine Einheit läuft oder vorbereitet ist (P171, `timer_zeile.jetzt_grund`). In „Im Plan
+einstellen“ schreibt „In Plan“ ins Formular (gespeichert mit Speichern oder Zurück), „Übung“
+gleich an die Übung. „Uhr beim Üben“ und „Zeit zählt“ haben weiter nur „nur hier ↺“ — die
+Geltung dafür bietet das Uhr-Blatt beim Üben (Abweichung von §2, letzter Punkt).
+
+**Editor im Fenster (Z2).** `components/timer_editor.timer_editor` ist der Editor des
+Haupttimers als Baustein (Werte, keine Controls); `views/timer.timer_bearbeiten_view` ist sein
+Rahmen. `timer_zeile.timer_im_fenster` setzt ihn in die Karte des Uhrenplans und in „Im Plan
+einstellen“: Reiter Zeiten · Klänge, Gesamtzeit, darunter **„Geändert gilt:“ Für jetzt · In
+„Plan“ · Übung**. Jede Änderung gilt sofort: *In Plan* → eigene Kopie der Planübung („Name
+(Plan)“, sichtbar „nur hier“), *Übung* → an die Übung (ein zugeordneter Timer mit mehreren
+Stellen fragt beim ersten Ändern einmal), *Für jetzt* → `AppState.uhr_einmal`. Der Name wird im
+Fenster nicht geändert (dafür die ganze Ansicht aus „Alle Timer“ bzw. der Übung); ein gemeinsamer
+Timer zeigt keine Ausführungen (P174). Zugeklappt steht unter der Zeile der Kurztext der Zeiten.
+
+**Tests.** `tests/test_timer_bibliothek.py` (Umzug, Verweise, Löschen, Export),
+`tests/test_ui_timer_zuordnen.py` (Filter + alle ankreuzen, Pläne, Zusammenlegen, Dialog),
+`tests/test_ui_plan_uhren.py`, `tests/test_ui_uebung_einstellen.py`.

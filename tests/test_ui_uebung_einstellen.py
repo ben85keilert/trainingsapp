@@ -301,3 +301,45 @@ def test_leiste_zaehlt_fuer_jetzt_und_zeit_antippen(page, state) -> None:
     assert isinstance(blatt, ft.BottomSheet)
     assert any(isinstance(x, ft.CupertinoTimerPicker) for x in _alle(blatt))
     assert (zeit_lesen("1:30"), zeit_lesen("90 s"), zeit_lesen("0")) == (90, 90, None)
+
+
+def test_im_plan_einstellen_timer_zeile_und_editor_im_fenster(page, state) -> None:
+    """Skizzen Z1/Z2 (Ben, 10.11.2026): eine Timer-Zeile statt „Anderen Timer nur hier …“ und
+    „Neuer Timer — nur hier“; ✎ klappt den Editor im Formular auf — Geändertes wird die eigene
+    Kopie der Planübung, gespeichert erst mit „Speichern“."""
+    from trainingsapp.core.timer import Abschnitt, TimerProfil
+    from trainingsapp.core.uebung_timer import TimerWahl
+    from trainingsapp.ui.views.plan_einstellen import plan_einstellen
+
+    halten = TimerProfil(id="h", name="Planke 30/15", abschnitte=[Abschnitt("Halten", 30)])
+    uebung = _uebung(state, timer=[halten.als_dict()])
+    plan, item = _plan(state, uebung, "Testplan")
+    ansicht = plan_einstellen(page, state, plan, item, uebung)
+    texte = _texte(ansicht)
+    assert "Planke 30/15" in texte and "0:30 · 1 Abschnitt" in texte and "Übung" in texte
+    assert "Anderen Timer nur hier …" not in texte and "Neuer Timer — nur hier" not in texte
+
+    def feld(data):
+        return next(x for x in _alle(ansicht) if getattr(x, "data", None) == data)
+
+    # Der Name öffnet das Uhr-Blatt mit den drei Geltungen
+    _klick(feld("timer_name"))
+    blatt = page.dialoge[-1]
+    assert isinstance(blatt, ft.BottomSheet)
+    assert "Wie die Übung" in _texte(blatt)
+    geltung = next(x for x in _alle(blatt) if isinstance(x, ft.SegmentedButton))
+    assert [x.value for x in geltung.segments] == ["jetzt", "plan", "uebung"]
+    assert geltung.selected == ["plan"]
+    # ✎: der Editor in der Zeile
+    _klick(feld("timer_editor_auf"))
+    assert "Geändert gilt:" in _texte(ansicht)
+    feld(("zaehlt", 0, 0)).on_click()
+    assert state.plaene.item_laden(item.id).timer == {}  # noch im Formular
+    speichern = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.TextButton) and x.content == "Speichern"
+    )
+    _klick(speichern)
+    eigen = TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer).eigen
+    assert eigen is not None and eigen.name == "Planke 30/15 (Testplan)"
+    assert eigen.abschnitte[0].zaehlt is False
+    assert state.uebungen.laden(uebung.id).timer[0].get("abschnitte")[0].get("zaehlt") is None

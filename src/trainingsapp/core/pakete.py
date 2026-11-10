@@ -70,7 +70,7 @@ from .paketmedien import Paketmedium, ist_paketmedium, medium_aus_paket
 from .paketversion import version_zahl
 from .result_spec import VORLAGEN, ResultSpec, basis_key
 from .takt import Takt
-from .timer import TimerProfil
+from .timer import TimerProfil, ohne_verweise
 from .zaehlen import SensorWahl
 
 #: Kennung im Feld ``format`` — andere JSON-Dateien (Messungen) sind kein Paket
@@ -314,7 +314,7 @@ def paketplan_aus(plan: Plan, key: str | None = None) -> PaketPlan:
         key=key or plan.package_key or plan.name.strip().casefold(),
         vorlage=vorlage,
         beschreibung=plan.description,
-        timer=dict(plan.timer) if plan.timer else None,
+        timer=ohne_verweise(dict(plan.timer)) if plan.timer else None,
         weiter_automatisch=plan.weiter_automatisch,
         pause_ohne_timer=plan.pause_ohne_timer,
     )
@@ -987,7 +987,7 @@ def stand(u: Exercise) -> dict[str, Any]:
     if u.limit_spec:
         d["limit_spec"] = u.limit_spec
     if u.timer:
-        d["timer"] = [dict(p) for p in u.timer]
+        d["timer"] = ohne_verweise([dict(p) for p in u.timer])
     if not u.uhr:
         d["uhr"] = False
     if u.zaehlt_als:

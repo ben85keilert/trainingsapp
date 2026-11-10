@@ -88,6 +88,21 @@ class Zeitachse:
     puffer_setzen: Callable[[int], None] | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class Kurvenwahl:
+    """Bereich und Kurven im Blatt „Fenster & Darstellung“ wählen (Ben, 10.11.2026, A21:
+    Zeit · Frequenz · Nichtlinear und die Chips standen zwischen Hauptkurve und
+    Verlaufskurven — jetzt im Blatt, nach der Zeitachse und vor den Werteachsen).
+
+    ``bereiche``: die angebotenen (`HrvEinstellungen.bereiche`); ``ohne``: Kurven, die es
+    für diese Messung nicht gibt; ``achsen``: die Werteachsen dessen, was **jetzt** als
+    Kurve gezeigt wird — nach jedem Tipp neu gefragt."""
+
+    bereiche: Sequence[str]
+    ohne: Callable[[], Sequence[str]]
+    achsen: Callable[[], Sequence[Werteachse]]
+
+
 def _achse(kennzahl: str) -> str | None:
     k = KENNZAHLEN.get(kennzahl)
     return k.achse_schluessel if k else None
@@ -567,6 +582,7 @@ def darstellung_blatt(
     kurven_teil: bool = True,
     gruppen_vor: Sequence[Gruppe] = (),
     gruppen_nach: Sequence[Gruppe] = (),
+    wahl: Kurvenwahl | None = None,
 ) -> ft.BottomSheet:
     """Zeitachse, Werteachsen und je gewählter Kurve: Fenster, gleitend oder Blöcke; pNNx.
 
@@ -583,20 +599,32 @@ def darstellung_blatt(
     ``kurven_teil=False``: ohne den Abschnitt „Kurven“ (die Herzfrequenz-Sicht hat keine
     Verlaufskurven); ``gruppen_vor``/``gruppen_nach``: eigene Gruppen des Aufrufers vor bzw.
     nach den Werteachsen (Herzfrequenz: Mittel und Bereiche, Signal an der Grenze).
+
+    ``wahl`` (Ben, 10.11.2026, A21): die Gruppe **„Verlaufskurven“** nach der Zeitachse —
+    Zeit · Frequenz · Nichtlinear und ein Chip je Kurve. Jeder Tipp gilt sofort und baut das
+    Blatt darunter neu: die Werteachsen zeigen nur, was als Kurve eingeschaltet ist
+    (``wahl.achsen``), „Kurven“ die Fenster der gewählten. Bei „Nichtlinear“ steht dort der
+    Schalter für die Poincaré-Wolke (`HrvEinstellungen.poincare`).
     """
     ansicht = state.ansicht()
     einstellungen: HrvEinstellungen = state.hrv_einstellungen()
-    gewaehlt = (
-        [
+    bereiche = list(wahl.bereiche) if wahl is not None else []
+
+    def bereich_jetzt() -> str:
+        if bereiche and ansicht.bereich not in bereiche:
+            return bereiche[0]
+        return str(ansicht.bereich)
+
+    def gewaehlte() -> list[str]:
+        if not kurven_teil:
+            return []
+        return [
             k
-            for k in (kurven if kurven is not None else im_bereich(ansicht.bereich))
+            for k in (kurven if kurven is not None else im_bereich(bereich_jetzt()))
             if k in KENNZAHLEN
             and KENNZAHLEN[k].rechnet
             and (kurven is not None or k in ansicht.kurven)
         ]
-        if kurven_teil
-        else []
-    )
 
     def speichern() -> None:
         state.ansicht_setzen(ansicht)
@@ -607,9 +635,8 @@ def darstellung_blatt(
         if zeitachse is not None
         else None
     )
-    y_zeilen = [
-        _YZeile(a, ansicht, speichern, einstellungen.achse_standard(a.schluessel)) for a in achsen
-    ]
+    #: Die Zeilen der Werteachsen — `bauen` füllt sie (mit ``wahl`` nach jedem Tipp neu)
+    y_zeilen: list[_YZeile] = []
 
     def alles_uebernehmen(*, melden: bool) -> bool:
         if breite is not None:
@@ -727,36 +754,7 @@ def darstellung_blatt(
     def gruppe(text: str, inhalt: Sequence[ft.Control]) -> list[ft.Control]:
         return [abschnitt_titel(text), *inhalt]
 
-    zeilen: list[ft.Control] = [kurvenzeile(k, KENNZAHLEN[k]) for k in gewaehlt]
-    if "pnnx" in gewaehlt:
-        zeilen.append(
-            ft.Dropdown(
-                label="Schwelle für pNNx",
-                value=str(ansicht.pnn_ms),
-                options=[ft.DropdownOption(key=str(x), text=f"{x} ms") for x in PNN_WAHL],
-                on_select=pnn_setzen,
-                dense=True,
-                border=ft.OutlineInputBorder(border_radius=ECKIG_RADIUS),
-            )
-        )
-    if kurven_teil:
-        if not zeilen:
-            zeilen.append(ft.Text("Keine gewählte Kurve hat ein Fenster.", size=12, opacity=0.7))
-        zeilen += [
-            ft.Switch(
-                label="Gleiche Achse in einem Diagramm",
-                value=ansicht.gemeinsam,
-                on_change=gemeinsam,
-            ),
-            ft.Text(
-                "Gleitend: Je länger das Fenster, desto ruhiger die Kurve und desto "
-                "später zeigt sie eine Änderung. Blöcke: ein Wert je Fenster, ohne "
-                "Überlappung — gut zum Vergleichen von Abschnitten.",
-                size=11,
-                opacity=0.65,
-            ),
-        ]
-    teile: list[ft.Control] = []
+    zeit_teil: list[ft.Control] = []
     if breite is not None and zeitachse is not None:
         zeit: list[ft.Control] = []
         if zeitachse.satz is not None:
@@ -798,27 +796,110 @@ def darstellung_blatt(
                     tooltip="Gilt ab der nächsten Verbindung; so lang darf die Zeitachse sein",
                 )
             )
-        teile += gruppe("Zeitachse", zeit)
-    for text, inhalt in gruppen_vor:
-        teile += gruppe(text, inhalt)
-    if y_zeilen:
-        teile += gruppe(
-            "Werteachsen",
-            [
+        zeit_teil += gruppe("Zeitachse", zeit)
+
+    def bereich_gewaehlt(b: str) -> None:
+        ansicht.bereich = b
+        speichern()
+        neu_bauen()
+
+    def kurve_umgeschaltet(k: str) -> None:
+        ansicht.umschalten(k)
+        speichern()
+        neu_bauen()
+
+    def poincare_gesetzt(e: ft.Event[ft.Switch]) -> None:
+        aktuell = state.hrv_einstellungen()
+        aktuell.poincare = bool(e.control.value)
+        state.hrv_einstellungen_setzen(aktuell)
+        geaendert()
+
+    def wahl_gruppe() -> list[ft.Control]:
+        """Zeit · Frequenz · Nichtlinear und die Chips des Bereichs (A21)."""
+        if wahl is None:
+            return []
+        inhalt: list[ft.Control] = []
+        if len(bereiche) > 1:
+            inhalt.append(bereich_wahl(bereiche, bereich_jetzt(), bereich_gewaehlt))
+        inhalt.append(chips(ansicht, kurve_umgeschaltet, bereich_jetzt(), ohne=wahl.ohne()))
+        return gruppe("Verlaufskurven", inhalt)
+
+    def bauen() -> list[ft.Control]:
+        """Alles unter dem Kopf — mit ``wahl`` nach jedem Tipp auf Bereich oder Chip neu."""
+        gewaehlt = gewaehlte()
+        y_zeilen[:] = [
+            _YZeile(a, ansicht, speichern, einstellungen.achse_standard(a.schluessel))
+            for a in (wahl.achsen() if wahl is not None else achsen)
+        ]
+        zeilen: list[ft.Control] = [kurvenzeile(k, KENNZAHLEN[k]) for k in gewaehlt]
+        if "pnnx" in gewaehlt:
+            zeilen.append(
+                ft.Dropdown(
+                    label="Schwelle für pNNx",
+                    value=str(ansicht.pnn_ms),
+                    options=[ft.DropdownOption(key=str(x), text=f"{x} ms") for x in PNN_WAHL],
+                    on_select=pnn_setzen,
+                    dense=True,
+                    border=ft.OutlineInputBorder(border_radius=ECKIG_RADIUS),
+                )
+            )
+        if kurven_teil:
+            if not zeilen:
+                zeilen.append(
+                    ft.Text("Keine gewählte Kurve hat ein Fenster.", size=12, opacity=0.7)
+                )
+            zeilen += [
+                ft.Switch(
+                    label="Gleiche Achse in einem Diagramm",
+                    value=ansicht.gemeinsam,
+                    on_change=gemeinsam,
+                ),
                 ft.Text(
-                    "Aus: Die Achse folgt den Werten im Ausschnitt. An: Sie reicht von–bis, "
-                    "z. B. RR 500 bis 1500 ms — was darüber oder darunter liegt, schneidet die "
-                    "Kurve am Rand ab. ↺ setzt den Standard aus den Einstellungen ein.",
+                    "Gleitend: Je länger das Fenster, desto ruhiger die Kurve und desto "
+                    "später zeigt sie eine Änderung. Blöcke: ein Wert je Fenster, ohne "
+                    "Überlappung — gut zum Vergleichen von Abschnitten.",
                     size=11,
                     opacity=0.65,
                 ),
-                *(z.control for z in y_zeilen),
-            ],
-        )
-    for text, inhalt in gruppen_nach:
-        teile += gruppe(text, inhalt)
-    if teile and kurven_teil:
-        teile.append(abschnitt_titel("Kurven"))
+            ]
+        if kurven is None and kurven_teil and bereich_jetzt() == "nichtlinear":
+            zeilen.append(
+                ft.Switch(
+                    label="Poincaré-Wolke zeigen",
+                    value=state.hrv_einstellungen().poincare,
+                    on_change=poincare_gesetzt,
+                    data="poincare",
+                )
+            )
+        teile: list[ft.Control] = [*zeit_teil, *wahl_gruppe()]
+        for text, inhalt in gruppen_vor:
+            teile += gruppe(text, inhalt)
+        if y_zeilen:
+            teile += gruppe(
+                "Werteachsen",
+                [
+                    ft.Text(
+                        "Aus: Die Achse folgt den Werten im Ausschnitt. An: Sie reicht von–bis, "
+                        "z. B. RR 500 bis 1500 ms — was darüber oder darunter liegt, schneidet die "
+                        "Kurve am Rand ab. ↺ setzt den Standard aus den Einstellungen ein.",
+                        size=11,
+                        opacity=0.65,
+                    ),
+                    *(z.control for z in y_zeilen),
+                ],
+            )
+        for text, inhalt in gruppen_nach:
+            teile += gruppe(text, inhalt)
+        if teile and kurven_teil:
+            teile.append(abschnitt_titel("Kurven"))
+
+        return [*teile, *zeilen]
+
+    def neu_bauen() -> None:
+        alles_uebernehmen(melden=False)  # Getipptes gilt, bevor seine Zeile verschwindet
+        spalte.controls = [kopf, *bauen()]
+        with contextlib.suppress(Exception):
+            spalte.update()
 
     def fertig() -> None:
         if alles_uebernehmen(melden=True):
@@ -837,15 +918,16 @@ def darstellung_blatt(
             ft.TextButton("Fertig", on_click=fertig),
         ]
     )
+    spalte = ft.Column(
+        spacing=20,  # Luft zwischen den Gruppen (Ben, 30.10.2026)
+        tight=True,
+        scroll=ft.ScrollMode.AUTO,
+        controls=[kopf, *bauen()],
+    )
     blatt = ft.BottomSheet(
         content=ft.Container(
             padding=ft.Padding.only(left=16, top=4, right=16, bottom=16),
-            content=ft.Column(
-                spacing=20,  # Luft zwischen den Gruppen (Ben, 30.10.2026)
-                tight=True,
-                scroll=ft.ScrollMode.AUTO,
-                controls=[kopf, *teile, *zeilen],
-            ),
+            content=spalte,
         ),
         scrollable=True,
         show_drag_handle=True,
@@ -898,6 +980,7 @@ __all__ = [
     "ECKIG_RADIUS",
     "FARBEN",
     "Gruppe",
+    "Kurvenwahl",
     "Werteachse",
     "Zeitachse",
     "ansicht_menue",

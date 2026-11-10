@@ -10,9 +10,11 @@ Verbindung, von oben nach unten:
 3. Eine Karte für die Kurven (Ben, 21.10.2026: Hauptkurve und Verlaufskurven dicht
    beieinander; Sortierung nach der Skizze vom 30.10.2026): Titelzeile mit „korrigiert“
    als Symbol, dann die Zeilen mit Überschrift — Zeitachse (Breiten, Uhrzeit), Abschnitte
-   —, die Hauptkurve (RR- bzw. PPI-Tachogramm), direkt darunter die Notizen, dann
-   „Verlaufskurven“ mit Bereich Zeit ↔ Frequenz ↔ Nichtlinear und den Chips, darunter
-   Spektrum bzw. Poincaré und die Verlaufskurven (`components.analyse`, eingebettet).
+   —, die Hauptkurve (RR- bzw. PPI-Tachogramm), direkt darunter die Notizen (Griff
+   darunter zieht die Liste höher oder niedriger), dann Spektrum bzw. Poincaré und die
+   Verlaufskurven (`components.analyse`, eingebettet). Bereich Zeit ↔ Frequenz ↔
+   Nichtlinear und die Chips stehen seit dem 10.11.2026 im Blatt „Fenster & Darstellung“
+   (A21).
    Sendet das Gerät nur die Herzfrequenz (Uhren im Übertragungsmodus — im Geräteprofil
    hinterlegt, sonst erkannt), ist die Hauptkurve der Puls in bpm (`nur_puls`, 17.10.2026).
 
@@ -958,7 +960,7 @@ def _live_teil(
         abschnitte_neu()
         analyse.zeichnen(x_von, x_bis, strich=strich())
         ablesen_zeichnen()
-        for c in (rr_box, lage_box, analyse.wahl, analyse.control, ablese_box):
+        for c in (rr_box, lage_box, analyse.control, ablese_box):
             with contextlib.suppress(Exception):
                 c.update()
 
@@ -1089,6 +1091,8 @@ def _live_teil(
         zeit_modus=UHR if einst.achse_uhrzeit else DAUER,
         dialog=page.show_dialog,
         zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
+        hoehe=lambda: state.hrv_einstellungen().notizen_hoehe_px,
+        hoehe_merken=lambda px: einstellung_merken(notizen_hoehe_px=px),
     )
 
     def timer_notizen() -> None:
@@ -1971,7 +1975,6 @@ def _live_teil(
         eintippen, Werteachsen der Haupt- und der Verlaufskurven, Fenster je Kurve. In der
         Herzfrequenz-Sicht (Ben, 30.10.2026) stattdessen Mittel, Bereiche, HF-Achse und das
         Signal an der Grenze — Verlaufskurven gibt es dort nicht."""
-        a = state.ansicht()
         zeit = Zeitachse(
             fenster.breite_s,
             breite_waehlen,
@@ -2014,14 +2017,20 @@ def _live_teil(
             )
             return
         haupt = ["hf_geraet"] if modus["puls"] else [ROH]
-        gezeigt = [k for g in kurvengruppen(a, analyse.bereich, ohne()) for k in g]
+
+        def achsen_jetzt() -> list[Werteachse]:
+            """Die Werteachsen dessen, was gerade als Kurve eingeschaltet ist (A21)."""
+            jetzt = state.ansicht()
+            gezeigt = [k for g in kurvengruppen(jetzt, analyse.bereich, ohne()) for k in g]
+            return werteachsen(jetzt, [*haupt, *gezeigt], roh_titel)
+
         page.show_dialog(
             darstellung_blatt(
                 page,
                 state,
-                lambda: aktualisieren(erzwingen=True),
-                achsen=werteachsen(a, [*haupt, *gezeigt], roh_titel),
+                analyse.geaendert,
                 zeitachse=zeit,
+                wahl=analyse.kurvenwahl(achsen_jetzt),
             )
         )
 
@@ -2117,12 +2126,20 @@ def _live_teil(
             ],
         )
 
+    menue_stand = {"aufnahme": lauf.aufnahme is not None}
+
     def fuellen() -> None:
         state.messung_ende_s = fenster.ende_s
         # Ein Zeitpunkt für alle Kurven — sonst rückte jede ein Stück weiter.
         x_von, x_bis = fenster.bereich(lauf.jetzt_s(), anfang())
         status_auffrischen()
         modus_pruefen()
+        # Das Menü ⋮ kennt „Teil speichern, weiter aufnehmen“ nur während der Aufnahme — und
+        # die beginnt auch ohne Neuaufbau dieser Ansicht (Startleiste, Workout, GPS-Training):
+        # ohne das hier fehlte der Eintrag dann (Ben, 10.11.2026)
+        if (lauf.aufnahme is not None) != menue_stand["aufnahme"]:
+            menue_stand["aufnahme"] = lauf.aufnahme is not None
+            analyse.aufbauen()
         hf_sicht = sicht["wert"] == SICHT_HF
         if hf_sicht:
             hf, zus, bezug_name, abschnitt_laeuft = hf_live_werte()
@@ -2147,7 +2164,6 @@ def _live_teil(
             )
         hf_box.visible = hf_sicht
         korrigiert_knopf.visible = not modus["puls"] and not hf_sicht
-        verlauf_gruppe.visible = not hf_sicht
         analyse.control.visible = not hf_sicht
         kurven_titel_text.value = kurven_titel()
         kacheln_box.content = anzeige(werte, einst.darstellung)
@@ -2192,10 +2208,10 @@ def _live_teil(
     # Verlaufskurven. Titelzeile wie in der Aufzeichnung: Ablesen, Vollbild, Fenster &
     # Darstellung (zweiter von rechts), Menü ⋮ mit Info und Korrektur (Ben, 21.10.2026).
     # Sortierung nach der Skizze vom 30.10.2026 (Ben: „Deine Vorschläge sind gut“): jedes
-    # Bedienelement bei dem, was es verändert — Zeitachse und Abschnitte über der Hauptkurve,
-    # Bereich und Chips der Verlaufskurven unter den Notizen direkt über den Verlaufskurven;
+    # Bedienelement bei dem, was es verändert — Zeitachse und Abschnitte über der Hauptkurve;
     # „korrigiert“ als Symbol in der Titelzeile; jede Zeile mit kleiner Überschrift (`gruppe`).
-    verlauf_gruppe = gruppe("Verlaufskurven", analyse.wahl)
+    # Bereich und Chips der Verlaufskurven stehen seit dem 10.11.2026 im Blatt „Fenster &
+    # Darstellung“ (A21) — die Verlaufskurven folgen direkt auf die Notizen.
     haupt_karte = karte(
         hf_box,
         ft.Row(
@@ -2229,7 +2245,6 @@ def _live_teil(
         ),
         ablese_box,
         notizfeld.control,
-        verlauf_gruppe,
         analyse.control,
     )
     # Die Sichtwahl direkt unter Gerät und Aufnahme (Ben, 30.10.2026) — scrollt sie weg,

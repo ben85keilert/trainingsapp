@@ -334,8 +334,9 @@ def test_aufzeichnung_auswertung_und_tag(page) -> None:
 
 def test_trainieren_zeigt_ob_liste_oder_workout(page, state) -> None:
     """Ben, 10.11.2026: Das Symbol von „Trainieren“ sagt, wie der Plan öffnet — ▶ als Liste,
-    das Workout-Symbol mit Schalter „Workout“ oder gezeichnetem Ablauf; nach „Liste“ für diese
-    Sitzung wieder ▶."""
+    das Workout-Symbol mit Schalter „Workout“ oder gezeichnetem Ablauf. Ein Workout bleibt ein
+    Workout: „Trainieren“ öffnet es auch nach „Zum Plan“/„Liste“ wieder als Workout — die Liste
+    gibt es nur von Hand."""
     liste = _plan(state, "kniebeuge", name="Kraft")
     workout = _plan(state, "kniebeuge", name="Zirkel")
     state.plaene.workout_setzen(workout.id, True, True)
@@ -348,6 +349,14 @@ def test_trainieren_zeigt_ob_liste_oder_workout(page, state) -> None:
         return out
 
     assert symbole() == {"Kraft": "liste", "Zirkel": "workout"}
-    state.plan_als_plan.add(workout.id)
-    assert symbole() == {"Kraft": "liste", "Zirkel": "liste"}
+    state.plan_als_plan.add(workout.id)  # nach dem Workout „Zum Plan“ oder oben „Liste“
+    assert symbole() == {"Kraft": "liste", "Zirkel": "workout"}
+    tile = next(
+        x
+        for x in _alle(plaene_liste(page, state))
+        if isinstance(x, ft.ListTile) and x.title.value == "Zirkel"
+    )
+    knopf = next(x for x in _alle(tile.trailing) if isinstance(x, ft.FilledTonalButton))
+    asyncio.run(knopf.on_click())
+    assert workout.id not in state.plan_als_plan and page.routen[-1] == f"/plan/{workout.id}"
     assert liste.id != workout.id

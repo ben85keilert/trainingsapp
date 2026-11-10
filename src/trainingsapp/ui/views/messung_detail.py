@@ -188,6 +188,7 @@ from trainingsapp.ui.components.titel import (
 )
 from trainingsapp.ui.components.verlauf import (
     FARBEN,
+    Werteachse,
     Zeitachse,
     darstellung_blatt,
     darstellung_knopf,
@@ -2540,6 +2541,12 @@ def _aufbauen(
     def uebungen_merken(offen: bool, quelle: str | None) -> None:
         state.notiz_uebungen_offen, state.notiz_uebungen_quelle = offen, quelle
 
+    def notizen_hoehe_merken(px: int) -> None:
+        """Der Griff unter der Notizliste (A21) — gilt auch live und beim nächsten Mal."""
+        aktuell = state.hrv_einstellungen()
+        aktuell.notizen_hoehe_px = px
+        state.hrv_einstellungen_setzen(aktuell)
+
     notizfeld = Notizfeld(
         zeitbezug=lambda: zeitbezug,
         ausblenden=_ist_leistung,
@@ -2559,6 +2566,8 @@ def _aufbauen(
         zeit_modus=UHR if einst.achse_uhrzeit else DAUER,
         dialog=page.show_dialog,
         zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
+        hoehe=lambda: state.hrv_einstellungen().notizen_hoehe_px,
+        hoehe_merken=notizen_hoehe_merken,
     )
 
     if geladen.nachgetragen_sha1 is not None:  # `_laden` schrieb Grenz-Notizen nach
@@ -3287,13 +3296,19 @@ def _aufbauen(
         else:
             ohne = [] if rec.hat_rr else ohne_rr()
             haupt = ["hf_geraet"] if z.nur_puls else [ROH]
-            gezeigt = [k for g in kurvengruppen(a, analyse.bereich, ohne) for k in g]
+
+            def achsen_jetzt() -> list[Werteachse]:
+                """Die Werteachsen dessen, was gerade als Kurve eingeschaltet ist (A21)."""
+                jetzt = state.ansicht()
+                gezeigt = [k for g in kurvengruppen(jetzt, analyse.bereich, ohne) for k in g]
+                return werteachsen(jetzt, [*haupt, *gezeigt], roh_titel)
+
             blatt = darstellung_blatt(
                 page,
                 state,
-                lambda: zeichnen(),
-                achsen=werteachsen(a, [*haupt, *gezeigt], roh_titel),
+                analyse.geaendert,
                 zeitachse=zeit,
+                wahl=analyse.kurvenwahl(achsen_jetzt),
             )
         page.show_dialog(blatt)
 
@@ -4174,7 +4189,6 @@ def _aufbauen(
                 editor_box,
                 gruppe("Ebenen", ebenen_box),
                 notiz_platz[0],
-                gruppe("Verlaufskurven", analyse.wahl),
                 analyse.control,
             ),
             *(

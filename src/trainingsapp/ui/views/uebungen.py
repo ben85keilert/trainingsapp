@@ -71,6 +71,9 @@ def heute_trainieren(page: ft.Page, state: AppState, plan_id: str) -> Callable[[
     """
 
     async def handler() -> None:
+        # „Trainieren“ meint bei einem Workout immer das Workout — auch nach einem Durchlauf
+        # und nach „Zum Plan“; die Liste gibt es nur von Hand (Ben, 10.11.2026)
+        state.plan_als_plan.discard(plan_id)
         state.sitzungen.session_fuer(state.profil.id, plan_id, state.heute())
         state.reiter = "heute"
         await page.push_route(f"/plan/{plan_id}")
@@ -102,7 +105,7 @@ def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
         # Üben · Bearbeiten · Ablauf starten (Ben, 28.10.2026)
         haupt = zl.Ziel(zl.BEARBEITEN, oeffner(plan.id))
         # Öffnet „Trainieren“ das Workout oder die Liste? Das Symbol sagt es (Ben, 10.11.2026)
-        als_workout = startet_als_workout(plan) and plan.id not in state.plan_als_plan
+        als_workout = startet_als_workout(plan)
         weitere = plan_ziele(
             page, state, plan, hier={zl.BEARBEITEN}, ueben=heute_trainieren(page, state, plan.id)
         )

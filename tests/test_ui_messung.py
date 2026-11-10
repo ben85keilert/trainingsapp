@@ -583,14 +583,48 @@ async def test_messung_live_verity_mit_verlauf_und_wischen(daten) -> None:
     assert charts[0].left_axis.title.value == "PPI ms"
     assert len({c.max_x for c in charts}) == 1
 
-    # Chip SDNN dazu: teilt sich mit RMSSD das ms-Diagramm
+    # Chips und Bereich stehen im Blatt „Fenster & Darstellung“ (Ben, 10.11.2026, A21) — die
+    # Verlaufskurven folgen direkt auf die Notizen, in der Karte steht kein Chip mehr
+    assert not [c for c in _alle_controls(ansicht) if isinstance(c, ft.Chip)]
+    _symbol(ansicht, ft.Icons.TUNE).on_click()
+    blatt = seite.aufrufe[-1]
+    assert isinstance(blatt, ft.BottomSheet)
+
+    def titel_im_blatt() -> list[str]:
+        return [
+            str(c.value)
+            for c in _alle_controls(blatt)
+            if isinstance(c, ft.Text) and c.weight == ft.FontWeight.BOLD
+        ]
+
+    def achsen_im_blatt() -> list[str]:
+        return [str(c.label) for c in _alle_controls(blatt) if isinstance(c, ft.Switch)]
+
+    vorher = achsen_im_blatt()
+    # Chip SDNN dazu: teilt sich mit RMSSD das ms-Diagramm — das Blatt baut sich darunter neu
     chip = next(
         c
-        for c in _alle_controls(ansicht)
+        for c in _alle_controls(blatt)
         if isinstance(c, ft.Chip) and getattr(c.label, "value", "") == "SDNN"
     )
     chip.on_select()
     assert state.ansicht().kurven[-1] == "sdnn"
+    # RMSSD abwählen und SDNN auch: die ms-Achse verschwindet aus den Werteachsen
+    for name in ("SDNN", "RMSSD"):
+        next(
+            c
+            for c in _alle_controls(blatt)
+            if isinstance(c, ft.Chip) and getattr(c.label, "value", "") == name
+        ).on_select()
+    assert len(achsen_im_blatt()) < len(vorher)
+    for name in ("RMSSD", "SDNN"):
+        next(
+            c
+            for c in _alle_controls(blatt)
+            if isinstance(c, ft.Chip) and getattr(c.label, "value", "") == name
+        ).on_select()
+    assert state.ansicht().kurven[-1] == "sdnn" and len(achsen_im_blatt()) == len(vorher)
+    assert titel_im_blatt()  # Gruppen stehen noch
     charts = [c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart)]
     assert len(charts) == 3 and len(charts[2].data_series) >= 2
 
@@ -986,6 +1020,74 @@ def test_detailansicht_alle_bereiche_und_kacheln(daten) -> None:
     assert "gesperrt" in texte and any("VLF: kein Teilstück ≥ 20 min" in t for t in texte)
 
 
+def test_aufzeichnung_bereich_und_poincare_im_blatt(daten) -> None:
+    """Ben, 10.11.2026 (A21): Zeit · Frequenz · Nichtlinear und die Chips stehen im Blatt
+    „Fenster & Darstellung“ (nach der Zeitachse, vor den Werteachsen), nicht mehr zwischen
+    Hauptkurve und Verlaufskurven; die Poincaré-Wolke ist dort abschaltbar — SD1, SD2 und
+    DFA α1 bleiben als Zeile."""
+    import shutil
+    from pathlib import Path
+
+    import flet_charts as fc
+
+    state, tmp_path = daten
+    ordner = tmp_path / "Messungen" / "PolarH10"
+    ordner.mkdir(parents=True)
+    golden = Path(__file__).parent / "golden" / "rr" / "sensor_synth_ruhe_sitzend_11.json"
+    pfad = ordner / golden.name
+    shutil.copy(golden, pfad)
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet_profil="polar_h10",
+    )
+    state.hrv.anlegen(eintrag)
+    e = state.hrv_einstellungen()
+    e.frequenz = e.nichtlinear = True
+    state.hrv_einstellungen_setzen(e)
+
+    seite = _seite()
+    ansicht = messung_detail_view(seite, state, eintrag)
+    assert not [c for c in _alle_controls(ansicht) if isinstance(c, ft.Chip)]
+    assert "VERLAUFSKURVEN" not in _baum_texte(ansicht)
+    zeit_charts = len([c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart)])
+
+    _symbol(ansicht, ft.Icons.TUNE).on_click()
+    blatt = seite.aufrufe[-1]
+    assert isinstance(blatt, ft.BottomSheet)
+    texte = _baum_texte(blatt)
+    assert texte.index("ZEITACHSE") < texte.index("VERLAUFSKURVEN") < texte.index("WERTEACHSEN")
+    assert not any(isinstance(c, ft.Switch) and c.data == "poincare" for c in _alle_controls(blatt))
+
+    bereich = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.SegmentedButton)
+        and [s.value for s in c.segments] == ["zeit", "frequenz", "nichtlinear"]
+    )
+    bereich.selected = ["nichtlinear"]
+    bereich.on_change(SimpleNamespace(control=bereich))
+    assert state.ansicht().bereich == "nichtlinear"
+    # Das Blatt zeigt jetzt die Chips dieses Bereichs und den Schalter der Wolke
+    chips = [c.label.value for c in _alle_controls(blatt) if isinstance(c, ft.Chip)]
+    assert "DFA α1" in chips and "RMSSD" not in chips
+    schalter = next(
+        c for c in _alle_controls(blatt) if isinstance(c, ft.Switch) and c.data == "poincare"
+    )
+    assert schalter.value is True
+
+    def charts() -> int:
+        return len([c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart)])
+
+    mit_wolke = charts()
+    schalter.value = False
+    schalter.on_change(SimpleNamespace(control=schalter))
+    assert not state.hrv_einstellungen().poincare
+    assert charts() == mit_wolke - 1  # die Wolke ist weg …
+    assert "SD1" in " ".join(_baum_texte(ansicht))  # … ihre Werte bleiben
+    assert zeit_charts >= 1
+
+
 def test_aufzeichnung_zuschneiden_und_abschnitte(daten) -> None:
     """Crop aus dem Sidecar steht im Kopf. Abschnitte entstehen nicht mehr von selbst aus
     Notizen: „Aus Notizen …" macht gewählte Notizen zu Grenzen; Löschen mit Rückgängig."""
@@ -1223,6 +1325,35 @@ def test_abschnitt_ueber_die_ganze_messung_per_pfeil(daten) -> None:
     assert seg["t_end_s"] == pytest.approx(schlaege[-1]["t_s"], abs=0.01)
 
 
+async def test_teil_speichern_im_menue_nach_start_ohne_neuaufbau(daten) -> None:
+    """Ben, 10.11.2026: „Teil speichern“ war nicht verfügbar. Der Eintrag im Menü ⋮ entstand
+    nur beim Aufbau der Ansicht — begann die Aufnahme danach ohne Neuaufbau (Startleiste,
+    Workout, GPS-Training), fehlte er. Jetzt zieht das Menü mit Beginn und Ende nach."""
+    state, tmp_path = daten
+    lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    state.messlauf = lauf
+    while lauf.jetzt_s() < 20:
+        await asyncio.sleep(0.01)
+    ansicht = messung(_seite(), state)
+
+    def eintraege() -> list[str]:
+        zeile = _titelzeile(ansicht, "RR-TACHOGRAMM")
+        return [i.content for i in zeile.controls[-1].content.items if i.content]
+
+    teil = "Teil speichern, weiter aufnehmen"
+    assert teil not in eintraege()
+    lauf.aufnahme_starten()  # nicht über den Knopf dieser Ansicht
+    await asyncio.sleep(0.2)
+    lauf.beobachter(True)
+    assert teil in eintraege()
+    lauf.aufnahme_stoppen(tmp_path)
+    lauf.beobachter(True)
+    assert teil not in eintraege()
+    task.cancel()
+
+
 def test_ablesen_zeigt_alle_werte_an_einer_stelle(daten) -> None:
     """„Ablesen" zeigt einen Strich und darunter RR, HF und die Verlaufskurven an dieser Stelle."""
     state, tmp_path = daten
@@ -1362,7 +1493,7 @@ async def test_live_ablesen_und_knoepfe_wie_in_der_aufzeichnung(daten) -> None:
     ansicht = messung(seite, state)
     zeile = _titelzeile(ansicht, "RR-TACHOGRAMM")
     # Skizze vom 30.10.2026: „korrigiert“ als Symbol in der Titelzeile, die Zeilen mit
-    # Überschrift, Bereich und Chips der Verlaufskurven unter den Notizen
+    # Überschrift; Bereich und Chips der Verlaufskurven seit dem 10.11.2026 im Blatt (A21)
     assert _knoepfe_rechts(zeile) == [
         "korrigiert",
         "Ablesen",
@@ -1371,7 +1502,8 @@ async def test_live_ablesen_und_knoepfe_wie_in_der_aufzeichnung(daten) -> None:
         "⋮",
     ]
     texte = _baum_texte(ansicht)
-    assert texte.index("ZEITACHSE") < texte.index("ABSCHNITTE") < texte.index("VERLAUFSKURVEN")
+    assert texte.index("ZEITACHSE") < texte.index("ABSCHNITTE")
+    assert "VERLAUFSKURVEN" not in texte
     korrigiert = zeile.controls[1]
     assert isinstance(korrigiert, ft.IconButton) and state.hrv_einstellungen().korrigiert
     korrigiert.on_click()

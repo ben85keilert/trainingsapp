@@ -30,6 +30,12 @@ HRV-Messung → „Notizen in der Liste“, `HrvEinstellungen.notizen_zeilen`, V
 eine feste Höhe und einen Rollbalken — so bleibt die Kurve beim Durchtippen im Blick. Live
 rollt sie zur neuesten Notiz, solange keine Eingabe offen ist.
 
+**Höhe von Hand** (Ben, 10.11.2026, A21: „mal zu klein, mal zu groß“): Unter der Liste liegt
+ein **Griff** — nach unten ziehen macht sie höher, nach oben niedriger, ein Doppeltipp stellt
+wieder auf die Zeilenzahl. Die gezogene Höhe (``hoehe``/``hoehe_merken``,
+`HrvEinstellungen.notizen_hoehe_px`) gilt, bis man sie zurückstellt; ohne ``hoehe_merken``
+gibt es keinen Griff (Vollbild).
+
 Marken stehen immer in der Hauptkurve (`marken`). Im Vollbild zeigt ein Tipp
 auf eine Marke ihr **Etikett** (`bei`, `etikett`): Zeit und Text in der Kurve,
 von dort bearbeiten oder löschen. Gespeichert wird das
@@ -60,6 +66,7 @@ import flet as ft
 from hrv_core.ereignisse import Zeitbezug, notiz, sortiert
 
 from trainingsapp.core.einheit import marke_angaben
+from trainingsapp.core.hrv_einstellungen import NOTIZEN_HOEHE_MAX_PX, NOTIZEN_HOEHE_MIN_PX
 from trainingsapp.core.kurzcode import genannte, kurzcode
 from trainingsapp.core.laufend import minuten
 from trainingsapp.core.zeitangabe import (
@@ -74,6 +81,7 @@ from trainingsapp.core.zeitangabe import (
 )
 from trainingsapp.ui.components.dialoge import loeschen_rueckfrage, meldung
 from trainingsapp.ui.components.kurve import Reihe
+from trainingsapp.ui.components.layout import ohne_auto_update
 from trainingsapp.ui.farben import FARBEN
 
 #: Schritte zum Verschieben (s)
@@ -167,6 +175,9 @@ class Notizfeld:
             oder `UHR` („14:03:05“); die Person schaltet jederzeit um.
         dialog: zeigt Rückfrage und Meldung (``page.show_dialog``) — ohne löscht
             `loeschen_fragen` sofort.
+        zeilen: so viele Zeilen zeigt die Liste, mehr rollt (0 = alle).
+        hoehe, hoehe_merken: die von Hand gezogene Höhe der Liste in Pixeln (0 = nach
+            ``zeilen``) und wohin sie gemerkt wird — mit ``hoehe_merken`` gibt es den Griff.
     """
 
     def __init__(
@@ -191,8 +202,15 @@ class Notizfeld:
         zeit_modus: str = DAUER,
         dialog: Callable[[Any], None] | None = None,
         zeilen: Callable[[], int] | None = None,
+        hoehe: Callable[[], int] | None = None,
+        hoehe_merken: Callable[[int], None] | None = None,
     ) -> None:
         self._zeitbezug = zeitbezug
+        self._hoehe = hoehe or (lambda: 0)
+        self._hoehe_merken = hoehe_merken
+        #: Beim Ziehen: die Höhe, die die Liste gerade hat (None = es wird nicht gezogen)
+        self._zug_px: float | None = None
+        self._anzahl = 0
         #: So viele Zeilen zeigt die Liste, mehr rollt (0 = alle)
         self._zeilen = zeilen or (lambda: 0)
         self._ereignisse = ereignisse
@@ -854,7 +872,34 @@ class Notizfeld:
         self._oben = ft.Column(spacing=0, tight=True)
         self._unten = ft.Column(spacing=0, tight=True)
         self._liste = ft.Column(spacing=0, controls=[self._oben, self._eingabe_box, self._unten])
-        self._inhalt.controls = [self._kopf, self._hinweis, self._liste]
+        self._griff = ft.GestureDetector(
+            visible=False,
+            drag_interval=40,
+            mouse_cursor=ft.MouseCursor.RESIZE_ROW,
+            on_vertical_drag_start=lambda _e: self._zug_beginn(),
+            on_vertical_drag_update=self._zug,
+            on_vertical_drag_end=lambda _e: self._zug_ende(),
+            on_double_tap=lambda _e: self.hoehe_zuruecksetzen(),
+            content=ft.Container(
+                height=18,
+                alignment=ft.Alignment.CENTER,
+                tooltip="Höhe der Notizliste: ziehen — Doppeltipp stellt zurück",
+                data="notizen_griff",
+                content=ft.Container(
+                    width=44,
+                    height=4,
+                    border_radius=2,
+                    bgcolor=ft.Colors.with_opacity(0.35, ft.Colors.ON_SURFACE),
+                ),
+            ),
+        )
+        # Ohne ``hoehe_merken`` (Vollbild: keine senkrechten Gesten) hängt der Griff nicht an
+        self._inhalt.controls = [
+            self._kopf,
+            self._hinweis,
+            self._liste,
+            *([self._griff] if self._hoehe_merken is not None else []),
+        ]
 
     def _aufbauen(self) -> None:
         zb = self._zeitbezug()
@@ -905,11 +950,20 @@ class Notizfeld:
             for i in sichtbar:
                 (oben if i <= grenze else unten).append(self._zeile(i, liste[i], zb))
         self._oben.controls, self._unten.controls = oben, unten
+        self._griff.visible = self._hoehe_merken is not None and zeilen_sichtbar and bool(sichtbar)
         self._rollen(len(sichtbar))
 
     def _rollen(self, anzahl: int) -> None:
         """Mehr Notizen als eingestellt: feste Höhe, Rollbalken — live ans Ende (die
         neueste), außer eine Eingabe ist offen (sie stünde sonst außer Sicht)."""
+        self._anzahl = anzahl
+        fest = self._zug_px if self._zug_px is not None else self._hoehe()
+        if fest and self._hoehe_merken is not None:
+            # Von Hand gezogen (A21): diese Höhe gilt, die Liste rollt darin
+            self._liste.height = float(fest)
+            self._liste.scroll = ft.ScrollMode.AUTO
+            self._liste.auto_scroll = self.live and self.bearbeite is None
+            return
         grenze = self._zeilen()
         if grenze > 0 and anzahl > grenze:
             self._liste.height = grenze * ZEILE_PX
@@ -919,6 +973,47 @@ class Notizfeld:
             self._liste.height = None
             self._liste.scroll = None
             self._liste.auto_scroll = False
+
+    # -- Höhe von Hand (A21) ------------------------------------------------------
+
+    def _zug_beginn(self) -> None:
+        ohne_auto_update()
+        fest = self._hoehe()
+        if fest:
+            self._zug_px = float(fest)
+            return
+        grenze = self._zeilen()
+        zeilen = min(self._anzahl, grenze) if grenze > 0 else self._anzahl
+        self._zug_px = float(max(zeilen * ZEILE_PX, NOTIZEN_HOEHE_MIN_PX))
+
+    def _zug(self, e: ft.DragUpdateEvent) -> None:
+        ohne_auto_update()  # kommt beim Ziehen dauernd — nur die Liste neu zeichnen
+        if self._zug_px is None:
+            return
+        self._zug_px = min(
+            max(self._zug_px + float(e.primary_delta or 0.0), NOTIZEN_HOEHE_MIN_PX),
+            NOTIZEN_HOEHE_MAX_PX,
+        )
+        self._rollen(self._anzahl)
+        with contextlib.suppress(Exception):
+            self._liste.update()
+
+    def _zug_ende(self) -> None:
+        if self._zug_px is None or self._hoehe_merken is None:
+            return
+        px, self._zug_px = round(self._zug_px), None
+        self._hoehe_merken(px)
+        self._rollen(self._anzahl)
+
+    def hoehe_zuruecksetzen(self) -> None:
+        """Doppeltipp auf den Griff: wieder nach der Zeilenzahl."""
+        if self._hoehe_merken is None:
+            return
+        self._zug_px = None
+        self._hoehe_merken(0)
+        self._rollen(self._anzahl)
+        with contextlib.suppress(Exception):
+            self._liste.update()
 
     def _uebungen_fuellen(self) -> None:
         """Die Namen der gewählten Quelle — klein und dicht, damit zehn Übungen passen."""

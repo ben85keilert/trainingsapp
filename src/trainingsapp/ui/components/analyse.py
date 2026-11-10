@@ -39,10 +39,13 @@ Analysefenster (``info_zusatz``).
 
 **Eingebettet** (Ben, 21.10.2026): Live liegt die Hauptkurve zu weit von den
 Verlaufskurven weg. Mit ``eingebettet=True`` gibt es keine eigene Karte, sondern
-zwei Teile für die Karte der Hauptkurve: ``wahl`` (Bereich und Chips — kommen
-**über** die Hauptkurve) und ``control`` (Spektrum bzw. Poincaré und die
-Verlaufskurven — direkt unter die Notizen). Das Menü „Ansichten“ (``menue``) wandert
-in die Titelzeile der Hauptkurve, das „i“ in deren Info-Text (`info_text`).
+``control`` (Spektrum bzw. Poincaré und die Verlaufskurven — direkt unter die Notizen)
+für die Karte der Hauptkurve. Das Menü „Ansichten“ (``menue``) wandert in die Titelzeile
+der Hauptkurve, das „i“ in deren Info-Text (`info_text`). **Bereich und Chips stehen
+eingebettet im Blatt „Fenster & Darstellung“** (Ben, 10.11.2026, A21: Rohkurve und
+Verlaufskurven näher zusammen) — `kurvenwahl` gibt dem Blatt, was es dafür braucht, und
+`geaendert` zieht die Karte nach. Die **Poincaré-Wolke** ist dort abschaltbar
+(`HrvEinstellungen.poincare`); SD1, SD2 und DFA α1 bleiben als Zeile.
 
 **Menü ⋮** (Ben, 21.10.2026): oben ``menue_oben`` (Info, automatische Korrektur),
 darunter die Ansichten; „Fenster & Darstellung“ ist ein eigener Knopf daneben. In der
@@ -77,6 +80,8 @@ from trainingsapp.ui.components.spektrum import (
 from trainingsapp.ui.components.verlauf import (
     FARBEN,
     Daten,
+    Kurvenwahl,
+    Werteachse,
     ansicht_menue,
     bereich_wahl,
     chips,
@@ -262,17 +267,9 @@ class Analyse:
         self._kurven = ft.Column(spacing=6)
         #: Menü „Ansichten“ — wird in `aufbauen` neu gefüllt (gespeicherte Ansichten)
         self.menue = ft.Container()
-        #: Eingebettet: Bereich und Chips — die Ansicht setzt sie über die Hauptkurve
-        #: (sonst leer; beides steckt dann in ``control``)
-        self.wahl: ft.Control = ft.Container(visible=False)
         self.control: ft.Control
         if eingebettet:
-            self.wahl = ft.Column(
-                spacing=8,
-                tight=True,
-                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-                controls=[self._kopf, self._chips],
-            )
+            # Bereich und Chips stehen im Blatt „Fenster & Darstellung“ (`kurvenwahl`)
             self.control = ft.Column(
                 spacing=12,
                 tight=True,
@@ -315,6 +312,14 @@ class Analyse:
         self.aufbauen()
         self._neu_zeichnen()
 
+    def geaendert(self) -> None:
+        """Bereich, Kurven oder Darstellung wurden im Blatt geändert — Karte nachziehen."""
+        self._geaendert()
+
+    def kurvenwahl(self, achsen: Callable[[], Sequence[Werteachse]]) -> Kurvenwahl:
+        """Was das Blatt „Fenster & Darstellung“ für Bereich und Chips braucht."""
+        return Kurvenwahl(self.bereiche, lambda: list(self._ohne()), achsen)
+
     # -- Aufbau ------------------------------------------------------------------
 
     def aufbauen(self) -> None:
@@ -338,7 +343,7 @@ class Analyse:
                     *([self.menue] if self._menue_im_kopf else []),
                 )
             )
-        if len(self.bereiche) > 1:
+        if len(self.bereiche) > 1 and not self._eingebettet:
             kopf.append(bereich_wahl(self.bereiche, bereich, self._wechseln))
         self._kopf.content = ft.Column(
             spacing=8,
@@ -416,7 +421,9 @@ class Analyse:
             gesehen=self.gesehen,
         ) or [
             ft.Text(
-                "Keine Kurve gewählt — oben einen Chip antippen.",
+                "Keine Kurve gewählt — oben unter „Fenster & Darstellung“ einschalten."
+                if self._eingebettet
+                else "Keine Kurve gewählt — oben einen Chip antippen.",
                 size=12,
                 opacity=0.6,
             )
@@ -478,12 +485,11 @@ class Analyse:
             teile += [spektrum_kurve(fs), band_leiste(fs, self._optisch, hinweis)]
         else:
             nl: _Nichtlinear = ergebnis
-            teile += [
+            if self._state.hrv_einstellungen().poincare:
                 # Über Stunden wären es zehntausende Punkte — gezeichnet wird
                 # eine gleichmäßige Auswahl, gerechnet mit allen
-                poincare_kurve(nl.paare[:: max(1, len(nl.paare) // POINCARE_PUNKTE)]),
-                self._poincare_werte(nl),
-            ]
+                teile.append(poincare_kurve(nl.paare[:: max(1, len(nl.paare) // POINCARE_PUNKTE)]))
+            teile.append(self._poincare_werte(nl))
         return ft.Column(spacing=8, tight=True, opacity=0.55 if veraltet else 1.0, controls=teile)
 
     @staticmethod

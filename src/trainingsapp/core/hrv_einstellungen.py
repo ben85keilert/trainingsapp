@@ -59,6 +59,9 @@ PUFFER_S: Final[tuple[int, ...]] = (1800, 3600, 7200, 14400, 21600, 43200)
 #: „bei vielen Notizen ist es schwierig, die Notizen durchzuklicken und an der Kurve zu
 #: beobachten“); 0 = alle, wie bisher
 NOTIZEN_ZEILEN: Final[tuple[int, ...]] = (5, 7, 10, 15, 0)
+#: Grenzen der von Hand gezogenen Höhe der Notizliste (px)
+NOTIZEN_HOEHE_MIN_PX: Final[int] = 60
+NOTIZEN_HOEHE_MAX_PX: Final[int] = 720
 #: Eingetippte Breite der Zeitachse (Ben, 21.10.2026): mindestens 10 s, live höchstens
 #: so viel, wie der Puffer hält (`HrvEinstellungen.puffer_s`)
 FENSTER_MIN_S: Final[int] = 10
@@ -195,6 +198,10 @@ class HrvEinstellungen:
     10
     >>> HrvEinstellungen.aus_dict({"notizen_zeilen": 8}).notizen_zeilen  # nicht zur Wahl
     7
+    >>> HrvEinstellungen.aus_dict({"notizen_hoehe_px": 240, "poincare": False}).notizen_hoehe_px
+    240
+    >>> HrvEinstellungen.aus_dict({"notizen_hoehe_px": 5}).notizen_hoehe_px  # zu klein: Zeilen
+    0
     >>> HrvEinstellungen.aus_dict({"puffer_s": 7200}).puffer_s, HrvEinstellungen().puffer_s
     (7200, 1800)
     >>> HrvEinstellungen.aus_dict({"analyse_schritt": "30"}).analyse_schritt
@@ -252,10 +259,16 @@ class HrvEinstellungen:
     #: Nichtlineares auch bei optischen Pulsintervallen (Verity Sense) — nicht
     #: empfohlen: DFA und SampEn brauchen präzise Schlagzeiten
     nichtlinear_optisch: bool = False
+    #: Bereich „Nichtlinear“: die Poincaré-Wolke über den Verlaufskurven zeigen — aus rückt
+    #: sie näher an die Hauptkurve, SD1, SD2 und DFA α1 bleiben als Zeile (Ben, 10.11.2026, A21)
+    poincare: bool = True
     #: In Notizen zur Messung die Übungen aus Plänen zum Antippen anbieten
     notiz_uebungen: bool = True
     #: Notizliste: so viele Zeilen, dann rollt sie (`NOTIZEN_ZEILEN`; 0 = alle)
     notizen_zeilen: int = 7
+    #: Notizliste: von Hand gezogene Höhe in Pixeln (Griff unter der Liste, Ben 10.11.2026,
+    #: A21) — 0 = nach `notizen_zeilen`; gilt live und in der Aufzeichnung
+    notizen_hoehe_px: int = 0
     #: Zeitachse der Kurven mit der Uhrzeit beschriften statt mit der Dauer seit Beginn
     #: (Ben, 20.10.2026) — gilt live und in der Aufzeichnung, Knopf an der Breitenwahl
     achse_uhrzeit: bool = False
@@ -348,8 +361,10 @@ class HrvEinstellungen:
             "frequenz": self.frequenz,
             "nichtlinear": self.nichtlinear,
             "nichtlinear_optisch": self.nichtlinear_optisch,
+            "poincare": self.poincare,
             "notiz_uebungen": self.notiz_uebungen,
             "notizen_zeilen": self.notizen_zeilen,
+            "notizen_hoehe_px": self.notizen_hoehe_px,
             "achse_uhrzeit": self.achse_uhrzeit,
             "atemuebung": self.atemuebung,
             "nachrechnen_ms": self.nachrechnen_ms,
@@ -426,8 +441,14 @@ class HrvEinstellungen:
             frequenz=schalter("frequenz"),
             nichtlinear=schalter("nichtlinear"),
             nichtlinear_optisch=schalter("nichtlinear_optisch"),
+            poincare=schalter("poincare"),
             notiz_uebungen=schalter("notiz_uebungen"),
             notizen_zeilen=auswahl("notizen_zeilen", NOTIZEN_ZEILEN),
+            notizen_hoehe_px=hoehe
+            if isinstance(hoehe := d.get("notizen_hoehe_px"), int)
+            and not isinstance(hoehe, bool)
+            and (hoehe == 0 or NOTIZEN_HOEHE_MIN_PX <= hoehe <= NOTIZEN_HOEHE_MAX_PX)
+            else 0,
             achse_uhrzeit=schalter("achse_uhrzeit"),
             atemuebung=schalter("atemuebung"),
             nachrechnen_ms=auswahl("nachrechnen_ms", NACHRECHNEN_MS),
@@ -535,6 +556,8 @@ __all__ = [
     "LIVE_FENSTER",
     "LIVE_SPEKTRUM_S",
     "NACHRECHNEN_MS",
+    "NOTIZEN_HOEHE_MAX_PX",
+    "NOTIZEN_HOEHE_MIN_PX",
     "PUFFER_S",
     "SICHTEN",
     "SICHT_HF",

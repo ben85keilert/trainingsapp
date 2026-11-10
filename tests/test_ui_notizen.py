@@ -186,3 +186,69 @@ def test_ohne_startzeit_nur_dauer() -> None:
     )
     f.bearbeiten(0)
     assert f._zeit_feld.value == "0:30" and not f._zeit_wechsel.visible
+
+
+def test_notizliste_hoehe_mit_dem_griff_ziehen() -> None:
+    """Ben, 10.11.2026 (A21): Die Notizliste ist „mal zu klein, mal zu groß“ — ein Griff unter
+    der Liste zieht sie höher und niedriger, ein Doppeltipp stellt auf die Zeilenzahl zurück;
+    ohne ``hoehe_merken`` (Vollbild) gibt es keinen Griff."""
+    from types import SimpleNamespace
+
+    from trainingsapp.core.hrv_einstellungen import NOTIZEN_HOEHE_MAX_PX, NOTIZEN_HOEHE_MIN_PX
+    from trainingsapp.ui.components.notizen import ZEILE_PX
+
+    def griffe(f: Notizfeld) -> list[ft.GestureDetector]:
+        gefunden: list[ft.GestureDetector] = []
+
+        def suchen(c: object) -> None:
+            if isinstance(c, ft.GestureDetector):
+                gefunden.append(c)
+            for kind in getattr(c, "controls", None) or []:
+                suchen(kind)
+            if getattr(c, "content", None) is not None and not isinstance(c.content, str):
+                suchen(c.content)
+
+        suchen(f.control)
+        return gefunden
+
+    w = _Welt(live=False)
+    assert not griffe(w.feld)  # Vollbild: kein Griff, keine senkrechte Geste
+
+    gemerkt: list[int] = []
+    stand = {"px": 0}
+
+    def merken(px: int) -> None:
+        stand["px"] = px
+        gemerkt.append(px)
+
+    zb = Zeitbezug(lambda: BEATS, START, achse=lambda: [b.t_s for b in BEATS])
+    f = Notizfeld(
+        zeitbezug=lambda: zb,
+        ereignisse=lambda: list(w.liste),
+        speichern=lambda _l: None,
+        neu_zeichnen=lambda: None,
+        zeigen=lambda _x: None,
+        mitte=lambda: 60.0,
+        offen=True,
+        zeilen=lambda: 7,
+        hoehe=lambda: stand["px"],
+        hoehe_merken=merken,
+    )
+    (griff,) = griffe(f)
+    assert griff.visible and f._liste.height is None  # drei Notizen, sieben Zeilen: alle
+    griff.on_vertical_drag_start(None)
+    griff.on_vertical_drag_update(SimpleNamespace(primary_delta=90.0))
+    erwartet = max(3 * ZEILE_PX, NOTIZEN_HOEHE_MIN_PX) + 90
+    assert f._liste.height == erwartet and f._liste.scroll == ft.ScrollMode.AUTO
+    griff.on_vertical_drag_end(None)
+    assert gemerkt == [erwartet] and f._liste.height == erwartet
+    # Grenzen: nie kleiner als zwei Zeilen, nie höher als der Bildschirm
+    griff.on_vertical_drag_start(None)
+    griff.on_vertical_drag_update(SimpleNamespace(primary_delta=-5000.0))
+    assert f._liste.height == NOTIZEN_HOEHE_MIN_PX
+    griff.on_vertical_drag_update(SimpleNamespace(primary_delta=9000.0))
+    assert f._liste.height == NOTIZEN_HOEHE_MAX_PX
+    griff.on_vertical_drag_end(None)
+    # Doppeltipp: wieder nach der Zeilenzahl
+    griff.on_double_tap(None)
+    assert gemerkt[-1] == 0 and f._liste.height is None

@@ -48,10 +48,19 @@ uv run python scripts/pruefe_flet_beispiele.py   # Flet-Skripte des Lernpfads oh
   **mit flet** (die Tests der Oberfläche, rund die Hälfte der Testdateien) und mypy. Mit
   `gh run list` nachsehen und Rotes sofort beheben; ein Auftrag ist erst fertig, wenn die CI
   grün ist.
+- **Nach einem Push nach hrv-core auch dort nachsehen** (`gh run list -R ben85keilert/hrv-core`)
+  bis grün (Ben, 10.11.2026): Die App nimmt hrv-core über `hrv-core.ref`, darum fällt Rotes
+  dort hier nie auf — die CI von hrv-core war vom 5. bis 10.11. wegen eines Doctests rot.
 - **Voller Lauf lokal** (`uv run pytest`): vor einem Release-Tag und nach breiten Änderungen —
   Migrationen, Modelle in `core/`, Routing und App-Hülle, Flet-Version, `hrv-core.ref`.
 - Tests ersetzen weder die Durchsicht sicherheitsrelevanter Änderungen vor einem Release noch
   die Gerätetests (`docs/offene_fragen.md`, Abschnitt 2).
+
+**Parallele Arbeit im selben Baum** (Ben, 10.11.2026 — mehrere Sitzungen oder Subagenten, auch
+in `../hrv-core`): `ruff format` nur auf die eigenen Dateien, nie auf einen ganzen Ordner
+(`ruff format --check .` zum Prüfen bleibt); **nie `git stash`** — es räumt die halbfertige
+Arbeit der anderen mit weg. Wer den Stand ohne die eigene Änderung braucht, nimmt
+`git worktree` oder `git show HEAD:<datei>`.
 
 **APK über GitHub bauen** (Ben, 9.11.2026: „ab jetzt wieder git build automatisch“; hier
 eingetragen 10.11.2026): Nach einem Versions-Commit (Version in `pyproject.toml` und `uv.lock`

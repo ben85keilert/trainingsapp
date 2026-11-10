@@ -21,7 +21,17 @@ PFEILE = "pfeile"
 
 
 def _knopf_inhalt(text: str, symbol: ft.IconData, *, links: bool) -> ft.Control:
-    name = ft.Text(text, size=13, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+    # Der Name gibt nach, wenn der Platz bis zur Mitte nicht reicht (Ben, 10.11.2026: ein
+    # langer Name lag über „4/4“) — ohne ``expand_loose`` nähme er im Knopf immer alles
+    name = ft.Text(
+        text,
+        size=13,
+        max_lines=1,
+        no_wrap=True,
+        overflow=ft.TextOverflow.ELLIPSIS,
+        expand=True,
+        expand_loose=True,
+    )
     pfeil = ft.Icon(symbol, size=22)
     return ft.Row(tight=True, spacing=2, controls=[pfeil, name] if links else [name, pfeil])
 

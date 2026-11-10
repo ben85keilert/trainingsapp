@@ -53,6 +53,7 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang import anhang_route
 from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
 from trainingsapp.ui.views.anhang_hochladen import hochladen_route
+from trainingsapp.ui.views.workout_eintrag import durchlaeufe_am_tag, eintraege_des_schritts
 
 #: Was „Speichern“ bzw. Zurück speichert
 HINWEIS = (
@@ -132,6 +133,17 @@ class _Leistungen:
             if state.einheiten is not None and self.karten
             else set()
         )
+        # Herkunft (Ben, 10.11.2026, `docs/plan_workout_eintrag.md`): Entstand der Eintrag in
+        # einem Workout, steht das statt „vom Timer“ da — die Werte bleiben bei der Übung
+        self.im_workout: dict[str, str] = {}
+        if self.karten:
+            for lauf in durchlaeufe_am_tag(state, tag):
+                for z in lauf.zeilen:
+                    wo = f"im Workout {lauf.name} · Schritt {z.stelle}" + (
+                        f", {z.mal}. Mal" if z.mal > 1 else ""
+                    )
+                    for e in eintraege_des_schritts(state, z):
+                        self.im_workout[e.id] = wo
         self.liste = ft.Column(spacing=12)
         self.kopf = ft.Text(_kopftext(len(self.karten), tag, self.heute), size=13, opacity=0.75)
         #: nach dem Löschen (das Blatt zeichnet sich dann selbst neu)
@@ -158,6 +170,8 @@ class _Leistungen:
             # Vom Timer (Ben, 17.10.2026): Anfang und Ende des Laufs
             von, bis = k.eintrag.started_at.astimezone(), k.eintrag.ended_at.astimezone()
             zeit = f"{von:%H:%M}–{bis:%H:%M} Uhr · vom Timer"
+        if (wo := self.im_workout.get(k.eintrag.id)) is not None:
+            zeit = zeit.replace(" · vom Timer", "") + f" · {wo}"
         felder: ft.Control = (
             k.form.control
             if k.form.spec.fields
@@ -184,7 +198,17 @@ class _Leistungen:
                                 content=ft.Text(str(nummer), size=13, weight=ft.FontWeight.W_600),
                             ),
                             ft.Text(
-                                " · ".join(t for t in (zeit, self.plan_name(k.session)) if t),
+                                " · ".join(
+                                    t
+                                    for t in (
+                                        zeit,
+                                        # im Workout: der Plan steht schon in der Herkunft
+                                        ""
+                                        if k.eintrag.id in self.im_workout
+                                        else self.plan_name(k.session),
+                                    )
+                                    if t
+                                ),
                                 size=13,
                                 opacity=0.75,
                                 expand=True,

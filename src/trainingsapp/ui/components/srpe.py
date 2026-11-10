@@ -1,4 +1,5 @@
-"""Die dezente sRPE-Zeile nach einer Einheit (Ben, 29.10.2026, Frage 8).
+"""Die dezente sRPE-Zeile nach einer Einheit (Ben, 29.10.2026, Frage 8) — zum Tag
+(`srpe_zeile`, Tagesfeld) und seit dem 10.11.2026 zum Workout (`workout_srpe_zeile`).
 
 Ben: „sRPE soll nach der Einheit sichtbar eingetragen werden können und wenn, kommt das als
 Tagesfeld mit, aber kein Dialog. Nach dem Ende der Einheit steht das oben/unten einfach
@@ -18,6 +19,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import tagesfelder as tf
+from trainingsapp.core.workout_eintrag import SRPE
 
 #: Die Stufen der CR10-Skala mit Kurzwort (Foster 2001), nur als Hilfe am Knopf
 STUFEN: tuple[tuple[int, str], ...] = (
@@ -59,17 +61,51 @@ def srpe_wert(state: Any, tag: date) -> int | None:
 def srpe_zeile(
     page: Any, state: Any, tag: date, *, danach: Callable[[], None] | None = None
 ) -> ft.Control | None:
-    """Die Zeile: Titel, elf Knöpfe, der gewählte gefüllt. ``None``, wenn es das Feld nicht
-    gibt (gelöscht gab es nur vor Migration 034)."""
+    """Die Zeile zum **Tag**: Titel, elf Knöpfe, der gewählte gefüllt. ``None``, wenn es das
+    Feld nicht gibt (gelöscht gab es nur vor Migration 034)."""
     feld = srpe_feld(state)
     if feld is None:
         return None
-    aktuell = {"wert": srpe_wert(state, tag)}
+
+    def schreiben(stufe: int) -> None:
+        state.tageswerte.einmal_setzen(feld, tag, wert=stufe)
+
+    return stufen_zeile(srpe_wert(state, tag), schreiben, danach=danach)
+
+
+def workout_srpe_zeile(
+    state: Any, einheit_id: str, *, danach: Callable[[], None] | None = None
+) -> ft.Control:
+    """Die Zeile zum **Workout** (Ben, 10.11.2026, `docs/plan_workout_eintrag.md`): Die
+    Anstrengung gehört zum Durchlauf, nicht zum Tag — sie steht im Workout-Eintrag
+    (`EinheitRepo.workout_eintragen`), mehrere Workouts am Tag tragen je ihre eigene, und das
+    Tagesfeld bleibt, wie es ist. Nachtragen und Ändern jederzeit."""
+
+    def schreiben(stufe: int) -> None:
+        state.einheiten.workout_eintragen(einheit_id, result={SRPE: stufe})
+
+    return stufen_zeile(
+        state.einheiten.workout_wert(einheit_id).srpe,
+        schreiben,
+        danach=danach,
+        hinweis="0 Ruhe · 10 maximal — wie anstrengend war das Workout insgesamt?",
+    )
+
+
+def stufen_zeile(
+    wert: int | None,
+    schreiben: Callable[[int], None],
+    *,
+    danach: Callable[[], None] | None = None,
+    hinweis: str = "0 Ruhe · 10 maximal — wie anstrengend war die Einheit insgesamt?",
+) -> ft.Control:
+    """Titel und die elf Knöpfe 0–10 — ``schreiben`` bekommt die getippte Stufe."""
+    aktuell = {"wert": wert}
     knoepfe: dict[int, ft.Container] = {}
 
     def setzen(stufe: int) -> Callable[[Any], None]:
         def handler(_e: Any = None) -> None:
-            state.tageswerte.einmal_setzen(feld, tag, wert=stufe)
+            schreiben(stufe)
             aktuell["wert"] = stufe
             for s, k in knoepfe.items():
                 k.bgcolor = ft.Colors.PRIMARY if s == stufe else None
@@ -105,11 +141,7 @@ def srpe_zeile(
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
                     ft.Text("Anstrengung (sRPE)", size=12, opacity=0.8, expand=True),
-                    ft.Text(
-                        "0 Ruhe · 10 maximal — wie anstrengend war die Einheit insgesamt?",
-                        size=11,
-                        opacity=0.55,
-                    ),
+                    ft.Text(hinweis, size=11, opacity=0.55),
                 ],
             ),
             ft.Row(spacing=4, wrap=True, controls=list(knoepfe.values())),
@@ -117,4 +149,11 @@ def srpe_zeile(
     )
 
 
-__all__ = ["STUFEN", "srpe_feld", "srpe_wert", "srpe_zeile"]
+__all__ = [
+    "STUFEN",
+    "srpe_feld",
+    "srpe_wert",
+    "srpe_zeile",
+    "stufen_zeile",
+    "workout_srpe_zeile",
+]

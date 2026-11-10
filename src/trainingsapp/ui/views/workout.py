@@ -55,7 +55,7 @@ from trainingsapp.ui.components.karte import hinweis, info_knopf, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.modus_wahl import WORKOUT, modus_wahl
-from trainingsapp.ui.components.srpe import srpe_zeile
+from trainingsapp.ui.components.srpe import workout_srpe_zeile
 from trainingsapp.ui.components.takt_blatt import takt_anbringen
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uhr import schluessel as uhr_schluessel
@@ -63,6 +63,8 @@ from trainingsapp.ui.plan_ablauf import GRUENDE
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.uebung_lauf import gewaehlte_ausfuehrung
 from trainingsapp.ui.views.timer import timer_knopf
+from trainingsapp.ui.views.workout_eintrag import durchlauf_laden
+from trainingsapp.ui.views.workout_eintrag import route as workout_eintrag_route
 
 
 def workout_route(plan: Plan) -> str:
@@ -1414,6 +1416,29 @@ def workout_view(
             wahl["ohne"] = set()
             neu_bauen()
 
+        def workout_werte_teile() -> list[ft.Control]:
+            """Die Anstrengung gehört zu diesem Durchlauf (Ben, 10.11.2026,
+            `docs/plan_workout_eintrag.md`) — nicht mehr ins Tagesfeld; der Workout-Eintrag
+            steht unter Heute und lässt sie dort nachtragen."""
+            einheit_id = state.plan_ablaeufe.get(plan.id)
+            if not einheit_id or durchlauf_laden(state, einheit_id) is None:
+                return []  # nichts eingetragen: kein Workout-Eintrag
+
+            async def zum_eintrag(_e: object = None) -> None:
+                await page.push_route(workout_eintrag_route(einheit_id))
+
+            return [
+                karte(
+                    workout_srpe_zeile(state, einheit_id),
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.END,
+                        controls=[ft.TextButton("Workout-Eintrag ›", on_click=zum_eintrag)],
+                    ),
+                    abstand=4,
+                    padding=10,
+                )
+            ]
+
         return [
             ft.Column(
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -1428,7 +1453,7 @@ def workout_view(
             ),
             karte(ft.Column(spacing=6, controls=zeilen), abstand=0, padding=10),
             aufnahme_karte(),
-            *([z] if (z := srpe_zeile(page, state, state.heute())) is not None else []),
+            *workout_werte_teile(),
             ft.Row(
                 spacing=8,
                 controls=[

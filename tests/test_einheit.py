@@ -331,3 +331,81 @@ def test_huelle_einer_laufenden_aufnahme_zeigt_deren_zeit() -> None:
     e2.starten()
     t[0] += 5.0
     assert round(e2.anzeige_dauer_s()) == 5
+
+
+# -- Workout-Eintrag (Migration 053, `core.workout_eintrag`) -------------------------------------
+
+
+def _workout(repo_, profil, einheit_id, start, *, plan="p", bei=None, sekunden=600.0):
+    """Ein beendetes Workout mit einer eingetragenen Übung in der Zeitleiste."""
+    daten = {"plan": plan, "workout": True}
+    schritt = {**daten, "planuebung": "a", "uebung": "u", "name": "Kniebeuge", "stelle": 1}
+    repo_.einheit_beginnen(einheit_id, profil, start, "Workout")
+    repo_.ereignisse_schreiben(
+        einheit_id,
+        [
+            (0, Ereignis(0.0, "plan", "start", "Beine", daten)),
+            (1, Ereignis(0.0, "plan", "uebung_start", "", schritt)),
+            (2, Ereignis(sekunden, "plan", "uebung_ende", "", {**schritt, "grund": "fertig"})),
+            (
+                3,
+                Ereignis(
+                    sekunden, "plan", "ende", "Beine", {**daten, **({"bei": bei} if bei else {})}
+                ),
+            ),
+        ],
+    )
+    repo_.einheit_beenden(einheit_id, start + timedelta(seconds=sekunden))
+
+
+def test_workout_werte_gehoeren_zum_durchlauf_und_ersetzen_sich(repo) -> None:
+    """Ben, 10.11.2026: Die Anstrengung steht am Workout, nicht am Tag — je Durchlauf eine
+    eigene, nachtragbar; eine Änderung ist eine neue Zeile, die die alte ersetzt."""
+    r, profil = repo
+    _workout(r, profil, "e-1", T0)
+    _workout(r, profil, "e-2", T0 + timedelta(hours=6))
+    assert r.workout_wert("e-1").leer and r.workout_wert("e-1").srpe is None
+
+    erster = r.workout_eintragen("e-1", result={"srpe": 6})
+    r.workout_eintragen("e-2", result={"srpe": 3})
+    zweiter = r.workout_eintragen("e-1", result={"srpe": 7}, note=" Knie gespürt ")
+    assert erster.id != zweiter.id
+    werte = r.workout_werte(["e-1", "e-2", "gibt-es-nicht"])
+    assert {k: (w.srpe, w.note) for k, w in werte.items()} == {
+        "e-1": (7, "Knie gespürt"),
+        "e-2": (3, ""),
+    }
+    assert werte["e-1"].spec.field_by_key("srpe") is not None
+    kette = r.con.execute(
+        "SELECT replaces_id FROM workout_entry WHERE einheit_id = 'e-1' ORDER BY created_at, rowid"
+    ).fetchall()
+    assert [z["replaces_id"] for z in kette] == [None, erster.id]
+
+    # Nur die Notiz: die Anstrengung bleibt; unverändert schreibt nichts; None nimmt heraus
+    assert r.workout_eintragen("e-1", note="anders").srpe == 7
+    assert r.workout_eintragen("e-1", note="anders").id == r.workout_wert("e-1").id
+    assert r.workout_eintragen("e-1", result={"srpe": None}).srpe is None
+    assert len(r.con.execute("SELECT 1 FROM workout_entry").fetchall()) == 5
+
+
+def test_workouts_eines_tags_und_das_vorige(repo) -> None:
+    from trainingsapp.core import workout_eintrag as we
+
+    r, profil = repo
+    _workout(r, profil, "e-1", T0, bei="b")
+    _workout(r, profil, "e-2", T0 + timedelta(hours=1))
+    _workout(r, profil, "e-3", T0 + timedelta(days=1))
+    _workout(r, profil, "e-x", T0 + timedelta(hours=2), plan="anderer")
+    koepfe = r.zwischen(profil, T0, T0 + timedelta(hours=12))
+    assert [k.id for k in koepfe] == ["e-1", "e-2", "e-x"]
+    laeufe = we.fortsetzungen_markieren(
+        [we.durchlauf(k.id, k.started_at, k.ended_at, r.ereignisse(k.id)) for k in koepfe]
+    )
+    assert [(d.einheit_id, d.vorzeitig, d.fortgesetzt) for d in laeufe] == [
+        ("e-1", True, False),
+        ("e-2", False, True),
+        ("e-x", False, False),
+    ]
+    assert we.kurz(laeufe[1]) == "10 min · 1 Übung · fortgesetzt"
+    davor = r.workout_davor(profil, "p", T0 + timedelta(days=1))
+    assert [k.id for k in davor] == ["e-2", "e-1"]

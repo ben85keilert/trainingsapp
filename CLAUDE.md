@@ -365,6 +365,22 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   dem Schalter ``workout`` bekommen die Kette beim Laden, ohne Datenschritt. Ob ein Plan ein
   Workout ist, sagt ``plan.ablauf.an`` (`startet_als_workout`); „Trainieren“ zeigt es am Symbol.
 
+- **Workout-Eintrag** (Ben, 10.11.2026, Vertrag `docs/plan_workout_eintrag.md`, Migration 053):
+  **Werte gehören der Übung, der Verlauf gehört dem Workout.** Ein Durchlauf (beendete Einheit mit
+  `plan/start` + `workout`, aus der etwas ins Tagebuch kam) wird aus der Zeitleiste gelesen
+  (`core/workout_eintrag.py`, flet-frei) und steht je Durchlauf als **eine Zeile** unter Heute
+  (Übersicht „Workouts · n“, Zeitleiste: Kopf des Blocks; `views/tag.workout_teile`/
+  `workout_block`), Tipp → `/workout/<einheit>` (`views/workout_eintrag.py`: Kacheln, „Zum
+  Workout“, Verlauf in gegangener Reihenfolge, Messung, Zuletzt). Die Übungen zeigt das Workout nur
+  mit Kurzwert; die Werte bleiben in `session_entry`, dort nennt eine Zeile die Herkunft
+  (`views/leistungen.py`). **Die Anstrengung (sRPE) gehört zum Durchlauf** — `workout_entry`
+  (Ergebnis + Spec-Kopie + Notiz, unveränderlich mit `replaces_id`, `EinheitRepo.
+  workout_eintragen`), eingetragen in „Workout fertig“ oder nachträglich im Eintrag
+  (`components/srpe.workout_srpe_zeile`); das Tagesfeld „Anstrengung (sRPE)“ bleibt für den Tag,
+  das Workout schreibt nicht hinein, keine Lastrechnung daraus (P179). **Ein Workout bleibt ein
+  Workout:** „Trainieren“ öffnet es immer als Workout (`uebungen.heute_trainieren` nimmt
+  `plan_als_plan` zurück), die Liste gibt es nur von Hand.
+
 - **Gezeichneter Ablauf** (Ben, 8.11.2026, Vertrag `docs/plan_verzweigungen.md` §8, Stand
   §8.8; Migration 044, Datenschritt 6): Der Plan-Editor hat die Reiter **Plan · Uhren**, mit
   „Workout“ dazu **„Ablauf“**. **Zweige A–D, dann/sonst/Wege sind veraltet** (P108) —

@@ -175,6 +175,7 @@ from trainingsapp.ui.views.verlauf_herzfrequenz import verlauf_herzfrequenz_view
 from trainingsapp.ui.views.verlauf_kachel import verlauf_kachel_view
 from trainingsapp.ui.views.verlauf_tagesfeld import verlauf_tagesfeld_view
 from trainingsapp.ui.views.workout import workout_view
+from trainingsapp.ui.views.workout_eintrag import durchlauf_laden, workout_eintrag_view
 
 #: Reiter der Navigationsleiste: Schlüssel, Beschriftung, Symbol
 REITER = [
@@ -1054,6 +1055,14 @@ def main(page: ft.Page) -> None:
                     eintrag_unter(basis, teile[3:])
                 elif teile[2:3] == ["leistungen"]:
                     leistungen_unter(basis, teile[3:])
+        elif teile[:1] == ["workout"] and len(teile) >= 2:
+            # Der Workout-Eintrag (Ben, 10.11.2026): ein Durchlauf — darüber die Einträge einer
+            # seiner Übungen, Zurück führt wieder in den Eintrag
+            if (lauf := durchlauf_laden(state, teile[1])) is not None:
+                einheit_id = lauf.einheit_id
+                ablegen(lambda: workout_eintrag_view(page, state, einheit_id))
+                if teile[2:3] == ["leistungen"]:
+                    leistungen_unter(f"/workout/{einheit_id}", teile[3:], lokaler_tag(lauf.beginn))
         elif teile[:1] == ["tag"] and len(teile) >= 2:
             with suppress(ValueError):  # kein Datum → Hauptansicht
                 tag = date.fromisoformat(teile[1])

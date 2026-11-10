@@ -77,6 +77,7 @@ from trainingsapp.core.tag import (
     Abschnitt,
     Gemacht,
     Plankarte,
+    gemacht,
     gemacht_reihen,
     plaene_des_tags,
     plankarten,
@@ -84,6 +85,7 @@ from trainingsapp.core.tag import (
     zusammenfassung,
 )
 from trainingsapp.core.verlauf import MONATE, WOCHENTAGE_LANG, montag
+from trainingsapp.core.workout_eintrag import Durchlauf, WorkoutWerte
 from trainingsapp.core.zaehlen import ENDE_ABGEHAKT
 from trainingsapp.ui import plan_ablauf as plan_ablauf_ui
 from trainingsapp.ui import uebung_lauf
@@ -109,6 +111,12 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang import anhang_route
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.nachtragen import nachtragen_knopf, nachtragen_route
+from trainingsapp.ui.views.workout_eintrag import (
+    aktuelle_eintrag_ids,
+    durchlaeufe_am_tag,
+    eintrag_kopf,
+)
+from trainingsapp.ui.views.workout_eintrag import route as workout_eintrag_route
 from trainingsapp.ui.views.ziele import plan_ziele, ziele_fuer
 
 WOCHENTAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
@@ -228,6 +236,11 @@ class _Daten:
     felder: list[tf.Tagesfeld]
     alle_felder: dict[str, tf.Tagesfeld]
     werte: list[tf.Tageswert]
+    #: Workout-Einträge (Ben, 10.11.2026, `docs/plan_workout_eintrag.md`): die Durchläufe des
+    #: Tags, was zu ihnen eingetragen ist, und je Durchlauf die IDs seiner gültigen Einträge
+    workouts: list[Durchlauf]
+    workout_werte: dict[str, WorkoutWerte]
+    workout_eintraege: dict[str, set[str]]
 
     @property
     def ist_heute(self) -> bool:
@@ -282,6 +295,7 @@ def _lesen(state: AppState, tag: date) -> _Daten:
             plan = state.plaene.laden(s.plan_id, mit_geloeschten=True)
             plan_namen[s.plan_id] = plan.name if plan is not None else "Plan"
     ids = [e.id for e, _ in eintraege]
+    workouts = durchlaeufe_am_tag(state, tag)
     alle_felder = {f.id: f for f in state.tagesfelder.alle(state.profil.id, mit_geloeschten=True)}
     return _Daten(
         tag=tag,
@@ -305,6 +319,11 @@ def _lesen(state: AppState, tag: date) -> _Daten:
         felder=[f for f in alle_felder.values() if f.aktiv and f.deleted_at is None],
         alle_felder=alle_felder,
         werte=state.tageswerte.am_tag(state.profil.id, tag),
+        workouts=workouts,
+        workout_werte=(
+            state.einheiten.workout_werte([w.einheit_id for w in workouts]) if workouts else {}
+        ),
+        workout_eintraege={w.einheit_id: aktuelle_eintrag_ids(state, w) for w in workouts},
     )
 
 
@@ -1027,12 +1046,52 @@ def tagesansicht(
         v = var.finden(uebung.result_spec if uebung else None, g.variante)
         return varianten_etikett(v, klein=klein)
 
+    def workout_kopf(w: Durchlauf, mit_uhrzeit: bool = True) -> ft.Control:
+        """Der Workout-Eintrag als eine Zeile — Tipp öffnet ihn (`views/workout_eintrag.py`)."""
+        return eintrag_kopf(
+            w,
+            daten().workout_werte.get(w.einheit_id),
+            oeffner(workout_eintrag_route(w.einheit_id)),
+            mit_uhrzeit=mit_uhrzeit,
+        )
+
+    def workout_teile() -> list[ft.Control]:
+        """Übersicht: je Durchlauf eine Zeile über „Gemacht“ — die Übungen stehen wie bisher
+        darunter (Werte gehören der Übung, der Verlauf dem Workout)."""
+        laeufe = daten().workouts
+        if not laeufe:
+            return []
+        return [
+            abschnitt(f"Workouts · {len(laeufe)}"),
+            *(
+                ft.Container(bgcolor=KARTE, border_radius=14, padding=6, content=workout_kopf(w))
+                for w in laeufe
+            ),
+        ]
+
+    def workout_block(w: Durchlauf) -> ft.Control:
+        """Zeitleiste: ein Block je Durchlauf — der Kopf ist der Workout-Eintrag, darunter seine
+        Übungen kurz (Name und Kurzwert, Tipp = Einträge der Übung)."""
+        d = daten()
+        ids = d.workout_eintraege.get(w.einheit_id, set())
+        zeilen = gemacht([(e, s) for e, s in d.eintraege if e.id in ids], d.namen())
+        return ft.Container(
+            bgcolor=KARTE,
+            border_radius=14,
+            padding=8,
+            content=ft.Column(
+                spacing=4,
+                controls=[workout_kopf(w, mit_uhrzeit=False), *(block_zeile(g) for g in zeilen)],
+            ),
+        )
+
     def gemacht_teile() -> list[ft.Control]:
         d = daten()
         reihen = d.reihen()
         verlauf = ft.TextButton("Im Verlauf", on_click=im_verlauf) if reihen else None
         teile: list[ft.Control] = [
-            abschnitt(f"Gemacht · {len(reihen)}" if reihen else "Gemacht", verlauf)
+            *workout_teile(),
+            abschnitt(f"Gemacht · {len(reihen)}" if reihen else "Gemacht", verlauf),
         ]
         if not reihen:
             teile.append(
@@ -1428,9 +1487,14 @@ def tagesansicht(
                 teile.append(abschnitt("Steht an", anderer_plan()))
                 teile.extend(anstehen_zeile(k) for k in anstehend)
         teile.append(abschnitt("Der Tag"))
+        # Was in einem Workout entstand, steht im Block seines Durchlaufs — der Planblock
+        # zeigt nur noch, was in der Liste geübt wurde (Ben, 10.11.2026)
+        im_workout = {i for ids in d.workout_eintraege.values() for i in ids}
+        uebrige = [(e, s) for e, s in d.eintraege if e.id not in im_workout]
         punkte: list[tuple[datetime | None, ft.Control]] = [
-            (a.beginn, block(a)) for a in zeitleiste(d.eintraege, d.namen(), d.ist_training)
+            (a.beginn, block(a)) for a in zeitleiste(uebrige, d.namen(), d.ist_training)
         ]
+        punkte.extend((w.beginn, workout_block(w)) for w in d.workouts)
         einmal = einmal_zeile()
         notizen = tagesnotiz()
 

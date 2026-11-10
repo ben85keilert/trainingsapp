@@ -18,9 +18,13 @@ from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
 from ..core.einheit import Beteiligung, Ereignis, Rolle, daten_pruefen
 from ..core.models import iso_utc, jetzt, new_id
+from ..core.result_spec import ResultSpec
+from ..core.workout_eintrag import WorkoutWerte
+from ..core.workout_eintrag import spec as workout_spec
 from .db import transaktion
 
 
@@ -127,6 +131,102 @@ class EinheitRepo:
                 (subject_id, iso_utc(seit)),
             )
         return [self._kopf(r) for r in zeilen]
+
+    def zwischen(self, subject_id: str, von: datetime, bis: datetime) -> list[EinheitKopf]:
+        """Die Einheiten, die in ``[von, bis)`` begannen — älteste zuerst (ein Tag)."""
+        return [
+            self._kopf(r)
+            for r in self.con.execute(
+                "SELECT * FROM einheit WHERE subject_id = ? AND deleted_at IS NULL "
+                "AND started_at >= ? AND started_at < ? ORDER BY started_at",
+                (subject_id, iso_utc(von), iso_utc(bis)),
+            )
+        ]
+
+    def workout_davor(self, subject_id: str, plan_id: str, vor: datetime) -> list[EinheitKopf]:
+        """Die Workouts dieses Plans, die vor ``vor`` begannen — jüngste zuerst (für „Zuletzt“
+        im Workout-Eintrag; ob daraus ein Eintrag wurde, sagt `core.workout_eintrag.durchlauf`)."""
+        return [
+            self._kopf(r)
+            for r in self.con.execute(
+                "SELECT DISTINCT e.* FROM einheit e JOIN einheit_ereignis x "
+                "ON x.einheit_id = e.id WHERE e.subject_id = ? AND e.deleted_at IS NULL "
+                "AND e.started_at < ? AND x.quelle = 'plan' AND x.art = 'start' "
+                "AND json_extract(x.daten_json, '$.plan') = ? "
+                "AND json_extract(x.daten_json, '$.workout') "
+                "ORDER BY e.started_at DESC LIMIT 20",
+                (subject_id, iso_utc(vor), plan_id),
+            )
+        ]
+
+    # -- Workout-Eintrag (Migration 053, `core.workout_eintrag`) -------------------
+
+    def workout_werte(self, einheit_ids: Collection[str]) -> dict[str, WorkoutWerte]:
+        """Je Einheit, was zum Workout eingetragen ist — die jüngste Zeile; fehlt, wo nichts ist."""
+        ids = list(dict.fromkeys(einheit_ids))
+        if not ids:
+            return {}
+        platzhalter = ",".join("?" * len(ids))
+        out: dict[str, WorkoutWerte] = {}
+        for r in self.con.execute(
+            f"SELECT * FROM workout_entry WHERE einheit_id IN ({platzhalter}) "
+            "ORDER BY created_at, rowid",
+            ids,
+        ):
+            try:
+                spec = ResultSpec.from_dict(json.loads(r["spec_snapshot_json"] or "{}"))
+            except (TypeError, ValueError, KeyError):
+                spec = workout_spec()
+            out[r["einheit_id"]] = WorkoutWerte(
+                einheit_id=r["einheit_id"],
+                result=json.loads(r["result_json"] or "{}"),
+                note=r["note"] or "",
+                spec=spec,
+                id=r["id"],
+                created_at=datetime.fromisoformat(r["created_at"]),
+            )
+        return out
+
+    def workout_wert(self, einheit_id: str) -> WorkoutWerte:
+        """Was zu diesem Workout eingetragen ist — leer, wenn nichts."""
+        return self.workout_werte([einheit_id]).get(einheit_id) or WorkoutWerte(einheit_id)
+
+    def workout_eintragen(
+        self,
+        einheit_id: str,
+        *,
+        result: dict[str, Any] | None = None,
+        note: str | None = None,
+    ) -> WorkoutWerte:
+        """Werte oder Notiz zum Workout setzen — ``None`` lässt, was da ist. Unveränderlich wie
+        ein Tagebucheintrag: geschrieben wird eine neue Zeile, die die bisherige ersetzt; ein
+        Wert ``None`` im Ergebnis nimmt das Feld heraus."""
+        alt = self.workout_wert(einheit_id)
+        werte = dict(alt.result)
+        for k, v in (result or {}).items():
+            if v is None:
+                werte.pop(k, None)
+            else:
+                werte[k] = v
+        text = alt.note if note is None else note.strip()
+        if werte == alt.result and text == alt.note:
+            return alt
+        neu = WorkoutWerte(einheit_id, werte, text, workout_spec(), new_id(), jetzt())
+        with transaktion(self.con):
+            self.con.execute(
+                "INSERT INTO workout_entry (id, einheit_id, result_json, spec_snapshot_json, "
+                "note, replaces_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    neu.id,
+                    einheit_id,
+                    json.dumps(werte, ensure_ascii=False),
+                    json.dumps(neu.spec.to_dict(), ensure_ascii=False),
+                    text,
+                    alt.id or None,
+                    iso_utc(jetzt()),
+                ),
+            )
+        return neu
 
     def offene(self) -> list[str]:
         """Einheiten ohne Ende — beim Start der App: abgebrochen (Prozess beendet, Akku leer)."""

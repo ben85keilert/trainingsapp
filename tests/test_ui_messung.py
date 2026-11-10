@@ -1390,6 +1390,49 @@ async def test_speichern_ohne_beenden_neben_stopp_und_zwischenstand(daten) -> No
     task.cancel()
 
 
+async def test_aufzeichnungen_zusammenfuegen_aus_der_liste(daten) -> None:
+    """Ben, 10.11.2026 (A21): „Zusammenfügen …“ über der Liste der Aufzeichnungen — Teile
+    ankreuzen, eine neue Aufzeichnung entsteht; auf Wunsch verschwinden die Teile aus der
+    Liste (ihre Dateien bleiben)."""
+    from trainingsapp.ui.views.messung import (
+        aufnahme_eintragen,
+        aufzeichnungen_zusammenfuegen,
+        zusammenfuegen_dialog,
+    )
+
+    state, tmp_path = daten
+    lauf = Messlauf(SimulatedSource(tempo=40.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    while lauf.aufnahme is None or len(lauf.aufnahme.beats) < 25:
+        await asyncio.sleep(0.01)
+    teil1 = await lauf.aufnahme_teilen_async(tmp_path)
+    while len(lauf.aufnahme.beats) < 25:
+        await asyncio.sleep(0.01)
+    teil2 = lauf.aufnahme_stoppen(tmp_path)
+    task.cancel()
+    a1 = aufnahme_eintragen(state, teil1, None)
+    a2 = aufnahme_eintragen(state, teil2, None)
+    eintraege = state.hrv.alle(state.profil.id)
+
+    seite = _seite()
+    dialog = zusammenfuegen_dialog(seite, state, eintraege)
+    haken = [c for c in _alle_controls(dialog) if isinstance(c, ft.Checkbox)]
+    knopf = dialog.actions[-1]
+    assert len(haken) == 2 and knopf.disabled
+    for h in haken:
+        h.value = True
+        h.on_change(SimpleNamespace(control=h))
+    assert not knopf.disabled and knopf.content == "2 zusammenfügen"
+
+    neu = await aufzeichnungen_zusammenfuegen(state, eintraege, teile_entfernen=True)
+    assert neu.file_path.endswith("_zusammen.json")
+    assert neu.duration_s == pytest.approx(a1.duration_s + a2.duration_s, abs=2.0)
+    assert [a.id for a in state.hrv.alle(state.profil.id)] == [neu.id]
+    assert teil1.pfad.exists() and teil2.pfad.exists()  # nur aus der Liste
+
+
 def test_ablesen_zeigt_alle_werte_an_einer_stelle(daten) -> None:
     """„Ablesen" zeigt einen Strich und darunter RR, HF und die Verlaufskurven an dieser Stelle."""
     state, tmp_path = daten

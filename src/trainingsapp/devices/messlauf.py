@@ -85,6 +85,7 @@ from hrv_core.recording import (
 from hrv_core.regeln import Korrekturregeln
 from hrv_core.segments import abdeckung
 from hrv_core.zeitachse import Kontinuitaetsuhr
+from hrv_core.zusammenfuegen import zieldatei, zusammenfuegen
 
 from ..config import app_version
 from ..core import abschnitte as eigene_abschnitte
@@ -243,6 +244,42 @@ def _gespeichert(
         n_luecken=int(deckung.get("n_gaps", 0)),
         subject_id=subject_id,
     )
+
+
+def teile_zusammenfuegen(pfade: Sequence[Path]) -> Gespeichert:
+    """Mehrere Messdateien zu **einer** (Ben, 10.11.2026, A21: lange Datenströme für VLF und
+    ULF) — `hrv_core.zusammenfuegen`: nach Beginn geordnet, Herzuhr zählt weiter, eine Pause
+    zwischen zwei Teilen bleibt als Lücke auf der Wanduhr, Notizen rücken mit, an jeder Naht
+    eine Notiz „Teil n“. Die neue Datei liegt neben dem ersten Teil (``…_zusammen.json``);
+    die Teile bleiben unverändert. Nur die Messdateien — Beiwerk (EKG, Atemphasen) und was
+    neben einem Teil liegt (Korrektur, Zuschnitt) gehen nicht mit. Schreibt, darum im Thread.
+
+    Raises:
+        ValueError: weniger als zwei Teile, ein Teil unlesbar, oder die Teile messen
+            verschieden (`intervall_quelle`) — das ergäbe keine eine Messung.
+        OSError: Lesen oder Schreiben scheiterte.
+    """
+    if len(pfade) < 2:
+        raise ValueError("Zum Zusammenfügen braucht es mindestens zwei Aufzeichnungen.")
+    # Nach Beginn, bei gleicher Sekunde nach Dateiname (``…_1`` ist der spätere Teil) — die
+    # Bibliothek ordnet nur nach Beginn und ließe sonst die Eingabe entscheiden
+    paare = sorted(
+        ((laden(p), p) for p in pfade), key=lambda tp: (tp[0].start_utc or _FRUEH, tp[1].name)
+    )
+    teile = [t for t, _ in paare]
+    if len({t.intervall_quelle for t in teile}) > 1:
+        raise ValueError(
+            "Die Aufzeichnungen messen verschieden (Brustgurt, optisch, nur Puls) — "
+            "sie lassen sich nicht zu einer zusammenfügen."
+        )
+    rec = zusammenfuegen(teile)
+    erster = paare[0][1]
+    ziel = freier_pfad(erster.parent, zieldatei([erster]).name)
+    pfad = json_atomar_schreiben(ziel, rec.to_dict())
+    return _gespeichert(pfad, rec, dauer_s=rec.dauer_s)
+
+
+_FRUEH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
@@ -1395,7 +1432,10 @@ class Messlauf:
         atmung = self.atmung_feld(aufnahme)
         dauer_s = aufnahme.dauer_s()
         ordner = self._ordner(basis)
-        name = f"{Path(aufnahme.dateiname()).stem}{ZWISCHEN_ZUSATZ}.json"
+        # Nach dem Namen, unter dem die ganze Aufnahme gespeichert wird (`_dateiname`, auch
+        # der Verweis einer Einheit) — so findet die Auswertung eines Trainings den
+        # Zwischenstand, solange die Messdatei noch nicht da ist (`ui.training.hrv_bezug`)
+        name = f"{Path(self._dateiname()).stem}{ZWISCHEN_ZUSATZ}.json"
 
         def schreiben() -> Gespeichert:
             ordner.mkdir(parents=True, exist_ok=True)

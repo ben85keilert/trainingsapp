@@ -80,6 +80,7 @@ from trainingsapp.data.strecken import (
     kopf_lesen,
     spur_ohne_ort,
 )
+from trainingsapp.devices.messlauf import ZWISCHEN_ZUSATZ
 from trainingsapp.devices.strecke_baustein import StreckeErgebnis
 
 
@@ -548,7 +549,32 @@ def hrv_bezug(state: Any, strecke: Strecke) -> HrvBezug | None:
         beginn = -hrv.versatz_s
         if gps is not None and gps.versatz_s is not None:
             verschiebung = hrv.versatz_s - gps.versatz_s
-    return HrvBezug(messungenverzeichnis() / datei, aufnahme, verschiebung, beginn)
+    pfad = messungenverzeichnis() / datei
+    if not pfad.exists() and (zwischen := zwischenstand_zu(state, pfad)) is not None:
+        # Die Messung läuft noch (Ben, 10.11.2026, A21: „Werte kommen erst, wenn
+        # gespeichert“): ihr jüngster Zwischenstand hat denselben Beginn, die Versätze gelten
+        pfad, aufnahme = zwischen
+    return HrvBezug(pfad, aufnahme, verschiebung, beginn)
+
+
+def zwischenstand_zu(state: Any, messdatei: Path) -> tuple[Path, HrvRecording] | None:
+    """Der jüngste Zwischenstand einer Aufnahme, deren Messdatei es noch nicht gibt
+    (`Messlauf.aufnahme_zwischenstand_async`: ``<Name>_zwischen.json``) — nur einer, der in
+    der Liste steht."""
+    try:
+        kandidaten = sorted(
+            messdatei.parent.glob(f"{messdatei.stem}{ZWISCHEN_ZUSATZ}*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return None
+    for k in kandidaten:
+        with contextlib.suppress(ValueError):
+            zeile = state.hrv.zur_datei(k.relative_to(messungenverzeichnis()).as_posix())
+            if zeile is not None:
+                return k, zeile
+    return None
 
 
 def zeitleiste_und_versatz(state: Any, strecke: Strecke) -> tuple[list[Ereignis], float | None]:

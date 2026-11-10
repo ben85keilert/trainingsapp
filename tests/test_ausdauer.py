@@ -8,6 +8,7 @@ ab, wie im Plan verlangt.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import math
 import random
@@ -219,8 +220,12 @@ async def _training(
         gps.punkt(p)
         await ruhe()
         e.takt()
-        if i == len(punkte) // 2 and zwischendurch is not None:
-            zwischendurch()
+        if (
+            i == len(punkte) // 2
+            and zwischendurch is not None
+            and inspect.isawaitable(warten := zwischendurch())
+        ):
+            await warten
     einheit_ui.alle_beenden(state)
     strecke = None
     for _ in range(200):
@@ -230,8 +235,8 @@ async def _training(
         await asyncio.sleep(0.02)
     assert strecke is not None, e.warnung
     assert state.ausdauer is None and teil.fertig and not gps.laeuft
-    if vor_dem_stopp is not None:
-        vor_dem_stopp(strecke)
+    if vor_dem_stopp is not None and inspect.isawaitable(warten := vor_dem_stopp(strecke)):
+        await warten
     # Die Messung läuft nach dem Training weiter (Ben, 9.11.2026: „GPS-Training soll die Messung
     # auch weiterlaufen lassen“) — wie eine vorher gestartete; hier stoppen und speichern
     if messlauf.aufnahme is not None and state.einheit is not None:
@@ -555,6 +560,105 @@ async def test_training_speichert_strecke_hrv_und_tagebuch(daten) -> None:
     strecke2, _ = await _training(state, tmp_path)
     eintrag2 = state.sitzungen.eintrag_laden(strecke2.session_entry_id)
     assert eintrag2 is not None and eintrag2.exercise_id == eintrag.exercise_id
+
+
+async def test_zwischenstand_zeigt_herzfrequenz_solange_die_messung_laeuft(daten) -> None:
+    """Ben, 10.11.2026 (A21): „Werte kommen erst, wenn gespeichert“ — das Training ist zu Ende,
+    die HRV-Messung läuft weiter, und die Auswertung hatte keine Herzfrequenz. Jetzt bietet sie
+    „Zwischenstand speichern“ an: Die Messung läuft weiter, die Auswertung liest den
+    Zwischenstand (gleicher Beginn, gleiche Versätze); die ganze Messung ersetzt ihn."""
+    from trainingsapp.ui.training import hrv_bezug
+    from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, hrv_zwischenstand
+
+    state, tmp_path = daten
+    gesehen: dict = {}
+
+    async def waehrend_hrv_laeuft(strecke) -> None:
+        vorher = hrv_bezug(state, strecke)
+        assert vorher is not None and not vorher.pfad.exists()
+        assert "Zwischenstand speichern" in _knoepfe(ausdauer_detail_view(_seite(), state, strecke))
+        aufnahme = state.messlauf.aufnahme
+        neu = await hrv_zwischenstand(state)
+        assert neu is not None and state.messlauf.aufnahme is aufnahme  # sie läuft weiter
+        bezug = hrv_bezug(state, strecke)
+        assert bezug is not None and bezug.pfad.exists()
+        assert bezug.pfad.stem == vorher.pfad.stem + "_zwischen"
+        assert bezug.aufnahme is not None and bezug.aufnahme.id == neu.id
+        assert bezug.beginn_s == vorher.beginn_s and bezug.verschiebung_s == vorher.verschiebung_s
+        # Die Messdatei liest ein Thread — danach steht der Hinweis mit dem Knopf da
+        ansicht = ausdauer_detail_view(_seite(), state, strecke)
+        for _ in range(100):
+            if "Neuen Zwischenstand speichern" in _knoepfe(ansicht):
+                break
+            await asyncio.sleep(0.02)
+        assert "Neuen Zwischenstand speichern" in _knoepfe(ansicht)
+        assert "HRV-MESSUNG LÄUFT NOCH" in [t.upper() for t in _texte(ansicht)]
+        gesehen["zwischen"] = (neu.id, bezug.pfad)
+
+    strecke, _ = await _training(state, tmp_path, hrv_vorher=60, vor_dem_stopp=waehrend_hrv_laeuft)
+    zw_id, zw_pfad = gesehen["zwischen"]
+    # Die ganze Messung hat den Zwischenstand ersetzt: eine Aufzeichnung, seine Datei ist weg
+    (aufnahme,) = state.hrv.alle(state.profil.id)
+    assert aufnahme.id != zw_id and not zw_pfad.exists()
+    bezug = hrv_bezug(state, strecke)
+    assert bezug is not None and bezug.aufnahme is not None and bezug.aufnahme.id == aufnahme.id
+    assert "_zwischen" not in bezug.pfad.stem
+
+
+async def test_laufendes_training_bis_hier_auswerten(daten) -> None:
+    """Ben, 10.11.2026 (A21): das **laufende** Training in der Auswertung — ohne es zu beenden
+    und ohne eine Zeile: Die Strecke „unterwegs“ steht in keiner Tabelle, die Auswertung liest
+    die mitgeschriebene Datei; Kürzen, Löschen und Sportartwechsel gibt es dort nicht."""
+    import flet as ft
+
+    from trainingsapp.ui.views.ausdauer import UNTERWEGS, ausdauer_detail_view, unterwegs_oeffnen
+
+    state, tmp_path = daten
+    seite = _seite()
+    routen: list[str] = []
+
+    async def push_route(route: str) -> None:
+        routen.append(route)
+
+    seite.push_route = push_route
+    gesehen: dict = {}
+
+    async def unterwegs() -> None:
+        await unterwegs_oeffnen(seite, state)
+        s = state.strecke_unterwegs
+        assert s is not None and s.id == UNTERWEGS and state.strecken.laden(UNTERWEGS) is None
+        assert routen == [f"/ausdauer/{UNTERWEGS}"]
+        assert s.file_path and (tmp_path / "Strecken" / s.file_path).exists()
+        assert s.distanz_m > 1000 and state.einheit is not None  # läuft weiter
+        ansicht = ausdauer_detail_view(_seite(), state, s, unterwegs=True)
+        sichtbar = {
+            c.tooltip for c in ansicht.appbar.actions if isinstance(c, ft.IconButton) and c.visible
+        }
+        assert sichtbar == {"GPX exportieren", "Neu laden: der Stand von jetzt"}
+        assert ansicht.appbar.title.value.endswith("· bis hier")
+        # Mit dem Training lief eine HRV-Aufnahme: ihr Zwischenstand wird im Thread gelesen
+        assert s.hrv_recording_id is not None
+        for _ in range(150):
+            if "JE KILOMETER" in [t.upper() for t in _texte(ansicht)]:
+                break
+            await asyncio.sleep(0.02)
+        titel = [t.upper() for t in _texte(ansicht)]
+        assert "JE KILOMETER" in titel and "HERZFREQUENZ UND TEMPO" in titel
+        gesehen["distanz"] = s.distanz_m
+
+    strecke, _ = await _training(state, tmp_path, zwischendurch=unterwegs, seite=seite)
+    assert gesehen["distanz"] < strecke.distanz_m  # das Training lief danach weiter
+    assert len(state.strecken.alle(state.profil.id)) == 1  # unterwegs hat nichts gespeichert
+
+
+def _knoepfe(wurzel) -> list[str]:
+    import flet as ft
+
+    return [
+        str(c.content)
+        for c in _alle(wurzel)
+        if isinstance(c, ft.FilledTonalButton | ft.FilledButton | ft.TextButton)
+    ]
 
 
 async def test_laufende_hrv_bekommt_marken_und_laeuft_weiter(daten) -> None:

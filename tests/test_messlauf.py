@@ -1141,3 +1141,41 @@ async def test_zwischenstand_notizen_kommen_in_die_ganze_aufnahme(tmp_path) -> N
     ]
     # Die nächste Aufnahme beginnt ohne Zwischenstände
     assert lauf._zwischen == []
+
+
+async def test_teile_zusammenfuegen_ergibt_einen_strom(tmp_path) -> None:
+    """Ben, 10.11.2026 (A21): Teile einer langen Aufnahme („Teil speichern, weiter aufnehmen“)
+    werden in der App wieder **eine** Messdatei — lange Ströme für VLF und ULF. Die Teile
+    bleiben liegen, die neue Datei heißt ``…_zusammen.json``."""
+    from hrv_core.recording import laden
+
+    from trainingsapp.devices.messlauf import teile_zusammenfuegen
+
+    lauf = Messlauf(SimulatedSource(tempo=40.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    while lauf.aufnahme is None or len(lauf.aufnahme.beats) < 30:
+        await asyncio.sleep(0.01)
+    lauf.notiz_hinzufuegen("in Teil 1")
+    teil1 = await lauf.aufnahme_teilen_async(tmp_path)
+    while len(lauf.aufnahme.beats) < 30:
+        await asyncio.sleep(0.01)
+    lauf.notiz_hinzufuegen("in Teil 2")
+    teil2 = lauf.aufnahme_stoppen(tmp_path)
+    task.cancel()
+    assert teil1 is not None and teil2 is not None
+
+    with pytest.raises(ValueError, match="mindestens zwei"):
+        teile_zusammenfuegen([teil1.pfad])
+    ganz = teile_zusammenfuegen([teil2.pfad, teil1.pfad])  # die Reihenfolge ist egal
+    assert ganz.pfad.name == teil1.pfad.stem + "_zusammen.json"
+    assert teil1.pfad.exists() and teil2.pfad.exists()  # die Teile bleiben
+    n1, n2 = len(teil1.recording.beats), len(teil2.recording.beats)
+    rec = laden(ganz.pfad)
+    assert len(rec.beats) == n1 + n2
+    assert ganz.started_at == teil1.started_at.replace(microsecond=0)
+    assert [b.rr_ms for b in rec.beats[:n1]] == [b.rr_ms for b in teil1.recording.beats]
+    texte = [e["text"] for e in rec.ereignisse]
+    assert texte.index("in Teil 1") < texte.index("Teil 2") < texte.index("in Teil 2")
+    assert ganz.dauer_s == pytest.approx(teil1.dauer_s + teil2.dauer_s, abs=2.0)

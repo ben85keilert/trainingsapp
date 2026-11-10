@@ -51,3 +51,6 @@ signierung.toml
 *.jks
 *.keystore
 *.jks.base64.txt
+
+# Claude Code: persönliche Einstellungen (die gemeinsamen stehen in .claude/settings.json)
+.claude/settings.local.json

@@ -112,7 +112,12 @@ from trainingsapp.ui.views.anhang_hochladen import (
     hochladen_route,
 )
 from trainingsapp.ui.views.anhang_ton import anhang_ton_view
-from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view, verwaiste_dialog
+from trainingsapp.ui.views.ausdauer import (
+    UNTERWEGS,
+    ausdauer_detail_view,
+    ausdauer_view,
+    verwaiste_dialog,
+)
 from trainingsapp.ui.views.eigene_pakete import SEGMENT as EIGEN_SEGMENT
 from trainingsapp.ui.views.eigene_pakete import eigenes_paket_view
 from trainingsapp.ui.views.einstellungen import einstellungen
@@ -1042,6 +1047,9 @@ def main(page: ft.Page) -> None:
         elif teile[:1] == ["ausdauer"]:
             if len(teile) == 1:
                 ablegen(lambda: ausdauer_view(page, state))
+            elif teile[1] == UNTERWEGS:
+                if (unterwegs := state.strecke_unterwegs) is not None:
+                    ablegen(lambda: ausdauer_detail_view(page, state, unterwegs, unterwegs=True))
             elif (strecke := state.strecken.laden(teile[1])) is not None:
                 ablegen(lambda: ausdauer_detail_view(page, state, strecke))
         elif teile[:1] == ["messung"] and len(teile) >= 2:

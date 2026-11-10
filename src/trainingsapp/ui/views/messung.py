@@ -49,7 +49,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -95,6 +95,7 @@ from trainingsapp.devices.messlauf import (
     Gespeichert,
     Messlauf,
     backup_wiederherstellen,
+    teile_zusammenfuegen,
 )
 from trainingsapp.devices.profiles import geraeteart, reifegrad_text
 from trainingsapp.devices.simulated import (
@@ -2392,6 +2393,137 @@ def _strecken_liste(page: ft.Page, state: AppState, trainings: list[ft.Control])
     return scroll_merken(page, state, "messung_strecken", liste)
 
 
+#: So viele Aufzeichnungen bietet „Zusammenfügen …“ an (die neuesten)
+ZUSAMMEN_MAX = 40
+
+
+async def aufzeichnungen_zusammenfuegen(
+    state: AppState, teile: Sequence[HrvRecording], *, teile_entfernen: bool = False
+) -> HrvRecording:
+    """Die gewählten Aufzeichnungen zu einer zusammenfügen und eintragen (Ben, 10.11.2026,
+    A21) — `devices.messlauf.teile_zusammenfuegen` im Thread. ``teile_entfernen``: die Teile
+    verschwinden danach aus der Liste (ihre Dateien bleiben liegen, wie beim Löschen).
+
+    Raises:
+        ValueError, OSError: siehe `teile_zusammenfuegen`.
+    """
+    geordnet = sorted(teile, key=lambda a: a.started_at)
+    pfade = [messungenverzeichnis() / a.file_path for a in geordnet]
+    ergebnis = await asyncio.to_thread(teile_zusammenfuegen, pfade)
+    eintrag = aufnahme_eintragen(state, ergebnis, geordnet[0].subject_id)
+    if teile_entfernen:
+        for a in geordnet:
+            state.hrv.loeschen(a.id)
+    return eintrag
+
+
+def zusammenfuegen_dialog(
+    page: ft.Page, state: AppState, eintraege: Sequence[HrvRecording]
+) -> ft.AlertDialog:
+    """„Zusammenfügen …“ über der Liste: Teile ankreuzen, eine Aufzeichnung daraus machen."""
+    gewaehlt: set[str] = set()
+    stand = {"entfernen": False, "laeuft": False}
+    dialog: ft.AlertDialog
+    knopf = ft.FilledButton("Zusammenfügen", disabled=True)
+    meldung = ft.Text(size=12, color=ft.Colors.ERROR, visible=False)
+
+    def umschalten(a: HrvRecording) -> Callable[[ft.Event[ft.Checkbox]], None]:
+        def handler(e: ft.Event[ft.Checkbox]) -> None:
+            if e.control.value:
+                gewaehlt.add(a.id)
+            else:
+                gewaehlt.discard(a.id)
+            knopf.disabled = len(gewaehlt) < 2 or stand["laeuft"]
+            knopf.content = (
+                f"{len(gewaehlt)} zusammenfügen" if len(gewaehlt) >= 2 else "Zusammenfügen"
+            )
+            with contextlib.suppress(Exception):
+                knopf.update()
+
+        return handler
+
+    def entfernen_gesetzt(e: ft.Event[ft.Switch]) -> None:
+        stand["entfernen"] = bool(e.control.value)
+
+    async def ausfuehren() -> None:
+        if stand["laeuft"] or len(gewaehlt) < 2:
+            return
+        stand["laeuft"] = True
+        knopf.disabled = True
+        with contextlib.suppress(Exception):
+            knopf.update()
+        teile = [a for a in eintraege if a.id in gewaehlt]
+        try:
+            eintrag = await aufzeichnungen_zusammenfuegen(
+                state, teile, teile_entfernen=stand["entfernen"]
+            )
+        except (ValueError, OSError) as fehler:
+            stand["laeuft"] = False
+            knopf.disabled = False
+            meldung.value, meldung.visible = str(fehler), True
+            with contextlib.suppress(Exception):
+                dialog.update()
+            return
+        schliessen(dialog)
+        page.show_dialog(
+            ft.SnackBar(
+                ft.Text(
+                    f"{len(teile)} Teile zusammengefügt: {_uhr(eintrag.duration_s)} "
+                    "in einer Aufzeichnung."
+                )
+            )
+        )
+        state.neu_zeichnen()
+
+    knopf.on_click = ausfuehren
+    zeilen: list[ft.Control] = []
+    for a in list(eintraege)[:ZUSAMMEN_MAX]:
+        lokal = a.started_at.astimezone()
+        zeilen.append(
+            ft.Checkbox(
+                label=f"{lokal:%d.%m. %H:%M} · {_uhr(a.duration_s)}"
+                + (f" · {a.title}" if a.title else ""),
+                on_change=umschalten(a),
+                data=("teil", a.id),
+            )
+        )
+    dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Aufzeichnungen zusammenfügen"),
+        content=ft.Column(
+            tight=True,
+            spacing=6,
+            width=420,
+            controls=[
+                ft.Text(
+                    "Aus den angekreuzten Teilen entsteht eine neue Aufzeichnung, der Reihe nach "
+                    "ab dem frühesten. Eine Pause zwischen zwei Teilen bleibt als Lücke "
+                    "sichtbar; Notizen und Abschnitte kommen mit. EKG-Mitschrift, Atem-Spur, "
+                    "Korrektur und Zuschnitt der Teile nicht.",
+                    size=12,
+                    opacity=0.75,
+                ),
+                ft.Column(
+                    spacing=0,
+                    tight=True,
+                    height=min(len(zeilen), 7) * 44,
+                    scroll=ft.ScrollMode.AUTO,
+                    controls=zeilen,
+                ),
+                ft.Switch(
+                    label="Teile danach aus der Liste nehmen (Dateien bleiben)",
+                    value=False,
+                    on_change=entfernen_gesetzt,
+                    data="teile_entfernen",
+                ),
+                meldung,
+            ],
+        ),
+        actions=[ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)), knopf],
+    )
+    return dialog
+
+
 def _hrv_liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Control:
     """Unterreiter „HRV": die Messungen des Profils und „Alle exportieren"."""
 
@@ -2429,7 +2561,17 @@ def _hrv_liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Contr
             content=ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 controls=[
-                    ft.Text(f"{len(eintraege)} Aufzeichnungen", size=12, opacity=0.7),
+                    ft.Text(f"{len(eintraege)} Aufzeichnungen", size=12, opacity=0.7, expand=True),
+                    ft.TextButton(
+                        "Zusammenfügen …",
+                        icon=ft.Icons.MERGE,
+                        tooltip="Teile einer langen Aufnahme zu einer Aufzeichnung zusammenfügen",
+                        on_click=lambda: page.show_dialog(
+                            zusammenfuegen_dialog(page, state, eintraege)
+                        ),
+                        visible=len(eintraege) >= 2,
+                        data="zusammenfuegen",
+                    ),
                     ft.TextButton(
                         "Alle exportieren",
                         icon=ft.Icons.SHARE,

@@ -48,7 +48,7 @@ import math
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -61,7 +61,7 @@ from hrv_core.ppi import schlagzeiten
 from hrv_core.recording import Recording
 from hrv_core.trends import aktuell, reihe
 
-from trainingsapp.config import streckenverzeichnis
+from trainingsapp.config import datenverzeichnis, streckenverzeichnis
 from trainingsapp.core import atem_auswertung as aa
 from trainingsapp.core.forschung import tempo_reihe
 from trainingsapp.core.hrv_training import (
@@ -77,7 +77,7 @@ from trainingsapp.core.intervalle import (
     intervalle,
     strecke_auf_achse,
 )
-from trainingsapp.core.models import Strecke
+from trainingsapp.core.models import HrvRecording, Strecke
 from trainingsapp.core.strecke import (
     GEHEN,
     LAUFEN,
@@ -105,6 +105,7 @@ from trainingsapp.data.strecken import gpx, jsonl_lesen, kopf_lesen
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.einheit import Einheitslauf
 from trainingsapp.devices.gps import GpsQuelle
+from trainingsapp.devices.messlauf import ZWISCHEN_ZUSATZ
 from trainingsapp.devices.strecke_baustein import StreckeBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.ausrichtung import querformat
@@ -292,6 +293,74 @@ def _training(state: AppState) -> tuple[Einheitslauf, StreckeBaustein] | None:
     if e is None or not isinstance(teil, StreckeBaustein):
         return None
     return e, teil
+
+
+#: Die Auswertung des laufenden Trainings: ``/ausdauer/unterwegs`` (A21, Ben 10.11.2026)
+UNTERWEGS = "unterwegs"
+
+
+async def hrv_zwischenstand(state: AppState) -> HrvRecording | None:
+    """Die laufende HRV-Aufnahme bis hier als Zwischenstand speichern und eintragen
+    (`Messlauf.aufnahme_zwischenstand_async`) — ``None`` ohne Aufnahme.
+
+    Raises:
+        OSError: Die Datei ließ sich nicht schreiben.
+    """
+    from trainingsapp.ui.views.messung import aufnahme_eintragen  # Kreis: messung → ausdauer
+
+    lauf = state.messlauf
+    if lauf is None or lauf.aufnahme is None:
+        return None
+    ergebnis = await lauf.aufnahme_zwischenstand_async(datenverzeichnis())
+    if ergebnis is None:
+        return None
+    return aufnahme_eintragen(state, ergebnis, lauf.subject_id)
+
+
+async def unterwegs_oeffnen(page: ft.Page, state: AppState) -> None:
+    """„Bis hier auswerten“ (Ben, 10.11.2026, A21): das **laufende** Training in der
+    Auswertung — Karte, Kilometer, Herzfrequenz und Tempo bis jetzt —, ohne es zu beenden.
+
+    Gespeichert wird vom Training nichts: Die Auswertung liest die Streckendatei, die ohnehin
+    mitgeschrieben wird, und eine `Strecke`, die in keiner Tabelle steht
+    (`AppState.strecke_unterwegs`). Läuft eine HRV-Aufnahme, entsteht ihr Zwischenstand —
+    den ersetzt später die ganze Messdatei."""
+    jetzt = _training(state)
+    if jetzt is None:
+        return
+    e, teil = jetzt
+    eintrag: HrvRecording | None = None
+    try:
+        eintrag = await hrv_zwischenstand(state)
+    except OSError as fehler:
+        page.show_dialog(ft.SnackBar(ft.Text(f"Zwischenstand nicht gespeichert: {fehler}")))
+    r = teil.rechner
+    datei = ""
+    pfad = getattr(teil.ablage, "pfad", None)
+    if pfad is not None and pfad.exists():
+        with contextlib.suppress(ValueError):
+            datei = pfad.relative_to(streckenverzeichnis()).as_posix()
+    dauer_s = max(e.dauer_s(), 0.0)
+    ende = datetime.now().astimezone()
+    start = e.zeitbasis.utc(0.0) if e.zeitbasis is not None else ende - timedelta(seconds=dauer_s)
+    state.strecke_unterwegs = Strecke(
+        id=UNTERWEGS,
+        subject_id=e.subject_id or state.profil.id,
+        sportart=teil.sportart,
+        started_at=start,
+        ended_at=ende,
+        file_path=datei,
+        distanz_m=r.distanz_m,
+        dauer_s=max(dauer_s, r.dauer_s),
+        bewegt_s=r.bewegt_s,
+        hoehe_auf_m=r.hoehe_auf_m,
+        hoehe_ab_m=r.hoehe_ab_m,
+        hrv_recording_id=eintrag.id if eintrag is not None else None,
+    )
+    if page.route == f"/ausdauer/{UNTERWEGS}":
+        state.neu_zeichnen()  # „Neu laden“ in der Auswertung selbst
+    else:
+        await page.push_route(f"/ausdauer/{UNTERWEGS}")
 
 
 def _hf(e: Einheitslauf) -> int | None:
@@ -636,7 +705,21 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
                 ),
                 zahlen,
                 warnung,
-                ft.FilledButton("Beenden", icon=ft.Icons.STOP, on_click=beenden_fragen),
+                ft.Row(
+                    spacing=8,
+                    wrap=True,
+                    controls=[
+                        ft.FilledButton("Beenden", icon=ft.Icons.STOP, on_click=beenden_fragen),
+                        ft.TextButton(
+                            "Bis hier auswerten",
+                            icon=ft.Icons.INSIGHTS,
+                            tooltip="Karte, Kilometer, Herzfrequenz und Tempo bis jetzt — "
+                            "das Training läuft weiter",
+                            on_click=lambda: page.run_task(unterwegs_oeffnen, page, state),
+                            data="bis_hier",
+                        ),
+                    ],
+                ),
                 ft.Switch(
                     label="Karte zeigen (Kacheln von OpenStreetMap)",
                     value=state.ausdauer_karte,
@@ -1152,7 +1235,14 @@ def _dfa_teil(
     )
 
 
-def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft.View:
+def ausdauer_detail_view(
+    page: ft.Page, state: AppState, strecke: Strecke, *, unterwegs: bool = False
+) -> ft.View:
+    """Die Auswertung eines Trainings. ``unterwegs`` (A21, Ben 10.11.2026): das **laufende**
+    Training bis hier (`unterwegs_oeffnen`) — die `Strecke` steht in keiner Tabelle, darum
+    ohne Kürzen, Löschen, Sportartwechsel und Forschungsexport; „Neu laden“ holt den Stand
+    von jetzt. Läuft die HRV-Messung eines **gespeicherten** Trainings noch, zeigt die
+    Auswertung ihren jüngsten Zwischenstand (`hrv_bezug`) und bietet an, einen zu speichern."""
     route = f"/ausdauer/{strecke.id}"
     punkte: list[Punkt] = []
     if strecke.file_path:
@@ -1315,8 +1405,18 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
     view = ft.View(
         route=route,
         appbar=ft.AppBar(
-            title=ft.Text(f"{SPORT_NAMEN.get(strecke.sportart, '')} {lokal:%d.%m. %H:%M}"),
+            title=ft.Text(
+                f"{SPORT_NAMEN.get(strecke.sportart, '')} {lokal:%d.%m. %H:%M}"
+                + (" · bis hier" if unterwegs else "")
+            ),
             actions=[
+                ft.IconButton(
+                    ft.Icons.REFRESH,
+                    tooltip="Neu laden: der Stand von jetzt",
+                    on_click=lambda: page.run_task(unterwegs_oeffnen, page, state),
+                    visible=unterwegs,
+                    data="unterwegs_neu",
+                ),
                 ft.IconButton(
                     ft.Icons.IOS_SHARE,
                     tooltip="GPX exportieren",
@@ -1327,18 +1427,19 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
                     ft.Icons.CONTENT_CUT,
                     tooltip="Ende kürzen",
                     on_click=lambda: ende_kuerzen(),
-                    visible=bool(punkte),
+                    visible=bool(punkte) and not unterwegs,
                 ),
                 ft.IconButton(
                     ft.Icons.SCIENCE_OUTLINED,
                     tooltip="Für die Auswertung exportieren (ohne Ort)",
                     on_click=lambda: forschung_fragen(page, state, [strecke.einheit_id or ""]),
-                    visible=bool(strecke.einheit_id),
+                    visible=bool(strecke.einheit_id) and not unterwegs,
                 ),
                 ft.IconButton(
                     ft.Icons.DELETE_OUTLINE,
                     tooltip="Aus der Liste entfernen",
                     on_click=loeschen_fragen,
+                    visible=not unterwegs,
                 ),
             ],
         ),
@@ -1346,6 +1447,31 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
         padding=12,
         controls=[sicher(inhalt, expand=False)],
     )
+
+    #: Die Messdatei gibt es noch nicht — gezeigt wird ein Zwischenstand der laufenden Messung
+    zwischen_stand = bezug is not None and ZWISCHEN_ZUSATZ in bezug.pfad.stem
+
+    def zwischenstand_knopf(text: str) -> list[ft.Control]:
+        """Der Knopf, solange eine Aufnahme läuft — sonst nichts (die Messung ist dann schon
+        gespeichert oder verworfen)."""
+        lauf = state.messlauf
+        if lauf is None or lauf.aufnahme is None:
+            return []
+
+        async def speichern() -> None:
+            try:
+                neu = await hrv_zwischenstand(state)
+            except OSError as fehler:
+                page.show_dialog(ft.SnackBar(ft.Text(f"Zwischenstand nicht gespeichert: {fehler}")))
+                return
+            if neu is not None:
+                state.neu_zeichnen()
+
+        return [
+            ft.FilledTonalButton(
+                text, icon=ft.Icons.SAVE_OUTLINED, on_click=speichern, data="zwischenstand"
+            )
+        ]
 
     def sportart_wechseln(sportart: str) -> None:
         """Nachträglich (Ben, 26.10.2026): Zeile und Tagebucheintrag, dann die Ansicht neu —
@@ -1371,9 +1497,24 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
             karte(
                 ft.Row(
                     controls=[
-                        sportart_knopf(page, strecke.sportart, sportart_wechseln),
+                        *(
+                            []
+                            if unterwegs
+                            else [sportart_knopf(page, strecke.sportart, sportart_wechseln)]
+                        ),
                         titel(SPORT_NAMEN.get(strecke.sportart, strecke.sportart)),
                     ]
+                ),
+                *(
+                    [
+                        hinweis(
+                            "Das Training läuft weiter — das ist der Stand von "
+                            f"{(strecke.ended_at or strecke.started_at).astimezone():%H:%M:%S}. "
+                            "„Neu laden“ oben holt den von jetzt."
+                        )
+                    ]
+                    if unterwegs
+                    else []
                 ),
                 ueberblick(e),
                 ft.Text(
@@ -1437,6 +1578,22 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
             dfa = _dfa_teil(hrv, strecke.started_at, bezug.beginn_s if bezug else None)
             if dfa is not None:
                 teile.append(karte(titel("DFA α1 — Überblick"), dfa))
+        if zwischen_stand and not unterwegs:
+            # Die Messung läuft noch, gezeigt wird ihr Zwischenstand (A21)
+            teile.append(
+                karte(
+                    titel("HRV-Messung läuft noch"),
+                    hinweis(
+                        "Herzfrequenz und DFA α1 stammen aus dem Zwischenstand von "
+                        f"{datetime.fromtimestamp(bezug.pfad.stat().st_mtime):%H:%M}. Die ganze "
+                        "Messung ersetzt ihn, sobald sie gespeichert ist."
+                        if bezug is not None and bezug.pfad.exists()
+                        else "Die ganze Messung ersetzt den Zwischenstand, sobald sie "
+                        "gespeichert ist."
+                    ),
+                    *zwischenstand_knopf("Neuen Zwischenstand speichern"),
+                )
+            )
         if eintrag is not None:  # nicht nur die ID — die Aufnahme kann gelöscht sein
             teile.append(
                 karte(
@@ -1454,8 +1611,10 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
                     titel("HRV"),
                     hinweis(
                         "Die HRV-Messung läuft noch. Herzfrequenz und DFA α1 je Kilometer "
-                        "erscheinen hier, sobald sie gespeichert ist."
+                        "erscheinen hier, sobald sie gespeichert ist — oder jetzt schon mit "
+                        "einem Zwischenstand: Die Messung läuft dabei weiter."
                     ),
+                    *zwischenstand_knopf("Zwischenstand speichern"),
                 )
             )
         teile.append(

@@ -59,7 +59,7 @@ from trainingsapp.core.hrv_einstellungen import (
     einstellungen_schreiben,
 )
 from trainingsapp.core.kurse import Kurs
-from trainingsapp.core.models import Exercise, Subject, jetzt, lokaler_tag
+from trainingsapp.core.models import Exercise, Strecke, Subject, jetzt, lokaler_tag
 from trainingsapp.core.paketdatei import klartext_aufraeumen
 from trainingsapp.core.pakete import Paket
 from trainingsapp.core.paketquelle import QUELLE_VORGABE, Pruefung, url_pruefen
@@ -400,6 +400,9 @@ class AppState:
     hf_stumm: Any = None
     #: HF-Vollbild: das Ablese-Intervall (von, bis, Bezug) — überlebt den Neuaufbau
     hf_intervall: dict[str, Any] | None = None
+    #: Das laufende Training „bis hier“ für die Auswertung (`/ausdauer/unterwegs`, A21) —
+    #: steht in keiner Tabelle, `views.ausdauer.unterwegs_oeffnen` setzt es
+    strecke_unterwegs: Strecke | None = None
     #: Einstellungen → HRV-Messung: Teil „Erweitert" aufgeklappt
     hrv_erweitert_offen: bool = False
     #: Notizen: Übungen zum Antippen eingeblendet, und aus welchem Plan

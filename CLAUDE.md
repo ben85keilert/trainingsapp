@@ -60,7 +60,11 @@ uv run python scripts/pruefe_flet_beispiele.py   # Flet-Skripte des Lernpfads oh
 in `../hrv-core`): `ruff format` nur auf die eigenen Dateien, nie auf einen ganzen Ordner
 (`ruff format --check .` zum Prüfen bleibt); **nie `git stash`** — es räumt die halbfertige
 Arbeit der anderen mit weg. Wer den Stand ohne die eigene Änderung braucht, nimmt
-`git worktree` oder `git show HEAD:<datei>`.
+`git worktree` oder `git show HEAD:<datei>`. Beim Committen die eigenen Dateien einzeln nennen,
+nie `git add -A`/`.`/Ordner oder `git commit -a`. **Ein Hook erzwingt das** (`.claude/settings.json`
+→ `.claude/hooks/sperre_git_ruff.py`, Fälle in `tests/test_hook_sperre.py`): Er sperrt diese
+Befehle für alle Sitzungen und Subagenten und nennt den Ersatz; er fängt Versehen ab, dicht ist
+er nicht (Variablen, Skripte).
 
 **APK über GitHub bauen** (Ben, 9.11.2026: „ab jetzt wieder git build automatisch“; hier
 eingetragen 10.11.2026): Nach einem Versions-Commit (Version in `pyproject.toml` und `uv.lock`
@@ -571,7 +575,13 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   ganze Messdatei **ersetzt** ihre Zwischenstände (`Gespeichert.ersetzt` →
   `views.messung.aufnahme_eintragen` nimmt Zeile und Dateien weg); am Zwischenstand ergänzte
   Notizen und Abschnitte kommen vorher in die Aufnahme, Zuschnitt und Korrektur nicht.
-  „Teil speichern, weiter aufnehmen“ (zwei Dateien, `hrv_core.zusammenfuegen`) steht daneben.
+  „Teil speichern, weiter aufnehmen“ (zwei Dateien) steht daneben; **„Zusammenfügen …“** über
+  der Liste der Aufzeichnungen macht aus Teilen wieder eine Datei (`…_zusammen.json`,
+  `devices.messlauf.teile_zusammenfuegen` über `hrv_core.zusammenfuegen`, Teile bleiben).
+  **Training:** läuft die Messung eines gespeicherten Trainings noch, liest die Auswertung
+  ihren jüngsten Zwischenstand (`ui.training.hrv_bezug`); „Bis hier auswerten“ zeigt das
+  **laufende** Training (`/ausdauer/unterwegs`, `AppState.strecke_unterwegs` — steht in keiner
+  Tabelle, nichts wird gespeichert).
   **Messansicht** (A21): Bereich Zeit · Frequenz · Nichtlinear und die Kurven-Chips stehen im
   Blatt „Fenster & Darstellung“ (`verlauf.Kurvenwahl`), nicht zwischen den Kurven; die
   Poincaré-Wolke ist dort abschaltbar, die Notizliste hat einen Griff für ihre Höhe.

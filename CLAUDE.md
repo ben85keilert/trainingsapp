@@ -53,6 +53,15 @@ uv run python scripts/pruefe_flet_beispiele.py   # Flet-Skripte des Lernpfads oh
 - Tests ersetzen weder die Durchsicht sicherheitsrelevanter Änderungen vor einem Release noch
   die Gerätetests (`docs/offene_fragen.md`, Abschnitt 2).
 
+**APK über GitHub bauen** (Ben, 9.11.2026: „ab jetzt wieder git build automatisch“; hier
+eingetragen 10.11.2026): Nach einem Versions-Commit (Version in `pyproject.toml` und `uv.lock`
+angehoben, im Betreff „(Version X.Y.Z)“) und **grüner CI dieses Commits** den Tag `v<Version>`
+setzen und pushen — der Workflow „APK“ baut daraus ein Vorab-Release. Den APK-Lauf abwarten und
+das Release mit Dateinamen nennen. Den **CI**-Lauf des Commits beobachten (`gh run list` zeigt
+daneben Dependabots „Graph Update“ — der zählt nicht). Scheitert der APK-Lauf an einem 504 von
+GitHubs Downloads, reicht `gh run rerun <id> --failed`; kein neuer Tag, keine neue Version.
+**Lokale Builds startet nur Ben.**
+
 **Flet-API nachschlagen:** `.mcp.json` registriert den MCP-Server `flet` (`uv run flet mcp`,
 Paket `flet-mcp` in der Gruppe `flet-dev`). Er kennt die API der installierten Flet-Version —
 vor dem Schreiben von `ui/`- oder Tutorial-Code dort prüfen statt aus dem Gedächtnis, denn

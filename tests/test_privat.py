@@ -50,7 +50,9 @@ def _paket(version: int = 1, text: str = "Langsam.") -> bytes:
 def test_verschluesseln_falscher_code_und_verfaelscht(tmp_path) -> None:
     daten = _paket() * 3000  # einige hundert kB; mehrere Blöcke prüft die Datei unten
     geheim = verschluesseln(daten, CODE)
-    assert ist_privat(geheim) and b"Max" not in geheim
+    # Ein langes Stück Klartext — drei Bytes wie b"Max" stehen in einigen hundert kB
+    # Zufall in etwa jedem vierzigsten Lauf (so fiel der Test am 10.11.2026 in der CI)
+    assert ist_privat(geheim) and "Übung für Max".encode() not in geheim
     assert entschluesseln(geheim, CODE) == daten
     assert verschluesseln(daten, CODE) != geheim  # frisches Salz
     with pytest.raises(CodeFalsch):

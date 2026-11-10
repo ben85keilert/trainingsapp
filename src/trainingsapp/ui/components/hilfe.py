@@ -386,13 +386,14 @@ Gibt es **mehrere gleichwertige Wege** (mehrere freie, oder mehrere, deren Bedin
 ist), fragt das Workout oben **„Wie geht es weiter?“** — hart wie weich, nach „Fertig“, am Ende
 der Zeit und beim Überspringen; vorher geht es nicht weiter.
 
-**Durcharbeiten** (mit Abzweigen): Das Workout folgt dem Pfad ab dem Start — was heute schon
+**Durcharbeiten:** Das Workout folgt dem Pfad ab dem Start — was heute schon
 gemacht ist, zählt nicht. Endet es vorzeitig (⏹, Abbrechen), merkt es sich die Stelle: heute
 steht im Start-Bild und auf „Heute“ **„Fortsetzen bei …“**, daneben „Von vorn“.
 
-**Workout · Liste** oben wechselt den Modus. „Trainieren“ öffnet einen Plan mit Abzweigen (oder
-mit dem Schalter „Workout“) als Workout. In der **Liste** übst du frei — mit Abzweigen nur, was
-schon **freigeschaltet** ist: Was hinter einer **Pflicht** liegt, ist gesperrt (🔒 „frei nach …“),
+**Workout · Liste** oben wechselt den Modus. „Trainieren“ öffnet ein Workout (Plan-Editor: „Art
+des Plans“) als Workout, eine Liste als Liste — das Symbol am Knopf zeigt es. In der **Liste**
+übst du frei — bei einem Workout nur, was schon **freigeschaltet** ist: Was hinter einer
+**Pflicht** liegt, ist gesperrt (🔒 „frei nach …“),
 bis ein Workout die Pflicht einmal erfüllt hat, wie die Kapitel eines Kurses. Zurücksetzen geht
 im Reiter „Ablauf“.
 
@@ -402,10 +403,14 @@ Läuft eine Aufnahme, wird das Workout ein Abschnitt in ihr — die Übungen lie
 """
 
 ABLAUF_MD = """\
-**Der Reihe nach** (Reiter „Plan“): Die Übungen kommen in der Reihenfolge der Liste. Je Übung
-sagt „Weiter, wenn …“ unter „Einstellen“, wann es weitergeht — sonst bleibst du bei der Übung.
+**Liste oder Workout** (Reiter „Plan“, „Art des Plans“): Eine **Liste** hakst du frei ab — in
+jeder Reihenfolge, ohne Bedingungen. Ein **Workout** führt Schritt für Schritt und hat den
+Reiter **„Ablauf“**: Dort steht, wann es weitergeht und wohin.
 
-**Mit Abzweigen** bringt den Reiter **„Ablauf“**: Du zeichnest, wie es weitergeht.
+Am Anfang **folgt der Ablauf der Liste**: Übung für Übung in ihrer Reihenfolge — eine neue
+Planübung gehört dazu, Umordnen ordnet das Workout um. Sobald du im Ablauf etwas änderst (ein
+Abzweig, eine Frage, ein anderes Ziel), ist es ein **eigener Ablauf**: Neue Planübungen stehen
+dann in der Palette, bis du sie einsetzt.
 
 - **Palette** oben: die Übungen des Plans mit ihrer **Nummer** (die Stelle in der Liste). Eine
   Übung darf mehrmals im Plan stehen — „+“ fügt eine hinzu. Die Palette scrollt waagerecht;
@@ -415,7 +420,8 @@ sagt „Weiter, wenn …“ unter „Einstellen“, wann es weitergeht — sonst
   Slot**, **Beiname**, **Aus dem Ablauf nehmen** (Lücke schließen oder die Reihe danach
   mitnehmen — die Übung bleibt im Plan und in der Palette). **Aus dem Plan** nimmt sie erst
   **Gedrückthalten** an ihrer Kachel in der Palette.
-- Der **Punkt** in der Mitte einer Verbindung öffnet ihre Wege — gleich auf diesem Weg.
+- Alle Wege einer Übung beginnen an ihrem **Abzweig** — dem Punkt unter ihr. **Tipp auf den
+  Abzweig** öffnet alle ihre Wege, **Tipp auf den Punkt eines Wegs** nur diesen.
 - **Wege einstellen** zeigt alle Wege der Übung untereinander: *Kommt von* und *Weiter zu* —
   je Weg das Ziel, *wann* (frei, Zeit ab, Wiederholungen, in einer Zeit, Skala), anbieten oder
   von selbst, Pflicht, Beschriftung („Rücken tut weh“). Dasselbe steht in „Im Plan einstellen“.
@@ -430,7 +436,7 @@ sagt „Weiter, wenn …“ unter „Einstellen“, wann es weitergeht — sonst
 
 Übungen, die nur über einen Abzweig erreichbar sind, kommen **bei Bedarf** dran — nie von selbst.
 
-**Freischalten:** Ein Plan mit Abzweigen öffnet mit „Trainieren“ als Workout und wird dort
+**Freischalten:** Ein Workout öffnet mit „Trainieren“ als Workout und wird dort
 durchgearbeitet. In der **Liste** ist nur frei, was keine noch nicht erfüllte **Pflicht**
 versperrt; jede Pflicht, die ein Workout einmal erfüllt, schaltet frei, was dahinter liegt.
 **Freischaltungen zurücksetzen …** (unter dem Bild) sperrt es wieder — Einträge bleiben.
@@ -471,7 +477,7 @@ nächsten Update die neue Fassung; deine eigene bleibt.
 """
 
 THEMEN: dict[str, tuple[str, str, str]] = {
-    "ablauf": ("Ablauf", ABLAUF_MD, "Der Reihe nach oder mit Abzweigen"),
+    "ablauf": ("Ablauf", ABLAUF_MD, "Liste oder Workout, Wege und Bedingungen"),
     "timer_editor": ("Timer bearbeiten", TIMER_EDITOR_MD, "Zeiten, Klänge, Teile, Runden"),
     "workout": ("Workout", WORKOUT_MD, "Workout: Übergang, Bedingungen, Wege"),
     "notation": ("So wird eingegeben", NOTATION_MD, "Wie gebe ich ein?"),

@@ -40,7 +40,6 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import ablauf as ab
-from trainingsapp.core import bedingung as bd
 from trainingsapp.core import varianten as var
 from trainingsapp.core import zaehlen as zl
 from trainingsapp.core.anhaenge import BILD, VIDEO, Ziel
@@ -88,7 +87,6 @@ from trainingsapp.core.uebung_timer import TimerWahl, timer_fuer
 from trainingsapp.core.zaehlen import VORLAGE_AUTO, VORLAGEN_ANGEBOT, SensorWahl, vorlagen_angebot
 from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
-from trainingsapp.ui.components.bedingung_form import bedingung_karte as bedingungs_karte
 from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
@@ -515,8 +513,8 @@ def plan_einstellen(
         return timer_fuer(uebung, plan_jetzt, eingestellt()) is None
 
     def bedingung_karte() -> ft.Control:
-        """„Weiter, wenn …“ — der Reihe nach: Herkunft und Ziel mit Nummer, darunter die
-        Bedingung; mit Abzweigen: alle Wege der Übung wie im Reiter „Ablauf“ (P108)."""
+        """Im Workout: alle Wege der Übung wie im Reiter „Ablauf“ (P108) — in einer Liste nur
+        der Hinweis, dass es dort keine Bedingungen gibt."""
         if plan_jetzt.ablauf.an:
             return ft.Container(
                 padding=ft.Padding.symmetric(horizontal=12, vertical=10),
@@ -532,37 +530,50 @@ def plan_einstellen(
                     merken=wege_merken,
                 ),
             )
-        eigen = not bed_stand["b"].leer
-
-        def zurueck() -> None:
-            bed_stand["b"] = Bedingung()
-            neu_zeichnen()
-
-        def setzen(neu: Bedingung) -> None:
-            bed_stand["b"] = neu
-
-        ids = [it.id for it in plan_jetzt.items]
-        n = ab.nummern(ids)
-        stelle = n.get(item.id, 0) - 1
-        alle = namen()
-        vorher = alle.get(ids[stelle - 1]) if 0 < stelle < len(ids) else None
-        danach = alle.get(ids[stelle + 1]) if 0 <= stelle < len(ids) - 1 else None
-        zeilen = [
-            ft.Text(f"Kommt von: {vorher}" if vorher else "Kommt von: Start des Workouts", size=13),
-            ft.Text(f"Weiter zu: {danach}" if danach else "Danach: Ende des Workouts", size=13),
-        ]
-        hinweise = []
-        if bed_stand["b"].art == bd.ZEIT and ohne_timer():
-            hinweise.append(
-                "Die Übung hat keinen Timer — „Zeit ab“ gilt, sobald „Fertig“ getippt ist."
-            )
-        return bedingungs_karte(
-            lambda: bed_stand["b"],
-            setzen,
-            neu_zeichnen,
-            kopf=[schild(eigen, zurueck if eigen else None)],
-            kopf_zeilen=zeilen,
-            hinweise=hinweise,
+        # Eine Liste hat keine Bedingungen (Ben, 10.11.2026: „Bedingungen machen bei der linearen
+        # Arbeitsweise wenig Sinn, da man sich einfach dorthin klicken kann, wo man will“) —
+        # was früher hier eingestellt wurde, ruht und gilt wieder, sobald der Plan ein Workout ist
+        ruht = bed_stand["b"].kurztext() if not bed_stand["b"].leer else ""
+        return ft.Container(
+            padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            border_radius=14,
+            bgcolor=KARTE,
+            data="bedingung_nur_workout",
+            content=ft.Column(
+                spacing=6,
+                controls=[
+                    ft.Row(
+                        spacing=8,
+                        controls=[
+                            ft.Icon(ft.Icons.FORMAT_LIST_BULLETED, size=18, opacity=0.7),
+                            ft.Text(
+                                "Dieser Plan ist eine Liste — jede Übung ist frei.",
+                                size=14,
+                                weight=ft.FontWeight.W_600,
+                                expand=True,
+                            ),
+                        ],
+                    ),
+                    ft.Text(
+                        "Bedingungen und Wege gibt es nur im Workout: im Plan-Editor „Art des "
+                        "Plans“ auf „Workout“ stellen — dann stehen sie hier und im Reiter "
+                        "„Ablauf“.",
+                        size=13,
+                        opacity=0.75,
+                    ),
+                    *(
+                        [
+                            ft.Text(
+                                f"Ruht: weiter, wenn {ruht} — gilt wieder im Workout.",
+                                size=12,
+                                opacity=0.6,
+                            )
+                        ]
+                        if ruht
+                        else []
+                    ),
+                ],
+            ),
         )
 
     # -- Aufbau --------------------------------------------------------------------------
@@ -1114,7 +1125,7 @@ def plan_einstellen(
             ),
             sensor_karte(),
             abschnitt(
-                "WEGE IM ABLAUF" if plan_jetzt.ablauf.an else "WEITER, WENN …",
+                "WEGE IM ABLAUF" if plan_jetzt.ablauf.an else "BEDINGUNGEN",
                 hilfe_knopf(page, thema="ablauf" if plan_jetzt.ablauf.an else "workout"),
             ),
             bedingung_karte(),

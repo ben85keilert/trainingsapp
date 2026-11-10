@@ -43,6 +43,7 @@ from trainingsapp.ui.components.takt_blatt import takt_blatt, takt_zeile_text
 from trainingsapp.ui.components.timer_wahl import kopie_von, timer_waehlen
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.ablauf import ablauf_ausschalten, ablauf_einschalten
 from trainingsapp.ui.views.timer import timer_knopf
 
 #: Welche Abweichungen der Uhrenplan zeigt (der Rest steht in „Im Plan einstellen“)
@@ -133,8 +134,13 @@ def plan_uhren_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.Vi
             )
 
         def workout_geschaltet(e: ft.Event[ft.Switch]) -> None:
-            state.plaene.workout_setzen(p.id, bool(e.control.value), p.uebergang_hart)
-            neu_zeichnen()
+            # Derselbe Schalter wie „Liste | Workout“ im Reiter „Plan“ (Ben, 10.11.2026:
+            # Workout = Ablauf) — mit ihm kommt und geht der Reiter „Ablauf“
+            if e.control.value:
+                ablauf_einschalten(state, p.id)
+            else:
+                ablauf_ausschalten(state, p.id)
+            state.neu_zeichnen()
 
         def uebergang_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
             hart = bool(e.control.selected) and e.control.selected[0] == "hart"
@@ -169,12 +175,8 @@ def plan_uhren_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.Vi
         return karte(
             kartentitel("Für den ganzen Plan"),
             ft.Switch(
-                # Mit Abzweigen ist der Plan immer ein Workout (P169) — der Schalter zeigt es nur
-                label="Workout — mit Abzweigen immer"
-                if p.ablauf.an
-                else "Workout — der Plan läuft von vorn bis hinten",
-                value=p.workout or p.ablauf.an,
-                disabled=p.ablauf.an,
+                label="Workout — Schritt für Schritt, mit Reiter „Ablauf“",
+                value=p.ablauf.an,
                 on_change=workout_geschaltet,
             ),
             ft.SegmentedButton(

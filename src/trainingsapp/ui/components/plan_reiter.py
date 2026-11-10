@@ -1,9 +1,9 @@
 """Die Reiter des Plan-Editors — Plan · Uhren · Ablauf (Ben, 8.11.2026, Skizze E1).
 
-Der Plan-Editor („Plan“: Name, Tage, Liste der Übungen, der Schalter „Der Reihe nach | Mit
-Abzweigen“), der Uhrenplan (K3) und der Reiter „Ablauf“ (G3) sind eigene Ansichten unter seiner
+Der Plan-Editor („Plan“: Name, Tage, Liste der Übungen, der Schalter „Liste |
+Workout“), der Uhrenplan (K3) und der Reiter „Ablauf“ (G3) sind eigene Ansichten unter seiner
 Route — alle drei zeigen oben dieselbe Reiterzeile, ein Tipp wechselt (Ben, 8.11.2026: „setze
-automatisch zwei Reiter Plan – Uhren“). „Ablauf“ erscheint erst mit „Mit Abzweigen“.
+automatisch zwei Reiter Plan – Uhren“). „Ablauf“ erscheint erst mit „Workout“.
 """
 
 from __future__ import annotations

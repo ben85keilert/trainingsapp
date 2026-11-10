@@ -93,7 +93,9 @@ def schritte_fuer(plan: Plan, katalog: Mapping[str, Exercise]) -> list[Schritt]:
                 uebung.name,
                 profil,
                 feld,
-                item.bedingung,
+                # Bedingungen gibt es nur im Workout (Ben, 10.11.2026) — läuft eine Liste „für
+                # heute“ als Workout, ist jede Übung frei; was eingestellt war, ruht
+                item.bedingung if plan.ablauf.an else Bedingung(),
                 beiname=item.beiname,
             )
         )
@@ -104,9 +106,9 @@ def schritte_fuer(plan: Plan, katalog: Mapping[str, Exercise]) -> list[Schritt]:
 
 
 def startet_als_workout(plan: Plan) -> bool:
-    """Öffnet „Trainieren“ den Plan als Workout? Mit dem Schalter „Workout“ und immer mit einem
-    gezeichneten Ablauf (Ben, 9.11.2026, P169: der Ablauf hat Vorrang, die Liste ist einen Tipp
-    entfernt) — sonst die Liste.
+    """Öffnet „Trainieren“ den Plan als Workout? Ein Workout hat einen Ablauf (Ben, 10.11.2026:
+    Workout = Ablauf; beim Laden bekommt ein Plan mit dem Schalter ``workout`` die Kette seiner
+    Liste, `core.ablauf.fuer_plan`) — die Liste ist einen Tipp entfernt (P169). Sonst die Liste.
 
     >>> from trainingsapp.core.ablauf import Ablauf
     >>> startet_als_workout(Plan(name="a")), startet_als_workout(Plan(name="b", workout=True))

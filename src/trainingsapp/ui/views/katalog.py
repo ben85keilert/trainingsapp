@@ -46,14 +46,22 @@ def _untertitel(uebung: Exercise) -> ft.Control | None:
     return ft.Column(spacing=1, tight=True, controls=zeilen) if zeilen else None
 
 
-def trainieren_knopf(on_click: Callable[[], object], tooltip: str) -> ft.Control:
-    """Der Knopf „Trainieren“ — gleich in der Übungs- und in der Planliste."""
+def trainieren_knopf(
+    on_click: Callable[[], object], tooltip: str, *, workout: bool = False
+) -> ft.Control:
+    """Der Knopf „Trainieren“ — gleich in der Übungs- und in der Planliste. ``workout``: der
+    Plan öffnet als Workout (geführt, Schritt für Schritt) statt als Liste — dasselbe Symbol
+    wie im Umschalter „Workout · Liste“ (Ben, 10.11.2026)."""
     return ft.FilledTonalButton(
         content=ft.Row(
             tight=True,
             spacing=4,
-            controls=[ft.Icon(ft.Icons.PLAY_ARROW, size=18), ft.Text("Trainieren")],
+            controls=[
+                ft.Icon(ft.Icons.PLAYLIST_PLAY if workout else ft.Icons.PLAY_ARROW, size=18),
+                ft.Text("Trainieren"),
+            ],
         ),
+        data="workout" if workout else "liste",
         tooltip=tooltip,
         on_click=on_click,
     )

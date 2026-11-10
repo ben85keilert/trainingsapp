@@ -15,6 +15,7 @@ import flet as ft
 
 from trainingsapp.core.models import Plan
 from trainingsapp.core.plaene import erledigte, tage_text
+from trainingsapp.core.plan_durchlauf import startet_als_workout
 from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.scroll import scroll_merken
@@ -100,6 +101,8 @@ def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
         # Tipp = bearbeiten, „Trainieren“ daneben; Zielsymbol oder Gedrückthalten zeigt
         # Üben · Bearbeiten · Ablauf starten (Ben, 28.10.2026)
         haupt = zl.Ziel(zl.BEARBEITEN, oeffner(plan.id))
+        # Öffnet „Trainieren“ das Workout oder die Liste? Das Symbol sagt es (Ben, 10.11.2026)
+        als_workout = startet_als_workout(plan) and plan.id not in state.plan_als_plan
         weitere = plan_ziele(
             page, state, plan, hier={zl.BEARBEITEN}, ueben=heute_trainieren(page, state, plan.id)
         )
@@ -117,7 +120,12 @@ def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
                 controls=[
                     trainieren_knopf(
                         heute_trainieren(page, state, plan.id),
-                        "Heute trainieren — auch wenn der Plan heute nicht ansteht",
+                        (
+                            "Heute als Workout trainieren — Schritt für Schritt"
+                            if als_workout
+                            else "Heute trainieren — auch wenn der Plan heute nicht ansteht"
+                        ),
+                        workout=als_workout,
                     ),
                     zl.zielsymbol(haupt, on_click=blatt),
                 ],
@@ -139,8 +147,8 @@ def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
         padding=ft.Padding.only(left=16, right=16, top=10, bottom=4),
         content=ft.Text(
             "Antippen = bearbeiten (Übungen, Ziele, aktiv, Wochentage). "
-            "„Trainieren“ nimmt den Plan für heute auf und öffnet ihn zum Üben — mit Abzweigen "
-            "als Workout, oben wechselt „Workout · Liste“.",
+            "„Trainieren“ nimmt den Plan für heute auf und öffnet ihn zum Üben — ein Workout "
+            "Schritt für Schritt (anderes Symbol), oben wechselt „Workout · Liste“.",
             size=12,
             opacity=0.6,
         ),

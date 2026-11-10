@@ -11,10 +11,13 @@ blaue Karte, leere Slots gestrichelt (`ft.DragTarget`).
 nicht. Ein Knoten steht mittig über seinen Kindern (`core.ablauf.layout`). Die **Nummer** am
 Knoten ist seine Stelle in der Planliste (Frage 5: nur ein Alias der festen ID).
 
-Kanten sind Linien mit Pfeil: der Ablauf kräftig, Wege zu Bedarfsübungen gestrichelt, ``◀ zurück``
-gepunktet als Bogen, Schleifen als Bogen am Knoten. Das **Etikett** (Auslöser, Beschriftung,
-Pflicht) sitzt nahe am Ziel, wo die Linien auseinanderlaufen; ein freier Weg ohne Beschriftung hat
-keins. **Vernebeln**: Knoten in ``vernebelt`` und ihre Kanten stehen auf 25 %.
+Die Wege verlassen eine Übung **wie bei einem Nerv** (Ben, 10.11.2026): ein kurzer Stamm nach
+unten, dann der **Abzweig** — ein Knoten zum Antippen (``on_abzweig``: alle Wege dieser Übung) —,
+von dort die einzelnen Wege, jeder mit seinem **Griff** (Punkt und Etikett mit Auslöser,
+Beschriftung, Pflicht; ``on_kante``: nur dieser Weg). Der Ablauf kräftig, Wege zu Bedarfsübungen
+gestrichelt, ``◀ zurück`` gepunktet; Rückwege laufen in Gassen zwischen den Spalten. Wo was liegt,
+rechnet `core.ablauf_geometrie` — hier wird nur gezeichnet. **Vernebeln**: Knoten in
+``vernebelt`` und ihre Kanten stehen auf 25 %.
 
 Für den Reiter, der die Fläche einmal baut und dann nur ihren Inhalt tauscht (die Ansicht behält
 Zoom und Lage): `zeichnung` + `aktualisieren`; für ein Blatt (Workout): `ablaufbild`.
@@ -34,23 +37,27 @@ import flet as ft
 import flet.canvas as cv
 
 from trainingsapp.core import ablauf as ab
+from trainingsapp.core import ablauf_geometrie as geo
 from trainingsapp.core.ablauf import Ablauf, Kante, Lage
+from trainingsapp.core.ablauf_geometrie import (
+    EBENE,
+    FRAGE_B,
+    FRAGE_H,
+    KNOTEN,
+    NAME_B,
+    RAND,
+    RAND_X,
+    SPALTE,
+    START_H,
+)
 from trainingsapp.core.models import Exercise, PlanItem
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 
-#: Maße der Zeichnung (px, vor dem Zoom)
-KNOTEN = 64
-SPALTE = 140
-EBENE = 156
-RAND = 24
-#: links mehr Platz: Schleifen und „◀ zurück“ zeichnen ihren Bogen links am Knoten
-RAND_X = 76
-START_H = 36
-FRAGE_B = 120
-FRAGE_H = 66
-ETIKETT_B = 120
-#: der Punkt einer Verbindung und seine Fläche zum Antippen (Ben, 9.11.2026)
+#: größte Breite eines Etiketts neben seinem Griff
+ETIKETT_B = 108
+#: der Punkt einer Verbindung, der Abzweig einer Übung und ihre Fläche zum Antippen
 PUNKT = 14
+ABZWEIG = 20
 GRIFF = 44
 #: so durchsichtig wird Vernebeltes
 NEBEL = 0.25
@@ -125,6 +132,7 @@ def zeichnung(
     on_knoten: Callable[[str], Any] | None = None,
     on_knoten_lang: Callable[[str], Any] | None = None,
     on_kante: Callable[[Kante], Any] | None = None,
+    on_abzweig: Callable[[str], Any] | None = None,
     on_slot: Callable[[Slot, str], Any] | None = None,
     on_start: Callable[[], Any] | None = None,
     on_start_ablegen: Callable[[str], Any] | None = None,
@@ -133,7 +141,8 @@ def zeichnung(
     ``laufend`` leuchtet, ``erledigt`` ist blass, ``vernebelt`` auf 25 %, ``gewaehlt`` hat einen
     Rahmen; ``zaehlung`` macht oft gegangene Kanten dicker; ``slots`` sind leere Plätze —
     ``on_slot(slot, item_id)`` läuft, wenn eine Planübung aus der Palette (Draggable mit ``data``
-    = ID) hineinfällt, ``on_start_ablegen(item_id)`` beim Ablegen auf „Start“."""
+    = ID) hineinfällt, ``on_start_ablegen(item_id)`` beim Ablegen auf „Start“. ``on_kante``: der
+    Griff eines Wegs, ``on_abzweig(knoten)``: der Abzweig einer Übung (alle ihre Wege)."""
     ids = [it.id for it in items]
     nummer = ab.nummern(ids)
     namen = {it.id: katalog[it.exercise_id].name for it in items if it.exercise_id in katalog}
@@ -146,23 +155,27 @@ def zeichnung(
         if oben is not None:
             belegt = [*lage.values(), *slot_lage.values()]
             slot_lage[n] = ab.freie_lage(belegt, oben.x, oben.ebene + 1)
-    alle = [*lage.values(), *slot_lage.values()]
-    x_min = min((v.x for v in alle), default=0.0)
-    x_max = max((v.x for v in alle), default=0.0)
-    ebene_max = max((v.ebene for v in alle), default=0)
     nebel = set(vernebelt)
     fertig = set(erledigt)
     bedarf = set(ab.bedarf(ablauf, ids))
 
-    def mitte(lg: Lage) -> tuple[float, float]:
-        return (
-            RAND_X + (lg.x - x_min) * SPALTE + KNOTEN / 2,
-            RAND + START_H + 22 + lg.ebene * EBENE + KNOTEN / 2,
-        )
+    def text_hoehe(it: PlanItem) -> float:
+        """So hoch ist die Beschriftung unter dem Bild etwa — der Stamm beginnt darunter."""
+        zeilen = 2 if len(namen.get(it.id, "")) > 17 else 1
+        return 4 + zeilen * 15 + (14 if it.beiname else 0) + (14 if it.id in bedarf else 0)
 
-    mitten = {k: mitte(v) for k, v in lage.items()}
-    breite = RAND_X + (x_max - x_min) * SPALTE + max(KNOTEN, FRAGE_B) + RAND + 80
-    hoehe = RAND + START_H + 22 + (ebene_max + 1) * EBENE + 40
+    g = geo.geometrie(
+        ablauf,
+        lage,
+        beschriftung={it.id: text_hoehe(it) for it in items},
+        weitere=list(slot_lage.values()),
+        mit_abzweig=[s.von for s in slots],
+    )
+    mitten = g.mitten
+    breite, hoehe = g.breite, g.hoehe
+
+    def mitte(lg: Lage) -> tuple[float, float]:
+        return geo.ort(lg, g.x_min)
 
     formen: list[cv.Shape] = []
     etiketten: list[ft.Control] = []
@@ -228,9 +241,31 @@ def zeichnung(
             color=ft.Colors.ON_TERTIARY_CONTAINER if warm else None,
         )
         rand = 4  # vom Rand der Blase bis zum Punkt
+        hoch: float = GRIFF
         if not text:
             left, breite, ausrichtung = x - GRIFF / 2, GRIFF, ft.Alignment.CENTER
             inhalt: ft.Control = punkt
+        elif seite == 0:
+            # Stummel („◀ zurück“, „Ende“): der Punkt, die Beschriftung mittig darunter
+            breite, hoch = 88, GRIFF + 26
+            left, ausrichtung = x - breite / 2, ft.Alignment.TOP_CENTER
+            inhalt = ft.Column(
+                spacing=2,
+                tight=True,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Container(height=(GRIFF - PUNKT) / 2 - 2),
+                    punkt,
+                    ft.Container(
+                        padding=ft.Padding.symmetric(horizontal=6, vertical=2),
+                        border_radius=10,
+                        bgcolor=ft.Colors.TERTIARY_CONTAINER
+                        if warm
+                        else ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                        content=aufschrift,
+                    ),
+                ],
+            )
         else:
             links = seite < 0
             inhalt = ft.Container(
@@ -257,106 +292,69 @@ def zeichnung(
                 left=left,
                 top=y - GRIFF / 2,
                 width=breite,
-                height=GRIFF,
+                height=hoch,
                 alignment=ausrichtung,
                 opacity=NEBEL if dimm else 1.0,
                 on_click=(lambda _e, kk=k: on_kante(kk)) if on_kante is not None else None,
                 content=inhalt,
-                tooltip=text or "Weg einstellen",
+                tooltip=(text or "Weg") + (" — nur diesen Weg einstellen" if on_kante else ""),
                 data=("kante", k.von, k.nach),
             )
         )
 
-    def bezier(
-        p0: tuple[float, float],
-        p1: tuple[float, float],
-        p2: tuple[float, float],
-        p3: tuple[float, float],
-        t: float,
-    ) -> tuple[float, float]:
-        u = 1 - t
-        return (
-            u**3 * p0[0] + 3 * u**2 * t * p1[0] + 3 * u * t**2 * p2[0] + t**3 * p3[0],
-            u**3 * p0[1] + 3 * u**2 * t * p1[1] + 3 * u * t**2 * p2[1] + t**3 * p3[1],
+    def linie(kurven: Sequence[geo.Kurve], farbe_: ft.Paint) -> cv.Shape:
+        teile: list[Any] = [cv.Path.MoveTo(*kurven[0].p0)]
+        teile.extend(cv.Path.CubicTo(*c.p1, *c.p2, *c.p3) for c in kurven)
+        return cv.Path(teile, paint=farbe_)
+
+    # Stamm und Abzweig: alle Wege einer Übung verlassen sie an einem Punkt
+    abzweig_punkte: list[ft.Control] = []
+    for knoten_id, (oben_p, unten_p) in g.staemme.items():
+        dimm = knoten_id in nebel
+        farbe = ft.Colors.SECONDARY if ablauf.frage(knoten_id) is not None else ft.Colors.PRIMARY
+        formen.append(
+            cv.Path(
+                [cv.Path.MoveTo(*oben_p), cv.Path.LineTo(*unten_p)],
+                paint=ft.Paint(
+                    color=ft.Colors.with_opacity(NEBEL if dimm else 1.0, farbe),
+                    stroke_width=3,
+                    style=ft.PaintingStyle.STROKE,
+                    stroke_cap=ft.StrokeCap.ROUND,
+                ),
+            )
+        )
+        anzahl = len(ablauf.von(knoten_id))
+        abzweig_punkte.append(
+            ft.Container(
+                left=unten_p[0] - GRIFF / 2,
+                top=unten_p[1] - GRIFF / 2,
+                width=GRIFF,
+                height=GRIFF,
+                alignment=ft.Alignment.CENTER,
+                opacity=NEBEL if dimm else 1.0,
+                on_click=(
+                    (lambda _e, kk=knoten_id: on_abzweig(kk)) if on_abzweig is not None else None
+                ),
+                tooltip=(f"{anzahl} Wege" if anzahl != 1 else "1 Weg")
+                + (" — alle einstellen" if on_abzweig is not None else ""),
+                data=("abzweig", knoten_id),
+                content=ft.Container(
+                    width=ABZWEIG,
+                    height=ABZWEIG,
+                    border_radius=ABZWEIG / 2,
+                    bgcolor=farbe,
+                    border=ft.Border.all(3, ft.Colors.SURFACE),
+                ),
+            )
         )
 
-    for k in ablauf.kanten:
-        if k.von not in mitten:
-            continue
+    for w in g.wege:
+        k = w.kante
         dimm = k.von in nebel or k.nach in nebel
-        x0, y0 = mitten[k.von]
-        farbe = farbe_fuer(k)
-        breit = FRAGE_B / 2 if ablauf.frage(k.von) is not None else KNOTEN / 2
-        if k.schleife:
-            r = KNOTEN / 2 + 14
-            formen.append(
-                cv.Path(
-                    [
-                        cv.Path.MoveTo(x0 - breit, y0 + 14),
-                        cv.Path.CubicTo(
-                            x0 - r - 24, y0 + 14, x0 - r - 24, y0 - 14, x0 - breit, y0 - 14
-                        ),
-                    ],
-                    paint=paint(k, dimm),
-                )
-            )
-            formen.append(pfeil(x0 - breit, y0 - 14, 0.0, farbe, dimm))
-            etikett(k, x0 - r - 12, y0 + 34, dimm, -1)
-            continue
-        if k.zurueck:
-            formen.append(
-                cv.Path(
-                    [
-                        cv.Path.MoveTo(x0 - breit, y0),
-                        cv.Path.CubicTo(x0 - 44, y0, x0 - 44, y0 - 64, x0 - 26, y0 - 74),
-                    ],
-                    paint=paint(k, dimm),
-                )
-            )
-            formen.append(pfeil(x0 - 26, y0 - 74, -math.radians(60), farbe, dimm))
-            etikett(k, x0 - 40, y0 - 40, dimm, -1)
-            continue
-        if k.zum_ende:
-            unten = y0 + KNOTEN / 2 + 40
-            formen.append(
-                cv.Path(
-                    [cv.Path.MoveTo(x0, y0 + KNOTEN / 2), cv.Path.LineTo(x0, unten)],
-                    paint=paint(k, dimm),
-                )
-            )
-            formen.append(pfeil(x0, unten, math.radians(90), farbe, dimm))
-            etikett(k, x0, unten + 16, dimm)
-            continue
-        if k.nach not in mitten:
-            continue
-        x1, y1 = mitten[k.nach]
-        if y1 > y0:
-            # abwärts: Unterkante zur Oberkante als weiche Kurve; der Punkt in der Mitte
-            a = (x0, y0 + KNOTEN / 2)
-            b = (x1, y1 - KNOTEN / 2 - 6)
-            c1, c2 = (a[0], a[1] + 50), (b[0], b[1] - 50)
-            formen.append(
-                cv.Path(
-                    [cv.Path.MoveTo(*a), cv.Path.CubicTo(*c1, *c2, *b)],
-                    paint=paint(k, dimm),
-                )
-            )
-            formen.append(pfeil(b[0], b[1], math.radians(90), farbe, dimm))
-            ex, ey = bezier(a, c1, c2, b, 0.5)  # die Mitte zwischen den Ebenen
-            etikett(k, ex, ey, dimm, -1 if x1 < x0 else 1)
-        else:
-            # aufwärts oder gleiche Ebene: rechts herum zurück
-            a = (x0 + breit, y0)
-            b = (x1 + KNOTEN / 2 + 6, y1)
-            aus = max(x0, x1) + KNOTEN / 2 + 48
-            formen.append(
-                cv.Path(
-                    [cv.Path.MoveTo(*a), cv.Path.CubicTo(aus, a[1], aus, b[1], b[0], b[1])],
-                    paint=paint(k, dimm),
-                )
-            )
-            formen.append(pfeil(b[0], b[1], math.radians(180), farbe, dimm))
-            etikett(k, aus, (a[1] + b[1]) / 2, dimm)
+        formen.append(linie(w.kurven, paint(k, dimm)))
+        if w.spitze is not None:
+            formen.append(pfeil(*w.spitze, farbe_fuer(k), dimm))
+        etikett(k, *w.griff, dimm, w.seite)
 
     # Start → Startknoten
     start = ablauf.startknoten(ids)
@@ -381,12 +379,12 @@ def zeichnung(
         if lg is None or slot.von not in mitten:
             continue
         x, y = mitte(lg)
-        x0, y0 = mitten[slot.von]
+        x0, y0 = g.abzweige[slot.von]
         formen.append(
             cv.Path(
                 [
-                    cv.Path.MoveTo(x0, y0 + KNOTEN / 2),
-                    cv.Path.CubicTo(x0, y0 + 50, x, y - 54, x, y - 24),
+                    cv.Path.MoveTo(x0, y0),
+                    cv.Path.CubicTo(x0, y0 + 50, x, y - 74, x, y - 24),
                 ],
                 paint=ft.Paint(
                     color=ft.Colors.OUTLINE,
@@ -533,15 +531,15 @@ def zeichnung(
                     weight=ft.FontWeight.W_600,
                     text_align=ft.TextAlign.CENTER,
                     max_lines=2,
-                    width=SPALTE - 24,
+                    width=NAME_B,
                 ),
                 *unterzeile,
             ],
         )
         knoten = ft.Container(
-            left=x - (SPALTE - 24) / 2,
+            left=x - NAME_B / 2,
             top=y - KNOTEN / 2,
-            width=SPALTE - 24,
+            width=NAME_B,
             opacity=NEBEL if dimm else (0.55 if it.id in fertig and it.id != laufend else 1.0),
             animate_opacity=ft.Animation(400, ft.AnimationCurve.EASE_IN_OUT),
             content=gesten(it.id, inhalt),
@@ -649,7 +647,9 @@ def zeichnung(
                 data=("slot", slot.von),
             )
         )
-    schichten.extend(etiketten)  # über allem, damit sie antippbar bleiben
+    # über allem, damit sie antippbar bleiben: erst die Abzweige, darüber die Griffe der Wege
+    schichten.extend(abzweig_punkte)
+    schichten.extend(etiketten)
     return Zeichnung(schichten, breite, hoehe, mitten, knoten_controls)
 
 
@@ -719,6 +719,7 @@ async def abspielen(page: Any, bild: Bild, pfad: Sequence[str], schritt_s: float
 
 
 __all__ = [
+    "ABZWEIG",
     "EBENE",
     "KNOTEN",
     "NEBEL",

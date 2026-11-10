@@ -151,6 +151,16 @@ async def test_workout_start_weich_ueberzeit_weiter_und_ende(umgebung) -> None:
     )
     uhren = [x for x in _alle(laufend) if isinstance(x, ft.Text) and x.size == 64]
     assert uhren and not any(u in list(_alle(scroll)) for u in uhren)
+    # Die Knöpfe des Laufs: eine Zeile unter der Zeit, fest wie sie — Pause, Überspringen und
+    # Abbrechen nur als Symbol; das „i“ steht allein in der Titelleiste (Ben, 10.11.2026)
+    zeile = next(x for x in _alle(laufend) if isinstance(x, ft.Row) and x.data == "steuerzeile")
+    assert [type(x).__name__ for x in zeile.controls] == [
+        "FilledTonalIconButton",
+        "FilledButton",
+        "OutlinedIconButton",
+        "IconButton",
+    ]
+    assert not any(x is zeile for x in _alle(scroll))
     # Zeit ab → Überzeit: die Zeit zählt ins Minus, „Weiter: Katze-Kuh“
     await _sekunden(state, uhr, gurt, 10)
     assert paar[1].phase == UEBERZEIT
@@ -165,7 +175,7 @@ async def test_workout_start_weich_ueberzeit_weiter_und_ende(umgebung) -> None:
     # bei jedem Schritt, eine Stoppuhr läuft; „Fertig“ beendet hier das Workout
     assert _ebenen(ohne_timer) == ["Takt", "Bewegung", "HF", "Kurve"]
     assert paar[1].timer is not None and paar[1].timer.lauf.profil.ist_stoppuhr
-    _knopf(ohne_timer, "Fertig — Workout beenden").on_click()
+    _knopf(ohne_timer, "Fertig").on_click()
     await _sekunden(state, uhr, gurt, 3)
     assert plan_ablauf.laufender(state, plan.id) is None
     ende = workout_view(seite, state, plan, route=route)

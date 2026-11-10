@@ -53,7 +53,13 @@ from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.components import zaehlen
-from trainingsapp.ui.components.fokus import FOKUS_ANSICHT, Fokus, balken
+from trainingsapp.ui.components.fokus import (
+    FOKUS_ANSICHT,
+    Fokus,
+    abbrechen_knopf,
+    balken,
+    steuerzeile,
+)
 from trainingsapp.ui.components.fokus import OBEN as FOKUS_OBEN
 from trainingsapp.ui.components.fokus_eintragen import EintragenKarte
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte
@@ -827,45 +833,25 @@ def uebung_timer_view(
             auffrischen()
 
         fokus.halt_knopf.on_click = anhalten
-        # Dieselben Knöpfe in derselben Reihenfolge wie die Karte in der Übung (K2):
-        # Pause · Nächster · Fertig, darunter Abbrechen
+        # Die Knöpfe des Laufs in einer Zeile direkt unter der Zeit, fest wie sie (Ben,
+        # 10.11.2026): Pause · Nächster · Fertig · Abbrechen — Pause und Abbrechen nur als Symbol
+        teile = fokus.bauen(e, lauf)
+        steuer = steuerzeile(
+            fokus.halt_knopf,
+            ft.OutlinedButton(
+                "Nächster",
+                icon=ft.Icons.SKIP_NEXT,
+                on_click=weiter,
+                visible=not lauf.vorwaerts and lauf.stand().abschnitte > 1,
+            ),
+            ft.FilledButton("Fertig", icon=ft.Icons.CHECK, on_click=fertig, expand=True),
+            abbrechen_knopf(abbrechen),
+        )
         return [
-            *fokus.bauen(e, lauf),
+            *teile[:FOKUS_OBEN],
+            steuer,
+            *teile[FOKUS_OBEN:],
             *([] if eintragen_karte.leer else [eintragen_karte.bauen(e)]),
-            ft.Row(
-                spacing=8,
-                controls=[
-                    fokus.halt_knopf,
-                    ft.OutlinedButton(
-                        "Nächster",
-                        icon=ft.Icons.SKIP_NEXT,
-                        on_click=weiter,
-                        visible=not lauf.vorwaerts and lauf.stand().abschnitte > 1,
-                    ),
-                    ft.FilledButton("Fertig", icon=ft.Icons.CHECK, on_click=fertig, expand=True),
-                ],
-            ),
-            ft.Row(
-                alignment=ft.MainAxisAlignment.CENTER,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.TextButton(
-                        "Abbrechen",
-                        icon=ft.Icons.CLOSE,
-                        tooltip="Beenden ohne Eintrag",
-                        style=ft.ButtonStyle(color=ft.Colors.ERROR),
-                        on_click=abbrechen,
-                    ),
-                    # Die Erklärung im „i“ (Ben, 8.11.2026 spät: „Infotext unten kommt in ein i“)
-                    info_knopf(
-                        page,
-                        "Pause, Nächster, Fertig, Abbrechen",
-                        "„Nächster“ und „Fertig“ nehmen die gelaufene Zeit, der Satz wird kürzer. "
-                        "„Abbrechen“ trägt nichts ein. Was kürzer als 5 s war, bekommt keine "
-                        "Marke und keinen Abschnitt.",
-                    ),
-                ],
-            ),
         ]
 
     def anzeigen(e: Einheitslauf) -> None:
@@ -970,9 +956,10 @@ def uebung_timer_view(
     fest = ft.Container(padding=ft.Padding.only(left=16, right=16, top=8), visible=False)
     if laufend is not None:
         alle = waehrend(laufend)
-        fest.content = ft.Column(spacing=8, controls=alle[:FOKUS_OBEN])
+        # Uhr, Balken und die Steuerzeile stehen fest
+        fest.content = ft.Column(spacing=8, controls=alle[: FOKUS_OBEN + 1])
         fest.visible = True
-        inhalt.controls = alle[FOKUS_OBEN:]
+        inhalt.controls = alle[FOKUS_OBEN + 1 :]
         state.timer_beobachter["uebung"] = auffrischen
     else:
         state.timer_beobachter.pop("uebung", None)
@@ -1001,7 +988,23 @@ def uebung_timer_view(
         appbar=ft.AppBar(
             title=ft.Text(("Fokus · " if laufend is not None else "Timer · ") + uebung.name),
             actions=[
-                *([zaehlt_chip] if laufend is not None else []),
+                *(
+                    [
+                        zaehlt_chip,
+                        # Die Erklärung der Knöpfe — oben bei den Einstellungen, nicht zwischen
+                        # den Knöpfen (Ben, 10.11.2026)
+                        info_knopf(
+                            page,
+                            "Pause, Nächster, Fertig, Abbrechen",
+                            "⏸ hält die Uhr an, ▶ lässt sie weiterlaufen. „Nächster“ und "
+                            "„Fertig“ nehmen die gelaufene Zeit, der Satz wird kürzer. ✕ bricht "
+                            "ab und trägt nichts ein. Was kürzer als 5 s war, bekommt keine "
+                            "Marke und keinen Abschnitt.",
+                        ),
+                    ]
+                    if laufend is not None
+                    else []
+                ),
                 # Das Uhr-Blatt (§4) — gilt für den nächsten Start, der Lauf bleibt, wie er ist
                 ft.IconButton(
                     ft.Icons.TUNE,

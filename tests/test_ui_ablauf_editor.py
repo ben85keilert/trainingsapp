@@ -28,6 +28,7 @@ from trainingsapp.core.models import Exercise, Plan, PlanItem  # noqa: E402
 from trainingsapp.ui.components.ablaufbild import KNOTEN  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.ablauf import (  # noqa: E402
+    ablauf_speichern,
     ablauf_view,
     ablauf_zusammenfassung,
     entfernen_fragen,
@@ -125,7 +126,7 @@ def test_reiter_und_schalter_bringen_den_ablauf(umgebung) -> None:
         if isinstance(x, ft.Container) and isinstance(x.data, tuple) and x.data[:1] == ("reiter",)
     ]
     assert reiter == [("reiter", ""), ("reiter", "uhren")]
-    assert ablauf_zusammenfassung(plan).startswith("Der Reihe nach")
+    assert ablauf_zusammenfassung(plan).startswith("Liste")
     # Nummern an den Übungen der Liste (Frage 5)
     texte = _texte(editor)
     assert {"1", "2", "3", "4"} <= set(texte)
@@ -137,15 +138,47 @@ def test_reiter_und_schalter_bringen_den_ablauf(umgebung) -> None:
     assert plan.ablauf.an and plan.ablauf.start == iw
     kanten = [(k.von, k.nach, k.ausloeser, k.n) for k in plan.ablauf.kanten]
     assert kanten == [(iw, ik, ab.WDH, 12), (ik, ip, ab.FREI, 0), (ip, id_, ab.FREI, 0)]
-    assert ablauf_zusammenfassung(plan).startswith("Mit Abzweigen: 3 Wege")
+    # Workout = Ablauf (Ben, 10.11.2026): der Schalter am Plan geht mit, der Ablauf folgt der
+    # Liste — gespeichert ist nur das Zeichen dafür
+    assert plan.workout and ablauf_zusammenfassung(plan).startswith("Workout: Übung für Übung")
+    assert state.plaene.ablauf_laden(plan.id) == ab.Ablauf(an=True)
     editor = plan_view(_Seite(), state, plan, bearbeiten=True, basis=basis)
     _mit_daten(editor, "reiter", "ablauf")
-    # Zurück auf „Der Reihe nach“: die Zeichnung bleibt gespeichert
+    # Eine neue Planübung gehört dazu, Umordnen ordnet das Workout um
+    neu = state.plaene.uebung_hinzufuegen(plan.id, plan.items[0].exercise_id)
+    plan = state.plaene.laden(plan.id)
+    assert plan.ablauf.kanten[-1].von == id_ and plan.ablauf.kanten[-1].nach == neu.id
+    state.plaene.reihenfolge_setzen(plan.id, [ik, iw, ip, id_, neu.id])
+    plan = state.plaene.laden(plan.id)
+    assert plan.ablauf.start == ik and [k.von for k in plan.ablauf.kanten] == [ik, iw, ip, id_]
+    state.plaene.uebung_entfernen(neu.id)
+    state.plaene.reihenfolge_setzen(plan.id, [iw, ik, ip, id_])
+    plan = state.plaene.laden(plan.id)
+    assert [k.nach for k in plan.ablauf.kanten] == [ik, ip, id_]
+    # Zurück auf „Liste“: ein Ablauf, der nur der Liste folgte, wird nicht aufgehoben
     schalter = next(x for x in _alle(editor) if isinstance(x, ft.SegmentedButton))
     schalter.selected = ["linear"]
     schalter.on_change(SimpleNamespace(control=schalter))
     plan = state.plaene.laden(plan.id)
-    assert not plan.ablauf.an and len(plan.ablauf.kanten) == 3
+    assert not plan.ablauf.an and not plan.workout and plan.ablauf.kanten == ()
+    # Ein eigener Ablauf (ein Abzweig) bleibt beim Ausschalten gespeichert und kommt zurück;
+    # eine neue Planübung steht dann nur in der Palette
+    schalter.selected = ["verzweigt"]
+    schalter.on_change(SimpleNamespace(control=schalter))
+    plan = state.plaene.laden(plan.id)
+    ablauf_speichern(state, plan.id, plan.ablauf.mit_kante(Kante(iw, ip, text="Abkürzung")))
+    plan = state.plaene.laden(plan.id)
+    assert ablauf_zusammenfassung(plan).startswith("Workout mit eigenem Ablauf: 4 Wege")
+    neu = state.plaene.uebung_hinzufuegen(plan.id, plan.items[0].exercise_id)
+    plan = state.plaene.laden(plan.id)
+    assert len(plan.ablauf.kanten) == 4 and neu.id not in ab.im_bild(
+        plan.ablauf, [iw, ik, ip, id_, neu.id]
+    )
+    state.plaene.uebung_entfernen(neu.id)
+    schalter.selected = ["linear"]
+    schalter.on_change(SimpleNamespace(control=schalter))
+    plan = state.plaene.laden(plan.id)
+    assert not plan.ablauf.an and len(plan.ablauf.kanten) == 4
 
 
 def test_palette_slot_routing_und_ziel_antippen(umgebung) -> None:
@@ -370,8 +403,9 @@ def test_aus_dem_ablauf_nehmen_laesst_die_uebung_im_plan(umgebung) -> None:
 
 
 def test_punkt_je_verbindung_und_blatt_auf_dem_weg(umgebung) -> None:
-    """Ben, 9.11.2026: Verbindungen bekommen einen Punkt in der Mitte zwischen den Ebenen; das
-    Blatt von unten steht auf dem angetippten Weg — die anderen Wege zugeklappt."""
+    """Ben, 9.11.2026: Verbindungen bekommen einen Punkt zwischen den Ebenen. Seit 10.11.2026
+    verlassen alle Wege die Übung an einem Abzweig: Tipp auf den Griff eines Wegs = nur dieser
+    Weg, Tipp auf den Abzweig = alle."""
     state, plan = umgebung
     basis = f"/plan/{plan.id}/bearbeiten"
     iw, ik, ip, _id = (it.id for it in plan.items)
@@ -392,17 +426,25 @@ def test_punkt_je_verbindung_und_blatt_auf_dem_weg(umgebung) -> None:
     knoten_p = _mit_daten(ansicht, "knoten", ip)
     mitte = griff.top + griff.height / 2
     assert knoten_w.top + KNOTEN <= mitte <= knoten_p.top
+    # Der Griff eines Wegs öffnet nur diesen Weg (Ben, 10.11.2026) …
     _klick(griff.on_click, None)
     blatt = seite.dialoge[-1]
     assert isinstance(blatt, ft.BottomSheet)
-    gewaehlt = [
-        x for x in _alle(blatt) if isinstance(x, ft.Container) and x.data == ("weg_gewaehlt", ip)
-    ]
-    zu = [x for x in _alle(blatt) if isinstance(x, ft.Container) and x.data == ("weg_zu", ik)]
-    assert gewaehlt and gewaehlt[0].border is not None and zu
-    # Der zugeklappte Hauptweg klappt per Tipp auf
-    _klick(zu[0].on_click, None)
-    assert not [x for x in _alle(blatt) if isinstance(x, ft.Container) and x.data == ("weg_zu", ik)]
+
+    def ziele(b) -> list[str]:
+        return [x.value for x in _alle(b) if isinstance(x, ft.Dropdown) and x.label == "Weiter zu"]
+
+    assert ziele(blatt) == [ip] and "KOMMT VON" not in _texte(blatt)
+    # … „Alle Wege“ holt die anderen dazu
+    alle = next(x for x in _alle(blatt) if isinstance(x, ft.TextButton) and x.data == "alle_wege")
+    _klick(alle.on_click, None)
+    assert ziele(blatt) == [ik, ip] and "KOMMT VON" in _texte(blatt)
+    # Der Abzweig unter der Übung — ein Austrittspunkt für alle Wege — öffnet alle auf einmal
+    abzweig = _mit_daten(ansicht, "abzweig", iw)
+    assert knoten_w.top + KNOTEN < abzweig.top + abzweig.height / 2 < mitte
+    _klick(abzweig.on_click, None)
+    blatt = seite.dialoge[-1]
+    assert ziele(blatt) == [ik, ip] and "KOMMT VON" in _texte(blatt)
     # Beschriftete Geschwisterwege: die Beschriftung steht nach außen — nichts überdeckt sich
     state.plaene.ablauf_setzen(
         plan.id,

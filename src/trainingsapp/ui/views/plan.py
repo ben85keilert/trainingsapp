@@ -951,8 +951,15 @@ def plan_view(
     def entferner(item: PlanItem) -> Callable[[], None]:
         def handler() -> None:
             jetzt = state.plaene.laden(plan.id)
-            if jetzt is not None and jetzt.ablauf.an:
-                # Mitten in einer Reihe des Ablaufs: Lücke schließen oder Nachfolgereihe (Frage 4)
+            if (
+                jetzt is not None
+                and jetzt.ablauf.an
+                and not ab.folgt_der_liste(
+                    jetzt.ablauf, [(it.id, it.bedingung) for it in jetzt.items]
+                )
+            ):
+                # Mitten in einer Reihe des eigenen Ablaufs: Lücke schließen oder Nachfolgereihe
+                # (Frage 4) — folgt der Ablauf der Liste, schließt er sich von selbst
                 entfernen_fragen(page, state, plan.id, item.id, state.neu_zeichnen)
                 return
             state.plaene.uebung_entfernen(item.id)
@@ -2576,7 +2583,7 @@ def plan_view(
                 size=12,
                 opacity=0.7,
             ),
-            # Der Reihe nach oder mit Abzweigen — „Mit Abzweigen“ bringt den Reiter „Ablauf“
+            # Liste oder Workout — „Workout“ bringt den Reiter „Ablauf“ (10.11.2026)
             modus_zeile(page, state, plan),
             ft.Text(
                 "„Einstellen“ legt Ziel und Eingabe je Übung fest. Reihenfolge: am Griff ziehen "

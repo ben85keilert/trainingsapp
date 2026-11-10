@@ -28,7 +28,7 @@ from typing import Any
 
 from ..core import eintraege as offene
 from ..core import varianten
-from ..core.ablauf import Ablauf
+from ..core.ablauf import Ablauf, folgt_der_liste, fuer_plan
 from ..core.bedingung import Bedingung
 from ..core.models import (
     EINGABE_CHIPS,
@@ -832,6 +832,7 @@ class PlanRepo:
         der Übung zurückkehren. Die neuen Einträge reihen sich dahinter ein.
         """
         stempel = jetzt().isoformat()
+        ablauf_json = _ablauf_json(self._ablauf_zum_speichern(plan))
         with transaktion(self.con):
             self.con.execute(
                 """
@@ -882,7 +883,7 @@ class PlanRepo:
                     int(plan.workout),
                     int(plan.uebergang_hart),
                     _takt_json(plan.takt) if plan.takt is not None else None,
-                    _ablauf_json(plan.ablauf),
+                    ablauf_json,
                 ),
             )
             # Versteckte bleiben stehen: Übungen im Papierkorb und aus deaktivierten
@@ -916,6 +917,35 @@ class PlanRepo:
                 reihenfolge += 1
                 self._item_schreiben(item)
 
+    def _ablauf_zum_speichern(self, plan: Plan) -> Ablauf:
+        """Was `speichern` als Ablauf schreibt: Folgt das Workout der Liste, nur das Zeichen
+        dafür (``an`` ohne Kanten) — dann wächst es mit ihr. Das gilt auch, wenn der Aufrufer
+        die Liste geändert und den Ablauf gelassen hat, wie er geladen war."""
+        paare = [(it.id, it.bedingung) for it in plan.items]
+        if folgt_der_liste(plan.ablauf, paare):
+            return Ablauf(an=True)
+        if plan.ablauf.an:
+            vorher = self.laden(plan.id, mit_geloeschten=True)
+            if (
+                vorher is not None
+                and vorher.ablauf == plan.ablauf
+                and folgt_der_liste(vorher.ablauf, [(it.id, it.bedingung) for it in vorher.items])
+            ):
+                return Ablauf(an=True)
+        return plan.ablauf
+
+    def _folgt_merken(self, plan_id: str) -> None:
+        """Vor einer Änderung der Liste (hinzufügen, entfernen, umordnen): Ist der gespeicherte
+        Ablauf nur die Kette der Liste, bleibt statt ihrer das Zeichen „folgt der Liste“ — die
+        Änderung gilt dann auch im Workout (Ben, 10.11.2026)."""
+        roh = self.ablauf_laden(plan_id)
+        if not roh.an or not roh.kanten:
+            return
+        p = self.laden(plan_id, mit_geloeschten=True)
+        if p is not None and folgt_der_liste(roh, [(it.id, it.bedingung) for it in p.items]):
+            with transaktion(self.con):
+                self._ablauf_schreiben(plan_id, Ablauf(an=True))
+
     def uebung_hinzufuegen(
         self, plan_id: str, exercise_id: str, target: dict[str, Any] | None = None
     ) -> PlanItem:
@@ -924,6 +954,7 @@ class PlanRepo:
         Nichts wird kopiert: Ziel, Parameter, Chips, Uhr und Timer gelten „wie die Übung“, bis
         man sie im Plan ändert (``target`` setzt gleich ein eigenes Ziel, etwa aus einem Kurs).
         """
+        self._folgt_merken(plan_id)
         naechste = self.con.execute(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM plan_item WHERE plan_id = ?",
             (plan_id,),
@@ -947,6 +978,7 @@ class PlanRepo:
         ).fetchone()
         if zeile is None:
             return
+        self._folgt_merken(zeile["plan_id"])
         with transaktion(self.con):
             self.con.execute("DELETE FROM plan_item WHERE id = ?", (item_id,))
             ablauf = self.ablauf_laden(zeile["plan_id"])
@@ -989,6 +1021,7 @@ class PlanRepo:
         Was nicht in der Liste steht — etwa Planübungen, deren Übung im
         Papierkorb liegt —, reiht sich in bisheriger Folge dahinter ein.
         """
+        self._folgt_merken(plan_id)
         alle = [
             r["id"]
             for r in self.con.execute(
@@ -1401,6 +1434,8 @@ class PlanRepo:
             nach_plan[r["plan_id"]].append(self._item_zeile(r))
         for p in plaene:
             p.items = nach_plan.get(p.id, [])
+            # Workout = Ablauf (Ben, 10.11.2026): ohne eigenen Ablauf folgt er der Liste
+            p.ablauf = fuer_plan(p.ablauf, p.workout, [(it.id, it.bedingung) for it in p.items])
         return plaene
 
     @staticmethod

@@ -48,7 +48,7 @@ from trainingsapp.ui import plan_ablauf, uebung_lauf
 from trainingsapp.ui.components import fokus_eintragen as fe
 from trainingsapp.ui.components import links, zaehl_stand
 from trainingsapp.ui.components.ablaufbild import ablaufbild, abspielen
-from trainingsapp.ui.components.fokus import FOKUS_ANSICHT, Fokus
+from trainingsapp.ui.components.fokus import FOKUS_ANSICHT, Fokus, abbrechen_knopf, steuerzeile
 from trainingsapp.ui.components.fokus import OBEN as FOKUS_OBEN
 from trainingsapp.ui.components.hilfe import WORKOUT_MD
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte
@@ -1046,9 +1046,9 @@ def workout_view(
                     if gez
                     else []
                 ),
-                info_knopf(page, "Workout", WORKOUT_MD),
             ],
         )
+        # Das „i“ steht in der Titelleiste — hier nur, was zur Übung gehört (Ben, 10.11.2026)
         teile: list[ft.Control] = [kopf, fortschritt(teil)]
         stand["oben"] = len(teile)
 
@@ -1157,8 +1157,9 @@ def workout_view(
             if erf.erfuellt and not b.inhalt.leer:
                 teile.append(inhalt_karte(b))
         if gez:
+            # Der Inhalt eines Wegs, sobald er offen steht — bei einem freien Weg von Anfang an
             for st in staende:
-                if st.angeboten and not st.kante.inhalt.leer:
+                if st.gangbar and not st.kante.inhalt.leer:
                     teile.append(inhalt_karte(bd.Bedingung(inhalt=st.kante.inhalt)))
         if s.frage is None and u is not None:
             feld = skala_feld(u)
@@ -1212,6 +1213,32 @@ def workout_view(
         # Ablaufbild (Symbol oben), das Ergebnis nach dem Workout
 
         # -- Knöpfe ------------------------------------------------------------------------
+        # Was den Lauf steuert, steht in **einer** Zeile direkt unter der Zeit, fest wie sie
+        # (Ben, 10.11.2026): Pause · Fertig · Wiederholen · Überspringen · Abbrechen — Pause,
+        # Überspringen und Abbrechen nur als Symbol. Wohin es geht („Weiter: …“, die Wege),
+        # steht darunter.
+        rund = ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26))
+        haupt: ft.Control | None = None
+        nochmal: ft.Control | None = None
+
+        def wiederholen_knopf() -> ft.Control:
+            return ft.OutlinedButton(
+                "Wiederholen",
+                icon=ft.Icons.REPLAY,
+                on_click=noch_einmal,
+                expand=True,
+                tooltip="Die Übung noch einmal von vorn",
+            )
+
+        def fertig_knopf(letzte: bool) -> ft.Control:
+            return ft.FilledButton(
+                "Fertig",
+                icon=ft.Icons.CHECK,
+                on_click=fertig,
+                expand=True,
+                tooltip="Fertig — das Workout endet hier" if letzte else "Fertig",
+            )
+
         if s.frage is not None:
             teile.extend(kanten_knoepfe(teil, weich))
         elif gez:
@@ -1224,15 +1251,7 @@ def workout_view(
                 # oben über allem anderen — ohne zu scrollen sichtbar
                 teile.insert(stand["oben"], weg_frage(knoepfe, ueber, doch_nicht))
             elif teil.phase == UEBUNG and not teil.wartet:
-                teile.append(
-                    ft.FilledButton(
-                        "Fertig" if knoepfe else "Fertig — Workout beenden",
-                        icon=ft.Icons.CHECK,
-                        height=52,
-                        on_click=fertig,
-                        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26)),
-                    )
-                )
+                haupt = fertig_knopf(not knoepfe)
             elif not knoepfe:
                 teile.append(
                     ft.FilledButton(
@@ -1240,28 +1259,18 @@ def workout_view(
                         icon=ft.Icons.CHECK,
                         height=52,
                         on_click=weiter,
-                        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26)),
+                        style=rund,
                     )
                 )
             if not frage_offen:
                 teile.extend(knoepfe)
             if wartend:
-                teile.append(
-                    ft.OutlinedButton("Noch einmal", icon=ft.Icons.REPLAY, on_click=noch_einmal)
-                )
+                nochmal = wiederholen_knopf()
         else:
             naechster = teil.naechster
             naechster_name = teil.schritte[naechster].anzeigename if naechster is not None else None
             if teil.phase == UEBUNG and not teil.wartet:
-                teile.append(
-                    ft.FilledButton(
-                        "Fertig" if naechster_name else "Fertig — Workout beenden",
-                        icon=ft.Icons.CHECK,
-                        height=52,
-                        on_click=fertig,
-                        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26)),
-                    )
-                )
+                haupt = fertig_knopf(naechster_name is None)
             elif wartend:
                 erfuellt = erf is None or erf.erfuellt
                 ziel_text = f"Weiter: {naechster_name}" if naechster_name else "Workout beenden"
@@ -1272,7 +1281,7 @@ def workout_view(
                             icon=ft.Icons.SKIP_NEXT,
                             height=52,
                             on_click=weiter,
-                            style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26)),
+                            style=rund,
                         )
                     )
                 elif weich and not b.hart:
@@ -1287,26 +1296,30 @@ def workout_view(
                         )
                     )
                 if not erfuellt:
-                    teile.append(
-                        ft.OutlinedButton(
-                            "Noch einmal versuchen",
-                            icon=ft.Icons.REPLAY,
-                            on_click=noch_einmal,
-                        )
-                    )
-        unten: list[ft.Control] = []
-        if stand["fokus"] is not None and teil.phase == UEBUNG and not teil.wartet:
-            unten.append(stand["fokus"].halt_knopf)
-        if s.frage is None:
-            unten.append(ft.OutlinedButton("Überspringen", on_click=ueberspringen, expand=True))
-        unten.append(
-            ft.TextButton(
-                "Abbrechen",
-                on_click=abbrechen,
-                style=ft.ButtonStyle(color=ft.Colors.ERROR),
-            )
+                    nochmal = wiederholen_knopf()
+        halt = (
+            stand["fokus"].halt_knopf
+            if stand["fokus"] is not None and teil.phase == UEBUNG and not teil.wartet
+            else None
         )
-        teile.append(ft.Row(spacing=8, controls=unten))
+        steuer = steuerzeile(
+            halt,
+            haupt,
+            nochmal,
+            # ohne Hauptknopf schiebt ein Füller die Symbole nach rechts
+            *([ft.Container(expand=True)] if haupt is None and nochmal is None else []),
+            ft.OutlinedIconButton(
+                ft.Icons.SKIP_NEXT,
+                tooltip="Überspringen — ohne Eintrag zur nächsten",
+                on_click=ueberspringen,
+                data="ueberspringen",
+            )
+            if s.frage is None
+            else None,
+            abbrechen_knopf(abbrechen, "Workout abbrechen"),
+        )
+        teile.insert(stand["oben"], steuer)
+        stand["oben"] += 1
         return teile
 
     # -- Danach (C4) -------------------------------------------------------------------------

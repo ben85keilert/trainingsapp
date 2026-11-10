@@ -1,8 +1,10 @@
 """Der Reiter **„Ablauf“** im Plan-Editor — Workouts zeichnen (Ben, 8.11.2026,
 `docs/plan_verzweigungen.md` §8, Skizzen Reihe E; überarbeitet nach dem ersten Test am Abend).
 
-Ein Plan läuft **der Reihe nach** (Planliste, je Übung „Weiter, wenn …“) oder **mit Abzweigen**
-(gezeichnet). Der Schalter dafür steht im Reiter „Plan“ (`modus_zeile`); erst „Mit Abzweigen“
+Ein Plan ist eine **Liste** (frei abhaken, keine Bedingungen) oder ein **Workout** — und jedes
+Workout hat diesen Reiter (Ben, 10.11.2026: Workout = Ablauf). Ohne eigene Zeichnung folgt der
+Ablauf der Liste (`core.ablauf.folgt_der_liste`). Der Schalter steht im Reiter „Plan“
+(`modus_zeile`); erst „Workout“
 bringt den dritten Reiter. Route ``<Plan bearbeiten>/ablauf``.
 
 Die Seite **scrollt nicht** — die Zeichnung füllt den Platz unter der Palette (in einer scrollenden
@@ -77,25 +79,32 @@ def knoten_namen(state: AppState, plan: Plan) -> dict[str, str]:
 
 
 def ablauf_zusammenfassung(plan: Plan) -> str:
-    """„Mit Abzweigen: 5 Wege · 2 bei Bedarf · 1 Frage“ — oder der Reihe nach."""
+    """Was unter dem Schalter steht: Liste · Workout, das der Liste folgt · eigener Ablauf
+    („5 Wege · 2 bei Bedarf · 1 Frage“)."""
     if not plan.ablauf.an:
         return (
-            "Der Reihe nach: Übung für Übung in der Reihenfolge der Liste — „Weiter, wenn …“ je "
-            "Übung unter „Einstellen“."
+            "Liste: jede Übung ist frei, du hakst ab, was du machst — ohne Bedingungen. "
+            "„Workout“ führt Schritt für Schritt durch den Plan."
         )
     ids = [it.id for it in plan.items]
+    if ab.folgt_der_liste(plan.ablauf, [(it.id, it.bedingung) for it in plan.items]):
+        return (
+            "Workout: Übung für Übung in der Reihenfolge der Liste. Wann es weitergeht und "
+            "wohin sonst, stellst du im Reiter „Ablauf“ ein."
+        )
     teile = [f"{len(plan.ablauf.kanten)} Wege"]
     if n := len(ab.bedarf(plan.ablauf, ids)):
         teile.append(f"{n} bei Bedarf")
     if plan.ablauf.fragen:
         f = len(plan.ablauf.fragen)
         teile.append(f"{f} Frage" if f == 1 else f"{f} Fragen")
-    return "Mit Abzweigen: " + " · ".join(teile) + " — gezeichnet im Reiter „Ablauf“."
+    return "Workout mit eigenem Ablauf: " + " · ".join(teile) + " — im Reiter „Ablauf“."
 
 
 def ablauf_speichern(state: AppState, plan_id: str, ablauf: Ablauf) -> None:
     """Speichert den Ablauf und spiegelt die Hauptwege in die Bedingungen der Planübungen (P108:
-    dieselben Einstellungen bei Übung und Ablauf) — so stimmt auch „Der Reihe nach“."""
+    dieselben Einstellungen bei Übung und Ablauf) — so bleibt ein Ablauf, der der Liste
+    folgt, als solcher erkennbar (`core.ablauf.folgt_der_liste`)."""
     p = state.plaene.laden(plan_id)
     if p is None:
         return
@@ -113,39 +122,46 @@ def ablauf_speichern(state: AppState, plan_id: str, ablauf: Ablauf) -> None:
 
 
 def ablauf_einschalten(state: AppState, plan_id: str) -> None:
-    """„Mit Abzweigen“: eine Zeichnung von früher kommt zurück (ihre Hauptwege mit den
-    Bedingungen von jetzt), sonst wird die Liste zur Kette mit ihren Bedingungen."""
+    """„Workout“: eine Zeichnung von früher kommt zurück (ihre Hauptwege mit den Bedingungen von
+    jetzt), sonst folgt der Ablauf der Liste. Der Schalter ``workout`` am Plan geht mit."""
     p = state.plaene.laden(plan_id)
     if p is None:
         return
     bedingungen = {it.id: it.bedingung for it in p.items}
-    if p.ablauf.kanten:
+    if p.ablauf.kanten and not p.ablauf.an:
         neu = ab.hauptwege_spiegeln(replace(p.ablauf, an=True), bedingungen)
+        neu = neu.bereinigt(list(bedingungen))
     else:
-        neu = ab.aus_bedingungen([(it.id, it.bedingung) for it in p.items])
-    state.plaene.ablauf_setzen(plan_id, neu.bereinigt(list(bedingungen)))
+        neu = Ablauf(an=True)  # folgt der Liste
+    state.plaene.ablauf_setzen(plan_id, neu)
+    state.plaene.workout_setzen(plan_id, True, p.uebergang_hart)
     state.ablauf_lagen.pop(plan_id, None)
 
 
 def ablauf_ausschalten(state: AppState, plan_id: str) -> None:
-    """„Der Reihe nach“: die Zeichnung bleibt gespeichert, gilt aber nicht."""
+    """„Liste“: eine eigene Zeichnung bleibt gespeichert, gilt aber nicht; ein Ablauf, der nur
+    der Liste folgte, wird nicht aufgehoben. Der Schalter ``workout`` geht mit."""
     p = state.plaene.laden(plan_id)
-    if p is not None:
-        state.plaene.ablauf_setzen(plan_id, replace(p.ablauf, an=False))
+    if p is None:
+        return
+    eigen = not ab.folgt_der_liste(p.ablauf, [(it.id, it.bedingung) for it in p.items])
+    state.plaene.ablauf_setzen(plan_id, replace(p.ablauf, an=False) if eigen else Ablauf())
+    state.plaene.workout_setzen(plan_id, False, p.uebergang_hart)
 
 
 def modus_zeile(page: Any, state: AppState, plan: Plan) -> ft.Control:
-    """Der Schalter im Reiter „Plan“: der Reihe nach oder mit Abzweigen (Ben, 8.11.2026: „ein
-    Switch-Button … erstellt einen dritten Reiter“), darunter die Zusammenfassung."""
+    """Der Schalter im Reiter „Plan“: Liste oder Workout (Ben, 8.11.2026: „ein Switch-Button …
+    erstellt einen dritten Reiter“; seit 10.11.2026 heißt er so, weil jedes Workout einen
+    Ablauf hat), darunter die Zusammenfassung."""
 
     def gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
         wert = str(e.control.selected[0]) if e.control.selected else LINEAR
         if wert == VERZWEIGT:
             ablauf_einschalten(state, plan.id)
-            text = "Reiter „Ablauf“ ist da — dort zeichnest du die Wege"
+            text = "Workout — im Reiter „Ablauf“ stehen die Wege und Bedingungen"
         else:
             ablauf_ausschalten(state, plan.id)
-            text = "Der Plan läuft der Reihe nach — die Zeichnung bleibt gespeichert"
+            text = "Liste — jede Übung ist frei, Bedingungen ruhen"
         with contextlib.suppress(Exception):
             page.show_dialog(ft.SnackBar(ft.Text(text)))
         state.neu_zeichnen()
@@ -157,7 +173,7 @@ def modus_zeile(page: Any, state: AppState, plan: Plan) -> ft.Control:
                 spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
-                    ft.Text("Ablauf", size=15, weight=ft.FontWeight.W_600, expand=True),
+                    ft.Text("Art des Plans", size=15, weight=ft.FontWeight.W_600, expand=True),
                     hilfe_knopf(page, thema="ablauf"),
                 ],
             ),
@@ -167,13 +183,13 @@ def modus_zeile(page: Any, state: AppState, plan: Plan) -> ft.Control:
                 segments=[
                     ft.Segment(
                         value=LINEAR,
-                        label=ft.Text("Der Reihe nach"),
-                        icon=ft.Icon(ft.Icons.LINEAR_SCALE),
+                        label=ft.Text("Liste"),
+                        icon=ft.Icon(ft.Icons.FORMAT_LIST_BULLETED),
                     ),
                     ft.Segment(
                         value=VERZWEIGT,
-                        label=ft.Text("Mit Abzweigen"),
-                        icon=ft.Icon(ft.Icons.ACCOUNT_TREE_OUTLINED),
+                        label=ft.Text("Workout"),
+                        icon=ft.Icon(ft.Icons.PLAYLIST_PLAY),
                     ),
                 ],
                 on_change=gewaehlt,
@@ -603,11 +619,17 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         neu_zeichnen()
 
     def kante_getippt(k: Kante) -> None:
-        """Der Punkt einer Verbindung (oder ihr Etikett): das Blatt der Wege ihrer Übung — auf
-        diesen Weg gerichtet (Ben, 9.11.2026)."""
+        """Der Griff eines Wegs (Punkt oder Etikett): das Blatt mit **nur diesem** Weg (Ben,
+        10.11.2026: „der Übersicht halber alleine“)."""
         state.ablauf_wahl[plan.id] = k.von
         neu_zeichnen()
-        wege_blatt(k.von, fokus=k.nach)
+        wege_blatt(k.von, fokus=k.nach, allein=True)
+
+    def abzweig_getippt(knoten: str) -> None:
+        """Der Abzweig unter einer Übung: alle ihre Wege auf einmal."""
+        state.ablauf_wahl[plan.id] = knoten
+        neu_zeichnen()
+        wege_blatt(knoten)
 
     def pfad_abspielen() -> None:
         p = frisch()
@@ -644,6 +666,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             on_knoten=knoten_getippt,
             on_knoten_lang=knoten_lang,
             on_kante=kante_getippt,
+            on_abzweig=abzweig_getippt,
             on_slot=einsetzen,
             on_start=pfad_abspielen,
             on_start_ablegen=start_ablegen,
@@ -878,11 +901,11 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
 
     # -- Blätter ---------------------------------------------------------------------------------
 
-    def wege_blatt(knoten: str, fokus: str | None = None) -> None:
+    def wege_blatt(knoten: str, fokus: str | None = None, allein: bool = False) -> None:
         """Alle Wege eines Knotens auf einmal (Ben: „wenn eine Übung mehrere Folgewege hat, dann
         diese gleichzeitig einstellen können … die verschiedenen Pfade einfach scrollbar“) — das
         Formular aus „Im Plan einstellen“. Gespeichert wird beim Schließen. ``fokus``: das Ziel
-        des angetippten Wegs — er steht offen, die anderen zugeklappt."""
+        des angetippten Wegs — er steht offen, die anderen zugeklappt; ``allein``: nur er."""
         p = frisch()
         stand: dict[str, Any] = {"a": p.ablauf, "verworfen": False}
         merken: dict[str, Any] = {}
@@ -910,6 +933,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                     ohne_timer=ohne,
                     merken=merken,
                     fokus=fokus,
+                    allein=allein,
                 ),
             ]
 
@@ -1078,16 +1102,17 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             teil.visible = an
         if not an:
             einfuehrung.content = karte(
-                kartentitel("Mit Abzweigen"),
+                kartentitel("Workout"),
                 ft.Text(
-                    "Dieser Plan läuft der Reihe nach. Mit Abzweigen zeichnest du Wege: zur "
-                    "Seite und zurück (Dehnung bei Krämpfen), nur bei Bedarf, Schleifen bis eine "
-                    "Skala erreicht ist, Fragen, die nach dem Wert verzweigen.",
+                    "Dieser Plan ist eine Liste — jede Übung ist frei. Als Workout führt er "
+                    "Schritt für Schritt: Hier stellst du ein, wann es weitergeht, und zeichnest "
+                    "Wege zur Seite und zurück (Dehnung bei Krämpfen), nur bei Bedarf, Schleifen "
+                    "bis eine Skala erreicht ist, Fragen, die nach dem Wert verzweigen.",
                     size=14,
                 ),
                 ft.FilledButton(
-                    "Mit Abzweigen zeichnen",
-                    icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
+                    "Als Workout einrichten",
+                    icon=ft.Icons.PLAYLIST_PLAY,
                     on_click=einschalten,
                 ),
                 abstand=10,

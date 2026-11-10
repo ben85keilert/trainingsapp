@@ -12,6 +12,7 @@ import pytest
 ft = pytest.importorskip("flet")
 
 from attrappen import Gurt, Seite, Uhr, ruhe  # noqa: E402
+from trainingsapp.core import ablauf as ab  # noqa: E402
 from trainingsapp.core import bedingung as bd  # noqa: E402
 from trainingsapp.core.bedingung import Bedingung, Inhalt  # noqa: E402
 from trainingsapp.core.hf_einstellungen import HfEinstellungen  # noqa: E402
@@ -122,7 +123,6 @@ def test_bedingung_wird_an_der_planuebung_gespeichert(tmp_path, monkeypatch) -> 
         geladen = state.plaene.item_laden(item.id)
         assert geladen.bedingung == b
         assert geladen.bedingung.kurztext() == "12 Wdh. in 40 s · Pflicht"
-        # Die Karte „Weiter, wenn …“ in „Im Plan einstellen“ zeigt und ändert sie
         page = SimpleNamespace(
             route="/",
             views=[],
@@ -133,17 +133,27 @@ def test_bedingung_wird_an_der_planuebung_gespeichert(tmp_path, monkeypatch) -> 
             push_route=_nichts,
         )
         uebung = state.uebungen.laden(item.exercise_id)
+        # In einer Liste gibt es keine Bedingungen (Ben, 10.11.2026): „Im Plan einstellen“ zeigt
+        # nur den Hinweis — was eingestellt ist, ruht
         seite = plan_einstellen(page, state, plan, geladen, uebung)
         texte = _texte(seite)
-        assert "WEITER, WENN …" in texte
-        # Herkunft und Ziel mit Nummer (P108: wie im Ablauf), keine Zweige mehr
-        assert "Kommt von: Start des Workouts" in texte
-        assert "Weiter zu: 2 · Ausfallschritt gestützt" in texte
-        assert not any(isinstance(x, ft.Dropdown) and x.label == "Zweig" for x in _alle(seite))
-        art = next(
-            x for x in _alle(seite) if isinstance(x, ft.Dropdown) and x.label == "Weiter, wenn"
+        assert (
+            "BEDINGUNGEN" in texte and "Dieser Plan ist eine Liste — jede Übung ist frei." in texte
         )
-        assert art.value == bd.WDH_IN_ZEIT
+        assert "Ruht: weiter, wenn 12 Wdh. in 40 s · Pflicht — gilt wieder im Workout." in texte
+        assert not any(isinstance(x, ft.Dropdown) and x.label == "Weiter zu" for x in _alle(seite))
+        # Als Workout stehen dort die Wege des Ablaufs — die Bedingung liegt auf dem Hauptweg
+        state.plaene.workout_setzen(plan.id, True, False)
+        plan = state.plaene.laden(plan.id)
+        seite = plan_einstellen(page, state, plan, geladen, uebung)
+        texte = _texte(seite)
+        assert "WEGE IM ABLAUF" in texte and "Start des Workouts" in texte
+        ziel = next(
+            x for x in _alle(seite) if isinstance(x, ft.Dropdown) and x.label == "Weiter zu"
+        )
+        assert ziel.value == plan.items[1].id
+        chips = [x for x in _alle(seite) if isinstance(x, ft.Chip) and x.selected]
+        assert any(x.label.value == ab.AUSLOESER_TEXT[ab.WDH_IN_ZEIT] for x in chips)
         hart = next(x for x in _alle(seite) if isinstance(x, ft.Switch) and "Pflicht" in x.label)
         assert hart.value is True
         hart.value = False
@@ -161,7 +171,7 @@ def test_bedingung_wird_an_der_planuebung_gespeichert(tmp_path, monkeypatch) -> 
 async def test_pflicht_bleibt_bei_der_uebung_und_wird_von_hand_erfuellt(umgebung) -> None:
     """Der Reihe nach (Ben, 8.11.2026 abends): die Bedingung sagt, wann es weitergeht — sonst
     bleibt man bei der Übung. Ohne Sensor trägt man Wiederholungen von Hand ein; eine Pflicht
-    lässt kein „Trotzdem weiter“ zu, „Noch einmal versuchen“ geht. Zweige gibt es hier nicht mehr
+    lässt kein „Trotzdem weiter“ zu, „Wiederholen“ geht. Zweige gibt es hier nicht mehr
     (P108)."""
     state, uhr, gurt = umgebung
     plan = _plan(state)
@@ -170,6 +180,7 @@ async def test_pflicht_bleibt_bei_der_uebung_und_wird_von_hand_erfuellt(umgebung
     state.plaene.bedingung_setzen(
         c.id, Bedingung(bd.GEMACHT, inhalt=Inhalt("Dehnen nicht vergessen"))
     )
+    state.plaene.workout_setzen(plan.id, True, False)  # Bedingungen gelten nur im Workout
     plan = state.plaene.laden(plan.id)
     seite = Seite()
     route = f"/plan/{plan.id}/workout"
@@ -193,7 +204,7 @@ async def test_pflicht_bleibt_bei_der_uebung_und_wird_von_hand_erfuellt(umgebung
     assert any(t.startswith("Noch nicht erfüllt") for t in texte)
     with pytest.raises(AssertionError):
         _knopf(ueber, "Trotzdem weiter: Ausfallschritt gestützt")  # Pflicht
-    _knopf(ueber, "Noch einmal versuchen")
+    _knopf(ueber, "Wiederholen")
     # Von Hand „+10“ und „+15“ → 25, erfüllt: „Weiter“ (weich) — Sätze dazu wie im Block
     _knopf(ueber, "+10").on_click()
     _knopf(workout_view(seite, state, plan, route=route), "+15").on_click()
@@ -214,7 +225,7 @@ async def test_pflicht_bleibt_bei_der_uebung_und_wird_von_hand_erfuellt(umgebung
     planke = workout_view(seite, state, plan, route=route)
     texte = _texte(planke)
     assert "Freigeschaltet" in texte and "Dehnen nicht vergessen" in texte  # abhaken: erfüllt
-    _knopf(planke, "Fertig — Workout beenden").on_click()
+    _knopf(planke, "Fertig").on_click()
     await _sekunden(state, uhr, gurt, 3)
     assert plan_ablauf.laufender(state, plan.id) is None
 
@@ -248,12 +259,14 @@ def test_zielbereich_unten_und_zone_im_fokus(tmp_path, monkeypatch) -> None:
 
 async def test_skala_weich_fertig_bleibt_trotzdem_weiter_oder_noch_einmal(umgebung) -> None:
     """Bedingung „Skala“ (Ben, 8.11.2026): die Selbsteinschätzung im Schritt. Weich: „Fertig“ unter
-    der Schwelle beendet die Übung nicht — man bleibt, kann noch einmal oder trotzdem weiter; die
-    Wahl steht je Durchlauf neu in der Zeitleiste."""
+    der Schwelle beendet die Übung nicht — man bleibt, kann wiederholen oder trotzdem weiter; die
+    Wahl steht je Durchlauf neu in der Zeitleiste. Seit 10.11.2026 als Weg des Ablaufs, der der
+    Liste folgt (Workout = Ablauf)."""
     state, uhr, gurt = umgebung
     plan = _plan(state)
     a, b_item, _c = plan.items
     state.plaene.bedingung_setzen(a.id, Bedingung(bd.SKALA, 6))
+    state.plaene.workout_setzen(plan.id, True, False)  # Bedingungen gelten nur im Workout
     plan = state.plaene.laden(plan.id)
     seite = Seite()
     route = f"/plan/{plan.id}/workout"
@@ -266,7 +279,7 @@ async def test_skala_weich_fertig_bleibt_trotzdem_weiter_oder_noch_einmal(umgebu
     e, teil = paar
     await _sekunden(state, uhr, gurt, 2)
     laufend = workout_view(seite, state, plan, route=route)
-    assert any("Skala wählen" in t for t in _texte(laufend))
+    assert "Wie fühlt es sich an? — Skala ≥ 6" in _texte(laufend)
 
     def chip(ansicht, wert: str):
         return next(
@@ -277,13 +290,15 @@ async def test_skala_weich_fertig_bleibt_trotzdem_weiter_oder_noch_einmal(umgebu
 
     chip(laufend, "4").on_select()
     laufend = workout_view(seite, state, plan, route=route)
-    assert any("Skala 4 von 6" in t for t in _texte(laufend))
     _knopf(laufend, "Fertig").on_click()
     await _sekunden(state, uhr, gurt, 1)
     assert teil.wartet and teil.k == 0 and a.id not in teil.ergebnisse
     wartend = workout_view(seite, state, plan, route=route)
-    _knopf(wartend, "Trotzdem weiter: Ausfallschritt gestützt")
-    _knopf(wartend, "Noch einmal versuchen").on_click()
+    assert any(t.startswith("Noch nicht erfüllt") for t in _texte(wartend))
+    # Weich ist die Bedingung ein Vorschlag: der Weg ist wählbar, obwohl sie fehlt
+    trotzdem = _knopf(wartend, "Weiter: Ausfallschritt gestützt (Skala ≥ 6)")
+    assert not trotzdem.disabled
+    _knopf(wartend, "Wiederholen").on_click()
     await _sekunden(state, uhr, gurt, 1)
     assert teil.k == 0 and teil.durchlauf == 2 and teil.skala_wert is None
     starts = [x for x in e.ereignisse if (x.quelle, x.art) == ("plan", "uebung_start")]
@@ -291,9 +306,9 @@ async def test_skala_weich_fertig_bleibt_trotzdem_weiter_oder_noch_einmal(umgebu
     laufend = workout_view(seite, state, plan, route=route)
     chip(laufend, "7").on_select()
     laufend = workout_view(seite, state, plan, route=route)
-    assert any("Skala 7 — erreicht" in t for t in _texte(laufend))
     _knopf(laufend, "Fertig").on_click()
     await _sekunden(state, uhr, gurt, 1)
+    # erfüllt: „Fertig“ geht den Weg
     assert teil.k == 1 and teil.schritt.item_id == b_item.id
     skalen = [x for x in e.ereignisse if (x.quelle, x.art) == ("person", "skala")]
     assert [x.daten["wert"] for x in skalen] == [4, 7]

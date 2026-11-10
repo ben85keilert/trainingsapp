@@ -162,8 +162,16 @@ async def test_starten_laufen_fertig_gemacht(umgebung) -> None:
     texte = _texte(laufend)
     assert "Pause · zählt nicht" in texte
     assert texte.count("Satz 1") == 1 and "Satz 2" in texte and "Satz 3" in texte
-    for text in ("Nächster", "Fertig", "Abbrechen"):
+    for text in ("Nächster", "Fertig"):
         _knopf(laufend, text)
+    # Die Knöpfe des Laufs stehen in einer Zeile fest unter der Zeit; Pause und Abbrechen sind
+    # nur Symbole (Ben, 10.11.2026)
+    zeile = next(x for x in _alle(laufend) if isinstance(x, ft.Row) and x.data == "steuerzeile")
+    arten = [type(x).__name__ for x in zeile.controls]
+    assert arten == ["FilledTonalIconButton", "OutlinedButton", "FilledButton", "IconButton"]
+    assert zeile.controls[-1].data == "abbrechen" and zeile.controls[0].tooltip == "Pause"
+    rollt = next(x for x in _alle(laufend) if isinstance(x, ft.Column) and x.scroll is not None)
+    assert not any(x is zeile for x in _alle(rollt))  # sie scrollt nicht mit
     _knopf(laufend, "Fertig").on_click()
     await _bis_zum_ende(state, uhr, gurt)
     danach = uebung_timer_view(seite, state, basis, uebung)

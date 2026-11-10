@@ -201,15 +201,16 @@ def test_takt_fuer_alle_und_bedingung_der_uebung_im_workout(umgebung) -> None:
     )
     plan = state.plaene.laden(plan.id)
     katalog = {u.id: u for u in (state.uebungen.laden(it.exercise_id) for it in plan.items) if u}
-    schritte = schritte_fuer(plan, katalog)
-    b = schritte[0].bedingung
-    assert (b.art, b.n, b.sonst, b.wege[0].ziel) == (
-        bd.SKALA,
-        6,
-        plan.items[1].id,
-        plan.items[0].id,
-    )
-    assert b.kurztext() == "Skala 6 · sonst → · 1 Weg"
+    # In einer Liste gibt es keine Bedingungen (Ben, 10.11.2026) — was eingestellt ist, ruht
+    assert plan.items[0].bedingung.kurztext() == "Skala 6 · sonst → · 1 Weg"
+    assert schritte_fuer(plan, katalog)[0].bedingung.leer
+    # … und gilt, sobald der Plan ein Workout ist — als Weg des Ablaufs, der der Liste folgt
+    state.plaene.workout_setzen(plan.id, True, False)
+    plan = state.plaene.laden(plan.id)
+    assert schritte_fuer(plan, katalog)[0].bedingung.art == bd.SKALA
+    assert [(k.ausloeser, k.n) for k in plan.ablauf.von(plan.items[0].id)] == [("skala", 6)]
+    state.plaene.workout_setzen(plan.id, False, False)
+    plan = state.plaene.laden(plan.id)
     assert timer_fuer(kniebeuge, plan, plan.items[0]).name == "Satz"
 
 

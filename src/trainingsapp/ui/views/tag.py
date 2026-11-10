@@ -485,7 +485,8 @@ def tagesansicht(
                 state.plan_als_plan.discard(plan.id)  # vorhin „Liste“ gewählt war
             await page.push_route(f"/plan/{plan.id}")
 
-        knoepfe: list[ft.Control] = [ft.FilledButton(text, icon=ft.Icons.PLAY_ARROW, on_click=los)]
+        symbol = ft.Icons.PLAYLIST_PLAY if startet_als_workout(plan) else ft.Icons.PLAY_ARROW
+        knoepfe: list[ft.Control] = [ft.FilledButton(text, icon=symbol, on_click=los)]
         if startet_als_workout(plan):
             knoepfe.append(ft.TextButton("Übungen ansehen", on_click=als_liste(plan)))
         return knoepfe
@@ -495,7 +496,7 @@ def tagesansicht(
         sondern dort, wo das Workout heute vorzeitig endete — Text und Knopf."""
         fort = plan_ablauf_ui.fortsetzung_heute(state, plan)
         if fort is None:
-            return "Workout mit Abzweigen", "Start"
+            return "Workout", "Start"
         item = next((it for it in plan.items if it.id == fort.bei), None)
         frage = plan.ablauf.frage(fort.bei)
         if item is not None:

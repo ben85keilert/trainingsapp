@@ -242,7 +242,8 @@ class Frage:
 
 @dataclass(frozen=True, slots=True)
 class Ablauf:
-    """Der Graph eines Plans. ``an`` = der Reiter „Ablauf“ ist eingeschaltet; aus = Kette."""
+    """Der Graph eines Plans. ``an`` = der Plan ist ein Workout (Reiter „Ablauf“); aus = eine
+    Liste. ``an`` ohne Kanten und Fragen: das Workout folgt der Liste (`fuer_plan`)."""
 
     an: bool = False
     #: der Startknoten — leer: die erste Planübung
@@ -479,6 +480,78 @@ def aus_bedingungen(items: Sequence[tuple[str, Bedingung]]) -> Ablauf:
             if w.ziel in ids:
                 kanten.append(Kante(item_id, w.ziel, text=w.text))
     return Ablauf(True, ids[0] if ids else "", tuple(kanten))
+
+
+# -- Workout = Ablauf (Ben, 10.11.2026) ----------------------------------------------------------
+#
+# Ein Plan ist eine **Liste** (frei abhaken, keine Bedingungen) oder ein **Workout** — und jedes
+# Workout hat einen Ablauf. Solange niemand im Reiter „Ablauf“ etwas ändert, **folgt er der
+# Liste**: Übung für Übung in ihrer Reihenfolge, jede neue Planübung gehört dazu, Umordnen
+# ordnet das Workout um. Erst eine Änderung dort (ein Abzweig, eine Frage, ein anderes Ziel)
+# macht ihn zum eigenen Ablauf — wie die Planübung der Übung folgt, bis man im Plan etwas ändert.
+
+
+def kette_der_liste(items: Sequence[tuple[str, Bedingung]]) -> Ablauf:
+    """Der Ablauf eines Workouts, das der Liste folgt: die Planübungen der Reihe nach, die
+    Bedingung jeder Übung auf ihrem Weg zur nächsten (alte Zweige zählen nicht mehr).
+
+    >>> a = kette_der_liste([("a", Bedingung(B_WDH, 12)), ("b", Bedingung()), ("c", Bedingung())])
+    >>> [(k.von, k.nach, k.ausloeser, k.n) for k in a.kanten], a.start, a.an
+    ([('a', 'b', 'wdh', 12), ('b', 'c', 'frei', 0)], 'a', True)
+    >>> kette_der_liste([]).an
+    True
+
+    Die Bedingung der **letzten** Übung liegt auf ihrem Weg zum Ende — sonst ginge sie verloren:
+
+    >>> a = kette_der_liste([("a", Bedingung()), ("b", Bedingung(B_WDH, 5))])
+    >>> [(k.von, k.nach, k.n) for k in a.kanten] == [("a", "b", 0), ("b", ENDE, 5)]
+    True
+    """
+    schlicht = [(i, ohne_verzweigung(b)) for i, b in items]
+    kette = replace(aus_bedingungen(schlicht), an=True)
+    if schlicht and not schlicht[-1][1].leer:
+        letzte, b = schlicht[-1]
+        kette = kette.mit_kante(kante_aus_bedingung(b, letzte, ENDE))
+    return kette
+
+
+def folgt_der_liste(ablauf: Ablauf, items: Sequence[tuple[str, Bedingung]]) -> bool:
+    """Ist der Ablauf (noch) die Kette der Liste? Dann wird er nicht eigens gespeichert und
+    wächst mit ihr.
+
+    >>> liste = [("a", Bedingung()), ("b", Bedingung())]
+    >>> folgt_der_liste(Ablauf(an=True), liste), folgt_der_liste(kette_der_liste(liste), liste)
+    (True, True)
+    >>> folgt_der_liste(kette_der_liste(liste).mit_kante(Kante("a", ENDE)), liste)
+    False
+    >>> folgt_der_liste(Ablauf(), liste)  # aus: eine Liste, kein Workout
+    False
+    """
+    if not ablauf.an or ablauf.fragen:
+        return False
+    if not ablauf.kanten:
+        return True
+    kette = kette_der_liste(items)
+    return ablauf.kanten == kette.kanten and ablauf.start in ("", kette.start)
+
+
+def fuer_plan(ablauf: Ablauf, workout: bool, items: Sequence[tuple[str, Bedingung]]) -> Ablauf:
+    """Der Ablauf, der für einen Plan gilt (beim Laden): der eigene, wenn es einen gibt — sonst,
+    für ein Workout, die Kette der Liste. ``workout``: der Schalter am Plan (Pläne von vor dem
+    10.11.2026 und aus Paketen haben ihn ohne Ablauf).
+
+    >>> liste = [("a", Bedingung()), ("b", Bedingung())]
+    >>> fuer_plan(Ablauf(), False, liste).an, len(fuer_plan(Ablauf(), True, liste).kanten)
+    (False, 1)
+    >>> len(fuer_plan(Ablauf(an=True), False, liste).kanten)  # folgt der Liste
+    1
+    >>> eigen = Ablauf(True, "b", (Kante("b", "a"),))
+    >>> fuer_plan(eigen, True, liste) is eigen
+    True
+    """
+    if (workout and not ablauf.an) or (ablauf.an and not ablauf.kanten and not ablauf.fragen):
+        return kette_der_liste(items)
+    return ablauf
 
 
 # -- Prüfen ------------------------------------------------------------------------------------
@@ -1359,8 +1432,10 @@ __all__ = [
     "bedarf",
     "bedingung_aus_kante",
     "erreichbar",
+    "folgt_der_liste",
     "fortsetzung",
     "freie_lage",
+    "fuer_plan",
     "gesperrt",
     "hat_verzweigung",
     "hauptpfad",
@@ -1371,6 +1446,7 @@ __all__ = [
     "kanten_pruefen",
     "kanten_zaehlen",
     "kette",
+    "kette_der_liste",
     "kreis_von_selbst",
     "lagen_ergaenzen",
     "layout",

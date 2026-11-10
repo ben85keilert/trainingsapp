@@ -10,7 +10,8 @@ Dasselbe Formular steht in „Im Plan einstellen“ (Abschnitt WEGE) und im Reit
 in einer Zeit · Skala), anbieten oder ausführen, Pflicht, Beschriftung, Inhalt. Der erste Weg
 ist der **Hauptweg** (er spiegelt sich in die Bedingung), ↑ macht einen anderen dazu — mehrere
 gleichwertige Wege fragt das Workout ab (`core.ablauf.wahl_offen`). ``fokus``: das Blatt steht
-auf diesem Weg (Punkt einer Verbindung angetippt), die anderen sind zugeklappt.
+auf diesem Weg, die anderen sind zugeklappt; mit ``allein`` (der Griff eines Wegs im Bild
+angetippt, Ben 10.11.2026) steht **nur** er da — „Alle Wege …“ holt den Rest.
 
 Das Formular hält nichts selbst: ``lesen`` liefert den Ablauf, ``setzen`` nimmt den geänderten —
 wann gespeichert wird, sagt der Ort (Speichern der Seite bzw. Schließen des Blatts).
@@ -41,6 +42,7 @@ def wege_karte(
     ohne_timer: bool = False,
     merken: dict[str, Any] | None = None,
     fokus: str | None = None,
+    allein: bool = False,
 ) -> ft.Control:
     """Herkunft und Wege von ``knoten``. ``namen``: jeder Knoten mit Nummer („3 · Planke“), in
     Planfolge, Fragen dahinter; ``ohne_timer``: die Übung hat keinen Timer (Hinweis zu „Zeit
@@ -48,9 +50,17 @@ def wege_karte(
 
     ``fokus``: das Ziel des angetippten Wegs (Ben, 9.11.2026: „Wenn es mehrere Wege von einer
     Übung aus gibt, soll das Blatt von unten einfach auf diesen ausgewählten Weg positioniert
-    sein“) — er steht offen und hervorgehoben, die anderen zugeklappt als eine Zeile."""
+    sein“) — er steht offen und hervorgehoben, die anderen zugeklappt als eine Zeile.
+    ``allein``: nur dieser eine Weg, ohne Herkunft und ohne die anderen (Ben, 10.11.2026: „dann
+    öffnet sich der entsprechende Eintrag der Übersicht halber alleine“), bis „Alle Wege …“."""
     a = lesen()
     offen: dict[str, Any] = merken if merken is not None else {}
+    nur = (
+        allein
+        and fokus is not None
+        and not offen.get("alle")
+        and any(k.von == knoten and k.nach == fokus for k in a.kanten)
+    )
 
     def aendern(i: int, *, zeichnen: bool = False, **felder: Any) -> None:
         jetzt = lesen()
@@ -185,6 +195,8 @@ def wege_karte(
     )
 
     # -- Weiter zu ---------------------------------------------------------------------------
+    if nur:
+        teile.clear()  # nur der eine Weg — die Herkunft steht bei „Alle Wege …“
     teile.append(ft.Text("WEITER ZU", size=11, weight=ft.FontWeight.BOLD, opacity=0.6))
     raus = [(i, k) for i, k in enumerate(a.kanten) if k.von == knoten]
     if not raus:
@@ -205,9 +217,22 @@ def wege_karte(
 
         return handler
 
+    def alle_zeigen(_e: Any = None) -> None:
+        offen["alle"] = True
+        neu_zeichnen()
+
     for n, (i, k) in enumerate(raus):
-        gewaehlt = fokus is not None and len(raus) > 1 and k.nach == fokus
-        if fokus is not None and len(raus) > 1 and not gewaehlt and not offen.get(f"auf{i}"):
+        if nur and k.nach != fokus:
+            continue
+        gewaehlt = fokus is not None and len(raus) > 1 and k.nach == fokus and not nur
+        if (
+            fokus is not None
+            and not nur
+            and not offen.get("alle")
+            and len(raus) > 1
+            and not gewaehlt
+            and not offen.get(f"auf{i}")
+        ):
             ziel = "Ende" if k.zum_ende else "◀ zurück" if k.zurueck else namen.get(k.nach, "?")
             teile.append(
                 ft.Container(
@@ -244,7 +269,20 @@ def wege_karte(
             karte.border = ft.Border.all(2, ft.Colors.PRIMARY)
             karte.data = ("weg_gewaehlt", k.nach)
         teile.append(karte)
-    teile.append(ft.TextButton("Weg", icon=ft.Icons.ADD, on_click=weg_dazu))
+    if nur:
+        andere = len(raus) - 1
+        teile.append(
+            ft.TextButton(
+                f"Alle Wege dieser Übung ({andere} weitere)"
+                if andere
+                else "Herkunft und neue Wege",
+                icon=ft.Icons.UNFOLD_MORE,
+                on_click=alle_zeigen,
+                data="alle_wege",
+            )
+        )
+    else:
+        teile.append(ft.TextButton("Weg", icon=ft.Icons.ADD, on_click=weg_dazu))
     return ft.Column(spacing=8, tight=True, controls=teile)
 
 

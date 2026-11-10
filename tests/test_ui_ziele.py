@@ -330,3 +330,24 @@ def test_aufzeichnung_auswertung_und_tag(page) -> None:
     assert zeilen == [("Auswertung", ""), ("Tag", "27.10.2026")]
     _waehlen(page, page.dialoge[-1], "Tag")
     assert page.routen[-1] == "/tag/2026-10-27"
+
+
+def test_trainieren_zeigt_ob_liste_oder_workout(page, state) -> None:
+    """Ben, 10.11.2026: Das Symbol von „Trainieren“ sagt, wie der Plan öffnet — ▶ als Liste,
+    das Workout-Symbol mit Schalter „Workout“ oder gezeichnetem Ablauf; nach „Liste“ für diese
+    Sitzung wieder ▶."""
+    liste = _plan(state, "kniebeuge", name="Kraft")
+    workout = _plan(state, "kniebeuge", name="Zirkel")
+    state.plaene.workout_setzen(workout.id, True, True)
+
+    def symbole() -> dict[str, str]:
+        out = {}
+        for tile in (x for x in _alle(plaene_liste(page, state)) if isinstance(x, ft.ListTile)):
+            knopf = next(x for x in _alle(tile.trailing) if isinstance(x, ft.FilledTonalButton))
+            out[tile.title.value] = knopf.data
+        return out
+
+    assert symbole() == {"Kraft": "liste", "Zirkel": "workout"}
+    state.plan_als_plan.add(workout.id)
+    assert symbole() == {"Kraft": "liste", "Zirkel": "liste"}
+    assert liste.id != workout.id

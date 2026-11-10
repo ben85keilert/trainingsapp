@@ -335,11 +335,22 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   steht unter DFA α1, und Schwellen aus α1 (`core/hf_auswertung`, `AUSWERTUNG_VERSION` 4) gelten
   nur bei spontaner Atmung ab 9/min oder unbekannter Lage — sonst Grund statt Schwelle.
 
+- **Liste oder Workout — Workout = Ablauf** (Ben, 10.11.2026, P170, Vertrag
+  `docs/plan_verzweigungen.md` §8.12): Ein Plan ist eine **Liste** (frei abhaken, **keine
+  Bedingungen** — Eingestelltes ruht, „Im Plan einstellen“ zeigt nur den Hinweis) oder ein
+  **Workout**; jedes Workout hat den Reiter „Ablauf“, Bedingungen gibt es nur als Wege dort.
+  Schalter „Liste | Workout“ (`views/ablauf.modus_zeile`, derselbe unter Uhren). **Der Ablauf
+  folgt der Liste, bis man im Ablauf etwas ändert** (`core.ablauf.kette_der_liste`,
+  `folgt_der_liste`, `fuer_plan` beim Laden in `PlanRepo._mit_items`; gespeichert nur
+  ``{"an": true}``; vor jeder Änderung der Liste `PlanRepo._folgt_merken`) — neue Planübungen
+  gehören dazu, Umordnen ordnet um; ein Abzweig macht den Ablauf eigen. Pläne von früher mit
+  dem Schalter ``workout`` bekommen die Kette beim Laden, ohne Datenschritt. Ob ein Plan ein
+  Workout ist, sagt ``plan.ablauf.an`` (`startet_als_workout`); „Trainieren“ zeigt es am Symbol.
+
 - **Gezeichneter Ablauf** (Ben, 8.11.2026, Vertrag `docs/plan_verzweigungen.md` §8, Stand
-  §8.8; Migration 044, Datenschritt 6): Der Plan-Editor hat die Reiter **Plan · Uhren**, der
-  Schalter **„Der Reihe nach | Mit Abzweigen“** (`views/ablauf.modus_zeile`) bringt **„Ablauf“**.
-  *Der Reihe nach* = Planfolge, je Übung nur die Bedingung (`PlanItem.bedingung`); **Zweige
-  A–D, dann/sonst/Wege sind veraltet** (P108) — Altbestand wird zum Ablauf. *Mit Abzweigen* =
+  §8.8; Migration 044, Datenschritt 6): Der Plan-Editor hat die Reiter **Plan · Uhren**, mit
+  „Workout“ dazu **„Ablauf“**. **Zweige A–D, dann/sonst/Wege sind veraltet** (P108) —
+  Altbestand wird zum Ablauf; die Karte „Weiter, wenn …“ je Planübung gibt es nicht mehr.
   `core/ablauf.py`: `Ablauf(an, start, kanten, fragen)`, `plan.ablauf_json`; **Knoten** sind
   Planübungen (Nummer = Stelle in der Liste, `nummern`; `beiname`) und **Fragen**, **Kanten**
   tragen den Auslöser (frei · Zeit ab · Wdh. · Wdh. in einer Zeit · Skala ≥ n bis m), Pflicht,
@@ -350,7 +361,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   (`PlanAblaufBaustein.wartet`, keine Pause), hart geht es von selbst weiter, sobald es reicht;
   jeder Schritt hat eine Uhr (ohne Timer `core.timer.stoppuhr`, „Zeit ab“ = „Fertig“) und damit
   den Fokus; Wiederholungen von Hand (`person/wdh`), wo niemand zählt. Rechnung nur in
-  `core/ablauf.py` und `devices/plan_ablauf.py`; `ui/` zeichnet (`components/ablaufbild.py`:
+  `core/ablauf.py`, `core/ablauf_geometrie.py` (wo Stamm, Abzweig, Wege und Griffe liegen —
+  **Wege wie ein Nerv**, Ben 10.11.2026, §8.11: ein Austrittspunkt je Übung; Tipp auf den
+  Abzweig = alle Wege, auf den Griff eines Wegs = nur dieser, `wege_karte(allein=)`; Rückwege
+  in Gassen zwischen den Spalten) und `devices/plan_ablauf.py`; `ui/` zeichnet (`components/ablaufbild.py`:
   Fläche einmal bauen, Inhalt tauschen, Lagen bleiben bis „Neu anordnen“, Eltern mittig;
   `views/ablauf.py`: Seite scrollt nicht, Palette = Planübungen mit `Draggable.affinity`
   senkrecht, Knöpfe unter dem Bild). Zeitleiste `plan/kante|frage|antwort`, `person/wdh`;
@@ -376,8 +390,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `person/wdh|skala|auspraegung`, eingetragen erst mit dem Ende des Laufs; Wiederholungen mit
   den Knöpfen des Blocks — **jeder Tipp ein Satz dazu**, „−“ nimmt den letzten zurück
   (`person/wdh` mit `dazu`). Im laufenden Fokus nur, was gerade passiert: keine „Läufe heute“,
-  Erklärungen im „i“, Takt · Zeit · Ebenen-Knopf in einer Zeile, die **beim Scrollen oben stehen
-  bleibt** (`fokus.OBEN`); Fokus-Ansichten (``data = FOKUS_ANSICHT``) bekommen **keine
+  Erklärungen im „i“ (Titelleiste), Takt · Zeit · Ebenen-Knopf in einer Zeile, die **beim
+  Scrollen oben stehen bleibt** (`fokus.OBEN`) — direkt darunter, ebenfalls fest, die
+  **Steuerzeile** (`fokus.steuerzeile`, Ben 10.11.2026, §9.4): ⏸ · Fertig · „Wiederholen“ · ⏭ ·
+  ✕ in einer Zeile, Pause/Überspringen/Abbrechen nur als Symbol; „Weiter: …“ und Wege darunter; Fokus-Ansichten (``data = FOKUS_ANSICHT``) bekommen **keine
   Laufleiste**. **Messung läuft weiter** ist Vorgabe (`Einheitslauf.stoppt_am_ende`): nach Timer,
   Übung, Workout und GPS-Training läuft eine mitgestartete Messung weiter — außer sie ist allein
   oder die Einheit begann als reine Messung (`beitreten`); die Strecke findet sie dann über die

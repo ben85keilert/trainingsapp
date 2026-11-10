@@ -269,3 +269,20 @@ einfach wieder in den Fokusmodus kommen.“
 - **Aus „Heute“/„Einheit“:** Ein Tipp auf das laufende Workout führt wie bisher in den Fokus
   (`einheit.teil_route` → `/plan/<id>/workout`), Zurück von dort ebenso in den Plan.
 
+### 9.4 Steuerzeile unter der Zeit (10.11.2026)
+
+Ben: „Übungsverlaufssymbole wie Pause – Fertig – Abbrechen – Überspringen in eine Zeile. Das ‚i‘
+sauber woanders hin. Abbrechen und Pause nur als Symbol … Die Zeile mit den Steuerungsbuttons
+kommt unter die Zeit und fixiert ebenfalls beim Scrollen.“
+
+- **Eine Zeile** (`components/fokus.steuerzeile`) direkt unter Uhr und Balken, **fest** wie sie:
+  im Fokus der Übung ⏸ · Nächster · Fertig · ✕, im Workout ⏸ · Fertig · Wiederholen · ⏭ · ✕.
+  Pause (`Fokus.halt_knopf`, `FilledTonalIconButton`) und Abbrechen (`abbrechen_knopf`, rot)
+  sind nur Symbole; im Workout auch „Überspringen“ (⏭), sonst passt die Zeile neben
+  „Wiederholen“ nicht auf ein Handy.
+- **„Wiederholen“** heißt, was „Noch einmal versuchen“ bzw. „Noch einmal“ hieß.
+- **Wohin es geht** — „Weiter: …“, „Trotzdem weiter“, die Wege eines Ablaufs — bleibt unter der
+  Karte „Eintragen“; „Fertig“ der letzten Übung heißt nur „Fertig“ (Tooltip: das Workout endet).
+- **Das „i“:** im Fokus der Übung in der Titelleiste neben „Uhr einstellen“, im Workout nur noch
+  das der Titelleiste (das zweite im Kopf der Übung fiel weg).
+

@@ -63,6 +63,8 @@ def _knoepfe(c) -> dict[str, ft.Control]:
         if isinstance(x, arten):
             beschriftung = x.content.value if isinstance(x.content, ft.Text) else x.content
             out[beschriftung] = x
+        elif isinstance(x, ft.OutlinedIconButton) and x.data == "ueberspringen":
+            out["Überspringen"] = x  # in der Steuerzeile nur als Symbol (Ben, 10.11.2026)
     return out
 
 
@@ -163,7 +165,7 @@ async def test_workout_folgt_den_kanten_mit_einschub_und_zurueck(umgebung) -> No
     assert [x.daten["kante"] for x in kanten] == ["Beine krampfen", ""]
     # Die Kniebeuge hat keine Kante: „Fertig“ beendet das Workout (eine Stoppuhr läuft mit)
     ende = workout_view(seite, state, plan, route=route)
-    _knoepfe(ende)["Fertig — Workout beenden"].on_click()
+    _knoepfe(ende)["Fertig"].on_click()
     await _sekunden(state, uhr, gurt, 2)
     assert plan_ablauf.laufender(state, plan.id) is None
     danach = workout_view(seite, state, plan, route=route)

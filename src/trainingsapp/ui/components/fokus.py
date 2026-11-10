@@ -53,8 +53,33 @@ from trainingsapp.ui.state import (
 FOKUS_ANSICHT = "fokus"
 #: So viele Controls vorn in `Fokus.bauen` gehören in den festen Kopf: die Zeile Takt · Zeit ·
 #: Ebenen und der Balken — sie scrollen nicht mit (Ben: „beim Runterscrollen soll die Uhr oben
-#: fixiert bleiben“)
+#: fixiert bleiben“). Direkt darunter setzt der Aufrufer seine `steuerzeile`, ebenfalls fest
 OBEN = 2
+
+
+def steuerzeile(*knoepfe: ft.Control | None) -> ft.Control:
+    """Die Zeile mit den Knöpfen des Laufs — Pause · Fertig · Überspringen · Abbrechen … —
+    **eine** Zeile direkt unter der Zeit; sie steht mit ihr fest oben (Ben, 10.11.2026: „Die
+    Zeile mit den Steuerungsbuttons … kommt unter die Zeit und fixiert ebenfalls beim
+    Scrollen“). ``None`` fällt weg."""
+    return ft.Row(
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[k for k in knoepfe if k is not None],
+        data="steuerzeile",
+    )
+
+
+def abbrechen_knopf(on_click: Callable[..., Any], tooltip: str = "") -> ft.Control:
+    """„Abbrechen“ als Symbol — klein, rot, am Ende der Steuerzeile."""
+    return ft.IconButton(
+        ft.Icons.CLOSE,
+        icon_color=ft.Colors.ERROR,
+        tooltip=tooltip or "Abbrechen — beenden ohne Eintrag",
+        on_click=on_click,
+        data="abbrechen",
+    )
+
 
 #: Die Kurven zeigen die letzten zwei Minuten
 KURVEN_FENSTER_S = 120.0
@@ -191,8 +216,8 @@ class Fokus:
         self._ebenen_eintraege: dict[str, ft.PopupMenuItem] = {}
         self.tempo_platz = ft.Container()
         self.saetze_spalte = ft.Column(spacing=0)
-        #: Anhalten/Fortsetzen — der Aufrufer setzt ``on_click``
-        self.halt_knopf = ft.FilledTonalButton(expand=True)
+        #: Anhalten/Fortsetzen — nur das Symbol (Ben, 10.11.2026); der Aufrufer setzt ``on_click``
+        self.halt_knopf = ft.FilledTonalIconButton(icon=ft.Icons.PAUSE, tooltip="Pause")
         self.ebenen = state.fokus_ebenen()
         self.kurven = state.fokus_kurven()
         self.bild_platz = ft.Container()
@@ -408,14 +433,8 @@ class Fokus:
         self._hf_nachziehen()
         self._kurven_nachziehen()
         self._saetze_nachziehen(e, lauf, stand, folge, zaehlend)
-        self.halt_knopf.content = ft.Row(
-            tight=True,
-            spacing=6,
-            controls=[
-                ft.Icon(ft.Icons.PLAY_ARROW if not stand.laeuft else ft.Icons.PAUSE, size=18),
-                ft.Text("Weiter" if not stand.laeuft else "Pause"),
-            ],
-        )
+        self.halt_knopf.icon = ft.Icons.PLAY_ARROW if not stand.laeuft else ft.Icons.PAUSE
+        self.halt_knopf.tooltip = "Weiter" if not stand.laeuft else "Pause"
         self.halt_knopf.disabled = (stand.fertig and ueber <= 0) or lauf.abgebrochen
         # „Ohne Uhr — nur Fokus“ (P146): keine Zeit, keine Pause — Kurven und Eintragen bleiben
         ohne = bool(getattr(lauf.profil, "ohne_uhr", False))
@@ -598,4 +617,12 @@ class Fokus:
         ]
 
 
-__all__ = ["KURVEN_FENSTER_S", "Fokus", "balken", "kurven_einheit", "kurven_reihen"]
+__all__ = [
+    "KURVEN_FENSTER_S",
+    "Fokus",
+    "abbrechen_knopf",
+    "balken",
+    "kurven_einheit",
+    "kurven_reihen",
+    "steuerzeile",
+]

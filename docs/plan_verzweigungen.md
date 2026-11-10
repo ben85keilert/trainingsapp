@@ -489,6 +489,75 @@ Vorschlag P166–P169, „Vorschläge passen alle, bau das alles“.
    „Start“/„Fortsetzen“ auf Heute öffnen das Workout auch nach einem „Liste“ in der Sitzung;
    „Übungen ansehen“ daneben öffnet die Liste.
 
+### 8.11 Wege wie ein Nerv: Stamm, Abzweig, Griffe (10.11.2026)
+
+Ben: „Wie bei einem Nerven gibt es einen gemeinsamen Austrittspunkt aller Wege von einer Übung
+weg, kurz nach unten und dann ein Knoten. Vom Knoten weg gehen die Pfade. Der Knoten lässt sich
+klicken, aber die Einzelwege auch, dann öffnet sich der entsprechende Eintrag der Übersicht halber
+alleine. Klick auf den Knoten öffnet alle. Gerne die Wege etwas länger halten.“
+
+- **Geometrie in `core/ablauf_geometrie.py`** (flet-frei, getestet in
+  `tests/test_ablauf_geometrie.py`), `ui/components/ablaufbild.py` zeichnet nur noch:
+  - **Stamm** von der Übung (unter Bild und Namen) nach unten zum **Abzweig** — ein Punkt je
+    Übung, an dem **alle** ihre Wege beginnen (`Geometrie.abzweige`, `staemme`).
+  - **ab** (Ziel weiter unten): weiche Kurve zur Oberkante; überspringt der Weg Ebenen und
+    stünde ein Knoten im Weg, weicht die Kurve seitlich aus (erste ohne Treffer).
+  - **rück** (Ziel auf gleicher Höhe oder weiter oben): im freien Band unter dem Abzweig zur
+    Seite, in einer **Gasse** zwischen den Spalten hinauf, von der Seite ins Ziel — die Gasse
+    liegt neben dem Ziel, zuerst auf der Seite, von der der Weg kommt.
+  - **Schleife** links herum zurück in die Übung; **◀ zurück** und **Ende** als kurze Stummel
+    links bzw. rechts am Abzweig, die Beschriftung darunter.
+  - Je Weg ein **Griff** (Punkt, mit Beschriftung daneben) nahe am Ziel, wo die Wege
+    auseinanderliegen; kommen mehrere Wege im selben Knoten an, liegen ihre Griffe gestaffelt.
+- **Ebenenabstand** 264 statt 156 (`EBENE`), damit Stamm, Abzweig, Wege und Griffe Platz haben.
+- **Antippen:** Abzweig → Blatt mit **allen** Wegen der Übung (`on_abzweig`); Griff eines Wegs →
+  Blatt mit **nur diesem** Weg (`wege_karte(allein=True)`), „Alle Wege dieser Übung“ holt
+  Herkunft und die übrigen dazu.
+- **Durchsicht der Wegführung — was dabei falsch war:** Wege begannen an der Unterkante des
+  Bilds und liefen durch den Namen der Übung; ein Weg über mehrere Ebenen lief durch die Knoten
+  dazwischen; ein Rückweg zu einem Ziel links lief waagrecht durch die eigene Übung (die Gasse
+  lag rechts vom rechteren der beiden Knoten statt neben dem Ziel).
+
+### 8.12 Workout = Ablauf: Bedingungen nur im Workout (10.11.2026, P170)
+
+Ben: „Es gibt noch Konflikte mit den Bedingungen. Bedingungen machen bei der linearen
+Arbeitsweise wenig Sinn, da man sich einfach dorthin klicken kann, wo man will … Sollen
+Bedingungen nur in Workouts gesetzt werden können? Dann sind die Einstellungen ‚Weiter, wenn …‘
+bei ohne Workout deaktiviert, und wenn doch, ist der 3. Reiter der Hauptbereich, um Bedingungen
+zu verwalten und zu regeln.“ — gewählt aus zwei Vorschlägen: **Workout = Ablauf**.
+
+1. **Zwei Arten von Plan** (Reiter „Plan“, „Art des Plans“: **Liste | Workout**,
+   `views/ablauf.modus_zeile`; derselbe Schalter unter „Uhren“):
+   - **Liste:** frei abhaken, jede Übung jederzeit — **keine Bedingungen**. „Im Plan einstellen“
+     zeigt statt „Weiter, wenn …“ den Hinweis; eine früher eingestellte Bedingung **ruht**
+     (bleibt gespeichert, steht als „Ruht: …“) und gilt wieder, sobald der Plan ein Workout ist.
+     Läuft eine Liste über „Workout · Liste“ **für heute** als Workout, ist jede Übung frei
+     (`core.plan_durchlauf.schritte_fuer`).
+   - **Workout:** geführt, Schritt für Schritt — und **jedes Workout hat den Reiter „Ablauf“**.
+     Bedingungen gibt es nur als Wege dort (dasselbe Formular in „Im Plan einstellen“).
+2. **Der Ablauf folgt der Liste, bis man im Ablauf etwas ändert** (wie die Planübung der Übung
+   folgt, P79): `core.ablauf.kette_der_liste` — die Planübungen der Reihe nach, die Bedingung
+   jeder Übung auf ihrem Weg zur nächsten, die der letzten auf ihrem Weg zum Ende. Gespeichert
+   ist dann nur das Zeichen ``{"an": true}`` (ohne Kanten); `fuer_plan` setzt beim Laden die
+   Kette ein (`PlanRepo._mit_items`). Eine neue Planübung gehört dazu, Umordnen ordnet das
+   Workout um, Entfernen schließt die Lücke ohne Rückfrage. Steht die Kette ausgeschrieben in der
+   Datenbank (so speichert der Reiter), erkennt `folgt_der_liste` sie am Vergleich — vor jeder
+   Änderung der Liste wird sie wieder zum Zeichen (`PlanRepo._folgt_merken`,
+   `_ablauf_zum_speichern`). Ein Abzweig, eine Frage, ein anderes Ziel, eine Beschriftung
+   machen daraus einen **eigenen Ablauf**: Neue Planübungen stehen dann in der Palette.
+3. **Pläne von früher** mit dem Schalter „Workout“ und ohne Zeichnung brauchen keinen
+   Datenschritt: `fuer_plan(…, workout=True)` gibt ihnen beim Laden die Kette. Folge, von Ben
+   bestätigt: Auch sie werden **durchgearbeitet** (P166: heute Erledigtes zählt nicht,
+   „Fortsetzen“; P168: eine Pflicht sperrt in der Liste, was dahinter liegt).
+4. **Ausschalten:** „Liste“ hebt einen eigenen Ablauf auf (``an = False``, die Zeichnung
+   kommt mit „Workout“ zurück); ein Ablauf, der nur der Liste folgte, wird nicht aufgehoben.
+5. **Entfallen:** die Karte „Weiter, wenn …“ je Planübung (`components/bedingung_form.py`) und
+   der Schalter „Der Reihe nach | Mit Abzweigen“. Im Workout zeigt ein freier Weg mit Inhalt
+   seinen Inhalt von Anfang an (vorher nur Wege mit erfülltem Auslöser).
+6. **Pakete:** unverändert — ein Plan mit Ablauf reist mit `plaene[].ablauf` (Positionen); die
+   Kette eines Workouts, das der Liste folgt, steht dort ausgeschrieben und wird beim Import
+   wieder als „folgt der Liste“ erkannt.
+
 ## 9. Entscheidungen (Ergänzung)
 
 - **P113** Name des Reiters: „Ablauf“ (Vorschlag) statt „Verlauf“ (belegt durch Kurven/Tagebuch)?

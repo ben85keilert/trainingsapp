@@ -46,6 +46,7 @@ from trainingsapp.core.tagebuch import (
     TAG,
     TAGESFELD,
     UEBUNG,
+    WORKOUT,
     Gruppe,
     Notiz,
     Tagesgruppe,
@@ -131,6 +132,8 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
         state.tageswerte.zwischen(profil, None, None),
         tagesfelder,
         tag_namen,
+        # Workouts, zu denen etwas eingetragen ist (Ben, 10.11.2026) — Tipp: der Workout-Eintrag
+        state.einheiten.workout_zeilen(profil) if state.einheiten is not None else (),
     )
     katalog = {u.id: u for u in state.uebungen.alle(mit_geloeschten=True)}
     plan_namen: dict[str, str] = {p.id: p.name for p in state.plaene.alle(profil)}
@@ -169,7 +172,7 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             return "Zum Tag"
         if n.art == AUFNAHME and not n.exercise_id:
             return "Aufnahmen · Zum Tag"
-        if n.art == TAGESFELD:
+        if n.art in (TAGESFELD, WORKOUT):
             return n.titel
         if n.art == PLAN:
             return f"Plan „{plan_name(n.plan_id)}“" if n.plan_id else "Ohne Plan"
@@ -199,6 +202,8 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             )
             return haupt, weitere
         tag_ziel = zl.Ziel(zl.TAG, _route(tag_route), untertitel=f"{n.tag:%d.%m.%Y}")
+        if n.art == WORKOUT:
+            return zl.Ziel(zl.AUSWERTUNG, bearbeiter(n)), [tag_ziel]
         if n.art == AUFNAHME:
             return zl.Ziel(zl.TAG, bearbeiter(n)), []
         if n.art == TAGESFELD and (feld := tagesfelder.get(n.feld_id or "")) is not None:
@@ -294,6 +299,8 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
                             danach=neu,
                         )
                     )
+            elif n.art == WORKOUT and n.bezug_id:
+                page.run_task(page.push_route, f"/workout/{n.bezug_id}")
             elif n.art == AUFNAHME:
                 # Anhänge am Tag: der Tag, dort stehen sie an der Notiz zum Tag
                 page.run_task(page.push_route, f"/tag/{n.tag.isoformat()}")
@@ -471,14 +478,15 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             PLAN: ft.Icons.LIST_ALT,
             AUFNAHME: ft.Icons.ATTACH_FILE,
             TAGESFELD: ft.Icons.LABEL_OUTLINE,
+            WORKOUT: ft.Icons.PLAYLIST_PLAY,
         }.get(n.art) or symbol(symbol_name)
         inhalt: ft.Control = (
             ft.Text(n.text, size=14, max_lines=NOTIZ_ZEILEN, overflow=ft.TextOverflow.ELLIPSIS)
             if n.art == TAG
             else ft.Text(n.text, size=14, selectable=False)
         )
-        if n.art == TAG and n.werte:
-            # Die Werte der Tagesfelder an diesem Tag (Skizze C4)
+        if n.art in (TAG, WORKOUT) and n.werte:
+            # Die Werte der Tagesfelder an diesem Tag (Skizze C4) — beim Workout seine Skalen
             zeile = ft.Container(
                 bgcolor=ft.Colors.SURFACE_CONTAINER,
                 border_radius=8,
@@ -564,6 +572,9 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             kopf_text, icon = "Zum Tag", ft.Icons.WB_SUNNY_OUTLINED
         elif g.art == PLAN:
             kopf_text, icon = f"Plan „{plan_name(g.schluessel)}“", ft.Icons.LIST_ALT
+        elif g.art == WORKOUT:
+            kopf_text = g.notizen[0].titel if g.notizen else "Workout"
+            icon = ft.Icons.PLAYLIST_PLAY
         elif g.art == TAGESFELD:
             feld = tagesfelder.get(g.schluessel or "")
             kopf_text = feld.name if feld is not None else "Tagesfeld"

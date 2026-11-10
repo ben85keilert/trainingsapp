@@ -12,7 +12,7 @@ Höchster). Zusammen mit den Minuten der Einheit ergibt das die sRPE-Last
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import date
 from typing import Any
 
@@ -74,43 +74,78 @@ def srpe_zeile(
 
 
 def workout_srpe_zeile(
-    state: Any, einheit_id: str, *, danach: Callable[[], None] | None = None
+    state: Any,
+    einheit_id: str,
+    *,
+    danach: Callable[[], None] | None = None,
+    felder: Sequence[str] = (),
 ) -> ft.Control:
     """Die Zeile zum **Workout** (Ben, 10.11.2026, `docs/plan_workout_eintrag.md`): Die
     Anstrengung gehört zum Durchlauf, nicht zum Tag — sie steht im Workout-Eintrag
     (`EinheitRepo.workout_eintragen`), mehrere Workouts am Tag tragen je ihre eigene, und das
     Tagesfeld bleibt, wie es ist. Nachtragen und Ändern jederzeit."""
 
-    def schreiben(stufe: int) -> None:
-        state.einheiten.workout_eintragen(einheit_id, result={SRPE: stufe})
+    return workout_skala_zeile(
+        state,
+        einheit_id,
+        SRPE,
+        danach=danach,
+        felder=felder,
+        hinweis="0 Ruhe · 10 maximal — wie anstrengend war das Workout insgesamt?",
+    )
+
+
+def workout_skala_zeile(
+    state: Any,
+    einheit_id: str,
+    key: str,
+    *,
+    titel: str = "Anstrengung (sRPE)",
+    hinweis: str = "0–10",
+    danach: Callable[[], None] | None = None,
+    felder: Sequence[str] = (),
+) -> ft.Control:
+    """Eine Skala 0–10 am Workout — die Anstrengung oder eine eigene (`core.workout_eintrag.
+    feld_key`). Noch einmal auf den gewählten Wert tippen nimmt ihn zurück (Nachtragen: ein
+    Vertipper soll nicht stehen bleiben). ``felder``: die Skalen des Workouts von jetzt, für
+    die Kopie der Felder am Eintrag."""
+
+    def schreiben(stufe: int | None) -> None:
+        state.einheiten.workout_eintragen(einheit_id, result={key: stufe}, felder=felder)
 
     return stufen_zeile(
-        state.einheiten.workout_wert(einheit_id).srpe,
+        state.einheiten.workout_wert(einheit_id).wert(key),
         schreiben,
         danach=danach,
-        hinweis="0 Ruhe · 10 maximal — wie anstrengend war das Workout insgesamt?",
+        titel=titel,
+        hinweis=hinweis,
+        leerbar=True,
     )
 
 
 def stufen_zeile(
     wert: int | None,
-    schreiben: Callable[[int], None],
+    schreiben: Callable[[Any], None],
     *,
     danach: Callable[[], None] | None = None,
+    titel: str = "Anstrengung (sRPE)",
     hinweis: str = "0 Ruhe · 10 maximal — wie anstrengend war die Einheit insgesamt?",
+    leerbar: bool = False,
 ) -> ft.Control:
-    """Titel und die elf Knöpfe 0–10 — ``schreiben`` bekommt die getippte Stufe."""
+    """Titel und die elf Knöpfe 0–10 — ``schreiben`` bekommt die getippte Stufe; mit
+    ``leerbar`` nimmt ein Tipp auf die gewählte sie zurück (``schreiben(None)``)."""
     aktuell = {"wert": wert}
     knoepfe: dict[int, ft.Container] = {}
 
     def setzen(stufe: int) -> Callable[[Any], None]:
         def handler(_e: Any = None) -> None:
-            schreiben(stufe)
-            aktuell["wert"] = stufe
+            neu = None if leerbar and aktuell["wert"] == stufe else stufe
+            schreiben(neu)
+            aktuell["wert"] = neu
             for s, k in knoepfe.items():
-                k.bgcolor = ft.Colors.PRIMARY if s == stufe else None
+                k.bgcolor = ft.Colors.PRIMARY if s == neu else None
                 if isinstance(k.content, ft.Text):
-                    k.content.color = ft.Colors.ON_PRIMARY if s == stufe else None
+                    k.content.color = ft.Colors.ON_PRIMARY if s == neu else None
                 with contextlib.suppress(Exception):
                     k.update()
             if danach is not None:
@@ -140,7 +175,7 @@ def stufen_zeile(
                 spacing=6,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
-                    ft.Text("Anstrengung (sRPE)", size=12, opacity=0.8, expand=True),
+                    ft.Text(titel, size=12, opacity=0.8, expand=True),
                     ft.Text(hinweis, size=11, opacity=0.55),
                 ],
             ),
@@ -155,5 +190,6 @@ __all__ = [
     "srpe_wert",
     "srpe_zeile",
     "stufen_zeile",
+    "workout_skala_zeile",
     "workout_srpe_zeile",
 ]

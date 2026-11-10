@@ -12,7 +12,7 @@ die Anstrengung (sRPE). Keine Deutung, keine Last: nur, was eingetragen wurde.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Final
 
@@ -27,15 +27,56 @@ SRPE: Final[str] = "srpe"
 UEBUNG, FRAGE = "uebung", "frage"
 
 
-def spec() -> ResultSpec:
-    """Die Felder eines Workout-Eintrags — zuerst nur die Anstrengung (CR10, 0–10).
+#: Vorsilbe der Schlüssel eigener Skalen eines Workouts (`feld_key`)
+SKALA_VOR: Final[str] = "skala:"
+#: So viele eigene Skalen je Workout — die Seite soll nicht überladen
+FELDER_MAX: Final[int] = 4
+
+
+def feld_key(name: str) -> str:
+    """Der Schlüssel einer eigenen Skala — aus ihrem Namen, damit Werte beim Umordnen bleiben.
+
+    >>> feld_key(" Schmerz danach ")
+    'skala:Schmerz danach'
+    """
+    return SKALA_VOR + " ".join(name.split())
+
+
+def felder_bereinigt(namen: Iterable[str]) -> list[str]:
+    """Die Namen eigener Skalen: ohne leere und doppelte (Groß/klein egal), höchstens
+    `FELDER_MAX`; „Anstrengung“ gibt es schon.
+
+    >>> felder_bereinigt([" Schmerz ", "schmerz", "", "Anstrengung (sRPE)", "Fokus"])
+    ['Schmerz', 'Fokus']
+    """
+    out: list[str] = []
+    gesehen = {"anstrengung (srpe)", "anstrengung", "srpe"}
+    for roh in namen:
+        name = " ".join(str(roh).split())
+        if name and name.casefold() not in gesehen:
+            gesehen.add(name.casefold())
+            out.append(name)
+    return out[:FELDER_MAX]
+
+
+def spec(felder: Iterable[str] = ()) -> ResultSpec:
+    """Die Felder eines Workout-Eintrags — immer die Anstrengung (CR10, 0–10), dazu die eigenen
+    Skalen des Workouts (``felder``: ihre Namen, je 0–10; `PlanRepo.workout_felder`).
 
     >>> [f.key for f in spec().fields], spec().fields[0].max
     (['srpe'], 10)
+    >>> [(f.key, f.label) for f in spec(["Schmerz"]).fields][1]
+    ('skala:Schmerz', 'Schmerz')
     """
     return ResultSpec(
         layout=Layout.SINGLE,
-        fields=[FieldSpec(SRPE, FieldType.SCALE, "Anstrengung (sRPE)", min=0, max=10, step=1)],
+        fields=[
+            FieldSpec(SRPE, FieldType.SCALE, "Anstrengung (sRPE)", min=0, max=10, step=1),
+            *(
+                FieldSpec(feld_key(n), FieldType.SCALE, n, min=0, max=10, step=1)
+                for n in felder_bereinigt(felder)
+            ),
+        ],
     )
 
 
@@ -65,9 +106,46 @@ class WorkoutWerte:
         except (TypeError, ValueError):
             return None
 
+    def wert(self, key: str) -> int | None:
+        """Der Wert eines Felds (Skala), falls eingetragen."""
+        wert = self.result.get(key)
+        try:
+            return None if wert is None else int(wert)
+        except (TypeError, ValueError):
+            return None
+
     @property
     def leer(self) -> bool:
-        return self.srpe is None and not self.note.strip()
+        return not self.werte_text() and not self.note.strip()
+
+    def werte_text(self) -> str:
+        """Was eingetragen ist, in einer Zeile — mit den Namen der Kopie, mit der es erfasst
+        wurde; eine Skala, die es am Workout nicht mehr gibt, bleibt sichtbar.
+
+        >>> w = WorkoutWerte("e", {"srpe": 6, "skala:Schmerz": 2}, spec=spec(["Schmerz"]))
+        >>> w.werte_text(), WorkoutWerte("e", {"skala:Alt": 3}).werte_text()
+        ('Anstrengung 6 · Schmerz 2', 'Alt 3')
+        """
+        namen = {f.key: f.label for f in self.spec.fields}
+        namen[SRPE] = "Anstrengung"
+        teile = []
+        for key in [*namen, *(k for k in self.result if k not in namen)]:
+            w = self.wert(key)
+            if w is not None:
+                teile.append(f"{namen.get(key) or key.removeprefix(SKALA_VOR)} {w}")
+        return " · ".join(teile)
+
+
+@dataclass(frozen=True, slots=True)
+class WorkoutZeile:
+    """Ein Workout mit dem, was zu ihm eingetragen ist — für das Tagebuch, ohne die Zeitleiste
+    zu lesen (`EinheitRepo.workout_zeilen`)."""
+
+    einheit_id: str
+    plan_id: str
+    name: str
+    beginn: datetime
+    werte: WorkoutWerte
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +192,8 @@ class Durchlauf:
     bei: str = ""
     #: setzt ein vorzeitig beendetes Workout desselben Tags fort (`fortsetzungen_markieren`)
     fortgesetzt: bool = False
+    #: die genommenen Wege (``plan/kante``: von, nach) in ihrer Reihenfolge — für das Ablaufbild
+    kanten: tuple[tuple[str, str], ...] = ()
 
     @property
     def vorzeitig(self) -> bool:
@@ -130,6 +210,11 @@ class Durchlauf:
     def uebungen(self) -> int:
         """Wie viele Übungen eingetragen wurden — eine wiederholte zählt einmal."""
         return len({z.item_id for z in self.zeilen if z.eingetragen})
+
+    @property
+    def besucht(self) -> frozenset[str]:
+        """Die Knoten (Planübungen, Fragen), bei denen der Durchlauf war."""
+        return frozenset(z.item_id for z in self.zeilen)
 
     @property
     def eintrag_ids(self) -> frozenset[str]:
@@ -176,6 +261,7 @@ def durchlauf(
     (True, True)
     """
     plan_id, name, bei = "", "", ""
+    kanten: list[tuple[str, str]] = []
     zeilen: list[dict[str, Any]] = []
     for e in ereignisse:
         daten = getattr(e, "daten", None) or {}
@@ -215,12 +301,14 @@ def durchlauf(
             ziel = _letzte(zeilen, item)
             if ziel is not None:
                 ziel["eintrag_ids"] = (*ziel["eintrag_ids"], str(daten["eintrag"]))
+        elif quelle == "plan" and art == "kante" and daten.get("von") and daten.get("nach"):
+            kanten.append((str(daten["von"]), str(daten["nach"])))
         elif quelle == "plan" and art == "ende":
             bei = str(daten.get("bei") or "")
     fertig = tuple(Zeile(**z) for z in zeilen)
     if not plan_id or not any(z.eingetragen for z in fertig):
         return None
-    return Durchlauf(einheit_id, plan_id, name, beginn, ende, fertig, bei)
+    return Durchlauf(einheit_id, plan_id, name, beginn, ende, fertig, bei, kanten=tuple(kanten))
 
 
 def _letzte(
@@ -253,9 +341,7 @@ def fortsetzungen_markieren(laeufe: Sequence[Durchlauf]) -> list[Durchlauf]:
     offen: dict[str, bool] = {}
     for d in sorted(laeufe, key=lambda d: d.beginn):
         fort = offen.get(d.plan_id, False)
-        out.append(
-            Durchlauf(d.einheit_id, d.plan_id, d.name, d.beginn, d.ende, d.zeilen, d.bei, fort)
-        )
+        out.append(replace(d, fortgesetzt=fort))
         offen[d.plan_id] = d.vorzeitig
     return out
 
@@ -294,13 +380,18 @@ def kurz(d: Durchlauf) -> str:
 
 __all__ = [
     "EINGETRAGEN",
+    "FELDER_MAX",
     "FRAGE",
+    "SKALA_VOR",
     "SRPE",
     "UEBUNG",
     "Durchlauf",
     "WorkoutWerte",
+    "WorkoutZeile",
     "Zeile",
     "durchlauf",
+    "feld_key",
+    "felder_bereinigt",
     "fortsetzungen_markieren",
     "kurz",
     "minuten_text",

@@ -1046,6 +1046,9 @@ def tagesansicht(
         v = var.finden(uebung.result_spec if uebung else None, g.variante)
         return varianten_etikett(v, klein=klein)
 
+    #: Zeitleiste: die älteren Workout-Blöcke, die aufgeklappt sind — über das Auffrischen hinweg
+    workout_offen: set[str] = set()
+
     def workout_kopf(w: Durchlauf, mit_uhrzeit: bool = True) -> ft.Control:
         """Der Workout-Eintrag als eine Zeile — Tipp öffnet ihn (`views/workout_eintrag.py`)."""
         return eintrag_kopf(
@@ -1075,13 +1078,47 @@ def tagesansicht(
         d = daten()
         ids = d.workout_eintraege.get(w.einheit_id, set())
         zeilen = gemacht([(e, s) for e, s in d.eintraege if e.id in ids], d.namen())
+        # Bei mehreren Workouts zeigt nur das jüngste seine Übungen — die älteren sind
+        # eingeklappt, ein Tipp klappt sie auf (übersichtlich bleiben)
+        zu = w is not d.workouts[-1] and w.einheit_id not in workout_offen
+
+        def umschalten(_e: object = None) -> None:
+            workout_offen.symmetric_difference_update({w.einheit_id})
+            auffrischen()
+
+        n = len(zeilen)
+        klappe = ft.Container(
+            ink=True,
+            on_click=umschalten,
+            border_radius=8,
+            padding=ft.Padding.symmetric(horizontal=4, vertical=4),
+            content=ft.Row(
+                spacing=4,
+                controls=[
+                    ft.Text(
+                        f"{n} Übung" if n == 1 else f"{n} Übungen",
+                        size=12,
+                        opacity=0.65,
+                        expand=True,
+                    ),
+                    ft.Icon(
+                        ft.Icons.EXPAND_MORE if zu else ft.Icons.EXPAND_LESS, size=18, opacity=0.6
+                    ),
+                ],
+            ),
+        )
+        mehrere = len(d.workouts) > 1 and w is not d.workouts[-1]
         return ft.Container(
             bgcolor=KARTE,
             border_radius=14,
             padding=8,
             content=ft.Column(
                 spacing=4,
-                controls=[workout_kopf(w, mit_uhrzeit=False), *(block_zeile(g) for g in zeilen)],
+                controls=[
+                    workout_kopf(w, mit_uhrzeit=False),
+                    *([klappe] if mehrere else []),
+                    *([] if zu else [block_zeile(g) for g in zeilen]),
+                ],
             ),
         )
 

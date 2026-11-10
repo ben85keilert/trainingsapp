@@ -38,10 +38,15 @@ from .models import DayNote, Session, SessionEntry, lokaler_tag
 from .tagesfelder import TEXT as NUR_TEXT
 from .tagesfelder import Tagesfeld, Tageswert, eintrag_text, tageszeile
 from .varianten import von as variante_von
+from .workout_eintrag import WorkoutZeile
 
 #: Woran eine Notiz hängt — `AUFNAHME`: Fotos und Videos an einem Eintrag, `TAGESFELD`: Text
 #: oder Notiz eines Tagesfelds
 TAG, PLAN, UEBUNG, AUFNAHME, TAGESFELD = "tag", "plan", "uebung", "aufnahme", "tagesfeld"
+#: Ein Workout mit dem, was zu ihm eingetragen ist (Ben, 10.11.2026,
+#: `docs/plan_workout_eintrag.md`) — ``bezug_id`` ist die Einheit, ``werte`` die Zeile der
+#: Skalen („Anstrengung 6“), ``text`` die Notiz zum Workout
+WORKOUT = "workout"
 #: So viele Zeilen zeigt eine Notiz zum Tag, bevor sie abgeschnitten wird — das Feld unter
 #: Heute (``max_lines``) und die Karte im Tagebuch gleichermaßen (Ben, 2.11.2026, P100)
 NOTIZ_ZEILEN = 10
@@ -106,6 +111,7 @@ def sammeln(
     tageswerte: Iterable[Tageswert] = (),
     tagesfelder: Mapping[str, Tagesfeld] | None = None,
     tag_namen: Mapping[str, str] | None = None,
+    workouts: Iterable[WorkoutZeile] = (),
 ) -> list[Notiz]:
     """Die Ebenen als Notizen — ``tage`` (die Notizen zum Tag, `DayNote`, mit ``tag_namen``
     ID → Name ihrer Tags), ``sessions`` (mit ihrem ersten Eintrag), ``eintraege`` (mit ihrer
@@ -157,6 +163,15 @@ def sammeln(
     tag | müde | Ibu 400 × 1
     tagesfeld | nach dem Laufen | Ibu 400
     tagesfeld | Gemüse | Ernährung
+
+    Ein Workout mit Anstrengung oder Notiz steht als eigene Zeile da (``bezug_id`` = Einheit):
+
+    >>> from .workout_eintrag import WorkoutWerte, WorkoutZeile
+    >>> wz = WorkoutZeile("x", "p", "Beine", datetime(2026, 10, 17, 10, tzinfo=UTC),
+    ...                   WorkoutWerte("x", {"srpe": 6}, "zäh"))
+    >>> [(x.art, x.titel, x.text, x.werte, x.bezug_id, x.plan_id)
+    ...  for x in sammeln([], [], [], workouts=[wz])]
+    [('workout', 'Workout Beine', 'zäh', 'Anstrengung 6', 'x', 'p')]
     """
     namen = tag_namen or {}
     ergebnis = [
@@ -215,6 +230,19 @@ def sammeln(
                 None,
                 eintrag_id,
                 anhang_ids=_reihenfolge(liste),
+            )
+        )
+    for w in workouts:
+        ergebnis.append(
+            Notiz(
+                lokaler_tag(w.beginn),
+                WORKOUT,
+                w.werte.note,
+                w.beginn,
+                plan_id=w.plan_id or None,
+                bezug_id=w.einheit_id,
+                werte=w.werte.werte_text(),
+                titel=f"Workout {w.name}".strip(),
             )
         )
     for (tag, notiz_id), liste in je_tag.items():
@@ -387,7 +415,12 @@ def nach_uebungen(notizen: Iterable[Notiz]) -> list[Gruppe]:
         # Aufnahmen stehen unter ihrer Übung, zwischen deren Notizen — die am Tag bei den
         # Notizen zum Tag
         art = (UEBUNG if x.exercise_id else TAG) if x.art == AUFNAHME else x.art
-        schluessel = {UEBUNG: x.exercise_id, PLAN: x.plan_id, TAGESFELD: x.feld_id}.get(art)
+        schluessel = {
+            UEBUNG: x.exercise_id,
+            PLAN: x.plan_id,
+            TAGESFELD: x.feld_id,
+            WORKOUT: x.plan_id,
+        }.get(art)
         gruppen.setdefault((art, schluessel), []).append(x)
 
     def neueste(liste: list[Notiz]) -> tuple[date, float]:
@@ -473,6 +506,7 @@ __all__ = [
     "TAG",
     "TAGESFELD",
     "UEBUNG",
+    "WORKOUT",
     "Gruppe",
     "Notiz",
     "Tagesgruppe",

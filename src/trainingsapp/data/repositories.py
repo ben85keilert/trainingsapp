@@ -70,6 +70,7 @@ from ..core.timer import (
     verweise_schreiben,
     zugeordnete,
 )
+from ..core.workout_eintrag import felder_bereinigt
 from ..core.zaehlen import SensorWahl
 from .db import transaktion
 
@@ -1394,6 +1395,29 @@ class PlanRepo:
                 "revision = revision + 1 WHERE id = ?",
                 (iso_utc(jetzt()), jetzt().isoformat(), plan_id),
             )
+
+    def workout_felder(self, plan_id: str) -> list[str]:
+        """Die eigenen Skalen dieses Workouts (Migration 054) — ihre Namen, leer ohne."""
+        r = self.con.execute(
+            "SELECT workout_felder_json FROM plan WHERE id = ?", (plan_id,)
+        ).fetchone()
+        try:
+            roh = json.loads(r[0]) if r is not None and r[0] else []
+        except (TypeError, ValueError):
+            roh = []
+        return felder_bereinigt(roh if isinstance(roh, list) else [])
+
+    def workout_felder_setzen(self, plan_id: str, namen: Iterable[str]) -> list[str]:
+        """Die eigenen Skalen setzen — nur diese Spalte; eingetragene Werte bleiben, wo sie
+        sind (`workout_entry` trägt die Kopie der Felder)."""
+        felder = felder_bereinigt(namen)
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE plan SET workout_felder_json = ?, updated_at = ?, "
+                "revision = revision + 1 WHERE id = ?",
+                (json.dumps(felder, ensure_ascii=False), jetzt().isoformat(), plan_id),
+            )
+        return felder
 
     def plan_takt_setzen(self, plan_id: str, takt: Takt | None) -> None:
         """„Takt für alle Übungen“ (Migration 042, P105) — ``None`` = keiner."""

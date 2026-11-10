@@ -1,6 +1,7 @@
 # Workout-Eintrag
 
-Stand: 10.11.2026 — Stufen 1 und 2 gebaut (Migration 053), Stufe 3 teilweise. Skizzen E1–E4:
+Stand: 10.11.2026 abends — Stufen 1 bis 3 gebaut (Migrationen 053, 054); offen nur die
+Lastrechnung (P179, zurückgestellt). Skizzen E1–E4:
 https://claude.ai/artifact/PpEBhBSSWcAWDY7kTqDEgd
 
 Ben, 10.11.2026: „Die Anstrengung sRPE müsste in Bezug auf das Workout notiert werden, d. h. ein
@@ -41,7 +42,13 @@ Notiz; unveränderlich — eine Änderung ist eine neue Zeile mit `replaces_id`,
 (`EinheitRepo.workout_eintragen`, `workout_wert`, `workout_werte`).
 
 - Erstes Feld: **Anstrengung (sRPE)**, 0–10 (`core.workout_eintrag.spec`, Schlüssel `srpe`).
-  Weitere Felder je Plan sind vorgesehen, noch nicht gebaut.
+- **Eigene Skalen je Workout** (Migration 054, `plan.workout_felder_json`): bis zu vier frei
+  benannte Skalen 0–10 („Schmerz danach“), gesetzt auf der Seite über „Felder …“
+  (`PlanRepo.workout_felder`/`workout_felder_setzen`) — sie gelten für alle Durchläufe dieses
+  Workouts. Schlüssel `skala:<Name>` (`feld_key`). Gerätelokal wie `freischaltung_seit`: kein
+  Paketfeld, `PlanRepo.speichern` fasst die Spalte nicht an. Wird eine Skala entfernt, bleibt ein
+  eingetragener Wert mit seinem Namen stehen (die Kopie der Felder am Eintrag).
+- Ein Tipp auf den gewählten Wert nimmt ihn zurück.
 - Eintragen in „Workout fertig“ und jederzeit im Workout-Eintrag (auch an vergangenen Tagen).
 - **Das Tagesfeld „Anstrengung (sRPE)“ bleibt, wie es ist** (einmal am Tag, für den Tag als
   Ganzes). Das Workout schreibt nicht mehr hinein — mehrere Workouts füllen weder „Zum Tag“ noch
@@ -65,8 +72,20 @@ Notiz; unveränderlich — eine Änderung ist eine neue Zeile mit `replaces_id`,
 3. **Verlauf:** je Schritt Nummer im Plan, Name („· 2. Mal“ bei Schleifen), Kurzwert aus dem
    gültigen Eintrag (eine Korrektur zählt, `SessionRepo.eintrag_aktuell`), Dauer; Fragen mit
    Antwort und Übersprungenes als blasse Zeilen.
-4. **Messung:** nur, wenn eine Aufnahme mitlief — führt zu ihrem Abschnitt „Workout …“.
-5. **Zuletzt:** der vorige Durchlauf desselben Workouts, eine Zeile, Tipp öffnet ihn.
+4. **Messung:** nur, wenn eine Aufnahme mitlief — die Herzfrequenz über dem Workout (5-s-Mittel,
+   korrigiert wie in der Auswertung; ein Thread liest die Messdatei, `hf_lesen`) mit senkrechten
+   Grenzen der Schritte, darunter der Weg zum Abschnitt „Workout …“ in der Auswertung.
+5. **Gegangener Weg:** nur bei einem Ablauf mit Abzweigen oder Fragen, eingeklappt — das
+   Ablaufbild (`components/ablaufbild`), Nichtbesuchtes blass, an den genommenen Wegen die Zahl
+   (`Durchlauf.kanten`, `besucht`).
+6. **Zuletzt:** der vorige Durchlauf desselben Workouts, eine Zeile, Tipp öffnet ihn; darunter
+   **„Alle Durchläufe ›“** (`/workout/<einheit>/alle`): Datum, Dauer, Übungen, Eingetragenes,
+   Notiz — der jüngste zuerst, ohne Wertung.
+
+Außerhalb der Seite: Das **Tagebuch** zeigt Workouts, zu denen etwas eingetragen ist
+(`core.tagebuch.WORKOUT`, `EinheitRepo.workout_zeilen`; nach Tagen an ihrer Uhrzeit, nach Übungen
+als Gruppe je Workout), Tipp → der Eintrag. In der **Zeitleiste** zeigt bei mehreren Workouts nur
+das jüngste seine Übungen, die älteren klappen auf Tipp auf.
 
 ## 6. Technik
 
@@ -82,10 +101,10 @@ Notiz; unveränderlich — eine Änderung ist eine neue Zeile mit `replaces_id`,
 ## 7. Stufen
 
 - **Stufe 1 (gebaut):** Zeile in Übersicht und Zeitleiste, Seite mit Kopf, Anstrengung, Verlauf.
-- **Stufe 2 (gebaut):** Herkunftszeile an der Übung, Notiz zum Workout, Karte „Messung“ (Link;
-  die kleine HF-Kurve mit Schrittgrenzen aus Skizze E3 fehlt noch).
-- **Stufe 3:** „Zuletzt“ (gebaut); offen: alle Durchläufe eines Workouts als Reihe, weitere
-  Felder je Plan, der gegangene Weg im Ablaufbild, Workout-Einträge im Tagebuch.
+- **Stufe 2 (gebaut):** Herkunftszeile an der Übung, Notiz zum Workout, Karte „Messung“ mit
+  HF-Kurve und Schrittgrenzen.
+- **Stufe 3 (gebaut 10.11.2026 abends):** „Zuletzt“, alle Durchläufe als Reihe, eigene Skalen je
+  Workout, der gegangene Weg im Ablaufbild, Workouts im Tagebuch, Einklappen in der Zeitleiste.
 
 ## 8. Offen
 
@@ -93,4 +112,7 @@ Notiz; unveränderlich — eine Änderung ist eine neue Zeile mit `replaces_id`,
   die sRPE-Last im HF-Verlauf ihn sieht? (Hängt an der zurückgestellten Lastrechnung.)
 - Export/Sync: `workout_entry` liegt nur in der Datenbank; in den Export gehört es, sobald
   Einheiten dort mitgehen.
-- Gerätetest T123.
+- Die HF-Kurve nimmt die Wanduhr der Messdatei; das Fenster kommt aus dem Versatz der
+  HRV-Beteiligung der Einheit — am Gerät prüfen, ob Kurve und Schrittgrenzen zusammenpassen.
+- Eigene Skalen reisen nicht in Paketen; ob sie das sollen, ist nicht entschieden.
+- Gerätetests T123, T124.

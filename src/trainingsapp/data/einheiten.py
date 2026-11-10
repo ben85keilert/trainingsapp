@@ -23,7 +23,7 @@ from typing import Any
 from ..core.einheit import Beteiligung, Ereignis, Rolle, daten_pruefen
 from ..core.models import iso_utc, jetzt, new_id
 from ..core.result_spec import ResultSpec
-from ..core.workout_eintrag import WorkoutWerte
+from ..core.workout_eintrag import WorkoutWerte, WorkoutZeile
 from ..core.workout_eintrag import spec as workout_spec
 from .db import transaktion
 
@@ -143,7 +143,9 @@ class EinheitRepo:
             )
         ]
 
-    def workout_davor(self, subject_id: str, plan_id: str, vor: datetime) -> list[EinheitKopf]:
+    def workout_davor(
+        self, subject_id: str, plan_id: str, vor: datetime, limit: int = 20
+    ) -> list[EinheitKopf]:
         """Die Workouts dieses Plans, die vor ``vor`` begannen — jüngste zuerst (für „Zuletzt“
         im Workout-Eintrag; ob daraus ein Eintrag wurde, sagt `core.workout_eintrag.durchlauf`)."""
         return [
@@ -154,8 +156,8 @@ class EinheitRepo:
                 "AND e.started_at < ? AND x.quelle = 'plan' AND x.art = 'start' "
                 "AND json_extract(x.daten_json, '$.plan') = ? "
                 "AND json_extract(x.daten_json, '$.workout') "
-                "ORDER BY e.started_at DESC LIMIT 20",
-                (subject_id, iso_utc(vor), plan_id),
+                "ORDER BY e.started_at DESC LIMIT ?",
+                (subject_id, iso_utc(vor), plan_id, limit),
             )
         ]
 
@@ -187,6 +189,32 @@ class EinheitRepo:
             )
         return out
 
+    def workout_zeilen(self, subject_id: str) -> list[WorkoutZeile]:
+        """Alle Workouts des Profils, zu denen etwas eingetragen ist (Anstrengung, Skala,
+        Notiz) — für das Tagebuch; Name und Plan aus ``plan/start`` der Zeitleiste."""
+        koepfe: dict[str, tuple[str, str, datetime]] = {}
+        for r in self.con.execute(
+            "SELECT e.id, e.started_at, x.text, x.daten_json FROM einheit e "
+            "JOIN einheit_ereignis x ON x.einheit_id = e.id "
+            "WHERE e.subject_id = ? AND e.deleted_at IS NULL AND x.quelle = 'plan' "
+            "AND x.art = 'start' AND e.id IN (SELECT einheit_id FROM workout_entry) "
+            "ORDER BY e.started_at, x.nr",
+            (subject_id,),
+        ):
+            d = json.loads(r["daten_json"] or "{}")
+            if d.get("workout") and r["id"] not in koepfe:
+                koepfe[r["id"]] = (
+                    str(d.get("plan") or ""),
+                    r["text"] or "",
+                    datetime.fromisoformat(r["started_at"]),
+                )
+        werte = self.workout_werte(list(koepfe))
+        return [
+            WorkoutZeile(i, plan, name, beginn, werte[i])
+            for i, (plan, name, beginn) in koepfe.items()
+            if i in werte and not werte[i].leer
+        ]
+
     def workout_wert(self, einheit_id: str) -> WorkoutWerte:
         """Was zu diesem Workout eingetragen ist — leer, wenn nichts."""
         return self.workout_werte([einheit_id]).get(einheit_id) or WorkoutWerte(einheit_id)
@@ -197,6 +225,7 @@ class EinheitRepo:
         *,
         result: dict[str, Any] | None = None,
         note: str | None = None,
+        felder: Collection[str] = (),
     ) -> WorkoutWerte:
         """Werte oder Notiz zum Workout setzen — ``None`` lässt, was da ist. Unveränderlich wie
         ein Tagebucheintrag: geschrieben wird eine neue Zeile, die die bisherige ersetzt; ein
@@ -211,7 +240,10 @@ class EinheitRepo:
         text = alt.note if note is None else note.strip()
         if werte == alt.result and text == alt.note:
             return alt
-        neu = WorkoutWerte(einheit_id, werte, text, workout_spec(), new_id(), jetzt())
+        # Die Kopie der Felder: Anstrengung, die Skalen des Workouts von jetzt (``felder``) und
+        # die, zu denen schon ein Wert steht — so bleibt lesbar, was einmal erfasst wurde
+        namen = [*felder, *(f.label for f in alt.spec.fields if f.key in werte)]
+        neu = WorkoutWerte(einheit_id, werte, text, workout_spec(namen), new_id(), jetzt())
         with transaktion(self.con):
             self.con.execute(
                 "INSERT INTO workout_entry (id, einheit_id, result_json, spec_snapshot_json, "

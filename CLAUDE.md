@@ -377,7 +377,14 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   (Ergebnis + Spec-Kopie + Notiz, unveränderlich mit `replaces_id`, `EinheitRepo.
   workout_eintragen`), eingetragen in „Workout fertig“ oder nachträglich im Eintrag
   (`components/srpe.workout_srpe_zeile`); das Tagesfeld „Anstrengung (sRPE)“ bleibt für den Tag,
-  das Workout schreibt nicht hinein, keine Lastrechnung daraus (P179). **Ein Workout bleibt ein
+  das Workout schreibt nicht hinein, keine Lastrechnung daraus (P179). **Eigene Skalen 0–10 je
+  Workout** (Migration 054, `plan.workout_felder_json`, gerätelokal wie `freischaltung_seit` —
+  `PlanRepo.workout_felder`/`workout_felder_setzen`, nie über `speichern`; „Felder …“ auf der
+  Seite, Schlüssel `core.workout_eintrag.feld_key`, die Kopie der Felder am Eintrag hält auch
+  entfernte lesbar). Die Seite hat dazu die HF-Kurve mit Schrittgrenzen (Thread, `hf_lesen`),
+  den gegangenen Weg im Ablaufbild (nur mit Abzweig, eingeklappt; `Durchlauf.kanten`) und
+  `/workout/<einheit>/alle`; das Tagebuch zeigt Workouts mit Eintrag (`core.tagebuch.WORKOUT`,
+  `EinheitRepo.workout_zeilen`), die Zeitleiste klappt ältere Workout-Blöcke ein. **Ein Workout bleibt ein
   Workout:** „Trainieren“ öffnet es immer als Workout (`uebungen.heute_trainieren` nimmt
   `plan_als_plan` zurück), die Liste gibt es nur von Hand.
 

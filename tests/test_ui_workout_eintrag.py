@@ -19,6 +19,8 @@ from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.tag import ZEITLEISTE, tagesansicht  # noqa: E402
 from trainingsapp.ui.views.workout_eintrag import (  # noqa: E402
     durchlaeufe_am_tag,
+    hf_lesen,
+    workout_alle_view,
     workout_eintrag_view,
 )
 
@@ -82,7 +84,7 @@ def _workout(state: AppState, plan: Plan, einheit_id: str, vor_minuten: int = 30
     jetzt = datetime.now(UTC)
     anfang = datetime.combine(state.heute(), datetime.min.time()).astimezone()
     start = max(jetzt - timedelta(minutes=vor_minuten), anfang)
-    a, b = plan.items
+    a, b = plan.items[:2]
     session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
     uebung = state.uebungen.laden(a.exercise_id)
     eintrag = state.sitzungen.eintrag_anlegen(
@@ -232,3 +234,179 @@ def test_eintrag_der_uebung_nennt_das_workout_als_herkunft(page, state) -> None:
     herkunft = [t for t in texte if "im Workout Beine · Schritt 1" in t]
     assert len(herkunft) == 1 and "Plan „Beine“" not in herkunft[0]
     assert any(t.endswith("ohne Plan") for t in texte)
+
+
+# -- Rest (10.11.2026 abends): eigene Skalen, Reihe, Weg, Kurve, Tagebuch, Einklappen -------------
+
+
+def _knopf(wurzel, text: str):
+    return next(x for x in _alle(wurzel) if isinstance(x, ft.TextButton) and x.content == text)
+
+
+def _stufe(wurzel, titel: str, stufe: int):
+    """Der Knopf ``stufe`` in der Skalen-Zeile mit diesem Titel."""
+    zeile = next(
+        x
+        for x in _alle(wurzel)
+        if isinstance(x, ft.Column) and _texte(x)[:1] == [titel] and len(_texte(x)) == 13
+    )
+    return next(
+        x
+        for x in _alle(zeile)
+        if isinstance(x, ft.Container)
+        and isinstance(x.content, ft.Text)
+        and x.content.value == str(stufe)
+    )
+
+
+def test_eigene_skalen_am_workout_gelten_fuer_alle_durchlaeufe(state) -> None:
+    dialoge: list = []
+
+    async def push_route(route: str) -> None:
+        return None
+
+    page = SimpleNamespace(
+        route="/", update=lambda: None, show_dialog=dialoge.append, push_route=push_route
+    )
+    plan = _plan(state, "kniebeuge", "wandsitz")
+    _workout(state, plan, "e-1", 60)
+    _workout(state, plan, "e-2", 10)
+    ansicht = workout_eintrag_view(page, state, "e-1")
+
+    # „Felder …“: eine Skala dazu — das Blatt zeigt sie, doppelte und leere fallen weg
+    _knopf(ansicht, "Felder …").on_click(None)
+    blatt = dialoge[-1]
+    feld = next(x for x in _alle(blatt) if isinstance(x, ft.TextField))
+    feld.value = " Schmerz danach "
+    feld.on_submit(None)
+    feld.value = "schmerz danach"
+    feld.on_submit(None)
+    assert state.plaene.workout_felder(plan.id) == ["Schmerz danach"]
+    assert "Schmerz danach" in _texte(blatt)
+
+    # Sie steht bei jedem Durchlauf dieses Workouts; der Wert gehört zum Durchlauf
+    eins = workout_eintrag_view(page, state, "e-1")
+    _stufe(eins, "Schmerz danach", 3).on_click(None)
+    _stufe(eins, "Anstrengung (sRPE)", 7).on_click(None)
+    assert state.einheiten.workout_wert("e-1").werte_text() == "Anstrengung 7 · Schmerz danach 3"
+    assert "Schmerz danach" in _texte(workout_eintrag_view(page, state, "e-2"))
+    assert state.einheiten.workout_wert("e-2").leer
+
+    # Noch einmal auf den gewählten Wert: zurückgenommen
+    _stufe(workout_eintrag_view(page, state, "e-1"), "Anstrengung (sRPE)", 7).on_click(None)
+    assert state.einheiten.workout_wert("e-1").srpe is None
+
+    # Die Skala entfernen: der eingetragene Wert bleibt sichtbar, am anderen Durchlauf ist sie weg
+    state.plaene.workout_felder_setzen(plan.id, [])
+    assert "nicht mehr am Workout" in _texte(workout_eintrag_view(page, state, "e-1"))
+    assert "Schmerz danach" not in _texte(workout_eintrag_view(page, state, "e-2"))
+    # Der Plan selbst bleibt beim Speichern, wie er war — die Spalte gehört nicht zum Modell
+    state.plaene.workout_felder_setzen(plan.id, ["Fokus"])
+    state.plaene.speichern(state.plaene.laden(plan.id))
+    assert state.plaene.workout_felder(plan.id) == ["Fokus"]
+
+
+def test_alle_durchlaeufe_als_reihe(page, state) -> None:
+    plan = _plan(state, "kniebeuge", "wandsitz")
+    _workout(state, plan, "e-1", 90)
+    _workout(state, plan, "e-2", 10)
+    state.einheiten.workout_eintragen("e-1", result={"srpe": 4}, note="zäh")
+
+    eintrag = workout_eintrag_view(page, state, "e-2")
+    asyncio.run(_knopf(eintrag, "Alle Durchläufe ›").on_click())
+    assert page.routen[-1] == "/workout/e-2/alle"
+
+    ansicht = workout_alle_view(page, state, "e-2")
+    texte = _texte(ansicht)
+    assert "2 Durchläufe" in texte and "Anstrengung 4" in texte and "zäh" in texte
+    zeilen = [x.data[1] for x in _alle(ansicht) if isinstance(getattr(x, "data", None), tuple)]
+    assert zeilen == ["e-2", "e-1"]  # der jüngste zuerst
+    andere = next(x for x in _alle(ansicht) if getattr(x, "data", None) == ("durchlauf", "e-1"))
+    asyncio.run(andere.on_click())
+    assert page.routen[-1] == "/workout/e-1"
+
+
+def test_gegangener_weg_nur_mit_abzweig_und_eingeklappt(page, state) -> None:
+    from trainingsapp.core import ablauf as ab
+
+    plan = _plan(state, "kniebeuge", "wandsitz", "liegestuetzen")
+    _workout(state, plan, "e-1")
+    # Eine gerade Kette: keine Karte
+    assert "GEGANGENER WEG" not in _texte(workout_eintrag_view(page, state, "e-1"))
+
+    a, b, c = (it.id for it in plan.items)
+    state.plaene.ablauf_setzen(
+        plan.id, ab.Ablauf(True, a, (ab.Kante(a, b), ab.Kante(a, c), ab.Kante(b, c)))
+    )
+    state.einheiten.ereignisse_schreiben(
+        "e-1",
+        [(7, Ereignis(240.0, "plan", "kante", "", {"plan": plan.id, "von": a, "nach": b}))],
+    )
+    (lauf,) = durchlaeufe_am_tag(state, state.heute())
+    assert lauf.kanten == ((a, b),) and lauf.besucht == {a, b}
+
+    ansicht = workout_eintrag_view(page, state, "e-1")
+    assert "GEGANGENER WEG" in _texte(ansicht)
+    assert not [x for x in _alle(ansicht) if isinstance(x, ft.InteractiveViewer)]
+    kopf = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Container) and x.on_click and _texte(x) == ["GEGANGENER WEG"]
+    )
+    kopf.on_click(None)
+    assert [x for x in _alle(ansicht) if isinstance(x, ft.InteractiveViewer)]
+
+
+def test_hf_kurve_liest_das_fenster_des_workouts() -> None:
+    from pathlib import Path
+
+    from hrv_core.regeln import Korrekturregeln
+
+    pfad = Path(__file__).parent / "golden" / "rr" / "sensor_synth_ruhe_sitzend_11.json"
+    alles = hf_lesen(pfad, Korrekturregeln(), 0.0, 1e9)
+    teil = hf_lesen(pfad, Korrekturregeln(), 60.0, 120.0)
+    assert len(alles) > len(teil) > 5
+    assert 0.0 <= teil[0][0] < 10.0 and teil[-1][0] <= 60.0  # x zählt ab Beginn des Workouts
+    assert all(30 < bpm < 200 for _, bpm in teil)
+
+
+def test_tagebuch_zeigt_workouts_mit_eintrag(page, state) -> None:
+    from trainingsapp.ui.views.tagebuch import tagebuch
+
+    plan = _plan(state, "kniebeuge", "wandsitz")
+    _workout(state, plan, "e-1", 60)
+    _workout(state, plan, "e-2", 10)  # nichts eingetragen: steht nicht im Tagebuch
+    state.einheiten.workout_eintragen("e-1", result={"srpe": 6}, note="Knie gespürt")
+    page.run_task = lambda f, *a: asyncio.run(f(*a))
+    ansicht = tagebuch(page, state)
+    texte = _texte(ansicht)
+    assert texte.count("Workout Beine") == 1
+    assert "Knie gespürt" in texte and "Anstrengung 6" in texte
+    karte = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Container)
+        and x.on_click
+        and "Knie gespürt" in _texte(x)
+        and "Workout Beine" in _texte(x)
+    )
+    karte.on_click()
+    assert page.routen[-1] == "/workout/e-1"
+
+
+def test_zeitleiste_klappt_aeltere_workouts_ein(page, state) -> None:
+    plan = _plan(state, "kniebeuge", "wandsitz")
+    _workout(state, plan, "e-1", 60)
+    _workout(state, plan, "e-2", 10)
+    state.tag_darstellung = ZEITLEISTE
+    ansicht = tagesansicht(page, state, state.heute())
+    texte = _texte(ansicht)
+    # Nur das jüngste zeigt seine Übung; am älteren steht „1 Übung“ zum Aufklappen
+    assert texte.count("Workout Beine") == 2 and texte.count("Kniebeuge") == 1
+    klappe = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Container) and x.on_click and _texte(x) == ["1 Übung"]
+    )
+    klappe.on_click(None)
+    assert _texte(ansicht).count("Kniebeuge") == 2

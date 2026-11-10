@@ -409,3 +409,22 @@ def test_workouts_eines_tags_und_das_vorige(repo) -> None:
     assert we.kurz(laeufe[1]) == "10 min · 1 Übung · fortgesetzt"
     davor = r.workout_davor(profil, "p", T0 + timedelta(days=1))
     assert [k.id for k in davor] == ["e-2", "e-1"]
+
+
+def test_workout_zeilen_fuers_tagebuch_und_kopie_der_felder(repo) -> None:
+    """Nur Workouts mit Eintrag (Anstrengung, Skala, Notiz); die Kopie der Felder am Eintrag
+    hält den Namen einer Skala, auch wenn es sie am Workout nicht mehr gibt."""
+    r, profil = repo
+    _workout(r, profil, "e-1", T0)
+    _workout(r, profil, "e-2", T0 + timedelta(hours=1))
+    r.workout_eintragen("e-1", result={"skala:Schmerz": 2}, felder=["Schmerz"])
+    r.workout_eintragen("e-1", result={"srpe": 5}, note="gut", felder=[])
+    zeilen = r.workout_zeilen(profil)
+    assert [(z.einheit_id, z.plan_id, z.name, z.beginn) for z in zeilen] == [
+        ("e-1", "p", "Beine", T0)
+    ]
+    assert zeilen[0].werte.werte_text() == "Anstrengung 5 · Schmerz 2"
+    assert zeilen[0].werte.note == "gut"
+    # Alles zurückgenommen: nicht mehr im Tagebuch
+    r.workout_eintragen("e-1", result={"srpe": None, "skala:Schmerz": None}, note="")
+    assert r.workout_zeilen(profil) == []

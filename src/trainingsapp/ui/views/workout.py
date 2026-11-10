@@ -1429,7 +1429,9 @@ def workout_view(
 
             return [
                 karte(
-                    workout_srpe_zeile(state, einheit_id),
+                    workout_srpe_zeile(
+                        state, einheit_id, felder=state.plaene.workout_felder(plan.id)
+                    ),
                     ft.Row(
                         alignment=ft.MainAxisAlignment.END,
                         controls=[ft.TextButton("Workout-Eintrag ›", on_click=zum_eintrag)],

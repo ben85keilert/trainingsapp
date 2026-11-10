@@ -128,3 +128,16 @@ jobs:
 
       - name: Flet-Beispiele des Lernpfads
         run: uv run --no-sync python scripts/pruefe_flet_beispiele.py
+
+      # Die Tests der Oberfläche (rund die Hälfte der Testdateien) brauchen flet und
+      # wurden im flet-freien Lauf oben übersprungen — sie liefen bis zum 10.11.2026
+      # nur auf dem Entwicklungsrechner. Hier läuft darum alles noch einmal mit flet;
+      # der Lauf oben bleibt, weil er zeigt, dass der Kern ohne flet auskommt.
+      - name: Testwerkzeuge zu den Laufzeitabhängigkeiten
+        run: uv sync --locked --no-default-groups --group dev
+
+      - name: Tests mit flet (Oberfläche)
+        run: uv run --no-sync pytest -q
+
+      - name: Typprüfung
+        run: uv run --no-sync mypy

@@ -39,8 +39,19 @@ uv run mypy                                    # Typprüfung (Paket ist in pypro
 uv run python scripts/pruefe_flet_beispiele.py   # Flet-Skripte des Lernpfads ohne Bildschirm (CI)
 ```
 
-Vor jedem Pull Request muss laufen:
-`uv run ruff check . && uv run ruff format --check . && uv run pytest`.
+**Wann welche Tests** (Ben, 10.11.2026 — der volle Lauf dauert lokal über sieben Minuten):
+
+- **Vor jedem Commit lokal:** `uv run ruff check . && uv run ruff format --check . && uv run mypy`
+  und die Testdateien der berührten Bereiche (`uv run pytest tests/test_….py`), dazu die
+  Doctests, wenn `core/` oder `devices/` berührt sind.
+- **Nach jedem Push:** Die CI fährt alles — erst ohne flet (Importregel), dann noch einmal
+  **mit flet** (die Tests der Oberfläche, rund die Hälfte der Testdateien) und mypy. Mit
+  `gh run list` nachsehen und Rotes sofort beheben; ein Auftrag ist erst fertig, wenn die CI
+  grün ist.
+- **Voller Lauf lokal** (`uv run pytest`): vor einem Release-Tag und nach breiten Änderungen —
+  Migrationen, Modelle in `core/`, Routing und App-Hülle, Flet-Version, `hrv-core.ref`.
+- Tests ersetzen weder die Durchsicht sicherheitsrelevanter Änderungen vor einem Release noch
+  die Gerätetests (`docs/offene_fragen.md`, Abschnitt 2).
 
 **Flet-API nachschlagen:** `.mcp.json` registriert den MCP-Server `flet` (`uv run flet mcp`,
 Paket `flet-mcp` in der Gruppe `flet-dev`). Er kennt die API der installierten Flet-Version —

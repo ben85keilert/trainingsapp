@@ -41,10 +41,15 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp.config import datenverzeichnis, medienverzeichnis
+from trainingsapp.config import datenverzeichnis, importverzeichnis, medienverzeichnis
 from trainingsapp.core.kurse import Kurs
 from trainingsapp.core.models import Exercise, Plan
-from trainingsapp.core.paketdatei import CodeNoetig, export_schreiben, paket_oeffnen
+from trainingsapp.core.paketdatei import (
+    CodeNoetig,
+    export_schreiben,
+    klartext_aufraeumen,
+    paket_oeffnen,
+)
 from trainingsapp.core.pakete import (
     GRUNDAUSSTATTUNG,
     Paket,
@@ -219,13 +224,18 @@ def import_rueckfrage(
     danach: Callable[[], None] | None = None,
     quelle: str | None = None,
     zusatz: str = "",
+    am_ende: Callable[[], None] | None = None,
 ) -> ft.AlertDialog:
     """Die Rückfrage vor dem Schreiben: was der Import tut — auch für „Wieder installieren“
     und für Pakete aus einer Quelle (``quelle`` = ihre Adresse, ``None`` = Datei; ``danach``
     läuft nach dem Schreiben, etwa Quelle merken; ``zusatz``: ein Satz dazu, etwa wo die
-    Adresse hinterlegt wird). Pläne des Pakets landen im aktiven Profil."""
+    Adresse hinterlegt wird; ``am_ende`` läuft, wenn der Dialog zu ist — importiert oder
+    abgebrochen, etwa den Klartext eines privaten Pakets löschen). Pläne des Pakets landen im
+    aktiven Profil."""
     wieder = vorschau.entfernt is not None
     nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (`components/dialoge.py`)
+    if am_ende is not None:
+        nachher.danach(am_ende)
 
     def ausfuehren() -> None:
         try:
@@ -428,8 +438,14 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
         pfad: str | None, daten: bytes | None, name: Path, code: str | None = None
     ) -> None:
         """Die gewählte Datei lesen — ein privates Paket (U7) fragt erst nach dem Code."""
-        # Der Klartext eines großen privaten Pakets liegt bis zum Import hier
-        arbeit = datenverzeichnis() / "Import"
+        # Der Klartext eines großen privaten Pakets liegt hier — nur, bis die Rückfrage zu ist
+        # (importiert oder abgebrochen); Liegengebliebenes räumt auch der Start (`AppState`)
+        arbeit = importverzeichnis()
+
+        def raeumen() -> None:
+            klartext_aufraeumen(arbeit)
+
+        raeumen()
         try:
             if pfad:
                 inhalt = paket_oeffnen(
@@ -456,9 +472,12 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
                 )
             )
             return
-        page.show_dialog(
-            import_rueckfrage(page, state, inhalt, state.pakete.vorschau(inhalt, state.profil.id))
-        )
+        try:
+            vorschau = state.pakete.vorschau(inhalt, state.profil.id)
+        except BaseException:
+            raeumen()
+            raise
+        page.show_dialog(import_rueckfrage(page, state, inhalt, vorschau, am_ende=raeumen))
 
     def wieder_installieren(paket_id: str) -> Callable[[], None]:
         """Ohne Datei: aus dem Paketstand, den jede Übung des Pakets trägt."""

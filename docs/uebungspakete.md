@@ -193,7 +193,8 @@ betreffen … vor allem gegen Bots und andere absichern.“ Zwei Schlösser:
 - **Werkzeug:** In der TOML `[privat]` mit `fuer = "Max"`; `trainingsapp-paket bauen
   [--basis-url …]` legt beim ersten Mal Ordner und Code an und merkt sie sich neben der TOML
   (`<name>.zugang.json` — **nur im privaten Inhalte-Repo**), verschlüsselt nach
-  `dist/p/<ordner>/paket.json` und gibt die **Zugangskarte** aus (Link + Code; auch als
+  `dist/p/<ordner>/paket.json` und gibt die **Zugangskarte** aus (Link + Code — nur am
+  Terminal; umgeleitet, etwa in der CI, nennt die Ausgabe bloß die Datei; immer als
   `<name>.zugangskarte.txt`, mit `segno` am Rechner zusätzlich ein QR-Code des Links als SVG).
   Jede neue Fassung: derselbe Link, derselbe Code. `pruefen`, `bauen` und `index` übergehen die
   `.zugang.json` (`pakete/*.json` sammelt sie mit ein); `index` ohne Dateien schreibt einen leeren

@@ -26,6 +26,7 @@ from trainingsapp.config import (
     anhaengeverzeichnis,
     datenbankpfad,
     datenverzeichnis,
+    importverzeichnis,
     medienverzeichnis,
     messungenverzeichnis,
     paketmedienverzeichnis,
@@ -59,6 +60,7 @@ from trainingsapp.core.hrv_einstellungen import (
 )
 from trainingsapp.core.kurse import Kurs
 from trainingsapp.core.models import Exercise, Subject, jetzt, lokaler_tag
+from trainingsapp.core.paketdatei import klartext_aufraeumen
 from trainingsapp.core.pakete import Paket
 from trainingsapp.core.paketquelle import QUELLE_VORGABE, Pruefung, url_pruefen
 from trainingsapp.core.paketversion import AUTO, UPDATE_MODI
@@ -609,6 +611,8 @@ class AppState:
         pakete.update_vorgabe = vorgabe if vorgabe in UPDATE_MODI else AUTO
         with contextlib.suppress(Exception):  # Aufräumen kostet nie den Start
             pakete.aufraeumen()
+            # Klartext eines privaten Pakets, falls die App mitten im Import endete (U7)
+            klartext_aufraeumen(importverzeichnis())
         return cls(
             con=con,
             uebungen=ExerciseRepo(con),

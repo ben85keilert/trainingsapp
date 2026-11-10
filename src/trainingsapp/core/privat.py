@@ -115,15 +115,20 @@ def _schluessel(code: str, salz: bytes, log2n: int, r: int, p: int) -> tuple[byt
         raise PrivatNichtMoeglich("Dieses Gerät kann private Pakete nicht öffnen (scrypt fehlt).")
     if not (10 <= log2n <= 20 and 1 <= r <= 16 and 1 <= p <= 4):
         raise CodeFalsch("unbekannte Schlüsselparameter")
-    roh = hashlib.scrypt(
-        code.encode("utf-8"),
-        salt=salz,
-        n=2**log2n,
-        r=r,
-        p=p,
-        maxmem=256 * 1024 * 1024,
-        dklen=64,
-    )
+    try:
+        roh = hashlib.scrypt(
+            code.encode("utf-8"),
+            salt=salz,
+            n=2**log2n,
+            r=r,
+            p=p,
+            maxmem=256 * 1024 * 1024,
+            dklen=64,
+        )
+    except ValueError:
+        # Der Kopf ist nicht geprüft, bevor der Schlüssel steht: Parameter, die mehr Speicher
+        # verlangen als erlaubt (etwa N = 2²⁰ mit r = 16), sind eine verfälschte Datei
+        raise CodeFalsch("unbekannte Schlüsselparameter") from None
     return roh[:32], roh[32:]
 
 

@@ -98,13 +98,52 @@ def test_datei_mit_code_importieren_und_zugang_anzeigen(tmp_path, page, state, m
     _code_eingeben(page, "k7qm-9xa2")  # klein und mit Bindestrich geht
     frage = page.dialoge[-1]
     assert frage.title.value == "„Für Max“ importieren?"
+    # Der Klartext liegt nur, solange die Rückfrage offen ist
+    arbeit = tmp_path / "Import"
+    assert [p.name[:9] for p in arbeit.iterdir()] == ["klartext_"]
     frage.actions[1].on_click()
+    _zu(page, frage)
+    assert not list(arbeit.iterdir())
     (paket,) = [p for p, _ in state.pakete.alle() if p.name == "Für Max"]
     assert paket.privat and paket.zugangscode == CODE and paket.fuer == "Max"
     seite = paket_view(page, state, "/pakete", paket)
     assert any(t.startswith("privat · für Max") for t in _texte(seite))
     next(x for x in _alle(seite) if getattr(x, "data", None) == "zugang").on_click()
     assert "K7QM-9XA2" in _texte(page.dialoge[-1])
+
+
+def test_abbrechen_loescht_den_klartext(tmp_path, page, state, monkeypatch) -> None:
+    from trainingsapp.ui.views.pakete import pakete_view
+
+    datei = tmp_path / "paket.json"
+    datei.write_bytes(_geheim())
+
+    class Waehler:
+        async def pick_files(self, **_):
+            return [SimpleNamespace(path=str(datei), name="paket.json", bytes=None)]
+
+    monkeypatch.setattr(ft, "FilePicker", Waehler)
+    ansicht = pakete_view(page, state)
+    next(x for x in _alle(ansicht) if isinstance(x, ft.FilledButton)).on_click()
+    blatt = page.dialoge[-1]
+    next(c for c in _alle(blatt) if isinstance(c, ft.FilledTonalButton)).on_click(None)
+    _zu(page, blatt)
+    _code_eingeben(page, CODE)
+    frage = page.dialoge[-1]
+    arbeit = tmp_path / "Import"
+    assert len(list(arbeit.iterdir())) == 1
+    frage.actions[0].on_click()  # Abbrechen
+    _zu(page, frage)
+    assert not list(arbeit.iterdir())
+    assert not [p for p, _ in state.pakete.alle() if p.name == "Für Max"]
+    # Was ein früherer Lauf liegen ließ, räumt der Start
+    (arbeit / "klartext_alt.zip").write_bytes(b"x")
+    state.schliessen()
+    neu = AppState.starten(tmp_path / "app.db")
+    try:
+        assert not list(arbeit.iterdir())
+    finally:
+        neu.con.close() if hasattr(neu, "con") else None
 
 
 def test_link_mit_code(page, state, monkeypatch) -> None:

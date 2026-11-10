@@ -239,6 +239,13 @@ def paketmedienverzeichnis() -> Path:
     return medienverzeichnis() / "Pakete"
 
 
+def importverzeichnis() -> Path:
+    """Arbeitsordner des Paket-Imports: Hier liegt der Klartext eines großen privaten Pakets
+    (U7), solange der Import aus ihm liest — danach und beim Start geräumt
+    (`core.paketdatei.klartext_aufraeumen`)."""
+    return datenverzeichnis() / "Import"
+
+
 def anhaengeverzeichnis() -> Path:
     """Fotos und Videos an Einträgen — die eigene Übungsausführung (`core/anhaenge.py`).
 

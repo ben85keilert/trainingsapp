@@ -16,6 +16,7 @@ from trainingsapp.core.paketquelle import ZugangNoetig, link_lesen, pruefen
 from trainingsapp.core.privat import (
     CodeFalsch,
     code_neu,
+    code_text,
     datei_entschluesseln,
     datei_verschluesseln,
     entschluesseln,
@@ -117,8 +118,12 @@ def test_werkzeug_baut_privat_und_laesst_es_aus_dem_index(tmp_path, capsys) -> N
     zugang = json.loads((tmp_path / "max.zugang.json").read_text("utf-8"))
     pfad = ziel / "p" / zugang["ordner"] / "paket.json"
     assert pfad.is_file() and ist_privat(pfad.read_bytes())
-    assert f"Link: https://x.org/pakete/p/{zugang['ordner']}/paket.json" in ausgabe
-    assert (tmp_path / "max.zugangskarte.txt").is_file()
+    # Umgeleitet (CI, Protokoll) stehen weder Link noch Code in der Ausgabe — nur die Datei
+    karte = tmp_path / "max.zugangskarte.txt"
+    assert zugang["ordner"] not in ausgabe and code_text(zugang["code"]) not in ausgabe
+    assert str(karte) in ausgabe
+    assert f"Link: https://x.org/pakete/p/{zugang['ordner']}/paket.json" in karte.read_text("utf-8")
+    assert code_text(zugang["code"]) in karte.read_text("utf-8")
     with pytest.raises(CodeNoetig):
         paket_oeffnen(pfad)
     assert paket_oeffnen(pfad, code=zugang["code"]).paket.fuer == "Max"
@@ -158,3 +163,38 @@ def test_werkzeug_laesst_die_zugangsdatei_aus(tmp_path, capsys) -> None:
     # Nur Privates: der Index ist leer, aber da (sonst fehlte er nach rsync --delete)
     assert main(["index", "--ziel", str(ziel / "index.json")]) == 0
     assert json.loads((ziel / "index.json").read_text("utf-8"))["pakete"] == []
+
+
+def test_verfaelschter_kopf_ist_code_falsch() -> None:
+    """Schlüsselparameter im Kopf, die mehr Speicher verlangen als erlaubt, sind eine
+    verfälschte Datei — kein `ValueError`, der die Update-Prüfung abbricht."""
+    geheim = bytearray(verschluesseln(b'{"paket": {"name": "T"}}', "K7QM9XA2"))
+    geheim[8:11] = bytes([20, 16, 4])  # log₂N, r, p
+    with pytest.raises(CodeFalsch):
+        entschluesseln(bytes(geheim), "K7QM9XA2")
+    with pytest.raises(PaketFehler, match="Code passt nicht"):
+        paket_oeffnen(bytes(geheim), code="K7QM9XA2")
+
+
+def test_klartext_bleibt_nicht_liegen(tmp_path) -> None:
+    """Der Klartext eines privaten Pakets aus einer Datei liegt nur für den Import im
+    Arbeitsordner: `klartext_aufraeumen` nimmt ihn weg, und ohne Paket darin bleibt er gar
+    nicht erst."""
+    from trainingsapp.core.paketdatei import klartext_aufraeumen
+    from trainingsapp.core.privat import datei_verschluesseln
+
+    arbeit = tmp_path / "Import"
+    klar = tmp_path / "klar.json"
+    klar.write_bytes(b'{"paket": {"name": "T"}, "exercises": [{"name": "A"}]}')
+    datei = tmp_path / "paket.json"
+    datei_verschluesseln(klar, datei, "K7QM9XA2")
+    assert paket_oeffnen(datei, code="K7QM9XA2", arbeit=arbeit).paket.name == "T"
+    assert [p.name[:9] for p in arbeit.iterdir()] == ["klartext_"]
+    assert klartext_aufraeumen(arbeit) == 1 and not list(arbeit.iterdir())
+    assert klartext_aufraeumen(tmp_path / "fehlt") == 0
+    # Entschlüsselt, aber kein Paket darin: nichts bleibt
+    klar.write_bytes(b"kein Paket")
+    datei_verschluesseln(klar, datei, "K7QM9XA2")
+    with pytest.raises(PaketFehler):
+        paket_oeffnen(datei, code="K7QM9XA2", arbeit=arbeit)
+    assert not list(arbeit.iterdir())

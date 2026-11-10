@@ -935,8 +935,19 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 if datei.suffix == ".toml" and "privat" in tomllib.loads(datei.read_text("utf-8")):
                     pfad, karte = privat_bauen(datei, args.ziel, args.basis_url)
-                    print(pfad)
-                    print(karte)
+                    # Ordner (der Link) und Code nur am Terminal — umgeleitet (CI,
+                    # Protokolldatei) stünden sie sonst in einem Log, das andere lesen
+                    if sys.stdout.isatty():
+                        print(pfad)
+                        print(karte)
+                    else:
+                        kurz = pfad.parent.with_name(pfad.parent.name[:4] + "…") / pfad.name
+                        print(kurz)
+                        print(
+                            "Zugangskarte: "
+                            f"{datei.with_name(datei.stem + '.zugangskarte.txt')}"
+                            " (Link und Code stehen nur dort, nicht in dieser Ausgabe)"
+                        )
                 else:
                     print(bauen(datei, args.ziel))
             except PaketFehler as bau_fehler:

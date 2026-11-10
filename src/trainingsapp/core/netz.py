@@ -15,11 +15,12 @@ Dieses Modul kennt kein flet.
 from __future__ import annotations
 
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
-#: http:// nur zum eigenen Rechner
-_LOKAL = ("http://localhost", "http://127.0.0.1", "http://[::1]")
+#: http:// nur zum eigenen Rechner — der Rechnername genau, nicht nur der Anfang der Adresse
+_LOKAL = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 def verschluesselt(url: str) -> bool:
@@ -29,8 +30,17 @@ def verschluesselt(url: str) -> bool:
     (True, False)
     >>> verschluesselt("http://localhost:8000/index.json"), verschluesselt("ftp://x")
     (True, False)
+    >>> verschluesselt("http://localhost.example.org/x"), verschluesselt("http://localhost@x.org/")
+    (False, False)
     """
-    return url.startswith("https://") or url.startswith(_LOKAL)
+    try:
+        teile = urllib.parse.urlsplit(url.strip())
+        rechner = teile.hostname
+    except ValueError:
+        return False
+    if not rechner:
+        return False
+    return teile.scheme == "https" or (teile.scheme == "http" and rechner in _LOKAL)
 
 
 class NurHttps(urllib.request.HTTPRedirectHandler):

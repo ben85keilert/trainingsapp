@@ -1091,3 +1091,53 @@ async def test_stopp_schliesst_den_atem_lauf_am_stopp(tmp_path) -> None:
     assert len(a.erfasst) == 1 and a.erfasst[0][0] == 2.0 and a.erfasst[0][1] >= 20.0
     await lauf.trennen()
     await asyncio.wait_for(task, 5)
+
+
+async def test_zwischenstand_notizen_kommen_in_die_ganze_aufnahme(tmp_path) -> None:
+    """A21 (Ben, 10.11.2026): „Zwischenstand speichern“ schreibt die Aufnahme bis hier als
+    eigene Datei, dieselbe Aufnahme läuft weiter. Notizen und Abschnitte, die man am
+    Zwischenstand nachträglich ergänzt, kommen beim Speichern der ganzen Aufnahme mit — die
+    Anker gelten unverändert, weil seine Schläge der Anfang der Aufnahme sind."""
+    import json
+
+    from hrv_core.recording import laden
+
+    lauf = Messlauf(SimulatedSource(tempo=40.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    assert await lauf.aufnahme_zwischenstand_async(tmp_path) is None  # ohne Aufnahme nichts
+    lauf.aufnahme_starten()
+    while lauf.aufnahme is None or len(lauf.aufnahme.beats) < 30:
+        await asyncio.sleep(0.01)
+    lauf.notiz_hinzufuegen("vorher")
+    aufnahme = lauf.aufnahme
+    zwischen = await lauf.aufnahme_zwischenstand_async(tmp_path)
+    assert zwischen is not None and zwischen.zwischenstand and lauf.aufnahme is aufnahme
+    assert zwischen.pfad.name.endswith("_zwischen.json") and not zwischen.ersetzt
+    n = len(zwischen.recording.beats)
+    assert [e["text"] for e in laden(zwischen.pfad).ereignisse] == ["vorher"]
+    # Das Backup der laufenden Aufnahme bleibt — der Zwischenstand räumt nichts auf
+    lauf.backup_jetzt()
+    assert list(tmp_path.rglob("*backup*"))
+
+    # Am Zwischenstand nachträglich eine Notiz ergänzt (wie in der Aufzeichnung)
+    doc = json.loads(zwischen.pfad.read_text(encoding="utf-8"))
+    doc["ereignisse"].append({"beat_index": 5, "t_s": 4.0, "t_wall_s": 4.0, "text": "nachher"})
+    zwischen.pfad.write_text(json.dumps(doc), encoding="utf-8")
+
+    while len(lauf.aufnahme.beats) < n + 30:
+        await asyncio.sleep(0.01)
+    lauf.notiz_hinzufuegen("spät")
+    ganz = lauf.aufnahme_stoppen(tmp_path)
+    task.cancel()
+    assert ganz is not None and ganz.ersetzt == (zwischen.pfad,)
+    assert len(ganz.recording.beats) >= n + 30
+    texte = [e["text"] for e in laden(ganz.pfad).ereignisse]
+    assert texte == ["nachher", "vorher", "spät"] or sorted(texte) == ["nachher", "spät", "vorher"]
+    assert texte.count("vorher") == 1  # die Notiz von vor dem Zwischenstand nicht doppelt
+    # Die Schläge des Zwischenstands sind der Anfang der ganzen Aufnahme
+    assert [b.rr_ms for b in ganz.recording.beats[:n]] == [
+        b.rr_ms for b in zwischen.recording.beats
+    ]
+    # Die nächste Aufnahme beginnt ohne Zwischenstände
+    assert lauf._zwischen == []

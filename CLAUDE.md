@@ -541,6 +541,18 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   sonst stehen). **Blätter von unten** nehmen `components/blatt.blatt_spalte`: Inhalt
   scrollt, gemessene Höhe, Knöpfe fest über der Navigationsleiste — keine Höhenschätzung.
 
+- **Speichern, ohne zu beenden** (Ben, 10.11.2026, A21): Das Menü neben „Stopp & speichern“
+  hat **„Zwischenstand speichern“** — die Aufnahme bis hier wird eine Aufzeichnung
+  (`Messlauf.aufnahme_zwischenstand_async`, Datei `…_zwischen.json`, ohne Beiwerk), **dieselbe
+  Aufnahme läuft weiter**, am Ende steht alles in einer Datei (lange Ströme für VLF/ULF). Die
+  ganze Messdatei **ersetzt** ihre Zwischenstände (`Gespeichert.ersetzt` →
+  `views.messung.aufnahme_eintragen` nimmt Zeile und Dateien weg); am Zwischenstand ergänzte
+  Notizen und Abschnitte kommen vorher in die Aufnahme, Zuschnitt und Korrektur nicht.
+  „Teil speichern, weiter aufnehmen“ (zwei Dateien, `hrv_core.zusammenfuegen`) steht daneben.
+  **Messansicht** (A21): Bereich Zeit · Frequenz · Nichtlinear und die Kurven-Chips stehen im
+  Blatt „Fenster & Darstellung“ (`verlauf.Kurvenwahl`), nicht zwischen den Kurven; die
+  Poincaré-Wolke ist dort abschaltbar, die Notizliste hat einen Griff für ihre Höhe.
+
 - **Laufende Messung überlebt das Wegwischen** (Ben, 16.10.2026): `scripts/apk_bauen.py`
   setzt in Flets Vorlage eine eigene MainActivity, die die Flutter-Engine im
   `FlutterEngineCache` hält — Bluetooth bleibt verbunden, den Prozess hält der

@@ -91,6 +91,7 @@ from trainingsapp.devices.einheit import Einheitslauf, HrvBaustein, TimerBaustei
 from trainingsapp.devices.gatt import adapter_warnung
 from trainingsapp.devices.messlauf import NUR_PULS_NACH as NUR_PULS_NACH  # Re-Export (H40)
 from trainingsapp.devices.messlauf import (
+    ZWISCHEN_ZUSATZ,
     Gespeichert,
     Messlauf,
     backup_wiederherstellen,
@@ -470,13 +471,35 @@ vor dem Start eintragen; „Aufnahme starten“ beginnt die Kurve neu.
 # ---------------------------------------------------------------------------
 
 
+#: Was das „i“ im Menü neben „Stopp & speichern“ erklärt (A21, Ben 10.11.2026)
+SPEICHERN_INFO = (
+    "**Zwischenstand speichern.** Die Aufnahme bis hier wird eine Aufzeichnung, die du gleich "
+    "auswerten kannst — dieselbe Aufnahme läuft weiter. Am Ende steht alles in **einer** "
+    "Datei; sie ersetzt den Zwischenstand. Notizen und Abschnitte, die du am Zwischenstand "
+    "ergänzt, kommen mit; Zuschnitt und Korrektur nicht.\n\n"
+    "**Teil speichern, weiter aufnehmen.** Die Aufnahme wird geteilt: Der Teil bis hier wird "
+    "eine eigene Datei, danach beginnt ein neuer Teil bei 0:00. Am Ende hast du mehrere "
+    "Dateien."
+)
+
+
 def aufnahme_eintragen(
     state: AppState, ergebnis: Gespeichert, subject_id: str | None = None
 ) -> HrvRecording:
     """Eine gespeicherte Aufnahme in die Liste eintragen — auch fürs Ausdauertraining.
 
     ``subject_id``: das Profil beim **Start** der Messung (`Messlauf.subject_id`);
-    ohne Angabe das gerade aktive."""
+    ohne Angabe das gerade aktive.
+
+    **Zwischenstände** (A21, Ben 10.11.2026): Ein Zwischenstand (`Gespeichert.zwischenstand`)
+    steht mit dem Zusatz „(Zwischenstand)“ in der Liste, sein Titel wird nicht gemerkt. Die
+    ganze Aufnahme **ersetzt** ihre Zwischenstände (`Gespeichert.ersetzt`): deren Zeilen
+    verschwinden, die Dateien samt Beiwerk werden gelöscht."""
+    for alt in ergebnis.ersetzt:
+        zwischenstand_entfernen(state, alt)
+    titel = ergebnis.recording.titel
+    if ergebnis.zwischenstand:
+        titel = f"{titel} (Zwischenstand)" if titel else "Zwischenstand"
     eintrag = HrvRecording(
         subject_id=subject_id or state.profil.id,
         file_path=ergebnis.pfad.relative_to(messungenverzeichnis()).as_posix(),
@@ -490,11 +513,28 @@ def aufnahme_eintragen(
         coverage_pct=ergebnis.abdeckung_pct,
         n_gaps=ergebnis.n_luecken,
         note=ergebnis.recording.notiz,
-        title=ergebnis.recording.titel,
+        title=titel,
     )
     state.hrv.anlegen(eintrag)
-    state.hrv.titel_merken(eintrag.subject_id, eintrag.title)
+    if not ergebnis.zwischenstand:
+        state.hrv.titel_merken(eintrag.subject_id, eintrag.title)
     return eintrag
+
+
+def zwischenstand_entfernen(state: AppState, pfad: Path) -> None:
+    """Ein Zwischenstand ist von der ganzen Aufnahme ersetzt: Zeile aus der Liste, Datei und
+    alles, was neben ihr entstand (Abschnitte, Korrektur, Zuschnitt), löschen. Nur Dateien,
+    deren Name mit dem des Zwischenstands beginnt — der trägt immer `ZWISCHEN_ZUSATZ`."""
+    if ZWISCHEN_ZUSATZ not in pfad.stem:
+        return
+    with contextlib.suppress(ValueError):
+        zeile = state.hrv.zur_datei(pfad.relative_to(messungenverzeichnis()).as_posix())
+        if zeile is not None:
+            state.hrv.loeschen(zeile.id)
+    with contextlib.suppress(OSError):
+        for datei in pfad.parent.glob(f"{pfad.stem}*"):
+            if datei.is_file():
+                datei.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1123,19 +1163,11 @@ def _live_teil(
         return [] if lauf.live.kennzahlen().rr_ms else ohne_rr()
 
     def menue_oben() -> list[ft.PopupMenuItem]:
-        """Info und automatische Korrektur — vorher Knöpfe in der Titelzeile (Ben, 21.10.);
-        während der Aufnahme „Teil speichern, weiter aufnehmen“ (Ben, 28.10.2026)."""
+        """Info und automatische Korrektur — vorher Knöpfe in der Titelzeile (Ben, 21.10.).
+        Speichern während der Aufnahme steht bei „Stopp & speichern“ (`speichern_menue`)."""
         eintraege = [info_eintrag(page, "So liest du die Kurven", lambda: kurven_info())]
         if not modus["puls"]:
             eintraege.append(regler_eintrag(regeln_oeffnen))
-        if lauf.aufnahme is not None:
-            eintraege.append(
-                ft.PopupMenuItem(
-                    content="Teil speichern, weiter aufnehmen",
-                    icon=ft.Icons.SAVE_AS_OUTLINED,
-                    on_click=lambda _=None: page.run_task(aufnahme_teilen),
-                )
-            )
         return eintraege
 
     analyse = Analyse(
@@ -1433,6 +1465,58 @@ def _live_teil(
         eintrag = aufnahme_eintragen(state, ergebnis, lauf.subject_id)
         page.show_dialog(ft.SnackBar(ft.Text(f"Gespeichert: {ergebnis.pfad.name}")))
         await page.push_route(f"/messung/{eintrag.id}")
+
+    async def zwischenstand_speichern() -> None:
+        """„Zwischenstand speichern“ (Ben, 10.11.2026, A21): die Aufnahme bis hier wird eine
+        Aufzeichnung zum Auswerten, **dieselbe Aufnahme läuft weiter**; am Ende ersetzt die
+        ganze Messdatei den Zwischenstand (`aufnahme_eintragen`)."""
+        if stoppt[0]:
+            return
+        stoppt[0] = True
+        try:
+            ergebnis = await lauf.aufnahme_zwischenstand_async(datenverzeichnis())
+        except OSError as fehler:
+            page.show_dialog(ft.SnackBar(ft.Text(f"Zwischenstand nicht gespeichert: {fehler}")))
+            return
+        finally:
+            stoppt[0] = False
+        if ergebnis is None:
+            return
+        eintrag = aufnahme_eintragen(state, ergebnis, lauf.subject_id)
+
+        async def oeffnen(_e: object = None) -> None:
+            await page.push_route(f"/messung/{eintrag.id}")
+
+        page.show_dialog(
+            ft.SnackBar(
+                ft.Text("Zwischenstand gespeichert — die Aufnahme läuft weiter."),
+                action="Ansehen",
+                on_action=oeffnen,
+            )
+        )
+
+    def speichern_menue() -> ft.Control:
+        """Neben „Stopp & speichern“ (Ben, 10.11.2026: „wo es hingehört, gerne in einem Menü“):
+        speichern, ohne die Aufnahme zu beenden — als Zwischenstand oder als Teil."""
+        return ft.PopupMenuButton(
+            icon=ft.Icons.SAVE_AS_OUTLINED,
+            tooltip="Speichern, ohne zu beenden",
+            data="speichern_menue",
+            items=[
+                ft.PopupMenuItem(
+                    content="Zwischenstand speichern",
+                    icon=ft.Icons.SAVE_OUTLINED,
+                    on_click=lambda _=None: page.run_task(zwischenstand_speichern),
+                ),
+                ft.PopupMenuItem(
+                    content="Teil speichern, weiter aufnehmen",
+                    icon=ft.Icons.CONTENT_CUT,
+                    on_click=lambda _=None: page.run_task(aufnahme_teilen),
+                ),
+                ft.PopupMenuItem(),
+                info_eintrag(page, "Speichern, ohne zu beenden", lambda: SPEICHERN_INFO),
+            ],
+        )
 
     async def aufnahme_teilen() -> None:
         """Lange Aufnahmen in Teilen (Ben, 28.10.2026): Teil 1 wird Messdatei und Eintrag,
@@ -1840,6 +1924,7 @@ def _live_teil(
                             ft.FilledButton(
                                 "Stopp & speichern", icon=ft.Icons.STOP, on_click=aufnahme_stoppen
                             ),
+                            speichern_menue(),
                             diagnosemodus_knopf(
                                 page, state, lauf, aufnahme_starten=aufnahme_starten
                             ),
@@ -2126,20 +2211,12 @@ def _live_teil(
             ],
         )
 
-    menue_stand = {"aufnahme": lauf.aufnahme is not None}
-
     def fuellen() -> None:
         state.messung_ende_s = fenster.ende_s
         # Ein Zeitpunkt für alle Kurven — sonst rückte jede ein Stück weiter.
         x_von, x_bis = fenster.bereich(lauf.jetzt_s(), anfang())
         status_auffrischen()
         modus_pruefen()
-        # Das Menü ⋮ kennt „Teil speichern, weiter aufnehmen“ nur während der Aufnahme — und
-        # die beginnt auch ohne Neuaufbau dieser Ansicht (Startleiste, Workout, GPS-Training):
-        # ohne das hier fehlte der Eintrag dann (Ben, 10.11.2026)
-        if (lauf.aufnahme is not None) != menue_stand["aufnahme"]:
-            menue_stand["aufnahme"] = lauf.aufnahme is not None
-            analyse.aufbauen()
         hf_sicht = sicht["wert"] == SICHT_HF
         if hf_sicht:
             hf, zus, bezug_name, abschnitt_laeuft = hf_live_werte()

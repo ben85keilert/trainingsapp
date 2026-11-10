@@ -74,7 +74,14 @@ from hrv_core.ekg import EkgSammler, ekg_journal_pfad, ekg_pfad
 from hrv_core.ereignisse import Zeitbezug, anker_aus_wand, notiz
 from hrv_core.live import LiveFenster
 from hrv_core.ppi import messluecken
-from hrv_core.recording import Recording, freier_pfad, messordner, speichern
+from hrv_core.recording import (
+    Recording,
+    freier_pfad,
+    json_atomar_schreiben,
+    laden,
+    messordner,
+    speichern,
+)
 from hrv_core.regeln import Korrekturregeln
 from hrv_core.segments import abdeckung
 from hrv_core.zeitachse import Kontinuitaetsuhr
@@ -187,6 +194,34 @@ class Gespeichert:
     #: Profil beim Start — nur aus einem wiederhergestellten Backup bekannt;
     #: ``None`` = das aktive Profil (beim normalen Stopp hält es `Messlauf.subject_id`)
     subject_id: str | None = None
+    #: Zwischenstände dieser Aufnahme, die diese Messdatei **ersetzt** (A21, Ben 10.11.2026):
+    #: wer einträgt, nimmt ihre Zeilen aus der Liste und löscht die Dateien
+    ersetzt: tuple[Path, ...] = ()
+    #: Diese Datei ist selbst ein Zwischenstand — die Aufnahme läuft weiter
+    zwischenstand: bool = False
+
+
+#: Namenszusatz der Zwischenstände: ``sensor_<Start>_zwischen.json``
+ZWISCHEN_ZUSATZ = "_zwischen"
+
+
+def _notiz_schluessel(e: Mapping[str, Any]) -> tuple[Any, float, str]:
+    """Woran eine Notiz wiedererkannt wird: Schlag, Wanduhr, Text."""
+    try:
+        wand = round(float(e.get("t_wall_s") or 0.0), 2)
+    except (TypeError, ValueError):
+        wand = 0.0
+    return (e.get("beat_index"), wand, str(e.get("text") or ""))
+
+
+@dataclass(frozen=True, slots=True)
+class _Zwischenstand:
+    """Ein gespeicherter Zwischenstand der laufenden Aufnahme: seine Datei und die Notizen,
+    die er beim Schreiben hatte (`_notiz_schluessel`) — was später in der Datei dazukam,
+    wandert am Ende in die ganze Aufnahme."""
+
+    pfad: Path
+    notizen: frozenset[tuple[Any, float, str]]
 
 
 def _sha1(pfad: Path) -> str:
@@ -494,6 +529,8 @@ class Messlauf:
         #: Abschnittsgrenzen der laufenden Aufnahme je Spur (Timer, km, Übung, Einheit):
         #: (Notiz, Name, Ende?) — jede Spur teilt nur sich selbst (`spuren_speichern`)
         self._grenzen: dict[str, list[tuple[dict, str, bool]]] = {}
+        #: Zwischenstände der laufenden Aufnahme (`aufnahme_zwischenstand_async`)
+        self._zwischen: list[_Zwischenstand] = []
         #: Notizen ohne Aufnahme (Ben, 16.10.2026) — `aufnahme_starten` übernimmt sie
         self._vorab: list[dict] = []
         #: Titel und Beschreibung ohne Aufnahme (Ben, 17.10.2026) — ebenso
@@ -1302,6 +1339,7 @@ class Messlauf:
         except BaseException:
             self._stopp_beenden(gespeichert=False)
             raise
+        ergebnis = replace(ergebnis, ersetzt=self._zwischen_pfade())
         self._stopp_beenden(gespeichert=True)
         return ergebnis
 
@@ -1326,9 +1364,83 @@ class Messlauf:
         except BaseException:
             self._stopp_beenden(gespeichert=False)
             raise
+        ergebnis = replace(ergebnis, ersetzt=self._zwischen_pfade())
         self._stopp_beenden(gespeichert=True)
         await self._stroeme_zurueck()
         return ergebnis
+
+    # -- Zwischenstand (A21, Ben 10.11.2026) ------------------------------------------------
+
+    async def aufnahme_zwischenstand_async(self, basis: Path) -> Gespeichert | None:
+        """„Zwischenstand speichern“: die Aufnahme **bis hier** als eigene Messdatei
+        (``…_zwischen.json``) — auswertbar wie jede Aufzeichnung —, während **dieselbe
+        Aufnahme weiterläuft** (Ben: „sonst gibt es Beenden“). Am Ende steht alles in einer
+        Datei (lange Ströme für VLF/ULF); die ganze Messdatei **ersetzt** die Zwischenstände
+        (`Gespeichert.ersetzt`), Notizen und Abschnitte, die man an einem Zwischenstand
+        nachträglich ergänzt hat, kommen vorher in die Aufnahme (`_zwischen_uebernehmen`).
+
+        Geschrieben werden Messdatei, Protokollfeld „Atmung“ und die Abschnitte bis hier —
+        **kein Beiwerk** (EKG, Atemphasen, Rohmitschnitt bleiben bei der laufenden Aufnahme)
+        und kein Backup wird angefasst. ``None``, wenn nichts aufgezeichnet ist oder gerade
+        gespeichert wird. Nach einem Absturz bleiben Zwischenstände als gewöhnliche
+        Aufzeichnungen neben der wiederhergestellten liegen.
+        """
+        aufnahme = self.aufnahme
+        if aufnahme is None or not aufnahme.beats or self._wird_gespeichert:
+            return None
+        # Alles, was der Thread braucht, hier im Loop kopieren — er liest ``self`` nicht
+        rec = replace(aufnahme.recording(), ecg_aufzeichnung=False)
+        spuren = {s: list(gs) for s, gs in self._grenzen.items()}
+        spuren.update(eigene_abschnitte.grenzen_aus_notizen(rec.ereignisse))
+        atmung = self.atmung_feld(aufnahme)
+        dauer_s = aufnahme.dauer_s()
+        ordner = self._ordner(basis)
+        name = f"{Path(aufnahme.dateiname()).stem}{ZWISCHEN_ZUSATZ}.json"
+
+        def schreiben() -> Gespeichert:
+            ordner.mkdir(parents=True, exist_ok=True)
+            pfad = json_atomar_schreiben(freier_pfad(ordner, name), rec.to_dict())
+            if atmung is not None:
+                with contextlib.suppress(OSError, ValueError):
+                    kopffeld_schreiben(pfad, atmung)
+            if any(spuren.values()):
+                with contextlib.suppress(OSError, ValueError):
+                    spuren_speichern(pfad, rec, spuren)
+            return replace(_gespeichert(pfad, rec, dauer_s=dauer_s), zwischenstand=True)
+
+        ergebnis = await asyncio.to_thread(schreiben)
+        if self.aufnahme is aufnahme:  # inzwischen beendet: dann bleibt er eine Aufzeichnung
+            self._zwischen.append(
+                _Zwischenstand(
+                    ergebnis.pfad, frozenset(_notiz_schluessel(e) for e in rec.ereignisse)
+                )
+            )
+        return ergebnis
+
+    def _zwischen_pfade(self) -> tuple[Path, ...]:
+        return tuple(z.pfad for z in self._zwischen)
+
+    def _zwischen_uebernehmen(self, aufnahme: Aufnahme) -> None:
+        """Vor dem Speichern der ganzen Aufnahme: Notizen (und damit Abschnitte — sie sind
+        Notizpaare), die an einem Zwischenstand **nachträglich** dazukamen, in die Aufnahme.
+        Die Schläge des Zwischenstands sind der Anfang dieser Aufnahme, die Anker gelten
+        darum unverändert. Geändertes kommt als neue Notiz neben die alte, Gelöschtes bleibt
+        — Zuschnitt und Korrektur eines Zwischenstands gehen mit ihm."""
+        for z in self._zwischen:
+            try:
+                datei = laden(z.pfad)
+            except (OSError, ValueError, KeyError):
+                continue
+            bekannt = {_notiz_schluessel(e) for e in aufnahme.ereignisse}
+            neu = [
+                dict(e)
+                for e in datei.ereignisse or []
+                if (k := _notiz_schluessel(e)) not in z.notizen and k not in bekannt
+            ]
+            if neu:
+                aufnahme.ereignisse = sorted(
+                    [*aufnahme.ereignisse, *neu], key=lambda e: _notiz_schluessel(e)[1]
+                )
 
     async def aufnahme_teilen_async(self, basis: Path) -> Gespeichert | None:
         """„Teil speichern & weiter“ (Ben, 28.10.2026, lange Aufnahmen): die bisherige
@@ -1343,6 +1455,9 @@ class Messlauf:
         alt = self.aufnahme
         if alt is None or not alt.beats or self._wird_gespeichert:
             return None
+        # Zwischenstände gehören zu Teil 1: er ersetzt sie, Teil 2 beginnt ohne
+        self._zwischen_uebernehmen(alt)
+        ersetzt, self._zwischen = self._zwischen_pfade(), []
         jetzt = self._uhr()
         neu = Aufnahme(
             geraet=alt.geraet,
@@ -1381,9 +1496,10 @@ class Messlauf:
         if mitschnitt_alt is not None and mitschnitt_alt.offen:
             self._mitschnitt_oeffnen(mitschnitt_alt.pfad.name)
         atmung_alt = self.atmung_feld(alt)  # im Loop (der Haken liest den Katalog)
-        return await asyncio.to_thread(
+        ergebnis = await asyncio.to_thread(
             self._schreiben, alt, basis, grenzen_alt, ekg_alt, mitschnitt_alt, atem_alt, atmung_alt
         )
+        return replace(ergebnis, ersetzt=ersetzt)
 
     def _stopp_beginnen(self) -> Aufnahme | None:
         """Die Aufnahme beenden: ab jetzt kein Schlag mehr hinein. ``None``: nichts
@@ -1393,11 +1509,13 @@ class Messlauf:
             self.aufnahme = None
             self.ekg = None
             self.atem = None
+            self._zwischen = []
             self._mitschnitt_verwerfen()
             return None
         if self._wird_gespeichert:
             return None
         self._wird_gespeichert = True
+        self._zwischen_uebernehmen(aufnahme)
         # Ein offener Lauf „Atmung erfassen“ endet mit der Aufnahme am Stopp, nicht mit dem
         # letzten Fenster (bis 5 s früher); die Spur der Einheit läuft ohne Sammler weiter
         # und bekommt mit der nächsten Aufnahme einen neuen (fünfte Prüfrunde, B5)
@@ -1418,6 +1536,7 @@ class Messlauf:
             self.diagnose_seit = None
             self._diagnose_wunsch = None  # je Messung (Plan §2.2)
             self._grenzen = {}
+            self._zwischen = []
 
     def _schreiben(
         self,

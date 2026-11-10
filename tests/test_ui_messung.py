@@ -1325,10 +1325,13 @@ def test_abschnitt_ueber_die_ganze_messung_per_pfeil(daten) -> None:
     assert seg["t_end_s"] == pytest.approx(schlaege[-1]["t_s"], abs=0.01)
 
 
-async def test_teil_speichern_im_menue_nach_start_ohne_neuaufbau(daten) -> None:
-    """Ben, 10.11.2026: „Teil speichern“ war nicht verfügbar. Der Eintrag im Menü ⋮ entstand
-    nur beim Aufbau der Ansicht — begann die Aufnahme danach ohne Neuaufbau (Startleiste,
-    Workout, GPS-Training), fehlte er. Jetzt zieht das Menü mit Beginn und Ende nach."""
+async def test_speichern_ohne_beenden_neben_stopp_und_zwischenstand(daten) -> None:
+    """Ben, 10.11.2026 (A21): Speichern, ohne zu beenden, steht bei „Stopp & speichern“ (ein
+    Menü), nicht im Menü ⋮ der Kurven — auch wenn die Aufnahme ohne Neuaufbau der Ansicht
+    begann („Teil speichern“ war so nicht erreichbar). „Zwischenstand speichern“ legt eine
+    Aufzeichnung an, die Aufnahme läuft weiter; die ganze Aufnahme ersetzt ihn am Ende."""
+    from trainingsapp.config import messungenverzeichnis
+
     state, tmp_path = daten
     lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
     await lauf.verbinden(SIM_SYNTH, "Simulator H10")
@@ -1336,21 +1339,54 @@ async def test_teil_speichern_im_menue_nach_start_ohne_neuaufbau(daten) -> None:
     state.messlauf = lauf
     while lauf.jetzt_s() < 20:
         await asyncio.sleep(0.01)
-    ansicht = messung(_seite(), state)
+    seite = _seite()
+    ansicht = messung(seite, state)
 
-    def eintraege() -> list[str]:
-        zeile = _titelzeile(ansicht, "RR-TACHOGRAMM")
-        return [i.content for i in zeile.controls[-1].content.items if i.content]
+    def menues() -> list[ft.PopupMenuButton]:
+        return [
+            c
+            for c in _alle_controls(ansicht)
+            if isinstance(c, ft.PopupMenuButton) and c.data == "speichern_menue"
+        ]
 
-    teil = "Teil speichern, weiter aufnehmen"
-    assert teil not in eintraege()
+    assert not menues()
     lauf.aufnahme_starten()  # nicht über den Knopf dieser Ansicht
-    await asyncio.sleep(0.2)
+    while lauf.aufnahme is None or len(lauf.aufnahme.beats) < 20:
+        await asyncio.sleep(0.01)
     lauf.beobachter(True)
-    assert teil in eintraege()
-    lauf.aufnahme_stoppen(tmp_path)
+    (menue,) = menues()
+    eintraege = [i.content for i in menue.items if i.content]
+    assert eintraege[:2] == ["Zwischenstand speichern", "Teil speichern, weiter aufnehmen"]
+    # … und nicht mehr im Menü ⋮ der Kurven
+    zeile = _titelzeile(ansicht, "RR-TACHOGRAMM")
+    assert "Teil speichern, weiter aufnehmen" not in [
+        i.content for i in zeile.controls[-1].content.items if i.content
+    ]
+
+    # Zwischenstand: eine Aufzeichnung mehr, die Aufnahme läuft weiter
+    aufnahme = lauf.aufnahme
+    zwischen = await lauf.aufnahme_zwischenstand_async(tmp_path)
+    assert zwischen is not None and zwischen.zwischenstand and lauf.aufnahme is aufnahme
+    from trainingsapp.ui.views.messung import aufnahme_eintragen
+
+    eintrag = aufnahme_eintragen(state, zwischen, lauf.subject_id)
+    assert eintrag.title == "Zwischenstand" and zwischen.pfad.name.endswith("_zwischen.json")
+    assert [a.id for a in state.hrv.alle(state.profil.id)] == [eintrag.id]
+    # nicht als Überschrift gemerkt
+    assert "Zwischenstand" not in [t.name for t in state.hrv.titel_liste(state.profil.id)]
+
+    n = len(zwischen.recording.beats)
+    while len(lauf.aufnahme.beats) < n + 20:
+        await asyncio.sleep(0.01)
+    ganz = lauf.aufnahme_stoppen(tmp_path)
+    assert ganz is not None and ganz.ersetzt == (zwischen.pfad,) and not ganz.zwischenstand
+    assert len(ganz.recording.beats) >= n + 20  # ein Strom, nichts geteilt
+    neu = aufnahme_eintragen(state, ganz, lauf.subject_id)
+    assert [a.id for a in state.hrv.alle(state.profil.id)] == [neu.id]
+    assert not zwischen.pfad.exists() and ganz.pfad.exists()
+    assert ganz.pfad.is_relative_to(messungenverzeichnis())
     lauf.beobachter(True)
-    assert teil not in eintraege()
+    assert not menues()
     task.cancel()
 
 

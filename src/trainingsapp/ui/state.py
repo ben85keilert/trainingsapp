@@ -563,6 +563,8 @@ class AppState:
     #: Baut den Ansichtsstapel zur aktuellen Route neu — setzt `app.main()`.
     #: Views rufen es nach Änderungen, die die Route nicht wechseln (ein Tipp
     #: auf „gemacht" bleibt auf derselben Planansicht).
+    #: abgeschlossene Erholungen der HF-Sicht, einmal gerechnet (`ui.hf_live`, H76)
+    hf_erholung_merk: dict[Any, Any] = field(default_factory=dict)
     #: ein Verbindungsaufbau läuft (`views.messung.verbinden`) — kein zweiter daneben (H70)
     verbindet: bool = False
     neu_zeichnen: Callable[[], None] = field(default=lambda: None)

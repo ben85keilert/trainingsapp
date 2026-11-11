@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import contextlib
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -680,7 +681,12 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
                     try:
                         wert = float(text.replace(",", ".")) if text else None
                     except ValueError:
+                        e.control.error = "Zahl"  # nicht still beim alten Wert bleiben (N119)
                         return
+                    if wert is not None and not math.isfinite(wert):
+                        e.control.error = "Zahl"  # „nan“: das Feld nähme danach keinen Wert an
+                        return
+                    e.control.error = None
                 form.teile[i] = replace(form.teile[i], **{attr: wert})
 
             return handler

@@ -874,6 +874,8 @@ class TimerRepo:
             roh = json.loads(r["value"] or "[]")
         except (TypeError, ValueError):
             roh = []
+        if not isinstance(roh, list):  # gültiges JSON, aber keine Liste (``5``): nichts da (D25)
+            roh = []
         profile = [p for d in roh if (p := TimerProfil.aus_dict(d)) is not None] if roh else []
         with transaktion(self.con):
             leer = self.con.execute("SELECT 1 FROM timer LIMIT 1").fetchone() is None

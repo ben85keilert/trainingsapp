@@ -369,7 +369,17 @@ class HfLive:
             return []
         zb = lauf.notiz_zeitbezug()
         laufend = self.state.hf_erholung["t0_s"] if self.state.hf_erholung else None
-        fenster = self.einst().erholung_fenster()
+        einst = self.einst()
+        fenster = einst.erholung_fenster()
+        # Eine abgeschlossene Erholung (älter als „Messen bis“) ändert sich nicht mehr: einmal
+        # rechnen und merken. Vorher lief je Marke jeder Takt über den ganzen Live-Puffer —
+        # zehn Marken kosteten am Rechner über 100 ms je Takt, in der Ereignisschleife (H76)
+        merk: dict[Any, hz.Erholung] | None = getattr(self.state, "hf_erholung_merk", None)
+        if merk is None:
+            merk = {}
+        aufnahme = getattr(lauf.aufnahme, "start_mono", id(lauf.aufnahme))
+        jetzt = lauf.jetzt_s()
+        fertig_ab = einst.messen_bis() + 5.0
         out: list[hz.Erholung] = []
         for e in lauf.aufnahme.ereignisse:
             marke = e.get("marke") if isinstance(e, dict) else None
@@ -378,15 +388,18 @@ class HfLive:
             x = zb.x(dict(e))
             if x is None or (laufend is not None and abs(x - laufend) < 0.5):
                 continue
-            out.append(
-                hz.hrr_erholung(
-                    self.erholung_reihe(x),
-                    x,
-                    fenster=fenster,
-                    kontext=str(marke.get("kontext") or ""),
-                    haltung=str(marke.get("haltung") or ""),
+            kontext, haltung = str(marke.get("kontext") or ""), str(marke.get("haltung") or "")
+            schluessel = (aufnahme, round(x, 1), tuple(fenster), kontext, haltung)
+            erholung = merk.get(schluessel)
+            if erholung is None:
+                erholung = hz.hrr_erholung(
+                    self.erholung_reihe(x), x, fenster=fenster, kontext=kontext, haltung=haltung
                 )
-            )
+                if jetzt - x > fertig_ab:
+                    if len(merk) > 200:  # andere Aufnahmen, alte Fenster: nicht ewig halten
+                        merk.clear()
+                    merk[schluessel] = erholung
+            out.append(erholung)
         return out
 
     def letztes_belastungsende(self) -> float | None:

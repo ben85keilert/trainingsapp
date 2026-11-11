@@ -25,6 +25,7 @@ Unter Namen gespeicherte Kurvenansichten bleiben beim Zurücksetzen erhalten.
 from __future__ import annotations
 
 import contextlib
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -291,9 +292,12 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
 
     def achsen_zahl(text: str | None) -> float | None:
         try:
-            return float((text or "").strip().replace(",", "."))
+            wert = float((text or "").strip().replace(",", "."))
         except ValueError:
             return None
+        # „inf“ und „nan“ sind für `float` Zahlen — als Achsengrenze ließen sie das Raster
+        # beim nächsten Zeichnen werfen (H106)
+        return wert if math.isfinite(wert) else None
 
     def achse_uebernehmen(k: str) -> Callable[[Any], None]:
         def handler(_ev: Any = None) -> None:

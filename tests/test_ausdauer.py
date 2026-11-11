@@ -1414,3 +1414,32 @@ async def test_ende_kuerzen_trifft_die_laufende_messung_nicht_den_zwischenstand(
     rec = laden(messungenverzeichnis() / aufnahme.file_path)
     ende = [e["t_wall_s"] for e in rec.ereignisse if e["text"] == "Gehen: Ende"]
     assert len(ende) == 1 and ende[0] == pytest.approx(960, abs=3)
+
+
+def test_werte_je_kilometer_und_dfa_werden_einmal_gerechnet(monkeypatch) -> None:
+    """H67: Was der Thread vorgerechnet hat (`hrv_vorrechnen`), schlägt die Ansicht nur nach —
+    „mit/ohne Pausen“ und jeder Neuaufbau rechnen DFA-Verlauf und Kilometer nicht noch einmal."""
+    from types import SimpleNamespace
+
+    from trainingsapp.ui.views import ausdauer
+
+    gerechnet: list[tuple] = []
+
+    def werte(_rec, _korr, von, bis, dfa=False):
+        gerechnet.append((von, bis, dfa))
+        return {"mean_bpm": 120.0, "dfa_alpha1": 0.8 if dfa else None}
+
+    monkeypatch.setattr(ausdauer, "werte_zwischen", werte)
+    monkeypatch.setattr(ausdauer, "ortung_zu_wand", lambda _bezug, _rec, t: t)
+    rec, korr = SimpleNamespace(), SimpleNamespace()
+    splits = [
+        SimpleNamespace(t_start=0.0, t_ende=300.0),
+        SimpleNamespace(t_start=300.0, t_ende=610.0),
+    ]
+    ausdauer.hrv_vorrechnen((rec, korr), splits, None, ekg=False)
+    assert len(gerechnet) == 2
+    assert ausdauer._km_werte(rec, korr, 0.0, 300.0, False)["mean_bpm"] == 120.0
+    assert ausdauer._km_werte(rec, korr, 300.0, 610.0, False)["mean_bpm"] == 120.0
+    assert len(gerechnet) == 2  # nachgeschlagen
+    ausdauer._km_werte(rec, SimpleNamespace(), 0.0, 300.0, False)
+    assert len(gerechnet) == 3  # eine andere Aufnahme rechnet selbst

@@ -1791,18 +1791,59 @@ def _live_teil(
             ziel_blatt(hl, lambda: aktualisieren(erzwingen=True), stumm_knoepfe_zeiten())
         )
 
+    #: Die Stücke der Herzfrequenz-Sicht: je Stück sein Schlüssel und sein Behälter. Gebaut
+    #: wird die Spalte **einmal**; ein Stück entsteht nur neu, wenn sich an ihm etwas ändert.
+    #: Vorher kam zweimal je Sekunde eine neue Spalte samt Knöpfen, Bezugswahl und Dropdown —
+    #: ein Tipp, der gerade lief, ging verloren, ein offenes Dropdown klappte zu (H69, wie
+    #: `status_auffrischen`).
+    hf_stuecke: dict[str, tuple[Any, ft.Container]] = {}
+
+    def hf_stueck(name: str, schluessel: Any, bauen: Callable[[], ft.Control]) -> ft.Container:
+        alt = hf_stuecke.get(name)
+        behaelter = alt[1] if alt is not None else ft.Container()
+        if alt is None or alt[0] != schluessel:
+            behaelter.content = bauen()
+            hf_stuecke[name] = (schluessel, behaelter)
+        return behaelter
+
     def hf_teil(
         hf: float | None, zus: dict[str, Any] | None, bezug_name: str, abschnitt_laeuft: bool
     ) -> ft.Control:
         erg, rest = erholung_live()
-        return ft.Column(
-            spacing=10,
-            tight=True,
-            controls=[
-                hf_kopf(hf, hf_profil_, hf_bereiche, einstellungen=hf_einstellungen_oeffnen),
-                skala(hf_bereiche, hf_profil_, hf),
-                ziel_zeile(hl, lambda: aktualisieren(erzwingen=True), ziel_oeffnen),
-                ft.Row(
+        grund = (id(hf_profil_), id(hf_bereiche))  # andere Bereiche: alles neu
+        hf_rund = None if hf is None else round(hf)
+        einst = hl.einst()
+        stumm = hl.stumm()
+        laeuft = state.hf_erholung is not None
+        kontext = (state.hf_erholung or {}).get("kontext", "dauer")
+        haltung = (state.hf_erholung or {}).get("haltung", "steht")
+        fruehere = fruehere_erholungen()
+        sekunden = (zus or {}).get("sekunden_je_bereich") if hf_bereiche else None
+        bezug = state.hf_bezug if state.hf_bezug in BEZUG_NAMEN else BEZUG_AUFNAHME
+        stuecke: list[ft.Control] = [
+            hf_stueck(
+                "kopf",
+                (grund, hf_rund),
+                lambda: hf_kopf(
+                    hf, hf_profil_, hf_bereiche, einstellungen=hf_einstellungen_oeffnen
+                ),
+            ),
+            hf_stueck("skala", (grund, hf_rund), lambda: skala(hf_bereiche, hf_profil_, hf)),
+            hf_stueck(
+                "ziel",
+                (
+                    grund,
+                    getattr(einst, "alarm_an", None),
+                    getattr(einst, "alarm_bpm", None),
+                    getattr(einst, "ziel_unten_bpm", None),
+                    stumm.text(time.monotonic()) if stumm is not None else None,
+                ),
+                lambda: ziel_zeile(hl, lambda: aktualisieren(erzwingen=True), ziel_oeffnen),
+            ),
+            hf_stueck(
+                "bezug",
+                (grund, bezug_name, bezug, abschnitt_laeuft),
+                lambda: ft.Row(
                     spacing=6,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
@@ -1813,11 +1854,7 @@ def _live_teil(
                             opacity=0.6,
                             expand=True,
                         ),
-                        bezug_wahl(
-                            state.hf_bezug if state.hf_bezug in BEZUG_NAMEN else BEZUG_AUFNAHME,
-                            bezug_waehlen,
-                            abschnitt_laeuft=abschnitt_laeuft,
-                        ),
+                        bezug_wahl(bezug, bezug_waehlen, abschnitt_laeuft=abschnitt_laeuft),
                         ft.IconButton(
                             ft.Icons.TUNE,
                             tooltip="Einstellungen → Herzfrequenz",
@@ -1826,23 +1863,41 @@ def _live_teil(
                         ),
                     ],
                 ),
-                zeit_je_bereich(
-                    (zus or {}).get("sekunden_je_bereich") if hf_bereiche else None, hf_bereiche
+            ),
+            hf_stueck(
+                "zeit",
+                (grund, None if sekunden is None else tuple(round(x) for x in sekunden)),
+                lambda: zeit_je_bereich(sekunden, hf_bereiche),
+            ),
+            hf_stueck(
+                "erholung",
+                (
+                    grund,
+                    laeuft,
+                    kontext,
+                    haltung,
+                    repr(erg),
+                    tuple(sorted((k, round(v)) for k, v in rest.items())),
+                    repr(fruehere),
                 ),
-                erholung_block(
+                lambda: erholung_block(
                     erg,
                     rest,
-                    laeuft=state.hf_erholung is not None,
-                    kontext=(state.hf_erholung or {}).get("kontext", "dauer"),
-                    haltung=(state.hf_erholung or {}).get("haltung", "steht"),
+                    laeuft=laeuft,
+                    kontext=kontext,
+                    haltung=haltung,
                     starten=erholung_starten,
                     beenden=erholung_beenden,
                     kontext_setzen=erholung_kontext,
                     haltung_setzen=erholung_haltung,
-                    fruehere=fruehere_erholungen(),
+                    fruehere=fruehere,
                     knopf=False,
                 ),
-                ft.Row(
+            ),
+            hf_stueck(
+                "knoepfe",
+                (laeuft,),
+                lambda: ft.Row(
                     spacing=8,
                     controls=[
                         ft.FilledTonalButton(
@@ -1852,9 +1907,7 @@ def _live_teil(
                             on_click=lambda _=None: talk_marke(),
                         ),
                         ft.FilledTonalButton(
-                            "Erholung beenden"
-                            if state.hf_erholung is not None
-                            else "Belastung endet jetzt",
+                            "Erholung beenden" if laeuft else "Belastung endet jetzt",
                             tooltip="Erholung messen: HF jetzt und in den Fenstern danach",
                             expand=True,
                             on_click=lambda _=None: (
@@ -1865,8 +1918,12 @@ def _live_teil(
                         ),
                     ],
                 ),
-            ],
-        )
+            ),
+        ]
+        if "spalte" not in hf_stuecke:
+            spalte = ft.Container(content=ft.Column(spacing=10, tight=True, controls=stuecke))
+            hf_stuecke["spalte"] = (None, spalte)
+        return hf_stuecke["spalte"][1]
 
     def status_karte() -> ft.Control:
         s = lauf.status

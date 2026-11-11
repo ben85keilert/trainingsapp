@@ -991,6 +991,65 @@ _SPALTEN_KOPF = {
 }
 
 
+#: Was aus einer geladenen HRV-Aufnahme schon gerechnet ist — je Aufnahme (ihr `Korrigiert`)
+#: ein Merkzettel. DFA-Verlauf und die Werte je Kilometer kosten bei langen Messungen Sekunden
+#: (1 h: 2,4 s, 3 h: 11 s am Rechner); sie werden im Thread vorgerechnet (`hrv_vorrechnen`)
+#: und beim Zeichnen nur noch nachgeschlagen — auch nach „mit/ohne Pausen“ (H67).
+_GERECHNET: dict[int, tuple[Any, dict[Any, Any]]] = {}
+
+
+def _merkzettel(korr: Korrigiert) -> dict[Any, Any]:
+    eintrag = _GERECHNET.get(id(korr))
+    if eintrag is None or eintrag[0] is not korr:
+        while len(_GERECHNET) >= 3:  # die letzten Auswertungen reichen
+            _GERECHNET.pop(next(iter(_GERECHNET)))
+        eintrag = (korr, {})
+        _GERECHNET[id(korr)] = eintrag
+    return eintrag[1]
+
+
+def _km_werte(
+    rec: Recording, korr: Korrigiert, von: float, bis: float, dfa: bool
+) -> dict[str, Any]:
+    zettel = _merkzettel(korr)
+    schluessel = ("km", round(von, 3), round(bis, 3), bool(dfa))
+    if schluessel not in zettel:
+        zettel[schluessel] = werte_zwischen(rec, korr, von, bis, dfa=dfa)
+    werte: dict[str, Any] = zettel[schluessel]
+    return werte
+
+
+def _dfa_punkte(rec: Recording, korr: Korrigiert) -> Any:
+    zettel = _merkzettel(korr)
+    if "dfa" not in zettel:
+        zeiten = korr_zeiten(korr, schlagzeiten(rec))
+        t, rr, naht = reihe(zeiten, korr.rr_ms, korr.breaks)
+        korrigiert = [z for z, f in zip(zeiten, korr.flag, strict=True) if f != "orig"]
+        zettel["dfa"] = dfa_verlauf(t, rr, naht, korrigiert)
+    return zettel["dfa"]
+
+
+def hrv_vorrechnen(
+    hrv: tuple[Recording, Korrigiert] | None,
+    splits: Sequence[Split],
+    bezug: HrvBezug | None,
+    ekg: bool,
+) -> None:
+    """DFA-Verlauf und Werte je Kilometer vorab — **im Thread** nach dem Laden (H67), damit
+    `fuellen` nur noch zeichnet. Ohne EKG-Gurt gibt es keinen DFA-Teil."""
+    if hrv is None:
+        return
+    rec, korr = hrv
+    if ekg:
+        _dfa_punkte(rec, korr)
+    for sp in splits:
+        von, bis = ortung_zu_wand(bezug, rec, sp.t_start), ortung_zu_wand(bezug, rec, sp.t_ende)
+        if von is not None and bis is not None:
+            _km_werte(rec, korr, von, bis, ekg)
+            if ekg:
+                _km_werte(rec, korr, von, bis, False)
+
+
 def _km_tabelle(
     strecke: Strecke,
     splits: Sequence[Split],
@@ -1017,7 +1076,7 @@ def _km_tabelle(
             rec, korr = hrv
             von, bis = ortung_zu_wand(bezug, rec, sp.t_start), ortung_zu_wand(bezug, rec, sp.t_ende)
             if von is not None and bis is not None:
-                w = werte_zwischen(rec, korr, von, bis, dfa=ekg and "dfa" in spalten)
+                w = _km_werte(rec, korr, von, bis, ekg and "dfa" in spalten)
                 hf, alpha = w["mean_bpm"], w["dfa_alpha1"]
         werte = {
             "zeit": zeit_text(sp.t_ende - anfang),
@@ -1182,11 +1241,7 @@ def _dfa_teil(
     Atmung aus RR im Modus des Protokollfelds) steht als Einordnung darunter, wenn sie nicht
     spontan ab 9/min ist — Wertebereiche vergleicht man nur innerhalb derselben Lage."""
     rec, korr = hrv
-    achse = schlagzeiten(rec)
-    zeiten = korr_zeiten(korr, achse)
-    t, rr, naht = reihe(zeiten, korr.rr_ms, korr.breaks)
-    korrigiert = [z for z, f in zip(zeiten, korr.flag, strict=True) if f != "orig"]
-    punkte = dfa_verlauf(t, rr, naht, korrigiert)
+    punkte = _dfa_punkte(rec, korr)
     if not punkte or all(w is None for _, w, _ in punkte):
         return None
     if beginn_s is not None:
@@ -1648,10 +1703,16 @@ def ausdauer_detail_view(
             )
         ]
 
+        def laden_und_rechnen() -> tuple[Recording, Korrigiert] | None:
+            geladen_ = hrv_laden(bezug, vorgabe)
+            with contextlib.suppress(Exception):  # Vorrechnen ist nur Vorarbeit
+                hrv_vorrechnen(geladen_, r.splits_mit_rest() if r is not None else [], bezug, ekg)
+            return geladen_
+
         async def laden_async() -> None:
             fehler: str | None = None
             try:
-                hrv = await asyncio.to_thread(hrv_laden, bezug, vorgabe)
+                hrv = await asyncio.to_thread(laden_und_rechnen)
             except (OSError, ValueError) as f:
                 hrv, fehler = None, str(f)
             if state.route_nummer != ansicht_nummer:

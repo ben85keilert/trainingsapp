@@ -122,6 +122,11 @@ def wege_karte(
             except ValueError:
                 e.control.error = "Zahl"
                 return
+            kanten = lesen().kanten
+            skala = 0 <= i < len(kanten) and kanten[i].ausloeser == ab.SKALA
+            if wert < 0 and (feld == "sekunden" or not skala):
+                e.control.error = "ab 0"  # nur eine Skala kennt negative Werte (N72)
+                return
             e.control.error = None
             if feld == "n":
                 aendern(i, n=int(wert))
@@ -348,8 +353,17 @@ def _weg(
                         i,
                         zeichnen=True,
                         ausloeser=art,
-                        n=k.n
-                        or (12 if art in (ab.WDH, ab.WDH_IN_ZEIT) else 7 if art == ab.SKALA else 0),
+                        # Die Zahl wandert nur zwischen den beiden Wiederholungs-Auslösern mit:
+                        # aus „12 Wdh.“ würde sonst „Skala ≥ 12“, nie erfüllbar (N72)
+                        n=(
+                            k.n
+                            if k.n and {art, k.ausloeser} <= {ab.WDH, ab.WDH_IN_ZEIT}
+                            else 12
+                            if art in (ab.WDH, ab.WDH_IN_ZEIT)
+                            else 7
+                            if art == ab.SKALA
+                            else 0
+                        ),
                         sekunden=k.sekunden or (60.0 if art == ab.WDH_IN_ZEIT else 0.0),
                     ),
                 )

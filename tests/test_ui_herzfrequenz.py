@@ -564,3 +564,28 @@ def test_einstellungen_herzfrequenz_signal_karte(daten) -> None:
     assert takt.value == "0"
     takt.on_select(SimpleNamespace(control=SimpleNamespace(value="10")))
     assert state.hf_einstellungen().alarm_takt_s == 10
+
+
+async def test_knoepfe_der_hf_sicht_bleiben_ueber_die_takte_dieselben(daten) -> None:
+    """H69: Die Sicht frischt zweimal je Sekunde auf — Knöpfe und Bezugswahl entstehen dabei
+    nicht neu (ein Tipp, der gerade läuft, ginge verloren), nur was sich ändert."""
+    state, tmp_path = daten
+    _profil_fuellen(state)
+    lauf, task = await _lauf(state, tmp_path, sekunden=12)
+    try:
+        seite = _seite()
+        ansicht = messung(seite, state)
+        talk = _knopf(ansicht, "Sprechen wird schwer")
+        ende = _knopf(ansicht, "Belastung endet jetzt")
+        wahl = next(c for c in _alle(ansicht) if isinstance(c, ft.SegmentedButton))
+        for _ in range(3):
+            lauf.beobachter(False)
+        assert _knopf(ansicht, "Sprechen wird schwer") is talk
+        assert _knopf(ansicht, "Belastung endet jetzt") is ende
+        assert wahl in list(_alle(ansicht))
+        ende.on_click()  # der Zustand wechselt: jetzt entsteht die Knopfzeile neu
+        lauf.beobachter(False)
+        assert _knopf(ansicht, "Erholung beenden") is not ende
+        assert _knopf(ansicht, "Sprechen wird schwer") is not None
+    finally:
+        await _ende(lauf, task)

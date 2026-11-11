@@ -160,9 +160,12 @@ PDFs mitbringen — an Übungen (`media`), Planübungen (`medien`) und Kurskapit
   geleert (gleiche Länge, Durchsicht 10.11.2026 — ein PDF aus Handyfotos trug sie sonst mit),
   ein verschlüsseltes PDF wird abgelehnt; Autor und Titel des Dokuments und Bilder in anderen
   Formaten bleiben — ein PDF sieht man vor dem Weitergeben selbst an. **Was sich nicht sicher
-  bereinigen lässt** (andere Formate; ein Video mit anderem als Bild- und Tonspuren oder mit
-  unbekannten Teilen — seit 11.11.2026 gilt für MP4/MOV eine **Weißliste**, S22: Untertitel-
-  und Datenspuren tragen bei Drohnen und Dashcams den Ort), **kommt nicht ins Paket**. Bereinigen ist idempotent: Eine saubere Datei
+  bereinigen lässt** (andere Formate; ein Video mit Datenspuren oder unbekannten Teilen — seit
+  11.11.2026 gilt für MP4/MOV eine **Weißliste**, S22: Bild- und Tonspuren, dazu
+  **Untertitelspuren, deren Text gelesen ist und keine Ortsangabe zeigt** — Koordinaten,
+  NMEA-Sätze, „GPS(…)“, „latitude:“ wie in der Telemetrie von Drohnen und Dashcams; eine
+  Untertitelspur, die sich nicht lesen lässt, etwa in Fragmenten, wird abgelehnt), **kommt
+  nicht ins Paket**. Bereinigen ist idempotent: Eine saubere Datei
   behält ihren Namen.
 - **In der App:** Import nimmt `.json`, `.toml` (ohne Dateien) und `.zip` (über den Pfad, nie
   ganz über die Leitung); die Rückfrage nennt Zahl und Größe der Dateien. Übungsseite, „i“ der

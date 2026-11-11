@@ -145,7 +145,7 @@ def test_video_mit_unbekannten_teilen_wird_abgelehnt() -> None:
 
 
 def test_video_mit_metadatenspur_wird_abgelehnt(tmp_path) -> None:
-    with pytest.raises(NichtBereinigbar, match="Textspur"):
+    with pytest.raises(NichtBereinigbar, match="Datenspur"):
         bereinigen(_mp4(b"meta"), "mov")
     quelle, ziel = tmp_path / "a.mov", tmp_path / "b.mov"
     quelle.write_bytes(_mp4(b"meta"))
@@ -205,3 +205,54 @@ def test_pdf_eingebettete_fotos_ohne_exif() -> None:
 def test_pdf_verschluesselt_wird_abgelehnt() -> None:
     with pytest.raises(NichtBereinigbar, match="verschlüsselt"):
         bereinigen(b"%PDF-1.6\ntrailer << /Encrypt 5 0 R >>\n%%EOF", "pdf")
+
+
+def _mit_untertiteln(texte: list[bytes], handler: bytes = b"sbtl") -> bytes:
+    """Ein MP4 mit Bildspur und einer Untertitelspur, deren Proben in ``mdat`` liegen."""
+    kopf = _box(b"ftyp", b"isom\x00\x00\x02\x00")
+    proben = b"".join(struct.pack(">H", len(t)) + t for t in texte)
+
+    def moov(versatz: int) -> bytes:
+        stsz = _box(
+            b"stsz",
+            bytes(4)
+            + struct.pack(">II", 0, len(texte))
+            + b"".join(struct.pack(">I", len(t) + 2) for t in texte),
+        )
+        stsc = _box(b"stsc", bytes(4) + struct.pack(">IIII", 1, 1, len(texte), 1))
+        stco = _box(b"stco", bytes(4) + struct.pack(">II", 1, versatz))
+        stsd = _box(b"stsd", bytes(8) + _box(b"tx3g", bytes(38)))
+        stbl = _box(b"stbl", stsd + stsz + stsc + stco)
+        hdlr = _box(b"hdlr", bytes(4) + b"mhlr" + handler + bytes(12))
+        text = _box(b"trak", _box(b"mdia", hdlr + _box(b"minf", stbl)))
+        return _box(b"moov", _box(b"mvhd", bytes(20)) + _spur(b"vide") + text)
+
+    versatz = len(kopf) + len(moov(0)) + 8
+    return kopf + moov(versatz) + _box(b"mdat", proben)
+
+
+def test_untertitelspur_bleibt_wenn_ihr_text_keinen_ort_zeigt() -> None:
+    """Ben, 11.11.2026: Erklärvideos brauchen Untertitel. Die Spur bleibt, wenn ihr Text
+    gelesen ist und keine Ortsangabe zeigt — Telemetrie von Drohnen und Dashcams nicht."""
+    gut = _mit_untertiteln(["Knie über dem Fuß.".encode(), b"3 x 15, dann 30 s Pause."])
+    assert bereinigen(gut, "mp4") == gut
+    assert bereinigen(_mit_untertiteln([b"Langsam absenken."], b"text"), "mov")
+    for ort in (
+        b"+52.5200+013.4050/",
+        b"52.520008, 13.404954",
+        b"GPS(13.4049, 52.5200, 19) D 3.2m",
+        b"latitude: 52.52 longitude: 13.40",
+        b"$GPRMC,123519,A,4807.038,N,01131.000,E",
+        "52° 31' N 13° 24' E".encode(),
+    ):
+        with pytest.raises(NichtBereinigbar, match="Ortsangaben in der Untertitelspur"):
+            bereinigen(_mit_untertiteln([b"Start", ort]), "mp4")
+
+
+def test_untertitelspur_die_sich_nicht_lesen_laesst_wird_abgelehnt() -> None:
+    """Ungelesen geht nichts hinaus: ohne Tabellen, mit Proben hinter dem Dateiende."""
+    with pytest.raises(NichtBereinigbar, match="nicht lesen"):
+        bereinigen(_mp4(b"sbtl"), "mp4")
+    kaputt = _mit_untertiteln([b"Hallo"])
+    with pytest.raises(NichtBereinigbar, match="nicht lesen"):
+        bereinigen(kaputt[:-4], "mp4")

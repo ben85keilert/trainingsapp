@@ -203,6 +203,22 @@ _BMFF_MOOV: Final = frozenset({b"mvhd", b"trak", b"mvex", b"iods", b"free", b"sk
 #: Spuren, die bleiben dürfen: Bild und Ton. ``text``/``sbtl`` (Koordinaten als Untertitel bei
 #: Drohnen und Dashcams), ``camm``, ``meta`` und alles Unbekannte nicht
 _BMFF_SPUREN: Final = frozenset({b"vide", b"soun"})
+#: Untertitel (Ben, 11.11.2026: „Ich brauche in den Videos Untertitelspur“): dürfen bleiben,
+#: wenn ihr **Text gelesen** ist und keine Ortsangabe zeigt (`_text_ohne_ort`)
+_BMFF_TEXTSPUREN: Final = frozenset({b"text", b"sbtl", b"subt"})
+#: So viel Untertiteltext liest die Prüfung höchstens — mehr ist kein Untertitel
+_TEXT_MAX: Final = 8 << 20
+#: Woran eine Ortsangabe im Text einer Spur erkannt wird: ISO 6709 (``+52.5200+013.4050``),
+#: zwei Dezimalgrade nebeneinander, Grad-Schreibweise, NMEA-Sätze und die Wörter, mit denen
+#: Drohnen und Dashcams ihre Telemetrie beschriften. Lieber eine Spur zu viel abgelehnt.
+_ORT_IM_TEXT: Final = re.compile(
+    rb"[+-]\d{2}\.\d{3,}[+-]\d{3}\.\d{3,}"
+    rb"|-?\d{1,3}[.,]\d{4,}\s*[,;/ ]\s*-?\d{1,3}[.,]\d{4,}"
+    rb"|\d{1,3}\s*\xc2?\xb0\s*\d{1,2}\s*['\xe2]"
+    rb"|\$G[PNLA][A-Z]{3},"
+    rb"|\b(?:gps|latitude|longitude|lat|lon|lng|geo|altitude|home)\s*[:=(\[]",
+    re.IGNORECASE,
+)
 
 
 def _box_kopf(f: BinaryIO, pos: int, ende: int) -> tuple[bytes, int, int]:
@@ -240,6 +256,83 @@ def _handler(f: BinaryIO, anfang: int, ende: int, tiefe: int = 0) -> bytes | Non
     return None
 
 
+def _box_suchen(f: BinaryIO, anfang: int, ende: int, weg: tuple[bytes, ...]) -> tuple[int, int]:
+    """Inhalt ``(von, bis)`` der Box am Ende von ``weg`` (``mdia``, ``minf``, ``stbl`` …)."""
+    for name in weg:
+        pos = anfang
+        while pos + 8 <= ende:
+            typ, groesse, kopf = _box_kopf(f, pos, ende)
+            if typ == name:
+                anfang, ende = pos + kopf, pos + groesse
+                break
+            pos += groesse
+        else:
+            raise NichtBereinigbar("Video mit Untertitelspur, die sich nicht lesen lässt")
+    return anfang, ende
+
+
+def _zahlen(f: BinaryIO, von: int, n: int, breite: int) -> list[int]:
+    f.seek(von)
+    roh = f.read(n * breite)
+    if len(roh) < n * breite:
+        raise NichtBereinigbar("Video unlesbar")
+    return [int.from_bytes(roh[i : i + breite], "big") for i in range(0, len(roh), breite)]
+
+
+def _text_ohne_ort(f: BinaryIO, anfang: int, ende: int) -> None:
+    """Eine Untertitelspur bleibt nur, wenn ihr Text **gelesen** ist und keine Ortsangabe zeigt.
+
+    Gelesen werden alle Proben der Spur über ihre Tabellen (``stsz``, ``stsc``,
+    ``stco``/``co64``). Was sich so nicht lesen lässt — Proben in Fragmenten (``moof``), in
+    einer anderen Datei, mehr als `_TEXT_MAX` —, wird abgelehnt: ungelesen geht nichts hinaus.
+    """
+    unlesbar = NichtBereinigbar("Video mit Untertitelspur, die sich nicht lesen lässt")
+    von, bis = _box_suchen(f, anfang, ende, (b"mdia", b"minf", b"stbl"))
+    tabellen: dict[bytes, tuple[int, int]] = {}
+    pos = von
+    while pos + 8 <= bis:
+        typ, groesse, kopf = _box_kopf(f, pos, bis)
+        tabellen[typ] = (pos + kopf, pos + groesse)
+        pos += groesse
+    orte = tabellen.get(b"stco") or tabellen.get(b"co64")
+    if orte is None or b"stsz" not in tabellen or b"stsc" not in tabellen:
+        raise unlesbar
+    breite = 4 if b"stco" in tabellen else 8
+    (n_orte,) = _zahlen(f, orte[0] + 4, 1, 4)
+    einheit, n_proben = _zahlen(f, tabellen[b"stsz"][0] + 4, 2, 4)
+    (n_laeufe,) = _zahlen(f, tabellen[b"stsc"][0] + 4, 1, 4)
+    if max(n_orte, n_proben, n_laeufe) > 200_000 or n_proben == 0 or n_orte == 0:
+        raise unlesbar  # leer heißt: die Proben liegen woanders (Fragmente)
+    versaetze = _zahlen(f, orte[0] + 8, n_orte, breite)
+    groessen = (
+        [einheit] * n_proben if einheit else _zahlen(f, tabellen[b"stsz"][0] + 12, n_proben, 4)
+    )
+    laeufe = _zahlen(f, tabellen[b"stsc"][0] + 8, n_laeufe * 3, 4)
+    je_stueck = [0] * n_orte  # Proben je Stück: jeder Lauf gilt ab seinem ersten Stück
+    for i in range(n_laeufe):
+        erstes, anzahl = laeufe[3 * i], laeufe[3 * i + 1]
+        naechstes = laeufe[3 * i + 3] if i + 1 < n_laeufe else n_orte + 1
+        for k in range(max(erstes, 1), min(naechstes, n_orte + 1)):
+            je_stueck[k - 1] = anzahl
+    f.seek(0, 2)
+    datei_ende = f.tell()
+    probe, gelesen = 0, 0
+    for versatz, anzahl in zip(versaetze, je_stueck, strict=True):
+        laenge = sum(groessen[probe : probe + anzahl])
+        probe += anzahl
+        gelesen += laenge
+        if gelesen > _TEXT_MAX or versatz + laenge > datei_ende:
+            raise unlesbar
+        f.seek(versatz)
+        if _ORT_IM_TEXT.search(f.read(laenge)):
+            raise NichtBereinigbar(
+                "Video mit Ortsangaben in der Untertitelspur — bitte ohne Ort aufnehmen "
+                "oder die Spur entfernen"
+            )
+    if probe != n_proben:
+        raise unlesbar
+
+
 def _bmff_flicken(f: BinaryIO, anfang: int, ende: int, tiefe: int = 0, eltern: bytes = b"") -> None:
     pos = anfang
     while pos + 8 <= ende:
@@ -259,11 +352,15 @@ def _bmff_flicken(f: BinaryIO, anfang: int, ende: int, tiefe: int = 0, eltern: b
             raise NichtBereinigbar(
                 "Video mit unbekanntem Teil (kann Ortsangaben tragen) — bitte umwandeln"
             )
-        elif typ == b"trak" and _handler(f, pos + kopf, pos + groesse) not in _BMFF_SPUREN:
-            raise NichtBereinigbar(
-                "Video mit Daten- oder Textspur (zeitgesteuerte Ortsangaben) — bitte ohne Ort "
-                "aufnehmen oder umwandeln"
-            )
+        elif typ == b"trak":
+            art = _handler(f, pos + kopf, pos + groesse)
+            if art in _BMFF_TEXTSPUREN:
+                _text_ohne_ort(f, pos + kopf, pos + groesse)
+            elif art not in _BMFF_SPUREN:
+                raise NichtBereinigbar(
+                    "Video mit Datenspur (zeitgesteuerte Ortsangaben) — bitte ohne Ort "
+                    "aufnehmen oder umwandeln"
+                )
         elif typ == b"stsd":
             # Beschreibung der Spur: kein Behälter, kann aber Nutzerdaten eingebettet tragen
             f.seek(pos + kopf)

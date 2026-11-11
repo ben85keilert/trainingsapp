@@ -270,7 +270,7 @@ def test_hrv_bewertung_ist_ein_benannter_schalter(monkeypatch) -> None:
 
 def test_migration_erzeugt_das_schema(tmp_path) -> None:
     con = oeffnen(tmp_path / "test.db")
-    assert schema_version(con) == 54
+    assert schema_version(con) == 55
 
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     for erwartet in (
@@ -307,8 +307,8 @@ def test_migration_ist_wiederholbar(tmp_path) -> None:
     """Ein zweiter Lauf darf nichts tun und nicht scheitern."""
     pfad = tmp_path / "test.db"
     con = oeffnen(pfad)
-    assert migrieren(con) == 54
-    assert migrieren(con) == 54
+    assert migrieren(con) == 55
+    assert migrieren(con) == 55
     con.close()
 
 
@@ -334,7 +334,7 @@ def test_kaputte_migration_laesst_nichts_zurueck(tmp_path) -> None:
     with pytest.raises(RuntimeError, match="999_kaputt"):
         migrieren(con, ordner)
     assert not con.in_transaction
-    assert schema_version(con) == 54  # alle echten Migrationen, die kaputte nicht
+    assert schema_version(con) == 55  # alle echten Migrationen, die kaputte nicht
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "halb" not in tabellen
     # Repariert läuft sie durch — der nächste Start scheitert nicht an „schon vorhanden"
@@ -426,3 +426,14 @@ def test_auspraegung_trennt_und_abgehakt_bleibt_getrennt() -> None:
 
     (nur,) = buendeln([e(), e()])
     assert nur.zusammenfassung() == "2× abgehakt"
+
+
+def test_ungueltige_ansichtseinstellungen_werfen_nie() -> None:
+    """H98: Eine beschädigte Einstellung wird bei jedem Öffnen gelesen — nie eine Ausnahme."""
+    from trainingsapp.core.darstellung import Darstellung, darstellung_lesen
+    from trainingsapp.core.hrv_ansicht import Ansicht, _bereich_ok, ansicht_lesen
+
+    assert isinstance(ansicht_lesen('{"fenster": {"rmssd": Infinity}}'), Ansicht)
+    assert ansicht_lesen("[1, 2]") == Ansicht()
+    assert _bereich_ok(10**400, 10**401) is False
+    assert darstellung_lesen('{"palette": [], "helligkeit": {}}') == Darstellung()

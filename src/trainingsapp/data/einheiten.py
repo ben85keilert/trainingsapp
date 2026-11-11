@@ -16,7 +16,7 @@ import json
 import sqlite3
 from collections import Counter
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -37,6 +37,20 @@ class EinheitKopf:
     titel: str
     started_at: datetime
     ended_at: datetime | None
+
+
+def _ereignisse_aus(zeilen: Any) -> list[Ereignis]:
+    """Zeilen der Zeitleiste als Ereignisse. Eine Zeile mit unbekannter Quelle oder Art (aus
+    einer neueren App-Fassung) oder kaputten Daten fällt weg, statt Heute, Workout-Eintrag
+    und „Fortsetzen“ scheitern zu lassen (N68)."""
+    out: list[Ereignis] = []
+    for r in zeilen:
+        try:
+            daten = json.loads(r["daten_json"] or "{}")
+            out.append(Ereignis(float(r["t_s"]), r["quelle"], r["art"], r["text"], daten))
+        except (ValueError, TypeError):
+            continue
+    return out
 
 
 class EinheitRepo:
@@ -226,11 +240,25 @@ class EinheitRepo:
         result: dict[str, Any] | None = None,
         note: str | None = None,
         felder: Collection[str] = (),
+        entwurf: str = "",
     ) -> WorkoutWerte:
         """Werte oder Notiz zum Workout setzen — ``None`` lässt, was da ist. Unveränderlich wie
         ein Tagebucheintrag: geschrieben wird eine neue Zeile, die die bisherige ersetzt; ein
-        Wert ``None`` im Ergebnis nimmt das Feld heraus."""
+        Wert ``None`` im Ergebnis nimmt das Feld heraus.
+
+        ``entwurf``: die ID der Zeile, die **dieses Schreiben** der Notiz schon angelegt hat
+        (Ben, 11.11.2026, N77). Ist sie noch die jüngste, wird nur ihr Text fortgeschrieben —
+        sonst legte jede Autosave-Pause eine neue Zeile an, Dutzende je Notiz. Eine Zeile je
+        Schreiben bleibt, und nichts geht verloren, wenn die App mittendrin endet."""
         alt = self.workout_wert(einheit_id)
+        if entwurf and alt.id == entwurf and note is not None and not result:
+            text = note.strip()
+            if text != alt.note:
+                with transaktion(self.con):
+                    self.con.execute(
+                        "UPDATE workout_entry SET note = ? WHERE id = ?", (text, entwurf)
+                    )
+            return replace(alt, note=text)
         werte = dict(alt.result)
         for k, v in (result or {}).items():
             if v is None:
@@ -285,18 +313,11 @@ class EinheitRepo:
 
     def ereignisse(self, einheit_id: str) -> list[Ereignis]:
         """In der Reihenfolge, in der sie geschrieben wurden (``nr``)."""
-        return [
-            Ereignis(
-                float(r["t_s"]),
-                r["quelle"],
-                r["art"],
-                r["text"],
-                json.loads(r["daten_json"] or "{}"),
-            )
-            for r in self.con.execute(
+        return _ereignisse_aus(
+            self.con.execute(
                 "SELECT * FROM einheit_ereignis WHERE einheit_id = ? ORDER BY nr", (einheit_id,)
             )
-        ]
+        )
 
     def kanten_gezaehlt(self, subject_id: str, plan_id: str) -> Counter[tuple[str, str]]:
         """Wie oft jede Kante eines Plans gegangen wurde — aus ``plan/kante`` aller Einheiten
@@ -337,21 +358,14 @@ class EinheitRepo:
         """Die ``plan/…``-Ereignisse aller Einheiten, die ab ``seit`` begannen — in ihrer
         Reihenfolge (Einheit für Einheit), für die Stelle zum Fortsetzen (`core.ablauf.
         fortsetzung`, P166)."""
-        return [
-            Ereignis(
-                float(r["t_s"]),
-                r["quelle"],
-                r["art"],
-                r["text"],
-                json.loads(r["daten_json"] or "{}"),
-            )
-            for r in self.con.execute(
+        return _ereignisse_aus(
+            self.con.execute(
                 "SELECT x.* FROM einheit_ereignis x JOIN einheit e ON e.id = x.einheit_id "
                 "WHERE e.subject_id = ? AND e.deleted_at IS NULL AND e.started_at >= ? "
                 "AND x.quelle = 'plan' ORDER BY e.started_at, x.nr",
                 (subject_id, iso_utc(seit)),
             )
-        ]
+        )
 
     def beteiligungen(self, einheit_id: str) -> list[Beteiligung]:
         return [

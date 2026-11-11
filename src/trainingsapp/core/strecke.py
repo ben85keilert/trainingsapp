@@ -322,6 +322,8 @@ class StreckenRechner:
         #: — für Strecke und Tempo eines Zeitraums (`stand_bei`, Intervalle des Timers)
         self._zeiten: list[float] = []
         self._staende: list[tuple[float, float]] = []
+        #: daneben die Höhenmeter (auf, ab) — um Splits neu zu schneiden (`split_laenge_setzen`)
+        self._hoehenstaende: list[tuple[float, float]] = []
 
     # -- Ortungen ----------------------------------------------------------------
 
@@ -408,6 +410,55 @@ class StreckenRechner:
     def _merken(self, t: float) -> None:
         self._zeiten.append(t)
         self._staende.append((self.distanz_m, self.bewegt_s))
+        self._hoehenstaende.append((self.hoehe_auf_m, self.hoehe_ab_m))
+
+    def split_laenge_setzen(self, split_m: float) -> None:
+        """Die Splitlänge wechseln — **für die ganze Strecke**, auch rückwirkend (Ben,
+        11.11.2026, H68: Wer im Lauf die Sportart wechselt, hatte sie meist falsch gewählt;
+        das ganze Training gehört dann zur neuen). Die Splits werden aus dem Verlauf neu
+        geschnitten, der angefangene läuft ab der letzten neuen Grenze weiter. Ein Split
+        endet wie live an der ersten Ortung, an der seine Länge erreicht ist.
+
+        >>> r = StreckenRechner(split_m=5000.0)
+        >>> for i in range(300):
+        ...     _ = r.hinzufuegen(Punkt(i * 2.0, 52.0 + i * 0.0001, 13.0, 4.0, tempo_ms=5.5))
+        >>> round(r.distanz_m), len(r.splits)
+        (3325, 0)
+        >>> r.split_laenge_setzen(1000.0)
+        >>> [(s.nummer, s.distanz_m) for s in r.splits], round(r.splits_mit_rest()[-1].distanz_m)
+        ([(1, 1000.0), (2, 1000.0), (3, 1000.0)], 325)
+        >>> live = StreckenRechner(split_m=1000.0)
+        >>> for i in range(300):
+        ...     _ = live.hinzufuegen(Punkt(i * 2.0, 52.0 + i * 0.0001, 13.0, 4.0, tempo_ms=5.5))
+        >>> [s.t_ende for s in live.splits] == [s.t_ende for s in r.splits]
+        True
+        >>> r.split_laenge_setzen(5000.0); r.splits, round(r.splits_mit_rest()[-1].distanz_m)
+        ([], 3325)
+        """
+        if split_m <= 0 or split_m == self.split_m:
+            return
+        self.split_m = split_m
+        self.splits = []
+        if not self._zeiten:
+            return
+        self._split_anfang = (self._zeiten[0], 0.0, 0.0, 0.0)
+        for t, (distanz, bewegt), (auf, ab) in zip(
+            self._zeiten, self._staende, self._hoehenstaende, strict=True
+        ):
+            while distanz >= (len(self.splits) + 1) * split_m:
+                t0, bewegt0, auf0, ab0 = self._split_anfang
+                self.splits.append(
+                    Split(
+                        nummer=len(self.splits) + 1,
+                        distanz_m=split_m,
+                        t_start=t0,
+                        t_ende=t,
+                        bewegt_s=bewegt - bewegt0,
+                        hoehe_auf_m=auf - auf0,
+                        hoehe_ab_m=ab - ab0,
+                    )
+                )
+                self._split_anfang = (t, bewegt, auf, ab)
 
     def _hoehe(self, p: Punkt) -> None:
         if p.hoehe_m is None:

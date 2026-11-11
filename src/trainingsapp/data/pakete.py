@@ -606,7 +606,7 @@ class PaketRepo:
                 ).fetchone()
                 if r is None or r[0] is None:
                     continue
-                self.con.execute("DELETE FROM plan_item WHERE exercise_id = ?", (uebung_id,))
+                PlanRepo(self.con).uebung_aus_allen_plaenen(uebung_id)
                 repo.in_papierkorb(uebung_id)
                 self.con.execute(
                     "UPDATE exercise SET package_id = NULL, package_standard_json = NULL, "
@@ -697,7 +697,7 @@ class PaketRepo:
                     (kopie.id, uebung_id),
                 )
             for uebung_id in ids:
-                self.con.execute("DELETE FROM plan_item WHERE exercise_id = ?", (uebung_id,))
+                PlanRepo(self.con).uebung_aus_allen_plaenen(uebung_id)
                 repo.in_papierkorb(uebung_id)
             # Pläne aus dem Paket in den Papierkorb — aller Profile (Plan §3)
             plaene = PlanRepo(self.con)

@@ -233,9 +233,16 @@ def workout_eintrag_view(page: Any, state: AppState, einheit_id: str) -> ft.View
         if e is None:
 
             def sichern(text: str) -> None:
-                state.einheiten.workout_eintragen(einheit_id, note=text)
+                # Eine Zeile je Schreiben, nicht je Autosave-Pause (N77)
+                vorher = state.einheiten.workout_wert(einheit_id).id
+                neu = state.einheiten.workout_eintragen(
+                    einheit_id, note=text, entwurf=notiz_stand.get("entwurf") or ""
+                )
+                if neu.id != vorher:
+                    notiz_stand["entwurf"] = neu.id
 
             def geschlossen() -> None:
+                notiz_stand["entwurf"] = ""
                 notiz_stand["offen"] = False
                 aufbauen()
 

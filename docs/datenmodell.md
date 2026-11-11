@@ -255,6 +255,10 @@ Synchronisationskonflikte strukturell ausgeschlossen.
 **`subject` gibt es von Anfang an**, auch in Edition A — eine Familie teilt sich
 ein Gerät. Nachträglich einzuführen wäre eine Migration über alles.
 
+**`measurement` ist stillgelegt** (Ben, 11.11.2026, Durchsicht D26, Migration 055): Die
+Tabelle wurde bei jedem Eintrag geschrieben, aber nie gelesen — Verlauf und Kurven rechnen aus
+`session_entry` (`core/verlauf.py`, `ResultSpec.kennzahlen`). Sie bleibt im Schema, leer. Der
+ursprüngliche Gedanke:
 **`measurement` ist normalisiert** (`metric_key`, `value`, `unit`,
 `recorded_at`) und speist sämtliche Verlaufsdiagramme: Übungsergebnisse über
 `ResultSpec.chart_metrics`, Benchmarks wie „Luft anhalten" und HRV-Kennzahlen.

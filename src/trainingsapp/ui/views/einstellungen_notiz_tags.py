@@ -16,6 +16,7 @@ from collections.abc import Callable
 import flet as ft
 
 from trainingsapp.core.models import NoteTag
+from trainingsapp.ui.components.dialoge import obersten_schliessen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
@@ -74,7 +75,7 @@ def einstellungen_notiz_tags_view(page: ft.Page, state: AppState) -> ft.View:
                     eingabe.error = str(fehler)
                     page.update()
                     return
-                page.pop_dialog()
+                obersten_schliessen(page)
                 if neu != tag.name:
                     melden(f"„{tag.name}“ heißt jetzt „{neu}“")
                 zeichnen()
@@ -90,7 +91,7 @@ def einstellungen_notiz_tags_view(page: ft.Page, state: AppState) -> ft.View:
                         controls=[eingabe, hinweis("Ändert den Namen an allen Notizen.")],
                     ),
                     actions=[
-                        ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                        ft.TextButton("Abbrechen", on_click=lambda: obersten_schliessen(page)),
                         ft.FilledButton("Umbenennen", on_click=ausfuehren),
                     ],
                 )
@@ -110,7 +111,7 @@ def einstellungen_notiz_tags_view(page: ft.Page, state: AppState) -> ft.View:
         def ausfuehren(_e: object = None) -> None:
             with contextlib.suppress(Exception):  # ohne Rückfrage ist kein Dialog offen
                 if n:
-                    page.pop_dialog()
+                    obersten_schliessen(page)
             state.notiz_tags.loeschen(tag.id)
             melden(f"„{tag.name}“ gelöscht" + (f" — {notizen_text(n)} ohne den Tag" if n else ""))
             zeichnen()
@@ -127,7 +128,7 @@ def einstellungen_notiz_tags_view(page: ft.Page, state: AppState) -> ft.View:
                         f"{notizen_text(n)} verlieren den Tag. Die Texte selbst bleiben."
                     ),
                     actions=[
-                        ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                        ft.TextButton("Abbrechen", on_click=lambda: obersten_schliessen(page)),
                         ft.FilledButton("Löschen", on_click=ausfuehren),
                     ],
                 )

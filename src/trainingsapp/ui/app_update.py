@@ -306,6 +306,10 @@ async def automatisch(page: Any, state: Any) -> None:
         return
     if state.app_update_auslassen() == stand.app.tag:
         return
+    if stand.app.apk_sha256 is None:
+        # Ohne Prüfsumme von GitHub installiert sich nichts von selbst (S29) — von Hand über
+        # die Karte „App“ bleibt es möglich, dort sieht die Person, was sie tut
+        return
     lauf = lauf_fuer(state, stand.app)
     if lauf.phase not in (BEREIT, FEHLER):  # unterwegs, oder es wartet auf eine Hand
         return

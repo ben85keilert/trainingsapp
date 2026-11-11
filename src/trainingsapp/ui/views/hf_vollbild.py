@@ -319,6 +319,10 @@ def hf_vollbild(
 
     def intervall_zeichnen(x_von: float, x_bis: float) -> None:
         iv = state.hf_intervall
+        # Die Live-Achse hat neu bei 0 begonnen (Aufnahme gestartet, neu verbunden): Ein
+        # Intervall von vorher liegt an Stellen, die es nicht mehr gibt (H103)
+        if iv is not None and iv["von"] > lauf.jetzt_s():
+            state.hf_intervall = iv = None
         intervall_box.visible = iv is not None
         if iv is None:
             intervall_box.content, st.intervall_karte = None, None

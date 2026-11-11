@@ -61,6 +61,14 @@ def test_backupagent_sichert_nur_mit_marke(apk_bauen) -> None:
     assert f'const val MARKE = "{sicherung.MARKE}"' in text
     assert f'const val STRECKEN_ORDNER = "{config.streckenverzeichnis().name}"' in text
     assert "markeFinden(wurzel, TIEFE) ?: return" in text  # ohne Marke: nichts
+    # P180 (Ben, 11.11.2026): Anhänge, Paketdateien, Karten, Import und Export nie — ein
+    # Video sprengt Googles 25 MB, und Android verwirft dann das ganze Backup.
+    nie = [config.anhaengeverzeichnis(), config.importverzeichnis(), config.kartenverzeichnis()]
+    namen = ", ".join(f'"{n}"' for n in [nie[0].name, nie[1].name, "Export", nie[2].name])
+    assert f"val NIE = setOf({namen})" in text and "ordner.name !in NIE" in text
+    pakete = config.paketmedienverzeichnis()
+    assert f'const val PAKETE_ORDNER = "{pakete.name}"' in text
+    assert f'const val MEDIEN_ORDNER = "{pakete.parent.name}"' in text
     assert "fullBackupFile(it, data)" in text
     assert "override fun onRestore(" in text and "override fun onBackup(" in text
     pyproject = tomllib.loads((SKRIPT.parent.parent / "pyproject.toml").read_text("utf-8"))

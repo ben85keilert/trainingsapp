@@ -4,6 +4,7 @@ Automatik; Ben, 9.11.2026). Nur mit flet — die Erweiterung ist eine Attrappe."
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -343,9 +344,16 @@ def test_lauf_ist_ein_datensatz() -> None:
 # -- Automatik ---------------------------------------------------------------------------
 
 
-def _mit_release(state: Zustand) -> Zustand:
-    state.updates = SimpleNamespace(app=RELEASE)
+def _mit_release(state: Zustand, sha256: str | None = "ab" * 32) -> Zustand:
+    """Die Automatik nimmt nur ein Release mit Prüfsumme von GitHub (S29)."""
+    state.updates = SimpleNamespace(app=replace(RELEASE, apk_sha256=sha256))
     return state
+
+
+def test_automatik_nie_ohne_pruefsumme(state, seite, geladen) -> None:
+    """S29: Nennt GitHub keinen ``digest``, installiert sich nichts von selbst."""
+    asyncio.run(app_update.automatisch(seite, _mit_release(state, sha256=None)))
+    assert state.app_update is None and geladen == []
 
 
 def test_automatik_laedt_und_bereitet_vor(state, seite, geladen) -> None:

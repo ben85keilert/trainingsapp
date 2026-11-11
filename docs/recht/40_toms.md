@@ -67,13 +67,22 @@
 - **Geräte-Backup** (seit 20.10.2026, Sicherheitsdurchsicht S4): Androids Auto Backup
   sichert nichts aus der App, solange die Person es nicht unter Einstellungen →
   Geräte-Backup einschaltet (Vorgabe aus; GPS-Strecken nur mit zweitem Schalter).
-  Eingeschaltet gehen Datenbank, Messungen und Anhänge in das Backup des
+  Eingeschaltet gehen Datenbank und Messungen in das Backup des
   Google-Kontos — Empfänger Google, mit der Gerätesperre verschlüsselt, höchstens
-  25 MB (`docs/sicherung.md`). Für iOS gilt dieselbe Regel (iCloud).
+  25 MB (`docs/sicherung.md`). **Anhänge, Paketdateien, Karten, Import/ und Export/ gehen
+  nie mit** (seit 11.11.2026, P180). Für iOS gilt dieselbe Regel (iCloud).
 - **Bilder in Kurskapiteln** (seit 20.10.2026, S2): Markdown-Bilder aus Paketen laden
   erst, wenn die Person es unter Einstellungen → Updates einschaltet (Vorgabe aus);
   bis dahin stehen sie als Link, der auf Tipp öffnet. Beim Laden erfährt der Anbieter
   des Pakets IP-Adresse und Zeitpunkt.
+- **Private Pakete** (seit 9.11.2026, U7, `docs/uebungspakete.md`; Nachtrag 11.11.2026, S33/S34):
+  Pakete für eine einzelne Person liegen verschlüsselt unter einem Link mit Zufallsnamen und
+  öffnen sich nur mit einem 8-stelligen Code. **In ein Paket gehören keine Personendaten** —
+  keine Diagnose, kein voller Name; „für“ ist ein Vorname oder Kürzel. Der Code steht nach dem
+  ersten Öffnen im Klartext in der Datenbank der App (`package.access_json`, bei eigenen
+  Paketen `own_package.access_code`), damit Updates sich selbst öffnen; er steht in keinem
+  Protokoll und keinem Export, geht aber **mit der Datenbank ins Geräte-Backup**, wenn die
+  Person es einschaltet. Keine neue Netzverbindung (dieselbe Paketquelle).
 - **Fotos und Videos an Einträgen** (seit 20.10.2026, `docs/plan_anhaenge.md`): mit der
   Kamera der App aufgenommen, als nackte JPEG/MP4-Bytes ohne Ortsstempel in den
   app-privaten Ordner `Anhaenge/` geschrieben; nicht in Galerie, Export, Diagnose,

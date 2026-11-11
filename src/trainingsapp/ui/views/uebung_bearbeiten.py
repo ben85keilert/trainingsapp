@@ -91,7 +91,7 @@ from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
 from trainingsapp.ui.components.bewegungsbild import bewegungsbild_blatt
 from trainingsapp.ui.components.chips_wahl import chips_zeile
-from trainingsapp.ui.components.dialoge import Nachher, schliessen
+from trainingsapp.ui.components.dialoge import Nachher, obersten_schliessen, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL
@@ -1789,11 +1789,11 @@ def uebung_bearbeiten(
             try:
                 state.pakete.zuruecksetzen([uebung.id])
             except sqlite3.Error as fehler:
-                page.pop_dialog()
+                obersten_schliessen(page)
                 page.show_dialog(ft.SnackBar(ft.Text(f"Nicht zurückgesetzt: {fehler}")))
                 return
             zurueckgesetzt.danach(lambda: page.run_task(page.push_route, f"/uebung/{uebung.id}"))
-            page.pop_dialog()
+            obersten_schliessen(page)
             page.show_dialog(ft.SnackBar(ft.Text("Auf den Paketstand gesetzt")))
 
         def zuruecksetzen_fragen() -> None:
@@ -1808,7 +1808,7 @@ def uebung_bearbeiten(
                         "gespeichert ist. Einträge bleiben."
                     ),
                     actions=[
-                        ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                        ft.TextButton("Abbrechen", on_click=lambda: obersten_schliessen(page)),
                         ft.FilledButton("Zurücksetzen", on_click=zuruecksetzen),
                     ],
                 )

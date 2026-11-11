@@ -117,6 +117,7 @@ from trainingsapp.ui.views.ausdauer import (
     UNTERWEGS,
     ausdauer_detail_view,
     ausdauer_view,
+    training_laeuft,
     verwaiste_dialog,
 )
 from trainingsapp.ui.views.eigene_pakete import SEGMENT as EIGEN_SEGMENT
@@ -239,6 +240,39 @@ def uebungsseiten_leiste(page: ft.Page, state: AppState, route: str) -> ft.Navig
         on_change=wechseln,
         destinations=[
             ft.NavigationBarDestination(label=label, icon=icon) for _, label, icon in reiter
+        ],
+    )
+
+
+def not_ansicht(page: ft.Page, fehler: BaseException) -> ft.View:
+    """Wenn selbst die Hauptansicht nicht entsteht (N103): sagen, was war, und den Weg zu den
+    Einstellungen lassen — dort liegen Export und Sicherung."""
+
+    async def einstellungen(_e: object = None) -> None:
+        await page.push_route("/einstellungen")
+
+    return ft.View(
+        route="/",
+        appbar=ft.AppBar(title=ft.Text("Trainingsapp")),
+        controls=[
+            ft.Container(
+                padding=20,
+                content=ft.Column(
+                    spacing=12,
+                    controls=[
+                        ft.Text("Die Startseite ließ sich nicht aufbauen.", size=18),
+                        ft.Text(
+                            "Deine Daten sind noch da. Unter Einstellungen kannst du sie "
+                            "exportieren.",
+                            opacity=0.8,
+                        ),
+                        ft.Text(f"{type(fehler).__name__}: {fehler}", size=12, opacity=0.6),
+                        ft.FilledButton(
+                            "Einstellungen", icon=ft.Icons.SETTINGS, on_click=einstellungen
+                        ),
+                    ],
+                ),
+            )
         ],
     )
 
@@ -947,7 +981,16 @@ def main(page: ft.Page) -> None:
             # Stapel dastehen — die alten Ansichten bleiben, der Fehler steht unten (N17)
             logging.getLogger(__name__).exception("Ansicht %s nicht gebaut", page.route)
             page.views.clear()
-            page.views.extend(vorher or [hauptansicht(page, state)])
+            if vorher:
+                page.views.extend(vorher)
+            else:
+                # Erster Aufbau: Wirft auch die Hauptansicht (kaputte Daten von heute), stünde
+                # die App ohne Ansicht da und käme nie zu den Einstellungen (N103)
+                try:
+                    page.views.append(hauptansicht(page, state))
+                except Exception as zweiter:
+                    logging.getLogger(__name__).exception("Hauptansicht nicht gebaut")
+                    page.views.append(not_ansicht(page, zweiter))
             gebaut["route"] = page.views[-1].route if page.views else None
             page.update()
             with suppress(Exception):
@@ -1063,6 +1106,9 @@ def main(page: ft.Page) -> None:
             if len(teile) == 1:
                 ablegen(lambda: ausdauer_view(page, state))
             elif teile[1] == UNTERWEGS:
+                if not training_laeuft(state):
+                    # Das Training ist zu Ende: Die Seite „läuft weiter“ gilt nicht mehr (H85)
+                    state.strecke_unterwegs = None
                 if (unterwegs := state.strecke_unterwegs) is not None:
                     ablegen(lambda: ausdauer_detail_view(page, state, unterwegs, unterwegs=True))
             elif (strecke := state.strecken.laden(teile[1])) is not None:

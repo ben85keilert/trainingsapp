@@ -327,7 +327,15 @@ def eigenes_paket_view(page: Any, state: AppState, basis: str, paket_id: str) ->
             melden(f"Export fehlgeschlagen: {fehler}")
             return
         if ep.code:  # privat (U7): verschlüsselt mit dem Code des Pakets
-            await asyncio.to_thread(_verschluesseln, datei, ep.code)
+            try:
+                await asyncio.to_thread(_verschluesseln, datei, ep.code)
+            except Exception as fehler:
+                # Der Klartext eines privaten Pakets bleibt nie unter Export/ liegen (S30)
+                for rest in (datei, datei.with_name(datei.name + ".teil")):
+                    with contextlib.suppress(OSError):
+                        rest.unlink(missing_ok=True)
+                melden(f"Export fehlgeschlagen: {fehler}")
+                return
         mime = "application/zip" if datei.suffix == ".zip" else "application/json"
         await datei_weitergeben(page, datei, datei.name, mime)
         repo.exportiert(ep.id, version, sha)

@@ -139,8 +139,11 @@ def darstellung_lesen(text: str | None) -> Darstellung:
     helligkeit = roh.get("helligkeit")
     verlauf = roh.get("verlauf")
     return Darstellung(
-        palette=palette if palette in PALETTEN else vorgabe.palette,
-        helligkeit=helligkeit if helligkeit in HELLIGKEITEN else vorgabe.helligkeit,
+        # nur Text kann ein Schlüssel sein — eine Liste dort würfe ``unhashable`` (H98)
+        palette=palette if isinstance(palette, str) and palette in PALETTEN else vorgabe.palette,
+        helligkeit=helligkeit
+        if isinstance(helligkeit, str) and helligkeit in HELLIGKEITEN
+        else vorgabe.helligkeit,
         verlauf=verlauf if isinstance(verlauf, bool) else vorgabe.verlauf,
     )
 

@@ -491,3 +491,20 @@ uebungen = [
     assert kapitelplan.items[0].takt is None
     morgen_baum, morgen_lotus = gelesen.plaene[0].vorlage.items
     assert morgen_baum.takt is None and morgen_lotus.takt is AUS
+
+
+def test_pruefen_warnt_vor_kapiteln_ohne_key(tmp_path) -> None:
+    """K41 (Ben, 11.11.2026): Ohne ``key`` hängt die Kapitel-ID an der Nummer — ein Einschub
+    verschöbe Fortschritt und Kapitelpläne. Das Werkzeug sagt es vorher."""
+    kurs = (
+        '\n[[kurse]]\nkey = "ruhe"\nname = "Ruhe"\n'
+        '\n[[kurse.kapitel]]\nkey = "eins"\ntitel = "Eins"\ntext = "a"\n'
+        '\n[[kurse.kapitel]]\ntitel = "Zwei"\ntext = "b"\n'
+    )
+    datei = tmp_path / "x.toml"
+    datei.write_text(QIGONG + kurs, encoding="utf-8")
+    fehler, hinweise = pruefen(datei, symbole=None)
+    assert fehler == []
+    assert any("Kurs „Ruhe“: Kapitel 2 ohne `key`" in h for h in hinweise)
+    datei.write_text(QIGONG + kurs.replace('titel = "Zwei"', 'key = "zwei"\ntitel = "Zwei"'))
+    assert not any("ohne `key`" in h for h in pruefen(datei, symbole=None)[1])

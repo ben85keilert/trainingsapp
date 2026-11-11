@@ -126,6 +126,9 @@ def tagesfeld_blatt(
     ausstehend: dict[str, Callable[[], None]] = {}
     #: Welcher Eintrag gerade aufgeklappt bearbeitet wird
     offen: dict[str, str | None] = {"id": None}
+    #: Was im aufgeklappten Bearbeiter getippt ist — überlebt jedes `zeichnen()` (Schnellknopf,
+    #: Variantenwechsel), solange derselbe Eintrag offen bleibt (N120)
+    entwurf: dict[str, str] = {}
     #: Die zuletzt hier eingetippte Uhrzeit — Vorlage für den nächsten Eintrag
     zuletzt: dict[str, time | None] = {"uhr": None}
     art = feld.art
@@ -737,8 +740,25 @@ def tagesfeld_blatt(
 
     def bearbeiter(w: tf.Tageswert) -> ft.Control:
         """Ein Eintrag aufgeklappt: Uhrzeit (die alte als Vorlage), Variante, Wert, Notiz."""
+        if entwurf.get("__id") != w.id:  # ein anderer Eintrag: von vorn
+            entwurf.clear()
+            entwurf["__id"] = w.id
+
+        def gemerkt(schluessel: str, vorgabe: str) -> str:
+            return entwurf.get(schluessel, vorgabe)
+
+        def merker(schluessel: str) -> Callable[[ft.Event[Any]], None]:
+            def handler(e: ft.Event[Any]) -> None:
+                entwurf[schluessel] = str(e.control.value or "")
+
+            return handler
+
         zeit_feld = ft.TextField(
-            label="Uhrzeit", value=f"{w.zeit.astimezone():%H:%M}", width=110, dense=True
+            label="Uhrzeit",
+            value=gemerkt("zeit", f"{w.zeit.astimezone():%H:%M}"),
+            width=110,
+            dense=True,
+            on_change=merker("zeit"),
         )
         f_alt = tf.wertfeld(w.spec)
         einheit = (
@@ -746,9 +766,13 @@ def tagesfeld_blatt(
         )
         wert_feld = ft.TextField(
             label=("Dauer" if art == tf.DAUER else "Wert") + einheit,
-            value=tf.eingabe_text(w.spec, w.wert),
+            value=gemerkt("wert", tf.eingabe_text(w.spec, w.wert)),
+            on_change=merker("wert"),
             hint_text="Minuten oder 1:30" if art == tf.DAUER else None,
-            expand=True,
+            # Feste Breite, nie ``expand``: Die Zeile bricht um (`wrap`), und ein dehnbares
+            # Kind in einer umbrechenden Zeile zeigt am Gerät nur eine graue Fläche (Ben,
+            # 11.11.2026, Gerätetest T125).
+            width=150,
             dense=True,
             visible=art in tf.SUMMIERT or art == tf.SKALA,
         )
@@ -759,14 +783,16 @@ def tagesfeld_blatt(
                 teil_felder.append(
                     ft.TextField(
                         label=f.label + (f" ({f.unit})" if f.unit else ""),
-                        value="" if wert_i is None else tf.zahl(float(wert_i)),
+                        value=gemerkt(f"teil{i}", "" if wert_i is None else tf.zahl(float(wert_i))),
+                        on_change=merker(f"teil{i}"),
                         width=max(96, 12 * len(f.label) + 40),
                         dense=True,
                     )
                 )
         notiz = ft.TextField(
             label="Text" if art == tf.TEXT else "Notiz",
-            value=w.note,
+            value=gemerkt("notiz", w.note),
+            on_change=merker("notiz"),
             multiline=True,
             min_lines=1,
             max_lines=6,
@@ -810,6 +836,9 @@ def tagesfeld_blatt(
                     melden("Diesen Wert verstehe ich nicht.")
                     return
             neue_variante = str(wahl.value or "") if wahl is not None else w.variante
+            if art == tf.TEXT and not (notiz.value or "").strip():
+                melden("Ein Text-Eintrag braucht Text — sonst den Eintrag löschen.")
+                return
             state.tageswerte.korrigieren(
                 w.id,
                 result=tf.ergebnis(wert, neue_variante),
@@ -817,6 +846,7 @@ def tagesfeld_blatt(
                 zeit=neue,
             )
             offen["id"] = None
+            entwurf.clear()
             melden("")
             merken()
             zeichnen()
@@ -849,6 +879,7 @@ def tagesfeld_blatt(
 
     def aufklapper_zu(_e: object = None) -> None:
         offen["id"] = None
+        entwurf.clear()
         zeichnen()
 
     def liste() -> list[ft.Control]:

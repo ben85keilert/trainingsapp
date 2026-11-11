@@ -161,7 +161,7 @@ class Testpunkt:
 def testreihe(
     punkte: Iterable[Testpunkt], *, ausgenommen: set[date] | None = None
 ) -> dict[str, list[Testpunkt]]:
-    """Je Testname die Punkte in Zeitfolge (ausgenommene Tage bleiben, sind markierbar)."""
+    """Je Testname die Punkte in Zeitfolge — ohne die ausgenommenen Tage."""
     aus = ausgenommen or set()
     out: dict[str, list[Testpunkt]] = defaultdict(list)
     for p in sorted(punkte, key=lambda p: p.tag):

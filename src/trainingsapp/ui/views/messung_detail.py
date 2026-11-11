@@ -572,6 +572,10 @@ def _laden(pfad: Path, vorgabe: Korrekturregeln) -> _Geladen:
     stand = korrektur_laden(pfad, vorgabe)
     z = _Zustand(stand)
     rec = stand.rec
+    # Eine fremde oder beschädigte Datei kann Notizen tragen, die keine Objekte sind — sie
+    # zählen nicht, die sonst heile Messung öffnet sich (H96)
+    if any(not isinstance(e, dict) for e in rec.ereignisse):
+        rec.ereignisse = [e for e in rec.ereignisse if isinstance(e, dict)]
     sidecar_alt = stand.veraltet
     # Notizen hängen an den Zeilen der Rohdatei; die Kurve hat ihre eigene Zeitachse
     # (nur Puls: die Wanduhr, siehe `_Zustand`)
@@ -1766,6 +1770,16 @@ def _aufbauen(
             )
         )
 
+    def abschnitt_zur_notiz_loeschen(kennung: str) -> bool:
+        """Aus der Notizliste: Wer eine Grenz-Notiz löscht, löscht den Abschnitt (H74) —
+        derselbe Weg wie der Papierkorb am Abschnitt, damit Liste, Sidecar und Notizen
+        zusammenbleiben. ``False``: kein Abschnitt dazu, das Notizfeld nimmt nur das Paar."""
+        a = next((b for b in eigene if b.id == kennung), None)
+        if a is None:
+            return False
+        abschnitt_loeschen(a)
+        return True
+
     def abschnitt_entfernen(a: Abschnitt) -> None:
         vorher = list(eigene)
         notizen_vorher = list(rec.ereignisse)
@@ -2132,7 +2146,13 @@ def _aufbauen(
         if e is None:
             return
         ganz = e.von <= 0.5 and e.bis >= dauer - 0.5
-        crop_setzen(None if ganz or e.bis - e.von < 10 else (e.von, e.bis))
+        if not ganz and e.bis - e.von < 10:
+            # Zu kurz: ablehnen, statt einen bestehenden Zuschnitt aufzuheben (H97)
+            page.show_dialog(
+                ft.SnackBar(ft.Text("Der Bereich ist kürzer als 10 s — nichts geändert."))
+            )
+            return
+        crop_setzen(None if ganz else (e.von, e.bis))
 
     def abschnitt_neu() -> None:
         """Neuer Abschnitt: der sichtbare Bereich, Grenzen rasten an nahen Notizen ein."""
@@ -2578,6 +2598,7 @@ def _aufbauen(
         zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
         hoehe=lambda: state.hrv_einstellungen().notizen_hoehe_px,
         hoehe_merken=notizen_hoehe_merken,
+        abschnitt_loeschen=lambda kennung: abschnitt_zur_notiz_loeschen(kennung),
     )
 
     if geladen.nachgetragen_sha1 is not None:  # `_laden` schrieb Grenz-Notizen nach

@@ -1,0 +1,96 @@
+# Wöchentliche Updates der Python-Abhängigkeiten (uv.lock) als Pull Request.
+#
+# Warum nicht Dependabot (Durchsicht 10.11.2026, N122): Sein uv-Lauf scheitert an den
+# Schwesterordnern (`../hrv-core`, `../hrv-watch` — „path based dependencies could not be
+# retrieved“), auch bei Sicherheitsupdates. Hier liegen die Repos nebeneinander wie in der CI,
+# darum kann uv das Lock neu auflösen. Dependabot bleibt für die Actions zuständig und für
+# die Meldungen unter „Security → Dependabot“. Erklärung: docs/dependabot.md.
+#
+# flet und seine Erweiterungen wandern nie von selbst (flet-mcp im Gleichschritt,
+# Android-Build prüfen) — sie bleiben auf dem Stand des Locks.
+name: uv-Updates
+
+on:
+  schedule:
+    - cron: "17 4 * * 1" # montags 04:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write # startet die CI für den Zweig (Pushes mit GITHUB_TOKEN lösen keine aus)
+
+concurrency:
+  group: uv-updates
+  cancel-in-progress: true
+
+jobs:
+  aktualisieren:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: trainingsapp
+    env:
+      ZWEIG: automatik/uv-updates
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: trainingsapp
+
+      - name: Stände der Schwesterrepos lesen
+        id: refs
+        working-directory: ${{ github.workspace }}
+        run: |
+          for name in hrv-core hrv-watch; do
+            ref="$(tr -d '[:space:]' < "trainingsapp/$name.ref")"
+            if ! printf '%s' "$ref" | grep -Eqx '[0-9a-f]{40}'; then
+              echo "::error file=$name.ref::$name.ref muss genau einen vollen Commit-SHA enthalten"
+              exit 1
+            fi
+            echo "${name//-/_}=$ref" >> "$GITHUB_OUTPUT"
+          done
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ben85keilert/hrv-core
+          ref: ${{ steps.refs.outputs.hrv_core }}
+          path: hrv-core
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ben85keilert/hrv-watch
+          ref: ${{ steps.refs.outputs.hrv_watch }}
+          path: hrv-watch
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: true
+
+      - name: Lock anheben — alles außer flet und den eigenen Paketen
+        run: python3 scripts/uv_updates.py
+
+      - name: Pull Request öffnen oder auffrischen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- uv.lock; then
+            echo "Nichts zu aktualisieren."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$ZWEIG"
+          git add uv.lock
+          git commit -m "Abhängigkeiten: uv.lock angehoben (wöchentlich, ohne flet)"
+          git push --force origin "$ZWEIG"
+          if [ -z "$(gh pr list --head "$ZWEIG" --state open --json number --jq '.[].number')" ]; then
+            gh pr create --head "$ZWEIG" --base main \
+              --title "Abhängigkeiten: uv.lock angehoben" \
+              --body-file "$RUNNER_TEMP/uv_updates.md"
+          else
+            gh pr edit "$ZWEIG" --body-file "$RUNNER_TEMP/uv_updates.md"
+          fi
+          # Ein Push mit dem GITHUB_TOKEN löst keine Workflows aus — die CI von Hand starten,
+          # ihr Ergebnis steht dann am Commit und damit im Pull Request.
+          gh workflow run ci.yml --ref "$ZWEIG"

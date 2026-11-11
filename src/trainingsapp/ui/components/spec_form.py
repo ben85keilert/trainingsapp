@@ -45,7 +45,13 @@ from trainingsapp.core.result_spec import (
     skala_wert,
     stellen,
 )
-from trainingsapp.core.units import format_dauer, format_sets, parse_dauer, parse_sets
+from trainingsapp.core.units import (
+    format_dauer,
+    format_sets,
+    ist_zahl,
+    parse_dauer,
+    parse_sets,
+)
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import ohne_auto_update
 from trainingsapp.ui.components.varianten import Variantenwahl, zeilenbreite
@@ -304,7 +310,9 @@ class SpecForm:
         if ist_leer(wert):
             return ""
         if f.type == FieldType.SET_LIST or isinstance(wert, list):
-            liste = wert if isinstance(wert, list) else [wert]
+            liste = [w for w in (wert if isinstance(wert, list) else [wert]) if ist_zahl(w)]
+            if not liste:  # Altbestand mit ``None`` oder Text in der Satzliste (N92)
+                return ""
             if f.type == FieldType.SET_LIST and not f.saetze:
                 liste = [sum(float(w) for w in liste)]
             return format_sets([float(w) for w in liste], zeit=(f.unit == "s"))
@@ -387,11 +395,13 @@ class SpecForm:
             widget = self._widgets[f.key]
             wert = self._lesen(f, widget)
             text = str(getattr(widget, "value", "") or "").strip()
-            # Bei Satzfeldern ist "0" erlaubt und heißt „ohne Angabe"
+            # Bei Satzfeldern ist "0" erlaubt und heißt „ohne Angabe" — bei einer Skala, deren
+            # Bereich die 0 nicht enthält, ist sie ein Wert außerhalb (N110)
+            null_ok = f.type != FieldType.SCALE
             ungueltig = (
                 (f.type in ZAHLENARTIG or f.type == FieldType.SET_LIST)
                 and wert is None
-                and text not in ("", "0")
+                and text not in (("", "0") if null_ok else ("",))
             )
             fehlt = f.required and (wert is None or wert == "")
             if isinstance(widget, ft.TextField):

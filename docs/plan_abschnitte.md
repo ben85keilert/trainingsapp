@@ -39,6 +39,10 @@ fehlten in der Notizliste.
 - Die Notizen stehen in der **Messdatei** (`ereignisse`, wie jede Notiz: Anker, `wall_time`,
   Text „Behandlung: Start“ / „Behandlung: Ende“). Sie erscheinen in der Notizliste live und
   nachträglich, sind dort verschiebbar, umbenennbar, löschbar.
+  **Eine Grenz-Notiz löschen heißt den Abschnitt löschen** (Ben, 11.11.2026, H74): Die
+  Notizliste fragt „Abschnitt löschen?“ und nimmt Start- und Ende-Notiz zusammen weg, in der
+  Auswertung samt Abschnitt und Sidecar (`Notizfeld._abschnitt_fragen`,
+  `messung_detail.abschnitt_zur_notiz_loeschen`) — nie eine Grenze allein.
 - Das **Sidecar wird daraus abgeleitet** (`ausschnitte.spuren_speichern` beim Speichern der
   Aufnahme, `zusatz_speichern` in der Auswertung): `segments` mit `t_start_s`/`t_end_s` =
   die **getippten** Grenzen (der Kern — was praxis_gui als Abschnitt sieht), dazu das

@@ -268,13 +268,17 @@ def einstellungen_anhaenge(page: Any, state: AppState) -> ft.View:
 
     # -- Aufräumen -----------------------------------------------------------------------
 
+    # Lässt sich der Ordner nicht lesen, weiß niemand, was fehlt: Dann gilt nichts als
+    # verwaist oder fehlend — „Entfernen“ löschte sonst Zeilen samt vorhandener Datei (N115)
     try:
         dateien = repo.dateien()
+        lesbar = True
     except OSError:
         dateien = []
+        lesbar = False
     zeilen = repo.alle_zeilen()
-    verwaist = verwaiste(dateien, zeilen)
-    fehlend = fehlende(zeilen, dateien)
+    verwaist = verwaiste(dateien, zeilen) if lesbar else []
+    fehlend = fehlende(zeilen, dateien) if lesbar else []
 
     def verwaiste_loeschen() -> None:
         n = 0

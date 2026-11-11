@@ -19,7 +19,7 @@ import flet as ft
 
 from trainingsapp.data.uebungsbilder import Uebungsbild
 from trainingsapp.ui.components.blatt import blatt_spalte
-from trainingsapp.ui.components.dialoge import schliessen
+from trainingsapp.ui.components.dialoge import obersten_schliessen, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL, symbol
 from trainingsapp.ui.components.uebungsbild import ECKE
@@ -76,7 +76,7 @@ def symbol_blatt(
             dialog: ft.AlertDialog
 
             def ja() -> None:
-                page.pop_dialog()
+                obersten_schliessen(page)
                 loeschen(b)
 
             dialog = ft.AlertDialog(
@@ -87,7 +87,7 @@ def symbol_blatt(
                     "danach wieder ihr Symbol."
                 ),
                 actions=[
-                    ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                    ft.TextButton("Abbrechen", on_click=lambda: obersten_schliessen(page)),
                     ft.FilledButton("Löschen", on_click=ja),
                 ],
             )

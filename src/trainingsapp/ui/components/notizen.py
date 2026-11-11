@@ -65,6 +65,7 @@ from typing import Any
 import flet as ft
 from hrv_core.ereignisse import Zeitbezug, notiz, sortiert
 
+from trainingsapp.core import abschnitte as eigene_abschnitte
 from trainingsapp.core.einheit import marke_angaben
 from trainingsapp.core.hrv_einstellungen import NOTIZEN_HOEHE_MAX_PX, NOTIZEN_HOEHE_MIN_PX
 from trainingsapp.core.kurzcode import genannte, kurzcode
@@ -204,8 +205,12 @@ class Notizfeld:
         zeilen: Callable[[], int] | None = None,
         hoehe: Callable[[], int] | None = None,
         hoehe_merken: Callable[[int], None] | None = None,
+        abschnitt_loeschen: Callable[[str], bool] | None = None,
     ) -> None:
         self._zeitbezug = zeitbezug
+        #: Wer die Abschnitte führt (Auswertung): löscht den Abschnitt mit dieser Kennung
+        #: selbst — mit Rückfrage, Sidecar und „Rückgängig“ — und sagt ``True`` (H74)
+        self._abschnitt_loeschen = abschnitt_loeschen
         self._hoehe = hoehe or (lambda: 0)
         self._hoehe_merken = hoehe_merken
         #: Beim Ziehen: die Höhe, die die Liste gerade hat (None = es wird nicht gezogen)
@@ -485,6 +490,10 @@ class Notizfeld:
         if not 0 <= i < len(liste):
             return
         eintrag = liste[i]
+        kennung = eigene_abschnitte.kennung_von(eintrag)
+        if kennung is not None:
+            self._abschnitt_fragen(eintrag, kennung)
+            return
         if self._dialog is None:
             self._entfernen_eintrag(eintrag)
             return
@@ -496,6 +505,57 @@ class Notizfeld:
                 zeigen(meldung("Notiz gelöscht", lambda: self.zurueckholen(weg)))
 
         zeigen(loeschen_rueckfrage("Notiz löschen?", self.beschreibung(eintrag), ja))
+
+    def _abschnitt_fragen(self, eintrag: dict, kennung: str) -> None:
+        """Eine **Grenz-Notiz** löschen heißt den Abschnitt löschen (Ben, 11.11.2026, H74 —
+        meist nimmt man so einen angefangenen, aber nicht trainierten Block wieder heraus):
+        Start- und Ende-Notiz gehen zusammen, nie eine allein — eine Start-Notiz ohne Ende
+        gälte sonst als „läuft noch“ bis zum Messende."""
+        if self._abschnitt_loeschen is not None and self._abschnitt_loeschen(kennung):
+            return
+        name = str((eintrag.get("marke") or {}).get("name") or "").strip()
+
+        def ja() -> None:
+            vorher = list(self._ereignisse())
+            bearbeitet = self._bearbeitete(vorher)
+            neu = [e for e in vorher if eigene_abschnitte.kennung_von(e) != kennung]
+            if len(neu) == len(vorher):
+                return
+            self._speichern(neu)
+            if bearbeitet is not None and eigene_abschnitte.kennung_von(bearbeitet) == kennung:
+                self.bearbeite = None
+            self._neu_zaehlen(bearbeitet)
+            self._aendern(kurve=True)
+            if self._dialog is not None:
+                self._dialog(meldung("Abschnitt gelöscht", lambda: self._paar_zurueck(vorher)))
+
+        if self._dialog is None:
+            ja()
+            return
+        was = f"„{name}“" if name else "Der Abschnitt"
+        self._dialog(
+            loeschen_rueckfrage(
+                "Abschnitt löschen?",
+                f"{was} wird gelöscht, mit seiner Start- und Ende-Notiz. Die Messung "
+                "selbst bleibt unverändert.",
+                ja,
+            )
+        )
+
+    def _paar_zurueck(self, vorher: list[dict]) -> None:
+        """„Rückgängig“ nach dem Löschen eines Abschnitts: seine Grenz-Notizen wieder dazu —
+        was seither an Notizen kam, bleibt."""
+        zb = self._zeitbezug()
+        if zb is None:
+            return
+        liste = list(self._ereignisse())
+        fehlen = [e for e in vorher if eigene_abschnitte.ist_grenze(e) and e not in liste]
+        if not fehlen:
+            return
+        bearbeitet = self._bearbeitete(liste)
+        self._speichern(sortiert([*liste, *fehlen], zb.beats()))
+        self._neu_zaehlen(bearbeitet)
+        self._aendern(kurve=True)
 
     def beschreibung(self, e: dict) -> str:
         """Was die Rückfrage nennt: Text und Zeit der Notiz."""

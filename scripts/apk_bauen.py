@@ -183,6 +183,12 @@ import java.io.File
 // bleiben sie draußen. Ohne Marke wird nichts geschrieben - weder ins Cloud-Backup
 // noch bei der Übertragung von Gerät zu Gerät.
 //
+// Nie gesichert werden Anhänge (Fotos, Videos, Audio), Paketdateien (Medien/Pakete),
+// Karten und die Ablagen Import/ und Export/ (Ben, 11.11.2026, P180): Google lässt
+// 25 MB je App zu und verwirft sonst das GANZE Backup still - ein Video genügte, und
+// Datenbank und Messungen wären mit weg. Anhänge sichert die vollständige Sicherung,
+// die die Person selbst anlegt; Paketdateien lassen sich neu laden.
+//
 // Kein Schlüssel-Wert-Backup (onBackup/onRestore leer): android:fullBackupOnly="true"
 // im Manifest lässt Android allein onFullBackup rufen. Die Wiederherstellung übernimmt
 // BackupAgent.onRestoreFile, Datei für Datei dorthin, wo sie lag.
@@ -207,7 +213,11 @@ class Sicherung : BackupAgent() {
             .walkTopDown()
             .onEnter { ordner ->
                 ordner === wurzel ||
-                    (ordner.name !in AUSGESCHLOSSEN && (strecken || ordner.name != STRECKEN_ORDNER))
+                    (ordner.name !in AUSGESCHLOSSEN &&
+                        ordner.name !in NIE &&
+                        !(ordner.name == PAKETE_ORDNER &&
+                            ordner.parentFile?.name == MEDIEN_ORDNER) &&
+                        (strecken || ordner.name != STRECKEN_ORDNER))
             }
             .filter { it.isFile }
             .forEach { fullBackupFile(it, data) }
@@ -218,6 +228,13 @@ class Sicherung : BackupAgent() {
         const val MARKE = "geraete_sicherung.txt"
         const val STRECKEN_ZEILE = "strecken"
         const val STRECKEN_ORDNER = "Strecken"
+        // Wörtlich wie config.anhaengeverzeichnis(), importverzeichnis(), kartenverzeichnis()
+        // und die Ablage Export/ (ui/components/weitergeben.py)
+        val NIE = setOf("Anhaenge", "Import", "Export", "Karten")
+        // config.paketmedienverzeichnis(): Medien/Pakete - Symbole und Bewegungsbilder
+        // daneben (Medien/Symbole, Medien/Bewegung) sind klein und gehen mit
+        const val MEDIEN_ORDNER = "Medien"
+        const val PAKETE_ORDNER = "Pakete"
         // Flet legt das Datenverzeichnis wenige Ebenen unter dataDir ab (app_flutter/…)
         const val TIEFE = 3
         // Was Android selbst nie sichert - und was wir nicht brauchen

@@ -942,7 +942,7 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
         ergebnis.append(varianten_kasten())
         ergebnis.append(wie_oft())
         ergebnis.append(fehler)
-        if vorhanden is not None:
+        if vorhanden is not None and not vorhanden.fest:  # feste Felder nur ausschalten (N112)
             ergebnis.append(
                 ft.Row(
                     controls=[

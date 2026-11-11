@@ -99,6 +99,24 @@ def datenformat_aktualisieren(con: sqlite3.Connection) -> int:
     return geaendert
 
 
+def _json_oder_nichts(text: object) -> object:
+    """JSON einer Spalte lesen; Kaputtes und Leeres sind ``None``.
+
+    Ein Datenschritt darf an einer einzelnen unlesbaren Zeile nicht scheitern — sonst rollt
+    die Transaktion zurück und die App startet nie wieder (D22). Die Repos dulden dieselben
+    Spalten ebenso.
+
+    >>> _json_oder_nichts('{"a": 1}'), _json_oder_nichts("{kaputt"), _json_oder_nichts(None)
+    ({'a': 1}, None, None)
+    """
+    if not isinstance(text, str) or not text:
+        return None
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
+
+
 def _schritt_6_zweige_als_ablauf(con: sqlite3.Connection) -> int:
     """Alte Zweige und Verweise → Kanten im Ablauf (siehe Modulkopf)."""
     from ..core.ablauf import Ablauf, aus_bedingungen, hat_verzweigung, ohne_verzweigung
@@ -111,11 +129,11 @@ def _schritt_6_zweige_als_ablauf(con: sqlite3.Connection) -> int:
             (plan["id"],),
         ).fetchall()
         items = [
-            (r["id"], Bedingung.aus_dict(json.loads(r["bedingung_json"] or "null"))) for r in zeilen
+            (r["id"], Bedingung.aus_dict(_json_oder_nichts(r["bedingung_json"]))) for r in zeilen
         ]
         if not any(hat_verzweigung(b) for _, b in items):
             continue
-        vorhanden = Ablauf.aus_dict(json.loads(plan["ablauf_json"] or "null"))
+        vorhanden = Ablauf.aus_dict(_json_oder_nichts(plan["ablauf_json"]))
         if vorhanden.leer:
             neu = aus_bedingungen(items)
             con.execute(
@@ -196,7 +214,9 @@ def _schritt_2_satzfeld(con: sqlite3.Connection) -> int:
                 )
             geaendert += 1
     for r in con.execute("SELECT id, target_json FROM plan_item").fetchall():
-        ziel = json.loads(r["target_json"])
+        ziel = _json_oder_nichts(r["target_json"])
+        if not isinstance(ziel, dict):
+            continue  # ``null`` = „wie die Übung“ (Migration 028) oder unlesbar (D22)
         neu = werte_modernisieren(ziel)
         if neu != ziel:
             con.execute(
@@ -262,11 +282,9 @@ def _schritt_3_kopien_reparieren(con: sqlite3.Connection) -> int:
             if isinstance(wert, list)
             and ((f := kopie.field_by_key(key)) is None or f.type != FieldType.SET_LIST)
         ]
-        gueltig = r["deleted_at"] is None and not r["ersetzt"]
         if not unpassend:
-            if gueltig and ist_altes_satzformat(kopie):
-                _kennzahlen_neu(con, r, modernisieren(kopie), werte_modernisieren(werte))
-                geaendert += 1
+            # Früher bekamen Einträge im alten Satzformat hier neue Kennzahlen in der Tabelle
+            # `measurement` — sie ist stillgelegt (D26), der Eintrag selbst bleibt, wie er ist
             continue
 
         neu = modernisieren(kopie)
@@ -288,36 +306,8 @@ def _schritt_3_kopien_reparieren(con: sqlite3.Connection) -> int:
             "UPDATE session_entry SET spec_snapshot_json = ? WHERE id = ?",
             (json.dumps(neu.to_dict(), ensure_ascii=False), r["id"]),
         )
-        if gueltig:
-            _kennzahlen_neu(con, r, neu, werte)
-        else:
-            con.execute("DELETE FROM measurement WHERE session_entry_id = ?", (r["id"],))
         geaendert += 1
     return geaendert
-
-
-def _kennzahlen_neu(
-    con: sqlite3.Connection, r: sqlite3.Row, spec: ResultSpec, werte: dict[str, object]
-) -> None:
-    """Kennzahlen eines Eintrags verwerfen und aus Spezifikation und Werten neu schreiben."""
-    con.execute("DELETE FROM measurement WHERE session_entry_id = ?", (r["id"],))
-    zeitpunkt = r["started_at"] or r["session_start"]
-    for kennzahl, wert, einheit in spec.kennzahlen(werte):
-        con.execute(
-            "INSERT INTO measurement (id, subject_id, metric_key, value, unit, "
-            "recorded_at, session_id, session_entry_id, source) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'exercise')",
-            (
-                new_id(),
-                r["subject_id"],
-                f"{r['exercise_id']}:{kennzahl}",
-                wert,
-                einheit,
-                zeitpunkt,
-                r["session_id"],
-                r["id"],
-            ),
-        )
 
 
 __all__ = ["datenformat_aktualisieren"]

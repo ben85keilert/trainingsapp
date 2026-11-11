@@ -19,6 +19,7 @@ from collections.abc import Callable
 import flet as ft
 
 from trainingsapp.core.models import TAG_REGION, TAG_TYP
+from trainingsapp.ui.components.dialoge import obersten_schliessen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
@@ -77,7 +78,7 @@ def einstellungen_tags_view(page: ft.Page, state: AppState) -> ft.View:
                     feld.error = fehler
                     page.update()
                     return
-                page.pop_dialog()
+                obersten_schliessen(page)
                 if neu != name:
                     melden(f"„{name}“ heißt jetzt „{neu}“")
                 zeichnen(art)
@@ -99,7 +100,7 @@ def einstellungen_tags_view(page: ft.Page, state: AppState) -> ft.View:
                         ],
                     ),
                     actions=[
-                        ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                        ft.TextButton("Abbrechen", on_click=lambda: obersten_schliessen(page)),
                         ft.FilledButton("Umbenennen", on_click=ausfuehren),
                     ],
                 )
@@ -111,7 +112,7 @@ def einstellungen_tags_view(page: ft.Page, state: AppState) -> ft.View:
         def ausfuehren() -> None:
             with contextlib.suppress(Exception):  # ohne Rückfrage ist kein Dialog offen
                 if n:
-                    page.pop_dialog()
+                    obersten_schliessen(page)
             state.tags.loeschen(art, name)
             melden(f"„{name}“ gelöscht" + (f", aus {uebungen_text(n)} entfernt" if n else ""))
             zeichnen(art)
@@ -129,7 +130,7 @@ def einstellungen_tags_view(page: ft.Page, state: AppState) -> ft.View:
                         "Die Übungen selbst und ihre Einträge bleiben."
                     ),
                     actions=[
-                        ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                        ft.TextButton("Abbrechen", on_click=lambda: obersten_schliessen(page)),
                         ft.FilledButton("Löschen", on_click=ausfuehren),
                     ],
                 )

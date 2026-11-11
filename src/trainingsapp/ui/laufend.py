@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import math
 import time
 from datetime import datetime, timedelta
@@ -154,17 +155,22 @@ async def takt(state: Any) -> None:
     zuletzt: Benachrichtigung | None = None
     dienst = False
     while True:
-        allein = timer_allein(state)
-        if allein != dienst and hasattr(transport, "hintergrund"):
-            with contextlib.suppress(Exception):
-                await transport.hintergrund(allein, "Timer läuft", "", zweck="timer")
-            dienst = allein
-            zuletzt = None  # Dienst oder nicht: die Benachrichtigung neu zeigen
-        inhalt = benachrichtigung(laufendes(state))
-        if inhalt != zuletzt:
-            with contextlib.suppress(Exception):
-                await transport.anzeigen(inhalt)
-                zuletzt = inhalt
+        # Der Takt darf nie enden (N104): Wirft das Lesen des Stands einmal, bliebe die
+        # Benachrichtigung sonst bis zum Neustart stehen.
+        try:
+            allein = timer_allein(state)
+            if allein != dienst and hasattr(transport, "hintergrund"):
+                with contextlib.suppress(Exception):
+                    await transport.hintergrund(allein, "Timer läuft", "", zweck="timer")
+                dienst = allein
+                zuletzt = None  # Dienst oder nicht: die Benachrichtigung neu zeigen
+            inhalt = benachrichtigung(laufendes(state))
+            if inhalt != zuletzt:
+                with contextlib.suppress(Exception):
+                    await transport.anzeigen(inhalt)
+                    zuletzt = inhalt
+        except Exception:
+            logging.getLogger(__name__).exception("Takt der Benachrichtigung")
         await asyncio.sleep(TAKT_S - (time.monotonic() % TAKT_S))  # auf die volle Sekunde (N27)
 
 

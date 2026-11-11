@@ -99,6 +99,25 @@ bewusst einträgt (`git -C ../hrv-core rev-parse origin/main > hrv-core.ref`) un
 die CI damit grün war. Lokal läuft weiter der Ordner `../hrv-core`, wie er
 gerade steht.
 
+**Seit 11.11.2026: uv-Updates über einen eigenen Workflow** (Durchsicht 10.11.2026, N122).
+Dependabots uv-Lauf scheiterte hier jedes Mal an den Schwesterordnern (`../hrv-core`,
+`../hrv-watch`: „path based dependencies could not be retrieved“) — auch die
+Sicherheitsupdates. Darum ist das Ökosystem `uv` aus `.github/dependabot.yml` heraus; was
+dieses Dokument weiter oben dazu sagt, gilt für die Actions weiter und für uv nur noch als
+Hintergrund. An seiner Stelle:
+
+- **`.github/workflows/uv-updates.yml`** läuft montags (und von Hand: Actions → „uv-Updates“ →
+  „Run workflow“), legt die Repos nebeneinander wie die CI, ruft `scripts/uv_updates.py`
+  (je Paket `uv lock --upgrade-package …`, **nie flet und seine Erweiterungen**) und öffnet
+  oder erneuert den Pull Request `automatik/uv-updates` mit einer Tabelle „vorher → nachher“.
+- Ein Push mit dem `GITHUB_TOKEN` löst keine Workflows aus; der Lauf startet die CI darum
+  selbst (`workflow_dispatch` in `ci.yml`). Mergen erst bei grüner CI.
+- **Einmal einzustellen** (Repo → Settings → Actions → General → Workflow permissions):
+  „Allow GitHub Actions to create and approve pull requests“ — sonst scheitert `gh pr create`.
+- Lokal dasselbe: `python3 scripts/uv_updates.py`, dann Tests, committen.
+- Die Meldungen unter „Security → Dependabot“ bleiben; der wöchentliche Lauf räumt sie mit
+  ab, soweit eine reparierte Version zu den Anforderungen passt.
+
 **Was Dependabot hier nicht sieht:**
 
 - `hrv-core`, `flet-ble`, `flet-ton` — Pfadabhängigkeiten

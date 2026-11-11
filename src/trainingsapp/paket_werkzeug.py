@@ -314,6 +314,20 @@ def pruefen(
                     f"Ergänzung „{x.get('uebung')}“: {', '.join(fremd)} — darf eine Ergänzung "
                     "nicht setzen, fällt weg"
                 )
+    for kurs in roh.get("kurse") or []:  # K41: die Kapitel-ID hängt sonst an der Nummer
+        kapitel = kurs.get("kapitel") if isinstance(kurs, dict) else None
+        ohne = [
+            n
+            for n, k in enumerate(kapitel if isinstance(kapitel, list) else [], 1)
+            if isinstance(k, dict) and not k.get("key") and not k.get("id")
+        ]
+        if ohne:
+            hinweise.append(
+                f"Kurs „{kurs.get('name') or kurs.get('key') or '?'}“: Kapitel "
+                f"{', '.join(map(str, ohne))} ohne `key` — ohne ihn zählt die Nummer: Ein "
+                "eingeschobenes Kapitel verschiebt dann Fortschritt und Kapitelpläne aller "
+                "dahinter auf das falsche Kapitel"
+            )
     if inhalt.paket.version is None:
         hinweise.append("Kopf ohne `version` — ohne sie erkennt kein Gerät ein Update")
     for treffer in wortliste_pruefen(roh, wortliste):

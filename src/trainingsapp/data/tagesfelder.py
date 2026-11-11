@@ -43,7 +43,7 @@ _GUELTIGE = """
 def _spec(text: str | None) -> ResultSpec:
     try:
         return ResultSpec.from_dict(json.loads(text or "{}"))
-    except (ValueError, TypeError, KeyError):
+    except (ValueError, TypeError, KeyError, AttributeError):  # auch ``"[]"`` (N91)
         return ResultSpec()
 
 

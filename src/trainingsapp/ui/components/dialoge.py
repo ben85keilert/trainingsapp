@@ -100,6 +100,18 @@ def schliessen(dialog: Any) -> None:
         dialog.update()
 
 
+def obersten_schliessen(page: Any) -> None:
+    """Den obersten offenen **Dialog** schließen — nie eine Meldung (SnackBar), die über ihm
+    liegt. Ersatz für `page.pop_dialog()` dort, wo der Dialog an Ort und Stelle gebaut und
+    ohne Namen gezeigt wird (N111, N118): `pop_dialog` träfe die Meldung, der modale Dialog
+    bliebe stehen. Ist keiner offen, passiert nichts."""
+    stapel = getattr(page, "_dialogs", None)
+    for d in reversed(list(getattr(stapel, "controls", ()))):
+        if getattr(d, "open", False) and not isinstance(d, ft.SnackBar):
+            schliessen(d)
+            return
+
+
 #: So lange steht eine Meldung mit „Rückgängig“ (ms) — etwas länger als Flutters 4 s,
 #: damit man den Knopf noch trifft
 MELDUNG_MS = 5000
@@ -299,6 +311,7 @@ __all__ = [
     "dialog_offen",
     "loeschen_rueckfrage",
     "meldung",
+    "obersten_schliessen",
     "reste_dialog",
     "schliessen",
 ]

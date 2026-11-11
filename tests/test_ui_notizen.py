@@ -252,3 +252,44 @@ def test_notizliste_hoehe_mit_dem_griff_ziehen() -> None:
     # Doppeltipp: wieder nach der Zeilenzahl
     griff.on_double_tap(None)
     assert gemerkt[-1] == 0 and f._liste.height is None
+
+
+async def test_grenznotiz_loeschen_loescht_den_abschnitt() -> None:
+    """H74 (Ben, 11.11.2026): Eine Grenz-Notiz löschen heißt den Abschnitt löschen — Start und
+    Ende gehen zusammen, nach der Rückfrage „Abschnitt löschen?“; „Rückgängig“ holt beide."""
+    from trainingsapp.core import abschnitte as eigene
+
+    welt = _Welt(live=False)
+    kennung = "seg-1a2b3c4d"
+    start = notiz(
+        "Block: Start",
+        anker_aus_wand(BEATS, 20.0),
+        START,
+        marke=eigene.start_marke(kennung, "Block"),
+    )
+    ende = notiz(
+        "Block: Ende", anker_aus_wand(BEATS, 40.0), START, marke=eigene.ende_marke(kennung, "Block")
+    )
+    welt.liste = [welt.liste[0], start, welt.liste[1], ende, welt.liste[2]]
+    gezeigt: list = []
+    welt.feld._dialog = gezeigt.append
+
+    welt.feld.loeschen_fragen(3)  # die Ende-Notiz
+    frage = gezeigt[-1]
+    assert frage.title.value == "Abschnitt löschen?"
+    assert len(welt.liste) == 5  # erst die Rückfrage
+    ja = next(a for a in frage.actions if getattr(a, "content", None) == "Löschen")
+    ja.on_click()
+    await frage.on_dismiss(None)  # gelöscht wird, wenn der Dialog zu ist
+    assert [e["text"] for e in welt.liste] == ["Notiz 10", "Notiz 30", "Notiz 50"]
+    assert gezeigt[-1].action.label == "Rückgängig"
+
+    gezeigt[-1].action.on_click()
+    assert [e["text"] for e in welt.liste].count("Block: Start") == 1
+    assert len(welt.liste) == 5
+
+    # wer die Abschnitte führt, löscht selbst
+    gefragt: list[str] = []
+    welt.feld._abschnitt_loeschen = lambda k: gefragt.append(k) or True
+    welt.feld.loeschen_fragen(next(i for i, e in enumerate(welt.liste) if e is start))
+    assert gefragt == [kennung] and len(welt.liste) == 5

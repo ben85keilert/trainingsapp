@@ -4,6 +4,13 @@ on:
   push:
     branches: [main, "claude/**"]
   pull_request:
+  # von Hand und für den Workflow „uv-Updates“: Was der mit dem GITHUB_TOKEN pusht, löst
+  # von selbst keine CI aus, darum startet er sie so (N122).
+  workflow_dispatch:
+
+# Die CI liest nur — kein Schritt braucht mehr als den Quelltext (S28)
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -138,6 +145,11 @@ jobs:
 
       - name: Tests mit flet (Oberfläche)
         run: uv run --no-sync pytest -q
+
+      # Die Doctests außerhalb von core/ und devices/ (data/, ui/, paket_werkzeug.py —
+      # 136 Stück) liefen bis zum 11.11.2026 in keiner Stufe (N128, K32); ui/ braucht flet.
+      - name: Doctests des ganzen Pakets
+        run: uv run --no-sync pytest --doctest-modules -q src/trainingsapp
 
       - name: Typprüfung
         run: uv run --no-sync mypy

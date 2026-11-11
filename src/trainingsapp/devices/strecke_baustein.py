@@ -138,18 +138,23 @@ class StreckeBaustein:
 
     def sportart_setzen(self, sportart: str) -> None:
         """Die Sportart mitten im Lauf wechseln (Ben, 26.10.2026: als „Laufen“ gestartet,
-        aber Rad gefahren). Ab jetzt gilt die neue Splitlänge (ein angefangener Abschnitt
-        läuft bis zur neuen Länge weiter), der nächste Takt schreibt ``gps/sportart`` in
-        die Zeitleiste, und `StreckeErgebnis` trägt am Ende die neue Sportart — Zeile und
-        Tagebuch stimmen dann. Der Dateikopf behält die Sportart vom Start: Die Zeile ist
-        die Wahrheit; nur das Nachtragen nach einem Absturz liest den Kopf, und danach
-        lässt sich die Sportart in der Auswertung ändern (`ui.training.sportart_aendern`).
+        aber Rad gefahren). **Das ganze Training gehört dann zur neuen Sportart** (Ben,
+        11.11.2026, H68 — der Wechsel ist meist die Korrektur einer falschen Wahl; wer
+        wirklich die Sportart wechselt, beendet die Runde und beginnt eine neue): Die Splits
+        werden für die ganze Strecke neu geschnitten (`StreckenRechner.split_laenge_setzen`),
+        für schon zurückgelegte gibt es kein Signal und keine Notiz mehr; was vorher an
+        km-Marken fiel, bleibt in der Zeitleiste stehen. Der nächste Takt schreibt
+        ``gps/sportart`` in die Zeitleiste, und `StreckeErgebnis` trägt am Ende die neue
+        Sportart — Zeile und Tagebuch stimmen dann. Der Dateikopf behält die Sportart vom
+        Start: Die Zeile ist die Wahrheit; nur das Nachtragen nach einem Absturz liest den
+        Kopf, und danach lässt sich die Sportart in der Auswertung ändern
+        (`ui.training.sportart_aendern`).
         """
         if sportart == self.sportart:
             return
         self.sportart = sportart
         self.split_m = split_laenge_m(sportart)
-        self.rechner.split_m = self.split_m
+        self.rechner.split_laenge_setzen(self.split_m)
         self._wechsel.append(sportart)
 
     # -- Zustand -----------------------------------------------------------------

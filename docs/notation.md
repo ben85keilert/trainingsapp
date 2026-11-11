@@ -67,7 +67,10 @@ den Wert, Loslassen trägt ihn in den offenen Eintrag ein, ✕ nimmt ihn heraus.
 Formular (Leistungen, Korrektur) stehen Regler und Zahlenfeld in einer Zeile, der Name
 darüber: Der Regler schreibt seine Zahl ins Feld, abgeschickt wird mit dem Haken. Ein
 leeres Feld heißt „ohne Wert“ — auch dort, wo der Regler am Anfang steht.
-In Satzlisten trennt das Komma Sätze — Kommazahlen dort mit Punkt (`12.5`).
+In Satzlisten trennt das Komma Sätze. **Sätze zählen ganze Wiederholungen** (Ben, 11.11.2026,
+N94): `0,5`, `15/0/20` (ein 0-Satz zwischen anderen) und `12.5` sind ungültig — das Feld zeigt
+„Ungültig“, und nichts wird abgeschickt. Bei Zeiten ist `1,5min` ungültig (Dezimalkomma oder
+zwei Sätze?), `1.5min` und `1:30` sind 90 s.
 
 ## Das Plus im Plan
 

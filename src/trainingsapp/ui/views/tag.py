@@ -366,10 +366,13 @@ def tag_waehlen(page: Any, state: AppState, tag: date) -> None:
         nachher.danach(lambda: page.push_route(f"/tag/{ziel.isoformat()}"))
         page.run_task(spaeter)
 
+    # Der gezeigte Tag muss im Bereich liegen — sonst bricht Flutter den Kalender ab (N105)
+    erster_tag = min(date(heute.year - 5, 1, 1), tag)
+    letzter_tag = max(heute + timedelta(days=365), tag)
     waehler = ft.DatePicker(
         value=datetime.combine(tag, datetime.min.time()),
-        first_date=datetime(heute.year - 5, 1, 1),
-        last_date=datetime.combine(heute + timedelta(days=365), datetime.min.time()),
+        first_date=datetime.combine(erster_tag, datetime.min.time()),
+        last_date=datetime.combine(letzter_tag, datetime.min.time()),
         current_date=datetime.combine(heute, datetime.min.time()),
         locale=ft.Locale("de", "DE"),
         help_text="Tag wählen",

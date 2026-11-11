@@ -34,7 +34,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
-from .units import MAX_WERT, format_dauer, format_sets, parse_dauer, satz_summe
+from .units import MAX_WERT, format_dauer, format_sets, ist_zahl, parse_dauer, satz_summe
 
 
 class FieldType(StrEnum):
@@ -585,7 +585,7 @@ def parameter_werte(spec: ResultSpec | None, werte: dict[str, Any]) -> list[Para
             summe = satz_summe([float(w) for w in wert if isinstance(w, int | float)])
             zusatz = f"{format_dauer(summe) if f.unit == 's' else f'{summe:g}'} gesamt"
             if not f.saetze:  # ohne Sätze steht die Summe vorn — dahinter, woraus
-                teile = [format_sets([float(w)], zeit=f.unit == "s") for w in wert]
+                teile = [format_sets([float(w)], zeit=f.unit == "s") for w in wert if ist_zahl(w)]
                 zusatz = " + ".join(teile) if len(teile) <= 6 else ""
         elif f.type == FieldType.SCALE:
             zusatz = skala_bereich_text(f)

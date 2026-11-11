@@ -17,6 +17,7 @@ from datetime import datetime
 import flet as ft
 
 from trainingsapp.core.models import HrvTitel
+from trainingsapp.ui.components.dialoge import obersten_schliessen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
@@ -93,7 +94,7 @@ def einstellungen_hrv_titel(page: ft.Page, state: AppState) -> ft.View:
                     eingabe.error = fehler
                     page.update()
                     return
-                page.pop_dialog()
+                obersten_schliessen(page)
                 zeichnen()
 
             eingabe.on_submit = lambda _: ausfuehren()
@@ -110,7 +111,7 @@ def einstellungen_hrv_titel(page: ft.Page, state: AppState) -> ft.View:
                         ],
                     ),
                     actions=[
-                        ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                        ft.TextButton("Abbrechen", on_click=lambda: obersten_schliessen(page)),
                         ft.FilledButton("Umbenennen", on_click=ausfuehren),
                     ],
                 )

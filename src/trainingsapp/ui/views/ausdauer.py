@@ -295,6 +295,11 @@ def _training(state: AppState) -> tuple[Einheitslauf, StreckeBaustein] | None:
     return e, teil
 
 
+def training_laeuft(state: AppState) -> bool:
+    """Läuft gerade ein Training (Teil ``gps`` der laufenden Einheit)?"""
+    return _training(state) is not None
+
+
 #: Die Auswertung des laufenden Trainings: ``/ausdauer/unterwegs`` (A21, Ben 10.11.2026)
 UNTERWEGS = "unterwegs"
 

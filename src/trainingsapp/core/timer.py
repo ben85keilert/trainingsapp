@@ -58,6 +58,7 @@ lässt sich ohne Bildschirm testen.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -276,6 +277,10 @@ class TimerProfil:
     #: (Ben, 10.11.2026, `docs/plan_timer_zuordnen.md` §4) — leer: eine eingebettete Kopie.
     #: Gespeichert wird dann nur der Verweis (`verweise_schreiben`).
     bibliothek: str = ""
+    #: Der Stand des Timers in der Bibliothek, als dieses Profil geladen wurde (`stand_von`) —
+    #: damit eine veraltete, unveränderte Kopie beim Speichern nichts zurückdreht (D21).
+    #: Leer = unbekannt. Zählt nicht beim Vergleich zweier Profile.
+    bibliothek_stand: str = field(default="", compare=False)
 
     @property
     def ist_stoppuhr(self) -> bool:
@@ -403,6 +408,8 @@ class TimerProfil:
             d["name_in_marken"] = False
         if self.bibliothek:
             d[BIBLIOTHEK] = self.bibliothek
+            if self.bibliothek_stand:
+                d[STAND] = self.bibliothek_stand
         return d
 
     @classmethod
@@ -436,12 +443,52 @@ class TimerProfil:
             teile=teile,
             name_in_marken=in_marken if einmal else True,
             bibliothek=str(d.get(BIBLIOTHEK) or ""),
+            bibliothek_stand=str(d.get(STAND) or "") if d.get(BIBLIOTHEK) else "",
         )
 
 
 #: Schlüssel eines Verweises in die Timer-Bibliothek (``{"ref": "<id>"}``) und der Vermerk am
 #: aufgelösten Profil (``"bibliothek": "<id>"``) — `verweise_aufloesen`, `verweise_schreiben`
 REF, BIBLIOTHEK = "ref", "bibliothek"
+#: Neben dem Vermerk: der Stand der Bibliothek beim Laden (`stand_von`, D21)
+STAND = "bibliothek_stand"
+
+
+def stand_von(d: Any) -> str:
+    """Kennung des Inhalts eines Timers — gleich für gleiche Profile, gleich wie sie
+    geschrieben sind; Vermerk und Stand selbst zählen nicht. Unlesbares hat keinen Stand.
+
+    >>> a = {"id": "t", "name": "H", "abschnitte": [{"name": "H", "dauer_s": 30}]}
+    >>> stand_von(a) == stand_von({**a, "bibliothek": "t", "bibliothek_stand": "x"})
+    True
+    >>> stand_von(a) == stand_von({**a, "name": "Halten"}), stand_von("kaputt")
+    (False, '')
+    """
+    profil = TimerProfil.aus_dict(d)
+    if profil is None:
+        return ""
+    profil.bibliothek = ""
+    text = json.dumps(profil.als_dict(), ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+
+
+def veraltet(d: Mapping[str, Any], in_bibliothek: Any) -> bool:
+    """Ist dieses zugeordnete Profil eine **unveränderte, aber überholte** Kopie? Dann darf es
+    beim Speichern die Bibliothek nicht zurückdrehen (D21): Die Übung wurde geladen, der Timer
+    danach woanders geändert, und hier hat ihn niemand angefasst. Ohne Stand: nein (wie früher).
+
+    >>> alt = {"id": "t", "name": "H", "abschnitte": [{"name": "H", "dauer_s": 30}]}
+    >>> neu = {**alt, "name": "Halten"}
+    >>> geladen = {**alt, "bibliothek": "t", "bibliothek_stand": stand_von(alt)}
+    >>> veraltet(geladen, neu), veraltet(geladen, alt)
+    (True, False)
+    >>> veraltet({**geladen, "name": "Hier geändert"}, neu)  # hier geändert: gilt
+    False
+    >>> veraltet({**alt, "bibliothek": "t"}, neu)
+    False
+    """
+    stand = str(d.get(STAND) or "")
+    return bool(stand) and stand_von(d) == stand and stand_von(in_bibliothek) != stand
 
 
 def verweise_aufloesen(wert: Any, bibliothek: Mapping[str, Mapping[str, Any]]) -> Any:
@@ -468,7 +515,9 @@ def verweise_aufloesen(wert: Any, bibliothek: Mapping[str, Mapping[str, Any]]) -
         return wert
     if REF in wert:
         ziel = bibliothek.get(str(wert[REF]))
-        return None if ziel is None else {**ziel, BIBLIOTHEK: str(wert[REF])}
+        if ziel is None:
+            return None
+        return {**ziel, BIBLIOTHEK: str(wert[REF]), STAND: stand_von(ziel)}
     if isinstance(wert.get("eigen"), dict) and REF in wert["eigen"]:
         eigen = verweise_aufloesen(wert["eigen"], bibliothek)
         rest = {k: v for k, v in wert.items() if k != "eigen"}
@@ -496,7 +545,7 @@ def verweise_schreiben(wert: Any, vorhanden: Collection[str]) -> Any:
     if BIBLIOTHEK in wert:
         if str(wert[BIBLIOTHEK]) in vorhanden:
             return {REF: str(wert[BIBLIOTHEK])}
-        return {k: v for k, v in wert.items() if k != BIBLIOTHEK}
+        return {k: v for k, v in wert.items() if k not in (BIBLIOTHEK, STAND)}
     if isinstance(wert.get("eigen"), dict) and BIBLIOTHEK in wert["eigen"]:
         return {**wert, "eigen": verweise_schreiben(wert["eigen"], vorhanden)}
     return wert

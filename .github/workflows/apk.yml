@@ -55,6 +55,9 @@ jobs:
         with:
           path: trainingsapp
           fetch-depth: 0 # Build-Nummer = Zahl der Commits
+          # Das Token (contents: write) bleibt nicht in .git/config liegen, während
+          # `flet build` fremden Gradle- und pub-Code ausführt (S28)
+          persist-credentials: false
 
       - name: hrv-core-Stand aus hrv-core.ref lesen
         # Die Datei pinnt den Commit der Schwesterbibliothek (CLAUDE.md, „Die
@@ -64,6 +67,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           ref="$(tr -d '[:space:]' < trainingsapp/hrv-core.ref)"
+          # wie in ci.yml: nur ein voller Commit-SHA, nie ein Zweig oder Tag (S28, N129)
+          if ! printf '%s' "$ref" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "::error file=hrv-core.ref::hrv-core.ref muss genau einen vollen Commit-SHA (40 Hex-Zeichen) enthalten, gefunden: '$ref'"
+            exit 1
+          fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - name: hrv-core (gemeinsame HRV-Bibliothek) auschecken
@@ -73,6 +81,7 @@ jobs:
           repository: ben85keilert/hrv-core
           ref: ${{ steps.hrv_core.outputs.ref }}
           path: hrv-core
+          persist-credentials: false
 
       - name: hrv-watch-Stand aus hrv-watch.ref lesen
         # Schwesterrepo hrv-watch: Flet-Erweiterung flet_medien (Uhr am Handgelenk),
@@ -81,6 +90,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           ref="$(tr -d '[:space:]' < trainingsapp/hrv-watch.ref)"
+          # wie in ci.yml: nur ein voller Commit-SHA, nie ein Zweig oder Tag (S28, N129)
+          if ! printf '%s' "$ref" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "::error file=hrv-watch.ref::hrv-watch.ref muss genau einen vollen Commit-SHA (40 Hex-Zeichen) enthalten, gefunden: '$ref'"
+            exit 1
+          fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - name: hrv-watch (Uhranbindung, flet_medien) auschecken
@@ -90,6 +104,7 @@ jobs:
           repository: ben85keilert/hrv-watch
           ref: ${{ steps.hrv_watch.outputs.ref }}
           path: hrv-watch
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
@@ -101,7 +116,8 @@ jobs:
           java-version: "17"
 
       - name: Abhängigkeiten installieren
-        run: uv sync
+        # --locked: genau der Stand aus uv.lock, sonst bräche der Build ab (S28, N129)
+        run: uv sync --locked
 
       - name: Signierschlüssel bereitstellen
         env:

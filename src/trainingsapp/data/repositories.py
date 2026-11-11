@@ -40,7 +40,6 @@ from ..core.models import (
     Exercise,
     HrvRecording,
     HrvTitel,
-    Measurement,
     Media,
     MediaKind,
     MediaSource,
@@ -65,7 +64,10 @@ from ..core.result_spec import FieldType, ResultSpec, basis_key, werte_modernisi
 from ..core.takt import AUS, Takt
 from ..core.timer import (
     BIBLIOTHEK,
+    STAND,
     TimerProfil,
+    stand_von,
+    veraltet,
     verweise_aufloesen,
     verweise_schreiben,
     zugeordnete,
@@ -321,10 +323,7 @@ class ExerciseRepo:
                         "UPDATE session_entry SET deleted_at = ? WHERE id = ?",
                         (stempel, eintrag_id),
                     )
-                    self.con.execute(
-                        "DELETE FROM measurement WHERE session_entry_id = ?", (eintrag_id,)
-                    )
-            self.con.execute("DELETE FROM plan_item WHERE exercise_id = ?", (uebung_id,))
+            PlanRepo(self.con).uebung_aus_allen_plaenen(uebung_id)
             self.con.execute(
                 "UPDATE exercise SET purged_at = ?, deleted_at = COALESCE(deleted_at, ?), "
                 "updated_at = ?, revision = revision + 1 WHERE id = ?",
@@ -520,7 +519,7 @@ class ExerciseRepo:
             icon_key=r["icon_key"],
             image_path=r["image_path"],
             is_builtin=bool(r["is_builtin"]),
-            result_spec=ResultSpec.from_dict(json.loads(r["result_spec_json"])),
+            result_spec=_spec_lesen(r["result_spec_json"]),
             limit_spec=json.loads(r["limit_spec_json"]),
             default_target=json.loads(r["default_target_json"]),
             default_input_mode=r["default_input_mode"],
@@ -631,6 +630,23 @@ def _json_lesen(text: str | None, vorgabe: Any) -> Any:
     return wert if isinstance(wert, type(vorgabe)) else vorgabe
 
 
+def _spec_lesen(text: str | None) -> ResultSpec:
+    """Die Feldbeschreibung einer Übung oder eines Eintrags — nachsichtig (N91): Eine einzige
+    Zeile mit unbekanntem Feldtyp (aus einer neueren App-Fassung) oder kaputtem JSON darf
+    nicht den ganzen Tag, Verlauf oder Katalog scheitern lassen. Dann gilt die leere
+    Beschreibung; die Werte zeigt `format_shorthand` als „Schlüssel Wert“.
+
+    >>> _spec_lesen('{"fields": [{"key": "x", "label": "X", "type": "gibt_es_nicht"}]}').fields
+    []
+    >>> _spec_lesen("{kaputt").fields, _spec_lesen("[]").fields, _spec_lesen(None).fields
+    ([], [], [])
+    """
+    try:
+        return ResultSpec.from_dict(json.loads(text or "{}"))
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return ResultSpec()
+
+
 def _timer_lesen(con: sqlite3.Connection, text: str | None, vorgabe: Any) -> Any:
     """Timer-JSON von Übung, Plan oder Planübung — Verweise in die Bibliothek (``{"ref": …}``,
     Migration 052) werden das Profil mit dem Vermerk ``bibliothek`` (`verweise_aufloesen`). Die
@@ -659,8 +675,12 @@ def _timer_json(con: sqlite3.Connection, wert: Any) -> str:
         if profil is None or alt is None:
             continue
         profil.id = str(d[BIBLIOTHEK])
+        if veraltet(d, alt):
+            continue  # unveränderte, überholte Kopie: die Bibliothek ist neuer (D21)
         if TimerProfil.aus_dict(alt) != profil:
             repo.speichern(profil)
+        if STAND in d:
+            d[STAND] = stand_von(profil.als_dict())  # das Objekt kennt jetzt diesen Stand
     return json.dumps(verweise_schreiben(wert, set(vorhanden)), ensure_ascii=False)
 
 
@@ -888,6 +908,7 @@ class TimerRepo:
         stempel = jetzt().isoformat()
         d = profil.als_dict()
         d.pop(BIBLIOTHEK, None)
+        d.pop(STAND, None)
         if position is None:
             r = self.con.execute(
                 "SELECT position FROM timer WHERE id = ? AND deleted_at IS NULL", (profil.id,)
@@ -1130,6 +1151,21 @@ class PlanRepo:
             if not ablauf.leer:
                 self._ablauf_schreiben(zeile["plan_id"], ablauf.ohne_knoten(item_id))
             self._beruehrt(zeile["plan_id"])
+
+    def uebung_aus_allen_plaenen(self, exercise_id: str) -> int:
+        """Alle Planübungen einer Übung entfernen, in jedem Plan — **samt ihren Kanten im
+        Ablauf** (D23: wer `plan_item` direkt löscht, lässt Wege auf einen Knoten stehen, den
+        es nicht mehr gibt). Für endgültiges Löschen und entfallene Paketübungen."""
+        ids = [
+            r["id"]
+            for r in self.con.execute(
+                "SELECT id FROM plan_item WHERE exercise_id = ?", (exercise_id,)
+            ).fetchall()
+        ]
+        with transaktion(self.con):
+            for item_id in ids:
+                self.uebung_entfernen(item_id)
+        return len(ids)
 
     def ablauf_laden(self, plan_id: str) -> Ablauf:
         r = self.con.execute("SELECT ablauf_json FROM plan WHERE id = ?", (plan_id,)).fetchone()
@@ -1761,6 +1797,11 @@ class SessionRepo:
                 WHERE s.subject_id = ? AND s.plan_id IS NOT NULL
                   AND s.deleted_at IS NULL AND e.deleted_at IS NULL
                   AND e.started_at >= ? AND e.started_at <= ?
+                  -- nur der gültige Stand jeder Kette: Ein Eintrag mit acht Tipps („+20“)
+                  -- zählt einmal, nicht achtmal (D27)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM session_entry n WHERE n.replaces_entry_id = e.id
+                  )
                 GROUP BY s.plan_id ORDER BY n DESC, erst
                 """,
                 (subject_id, *utc),
@@ -1869,7 +1910,6 @@ class SessionRepo:
         )
         with transaktion(self.con):
             self._eintrag_schreiben(eintrag, ersetzt=None)
-            self._kennzahlen_schreiben(session, eintrag)
         return eintrag
 
     def erledigt(self, session: Session, uebung: Exercise, note: str = "") -> SessionEntry:
@@ -1936,8 +1976,6 @@ class SessionRepo:
         )
         with transaktion(self.con):
             self._eintrag_schreiben(neu, ersetzt=alt.id)
-            self.con.execute("DELETE FROM measurement WHERE session_entry_id = ?", (alt.id,))
-            self._kennzahlen_schreiben(session, neu)
         return neu
 
     def eintrag_uebung_wechseln(self, alter_eintrag_id: str, uebung: Exercise) -> SessionEntry:
@@ -1965,8 +2003,6 @@ class SessionRepo:
         )
         with transaktion(self.con):
             self._eintrag_schreiben(neu, ersetzt=alt.id)
-            self.con.execute("DELETE FROM measurement WHERE session_entry_id = ?", (alt.id,))
-            self._kennzahlen_schreiben(session, neu)
         return neu
 
     # -- Offener Eintrag (Ben, 19.10.2026; `core.eintraege`) --------------------------
@@ -2453,7 +2489,6 @@ class SessionRepo:
                 self.con.execute(
                     "UPDATE session_entry SET deleted_at = ? WHERE id = ?", (stempel, aktuell)
                 )
-                self.con.execute("DELETE FROM measurement WHERE session_entry_id = ?", (aktuell,))
                 aktuell = r["replaces_entry_id"]
 
     def eintrag_laden(self, eintrag_id: str) -> SessionEntry | None:
@@ -2666,39 +2701,6 @@ class SessionRepo:
                 zaehler[lokaler_tag(datetime.fromisoformat(r["started_at"]))] += 1
         return dict(zaehler)
 
-    # -- Kennzahlen ----------------------------------------------------------
-
-    def verlauf(self, subject_id: str, metric_key: str) -> list[Measurement]:
-        return [
-            Measurement(
-                id=r["id"],
-                subject_id=r["subject_id"],
-                metric_key=r["metric_key"],
-                value=r["value"],
-                unit=r["unit"],
-                recorded_at=datetime.fromisoformat(r["recorded_at"]),
-                session_id=r["session_id"],
-                session_entry_id=r["session_entry_id"],
-                source=r["source"],
-            )
-            for r in self.con.execute(
-                "SELECT * FROM measurement WHERE subject_id = ? AND metric_key = ? "
-                "AND deleted_at IS NULL ORDER BY recorded_at",
-                (subject_id, metric_key),
-            )
-        ]
-
-    def metriken(self, subject_id: str) -> list[str]:
-        """Alle Kennzahlen, zu denen es Werte gibt."""
-        return [
-            r["metric_key"]
-            for r in self.con.execute(
-                "SELECT DISTINCT metric_key FROM measurement WHERE subject_id = ? "
-                "AND deleted_at IS NULL ORDER BY metric_key",
-                (subject_id,),
-            )
-        ]
-
     # -- intern --------------------------------------------------------------
 
     def _eintrag_schreiben(self, e: SessionEntry, ersetzt: str | None) -> None:
@@ -2724,27 +2726,6 @@ class SessionRepo:
             ),
         )
 
-    def _kennzahlen_schreiben(self, session: Session, e: SessionEntry) -> None:
-        """chart_metrics → measurement: je Kennzahl eine Zeile (Satzfelder: Summe und Maximum)."""
-        spec = e.spec_snapshot
-        assert spec is not None
-        zeitpunkt = e.started_at or session.started_at
-        for kennzahl, wert, einheit in spec.kennzahlen(e.result):
-            self.con.execute(
-                "INSERT INTO measurement (id, subject_id, metric_key, value, unit, recorded_at, "
-                "session_id, session_entry_id, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'exercise')",
-                (
-                    new_id(),
-                    session.subject_id,
-                    f"{e.exercise_id}:{kennzahl}",
-                    wert,
-                    einheit,
-                    zeitpunkt.isoformat(),
-                    session.id,
-                    e.id,
-                ),
-            )
-
     @staticmethod
     def _session_zeile(r: sqlite3.Row) -> Session:
         return Session(
@@ -2765,7 +2746,7 @@ class SessionRepo:
             exercise_id=r["exercise_id"],
             order=r["sort_order"],
             result=json.loads(r["result_json"]),
-            spec_snapshot=ResultSpec.from_dict(json.loads(r["spec_snapshot_json"])),
+            spec_snapshot=_spec_lesen(r["spec_snapshot_json"]),
             note=r["note"],
             started_at=datetime.fromisoformat(r["started_at"]) if r["started_at"] else None,
             ended_at=datetime.fromisoformat(r["ended_at"]) if r["ended_at"] else None,

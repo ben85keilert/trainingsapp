@@ -34,6 +34,8 @@ _WINKEL = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:°|grad\b)", re.IGNORECASE)
 _DAUER_MMSS = re.compile(r"(?<!\d)(\d+):([0-5]\d)(?!\d)")
 # 1:30:00 — Stunden, wenn ein ganzer Tag gemessen wurde
 _DAUER_HHMMSS = re.compile(r"(?<!\d)(\d+):([0-5]\d):([0-5]\d)(?!\d)")
+# „1,5min“ in einer Satzliste — mehrdeutig (`parse_sets`)
+_KOMMA_ZEIT = re.compile(r"\d,\d+\s*(?:min|m)\b", re.IGNORECASE)
 _DAUER_EINHEIT = re.compile(r"(\d+(?:[.,]\d+)?)\s*(s|sek|sec|min|m)\b", re.IGNORECASE)
 
 
@@ -131,10 +133,23 @@ def parse_sets(text: str, zeit: bool = False) -> list[float] | None:
     True
     >>> parse_sets("100001") is None and parse_sets("1e400") is None
     True
+
+    **Ungültig statt geraten** (Ben, 11.11.2026, N94 — das Formular zeigt „Ungültig“ und
+    schickt nichts ab): Sätze zählen ganze Wiederholungen, das Komma trennt Sätze — „0,5“
+    wäre ein 0-Satz und ein Satz mit 5, „1,5min“ eine Sekunde und fünf Minuten.
+
+    >>> parse_sets("0,5") is None and parse_sets("15/0/20") is None  # kein 0-Satz
+    True
+    >>> parse_sets("12.5") is None and parse_sets("2x7.5") is None  # nur ganze Wiederholungen
+    True
+    >>> parse_sets("1,5min", zeit=True) is None, parse_sets("1.5min", zeit=True)
+    (True, [90.0])
     """
     text = text.strip().lstrip("+").strip()
     if not text:
         return None
+    if zeit and _KOMMA_ZEIT.search(text):
+        return None  # „1,5min“: Dezimalkomma oder zwei Sätze? Nicht raten.
     werte: list[float] = []
     for segment in re.split(r"[/,;]", text):
         segment = segment.strip()
@@ -147,11 +162,13 @@ def parse_sets(text: str, zeit: bool = False) -> list[float] | None:
         if anzahl > MAX_SAETZE or len(werte) + anzahl > MAX_SAETZE:
             return None
         wert = parse_dauer(m.group(2)) if zeit else _zahl(m.group(2))
-        if wert is None:
+        if wert is None or (not zeit and not float(wert).is_integer()):
             return None
         werte.extend([wert] * anzahl)
     if not werte or all(w == 0 for w in werte):
         return None
+    if any(w == 0 for w in werte):
+        return None  # ein 0-Satz zwischen anderen ist ein Tippfehler
     return werte
 
 
@@ -204,8 +221,22 @@ def format_sets(werte: list[float] | None, zeit: bool = False) -> str:
 
 
 def satz_summe(werte: list[float] | None) -> float:
-    """Summe über alle Sätze — die Standardkennzahl für die Kurve."""
-    return float(sum(werte)) if werte else 0.0
+    """Summe über alle Sätze — die Standardkennzahl für die Kurve. Was keine Zahl ist
+    (``None`` oder Text in Altbestand, N92), zählt nicht.
+
+    >>> satz_summe([10, 12.5]), satz_summe(None), satz_summe([5, None, "x", True])
+    (22.5, 0.0, 5.0)
+    """
+    return float(sum(w for w in werte if ist_zahl(w))) if werte else 0.0
+
+
+def ist_zahl(w: object) -> bool:
+    """Eine endliche Zahl, kein Wahrheitswert — was in einer Satzliste zählen darf.
+
+    >>> ist_zahl(3), ist_zahl(2.5), ist_zahl(True), ist_zahl(None), ist_zahl(float("nan"))
+    (True, True, False, False, False)
+    """
+    return isinstance(w, int | float) and not isinstance(w, bool) and math.isfinite(w)
 
 
 def format_dauer(sekunden: float) -> str:

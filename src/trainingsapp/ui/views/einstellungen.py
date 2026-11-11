@@ -157,10 +157,11 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                 hinweis(
                     "Aus (Vorgabe): Nichts aus der App geht ins Backup des Geräts — nach "
                     "Gerätewechsel oder Neuinstallation ist alles weg, was du nicht exportiert "
-                    "hast. An: Datenbank, Messungen und Anhänge gehen in das Backup deines "
+                    "hast. An: Datenbank und Messungen gehen in das Backup deines "
                     "Google-Kontos (mit der Gerätesperre verschlüsselt, höchstens 25 MB) und "
                     "kommen auf dem nächsten Gerät zurück. GPS-Strecken nur, wenn du sie "
-                    "ausdrücklich einschließt."
+                    "ausdrücklich einschließt. Anhänge (Fotos, Videos, Audio) und Dateien aus "
+                    "Paketen gehen nie mit — sie sind zu groß; Pakete lassen sich neu laden."
                 ),
             )
         ]

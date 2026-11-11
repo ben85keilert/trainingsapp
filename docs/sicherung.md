@@ -30,10 +30,14 @@ Vorgabe, an auf Wunsch, Strecken gesondert.
   (Flet legt das Datenverzeichnis unter `app_flutter/…` ab). Ohne Marke schreibt er
   nichts. Mit Marke geht alles unter `dataDir` außer `cache`, `code_cache`, `lib`,
   `no_backup` — und außer `Strecken/`, wenn die Marke `strecken` nicht enthält.
+  **Nie** gehen `Anhaenge/`, `Medien/Pakete/`, `Karten/`, `Import/` und `Export/` mit (Ben,
+  11.11.2026, P180): Ein Video sprengte die 25 MB, und Android verwürfe das ganze Backup.
+  Nach einer Wiederherstellung zeigen Anhänge „fehlt“, Paketdateien „Datei fehlt — das Paket
+  neu importieren“; Anhänge sichert die vollständige Sicherung (`docs/plan_export.md` §2).
   Wiederherstellung: `BackupAgent.onRestoreFile`, Datei für Datei dorthin, wo sie lag.
   Gilt für Cloud-Backup und für die Übertragung von Gerät zu Gerät.
 - Grenzen: Googles Cloud-Backup nimmt höchstens 25 MB je App; darüber scheitert die
-  Sicherung still. Messungen und Anhänge werden schnell größer — der Export bleibt der
+  Sicherung still. Messungen werden schnell größer — der Export bleibt der
   verlässliche Weg (`docs/kompatibilitaet.md`).
 - Prüfen: `adb shell bmgr backupnow <paket>` und `bmgr restore`, oder Gerätewechsel.
   Gerätetest im Katalog (T-Nummer).

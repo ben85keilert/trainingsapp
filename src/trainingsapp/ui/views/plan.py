@@ -134,7 +134,7 @@ from trainingsapp.core.zaehlen import ENDE_ABGEHAKT
 from trainingsapp.ui import marken, uebung_lauf
 from trainingsapp.ui import plan_ablauf as plan_ablauf_ui
 from trainingsapp.ui.components import zaehl_stand
-from trainingsapp.ui.components.dialoge import Nachher, schliessen
+from trainingsapp.ui.components.dialoge import Nachher, obersten_schliessen, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.material import material_knopf
@@ -1016,7 +1016,7 @@ def plan_view(
         page.show_dialog(dialog)
 
     def abbrechen() -> None:
-        page.pop_dialog()
+        obersten_schliessen(page)
 
     nachher = Nachher()  # Routenwechsel erst, wenn der Dialog zu ist (`components/dialoge.py`)
 
@@ -1026,7 +1026,7 @@ def plan_view(
     def loeschen() -> None:
         state.plaene.loeschen(plan.id)
         nachher.danach(lambda: page.push_route("/"))
-        page.pop_dialog()
+        obersten_schliessen(page)
         page.show_dialog(
             ft.SnackBar(
                 ft.Text(f"Plan „{plan.name}“ liegt im Papierkorb — Einträge bleiben."),

@@ -269,3 +269,42 @@ async def test_sportart_im_lauf_wechseln() -> None:
     wechsel = next(x for x in e.ereignisse if x.art == "sportart")
     assert wechsel.daten == {"sportart": RAD, "split_m": 5000.0}
     assert 90 <= wechsel.t_s <= 92
+
+
+async def test_sportwechsel_gilt_fuer_das_ganze_training() -> None:
+    """H68 (Ben, 11.11.2026): Der Wechsel im Lauf ist meist die Korrektur einer falschen Wahl —
+    das ganze Training gehört zur neuen Sportart. Rad → Laufen nach 3 km: die Splits werden für
+    die ganze Strecke neu geschnitten, ohne einen Schwall von km-Signalen; danach geht es mit
+    „km 4“ weiter."""
+    from trainingsapp.core.strecke import RAD
+
+    uhr = Uhr()
+    gps = Empfaenger(uhr)
+    strecke = StreckeBaustein(gps, RAD, jetzt_utc=uhr.utc)
+    e = Einheitslauf(uhr=uhr, jetzt_utc=uhr.utc, titel="Runde")
+    e.hinzufuegen(strecke)
+    await e.vorbereiten()
+    gps.ortung(0, genauigkeit_m=8)
+    await ruhe()
+    e.starten()
+
+    async def laufen(bis_m: float) -> None:
+        while strecke.rechner.distanz_m < bis_m:
+            uhr.t += 1
+            gps.ortung()
+            await ruhe()
+            e.takt()
+
+    await laufen(3100)
+    assert strecke.rechner.splits == []
+    strecke.sportart_setzen(LAUFEN)
+    r = strecke.rechner
+    assert [s.nummer for s in r.splits] == [1, 2, 3]
+    assert all(s.t_ende > s.t_start for s in r.splits)
+    await laufen(4100)
+    assert [s.nummer for s in r.splits] == [1, 2, 3, 4]
+    assert abs(sum(s.distanz_m for s in r.splits_mit_rest()) - r.distanz_m) < 1
+    e.beenden()
+    await e.abschliessen()
+    km = [x.text for x in e.ereignisse if x.quelle == "gps" and x.art == "km"]
+    assert km == ["km 4"]

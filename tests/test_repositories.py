@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,6 +48,24 @@ def con(tmp_path):
 @pytest.fixture
 def repo(con):
     return ExerciseRepo(con)
+
+
+def _kennzahlen(repo, sitzung) -> list[tuple[str, float]]:
+    """Die Kennzahlen der gültigen Einträge einer Session (`ResultSpec.kennzahlen`) — früher
+    standen sie in der Tabelle `measurement`, die niemand las (D26, stillgelegt 11.11.2026)."""
+    return [
+        (f"{e.exercise_id}:{name}", wert)
+        for e in repo.eintraege(sitzung.id)
+        for name, wert, _einheit in e.spec_snapshot.kennzahlen(e.result)
+    ]
+
+
+def _verlauf(repo, sitzung, schluessel: str) -> list[SimpleNamespace]:
+    return [SimpleNamespace(value=w) for k, w in _kennzahlen(repo, sitzung) if k == schluessel]
+
+
+def _metriken(repo, sitzung) -> list[str]:
+    return sorted({k for k, _ in _kennzahlen(repo, sitzung)})
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +143,7 @@ def test_migration_038_takt(tmp_path) -> None:
         (jetzt, jetzt),
     )
     con.commit()
-    assert migrieren(con) == 54
+    assert migrieren(con) == 55
     zeile = con.execute("SELECT takt_json FROM exercise WHERE id = 'u'").fetchone()
     assert zeile["takt_json"] == "{}"
     uebung = ExerciseRepo(con).laden("u")
@@ -336,8 +355,8 @@ def test_erledigt_ohne_kennzahl(welt) -> None:
     e = repo.erledigt(sitzung, uebung)
     assert e.result == {}
     assert repo.anzahl_am_tag(ich.id, lokaler_tag(jetzt())) == {uebung.id: 1}
-    assert con.execute("SELECT COUNT(*) FROM measurement").fetchone()[0] == 0
-    assert repo.metriken(ich.id) == []
+    assert con.execute("SELECT COUNT(*) FROM measurement").fetchone()[0] == 0  # stillgelegt
+    assert _metriken(repo, sitzung) == []
 
 
 def test_session_fuer_ist_idempotent(welt) -> None:
@@ -403,22 +422,22 @@ def test_letzter_eintrag_ueber_sitzungen(welt) -> None:
 
 
 def test_korrektur_ersetzt(welt) -> None:
-    con, repo, ich, sitzung = welt
+    con, repo, _ich, sitzung = welt
     uebung = _wadenheben(con)
     alt = repo.eintrag_anlegen(sitzung, uebung, {"reps": [15, 15, 15]}, note="Tippfehler")
     neu = repo.eintrag_korrigieren(alt.id, {"reps": [20, 20, 20]})
 
     assert [e.id for e in repo.eintraege(sitzung.id)] == [neu.id]
     assert neu.note == "Tippfehler"  # Notiz bleibt, wenn keine neue kommt
-    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:reps:sum")] == [60.0]
+    assert [m.value for m in _verlauf(repo, sitzung, f"{uebung.id}:reps:sum")] == [60.0]
     assert con.execute("SELECT COUNT(*) FROM session_entry").fetchone()[0] == 2
-    assert repo.metriken(ich.id) == [f"{uebung.id}:reps:max", f"{uebung.id}:reps:sum"]
+    assert _metriken(repo, sitzung) == [f"{uebung.id}:reps:max", f"{uebung.id}:reps:sum"]
 
 
 def test_zwei_korrekturen_auf_dieselbe_zeile_ergeben_einen_eintrag(welt) -> None:
     """D19: Ein Formular hält die Zeile von vorhin, inzwischen hing ein Satz an — die zweite
     Korrektur hängt am gültigen Stand, nicht noch einmal an der alten Zeile."""
-    con, repo, ich, sitzung = welt
+    con, repo, _ich, sitzung = welt
     uebung = _wadenheben(con)
     alt = repo.eintrag_anlegen(sitzung, uebung, {"reps": [10]})
     mitte = repo.eintrag_korrigieren(alt.id, {"reps": [10, 12]})
@@ -426,7 +445,7 @@ def test_zwei_korrekturen_auf_dieselbe_zeile_ergeben_einen_eintrag(welt) -> None
 
     assert [e.id for e in repo.eintraege(sitzung.id)] == [neu.id]
     assert repo.eintrag_kette(neu.id) == [neu.id, mitte.id, alt.id]
-    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:reps:sum")] == [11.0]
+    assert [m.value for m in _verlauf(repo, sitzung, f"{uebung.id}:reps:sum")] == [11.0]
 
 
 def test_loeschen_ist_weich_und_nimmt_kennzahlen_mit(welt) -> None:
@@ -438,7 +457,7 @@ def test_loeschen_ist_weich_und_nimmt_kennzahlen_mit(welt) -> None:
 
     assert repo.eintraege(sitzung.id) == []
     assert repo.eintraege_am_tag(ich.id, lokaler_tag(jetzt())) == []
-    assert repo.verlauf(ich.id, f"{uebung.id}:reps:sum") == []
+    assert _verlauf(repo, sitzung, f"{uebung.id}:reps:sum") == []
     assert repo.eintrag_laden(neu.id) is None
     # Grabsteine bleiben für die Synchronisation
     assert (
@@ -452,7 +471,7 @@ def test_ohne_chart_metrics_keine_kennzahl(welt) -> None:
     uebung = _wadenheben(con)
     uebung.result_spec = replace(uebung.result_spec, chart_metrics=[])
     repo.eintrag_anlegen(sitzung, uebung, {"reps": [15, 15, 15]})
-    assert con.execute("SELECT COUNT(*) FROM measurement").fetchone()[0] == 0
+    assert con.execute("SELECT COUNT(*) FROM measurement").fetchone()[0] == 0  # stillgelegt
 
 
 def test_session_notiz(welt) -> None:
@@ -596,7 +615,7 @@ def test_tagesnotizen_mehrere_je_tag_mit_tags(con) -> None:
 
 def test_satz_anhaengen_baut_den_eintrag_auf(welt) -> None:
     """+15, +15, +20 → ein Eintrag 15/15/20 mit Historie, Summe 50 im Verlauf."""
-    con, repo, ich, sitzung = welt
+    con, repo, _ich, sitzung = welt
     uebung = _wadenheben(con)
     heute = lokaler_tag(jetzt())
     repo.satz_anhaengen(sitzung, uebung, "reps", 15, heute)
@@ -607,8 +626,8 @@ def test_satz_anhaengen_baut_den_eintrag_auf(welt) -> None:
     assert e.shorthand() == "15/15/20"
     assert len(repo.eintraege(sitzung.id)) == 1  # ein gültiger Eintrag …
     assert con.execute("SELECT COUNT(*) FROM session_entry").fetchone()[0] == 3  # … mit Historie
-    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:reps:sum")] == [50.0]
-    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:reps:max")] == [20.0]
+    assert [m.value for m in _verlauf(repo, sitzung, f"{uebung.id}:reps:sum")] == [50.0]
+    assert [m.value for m in _verlauf(repo, sitzung, f"{uebung.id}:reps:max")] == [20.0]
 
 
 def test_satz_anhaengen_nach_gemacht(welt) -> None:
@@ -855,7 +874,7 @@ def test_satz_anhaengen_an_eintrag_mit_alter_kopie(welt) -> None:
     """
     from trainingsapp.core.result_spec import FieldType
 
-    con, repo, ich, sitzung = welt
+    con, repo, _ich, sitzung = welt
     uebung = ExerciseRepo(con).laden(seed_id("hueftbeuger_dehnung"))
     damals = replace(uebung, result_spec=_alte_halten_spec())
     repo.erledigt(sitzung, damals)  # Eintrag mit alter Kopie
@@ -865,7 +884,7 @@ def test_satz_anhaengen_an_eintrag_mit_alter_kopie(welt) -> None:
     assert e.spec_snapshot.field_by_key("hold").type == FieldType.SET_LIST
     assert e.result == {"hold": [45]}
     assert e.shorthand() == "45s"
-    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:hold:sum")] == [45.0]
+    assert [m.value for m in _verlauf(repo, sitzung, f"{uebung.id}:hold:sum")] == [45.0]
 
 
 def test_satz_anhaengen_uebernimmt_alte_werte(welt) -> None:
@@ -896,7 +915,7 @@ def test_datenformat_repariert_eintraege_mit_unpassender_kopie(welt) -> None:
     from trainingsapp.data.repositories import SettingRepo
     from trainingsapp.data.upgrade import datenformat_aktualisieren
 
-    con, repo, ich, sitzung = welt
+    con, repo, _ich, sitzung = welt
     uebung = ExerciseRepo(con).laden(seed_id("hueftbeuger_dehnung"))
     damals = replace(uebung, result_spec=_alte_halten_spec())
     alt = repo.erledigt(sitzung, damals)
@@ -913,17 +932,18 @@ def test_datenformat_repariert_eintraege_mit_unpassender_kopie(welt) -> None:
     assert repariert.spec_snapshot.field_by_key("hold").type == FieldType.SET_LIST
     assert repariert.result == {"hold": [45.0]}  # Werte unangetastet
     assert repariert.shorthand() == "45s"
-    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:hold:sum")] == [45.0]
+    assert [m.value for m in _verlauf(repo, sitzung, f"{uebung.id}:hold:sum")] == [45.0]
     assert datenformat_aktualisieren(con) == 0
 
 
-def test_datenformat_schreibt_alte_kennzahlen_unter_neue_schluessel(welt) -> None:
-    """3× 15 im alten Format hatte die Kennzahl „reps" = 15; danach reps:sum = 45, reps:max = 15."""
+def test_datenformat_laesst_altes_satzformat_unberuehrt(welt) -> None:
+    """3× 15 im alten Format bleibt, wie es eingetragen wurde — der Datenschritt schrieb
+    früher nur die Kennzahlen in `measurement` um; die Tabelle ist stillgelegt (D26)."""
     from trainingsapp.core.result_spec import FieldSpec, FieldType, ResultSpec
     from trainingsapp.data.repositories import SettingRepo
     from trainingsapp.data.upgrade import datenformat_aktualisieren
 
-    con, repo, ich, sitzung = welt
+    con, repo, _ich, sitzung = welt
     uebung = _wadenheben(con)
     alt_spec = ResultSpec(
         fields=[
@@ -936,15 +956,13 @@ def test_datenformat_schreibt_alte_kennzahlen_unter_neue_schluessel(welt) -> Non
     e = repo.eintrag_anlegen(
         sitzung, replace(uebung, result_spec=alt_spec), {"sets": 3, "reps": 15}
     )
-    assert repo.metriken(ich.id) == [f"{uebung.id}:reps"]
     SettingRepo(con).setzen("datenformat", "2")
 
-    assert datenformat_aktualisieren(con) == 1
-    assert repo.metriken(ich.id) == [f"{uebung.id}:reps:max", f"{uebung.id}:reps:sum"]
-    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:reps:sum")] == [45.0]
+    assert datenformat_aktualisieren(con) == 0
     unveraendert = repo.eintrag_laden(e.id)
     assert unveraendert.result == {"sets": 3, "reps": 15}
     assert unveraendert.shorthand() == "3x15"
+    assert con.execute("SELECT COUNT(*) FROM measurement").fetchone()[0] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1109,7 +1127,7 @@ def test_migration_028_planuebung_folgt(tmp_path) -> None:
             (f"i{nr}", nr, ziel, felder),
         )
     con.commit()
-    assert migrieren(con) == 54
+    assert migrieren(con) == 55
     zeilen = {
         r["id"]: (r["target_json"], r["fields_json"])
         for r in con.execute("SELECT id, target_json, fields_json FROM plan_item")
@@ -1164,7 +1182,7 @@ def test_migration_037_beschleunigung(tmp_path) -> None:
         )
     con.commit()
 
-    assert migrieren(con) == 54
+    assert migrieren(con) == 55
     zeile = con.execute("SELECT acc_json FROM exercise WHERE id = 'u'").fetchone()
     assert zeile["acc_json"] == "{}"
     uebung = ExerciseRepo(con).laden("u")
@@ -1515,7 +1533,7 @@ def test_eintrag_mit_zusatzfeld_der_planuebung_und_notiz(welt) -> None:
     heute = lokaler_tag(jetzt())
     e = repo.satz_anhaengen(sitzung, erweitert, "reps", 15, heute, {"weight": 10})
     assert e.spec_snapshot.field_by_key("weight") is not None
-    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:weight")] == [10.0]
+    assert [m.value for m in _verlauf(repo, sitzung, f"{uebung.id}:weight")] == [10.0]
     # Die Übung selbst bleibt unverändert
     assert ExerciseRepo(con).laden(uebung.id).result_spec.field_by_key("weight") is None
 
@@ -2044,8 +2062,111 @@ def test_migration_030_uebernimmt_vergebene_titel(tmp_path) -> None:
             )
         )
     con.commit()
-    assert migrieren(con) == 54
+    assert migrieren(con) == 55
     liste = hrv.titel_liste(ich.id)
     assert [t.name for t in liste] == ["Abends", "Morgens"]
     assert liste[1].zuletzt == datetime(2026, 10, 2, tzinfo=UTC)
     con.close()
+
+
+# ---------------------------------------------------------------------------
+# Durchsicht 10.11.2026: D21, D22, D23
+# ---------------------------------------------------------------------------
+
+
+def test_datenschritte_dulden_null_und_kaputtes_json(con) -> None:
+    """D22: ``target_json = 'null'`` („wie die Übung“, Migration 028) und kaputtes JSON in
+    Bedingung oder Ablauf brachen die Datenschritte ab — die App startete nicht mehr."""
+    from trainingsapp.data.repositories import SettingRepo
+    from trainingsapp.data.upgrade import datenformat_aktualisieren
+
+    u = Exercise(name="Wandsitz")
+    ExerciseRepo(con).speichern(u)
+    plan = Plan(name="Alt")
+    plan.items = [PlanItem(exercise_id=u.id)]
+    PlanRepo(con).speichern(plan)
+    con.execute("UPDATE plan_item SET target_json = 'null', bedingung_json = '{kaputt'")
+    con.execute("UPDATE plan SET ablauf_json = '{kaputt'")
+    SettingRepo(con).setzen("datenformat", "1")
+
+    datenformat_aktualisieren(con)  # wirft nicht
+    assert datenformat_aktualisieren(con) == 0
+
+
+def test_endgueltig_loeschen_nimmt_die_kanten_des_ablaufs_mit(con) -> None:
+    """D23: Die Planübung ging, ihre Kanten blieben und zeigten auf einen Knoten, den es
+    nicht mehr gibt."""
+    from trainingsapp.core.ablauf import Ablauf, Kante
+
+    uebungen, plaene = ExerciseRepo(con), PlanRepo(con)
+    a, b, c = (Exercise(name=n) for n in "ABC")
+    for u in (a, b, c):
+        uebungen.speichern(u)
+    plan = Plan(name="Eigen")
+    plan.items = [PlanItem(exercise_id=u.id) for u in (a, b, c)]
+    ia, ib, ic = (it.id for it in plan.items)
+    plan.ablauf = Ablauf(an=True, start=ia, kanten=(Kante(ia, ib), Kante(ib, ic), Kante(ia, ic)))
+    plaene.speichern(plan)
+
+    uebungen.in_papierkorb(b.id)
+    uebungen.endgueltig_loeschen(b.id)
+
+    ablauf = plaene.ablauf_laden(plan.id)
+    assert [(k.von, k.nach) for k in ablauf.kanten] == [(ia, ic)]
+    assert [it.id for it in plaene.laden(plan.id).items] == [ia, ic]
+
+
+def test_veraltete_kopie_dreht_den_bibliothekstimer_nicht_zurueck(con) -> None:
+    """D21: Übung geladen, Timer woanders geändert, Übung mit etwas anderem gespeichert — der
+    Timer der Bibliothek bleibt beim neueren Stand. Wer ihn **hier** ändert, ändert ihn."""
+    from trainingsapp.core.timer import Abschnitt, TimerProfil
+    from trainingsapp.data.repositories import TimerRepo
+
+    timer, uebungen = TimerRepo(con), ExerciseRepo(con)
+    timer.speichern(TimerProfil(id="t1", name="Intervall 30/15", abschnitte=[Abschnitt("H", 30)]))
+    u = Exercise(name="Planke", timer=[{"id": "t1", "bibliothek": "t1", **timer.roh()["t1"]}])
+    uebungen.speichern(u)
+
+    alt = uebungen.laden(u.id)
+    timer.speichern(TimerProfil(id="t1", name="NEU umbenannt", abschnitte=[Abschnitt("H", 45)]))
+    alt.name = "Planke lang"
+    uebungen.speichern(alt)
+    assert timer.alle()[0].name == "NEU umbenannt"
+    assert uebungen.laden(u.id).timer[0]["name"] == "NEU umbenannt"
+
+    # hier geändert: gilt überall — auch zweimal hintereinander aus demselben Objekt
+    frisch = uebungen.laden(u.id)
+    for name in ("Hier geändert", "Noch einmal"):
+        frisch.timer[0]["name"] = name
+        uebungen.speichern(frisch)
+        assert timer.alle()[0].name == name
+
+
+def test_kaputte_zeile_laesst_den_tag_nicht_scheitern(welt) -> None:
+    """N91, N92: Ein Eintrag mit unbekanntem Feldtyp (neuere App-Fassung) oder einer Satzliste
+    mit ``None`` darf weder den Tag noch die Anzeige scheitern lassen."""
+    con, repo, ich, sitzung = welt
+    uebung = _wadenheben(con)
+    e = repo.eintrag_anlegen(sitzung, uebung, {"reps": [15, 15]})
+    con.execute(
+        "UPDATE session_entry SET spec_snapshot_json = ? WHERE id = ?",
+        ('{"fields": [{"key": "x", "label": "X", "type": "kommt_erst_noch"}]}', e.id),
+    )
+    ((geladen, _),) = repo.eintraege_am_tag(ich.id, lokaler_tag(jetzt()))
+    assert geladen.spec_snapshot.fields == [] and geladen.result == {"reps": [15, 15]}
+    assert "15" in geladen.shorthand()
+
+    spec = uebung.result_spec
+    assert spec.zusammenfassung({"reps": [5, None, "x"]}).startswith("5 ")
+
+
+def test_zeitleiste_ueberspringt_unbekannte_ereignisse(con) -> None:
+    """N68: Ein Ereignis mit unbekannter Art (neuere App-Fassung) fällt weg, der Rest bleibt."""
+    from trainingsapp.data.einheiten import _ereignisse_aus
+
+    zeilen = [
+        {"t_s": 1.0, "quelle": "person", "art": "eintrag", "text": "a", "daten_json": "{}"},
+        {"t_s": 2.0, "quelle": "person", "art": "gibt_es_nicht", "text": "b", "daten_json": "{}"},
+        {"t_s": 3.0, "quelle": "person", "art": "eintrag", "text": "c", "daten_json": "{kaputt"},
+    ]
+    assert [x.text for x in _ereignisse_aus(zeilen)] == ["a"]

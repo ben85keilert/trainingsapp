@@ -328,7 +328,7 @@ class Ansicht:
             try:
                 if int(v) > 0:
                     fenster[_neu(str(k))] = int(v)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):  # ``Infinity`` (H98)
                 continue
         modus_roh = d.get("modus")
         modus = {
@@ -365,7 +365,10 @@ def _bereich_ok(lo: Any, hi: Any) -> bool:
     (True, False, False, False)
     """
     zahlen = all(isinstance(x, int | float) and not isinstance(x, bool) for x in (lo, hi))
-    return zahlen and math.isfinite(lo) and math.isfinite(hi) and lo < hi
+    try:
+        return zahlen and math.isfinite(lo) and math.isfinite(hi) and lo < hi
+    except OverflowError:  # eine Ganzzahl mit Hunderten Stellen (H98)
+        return False
 
 
 def _seite(roh: Any, vorgabe: Iterable[str]) -> list[str]:
@@ -387,8 +390,8 @@ def _neu(schluessel: str) -> str:
 def ansicht_lesen(text: str | None) -> Ansicht:
     try:
         return Ansicht.aus_dict(json.loads(text or ""))
-    except (TypeError, ValueError):
-        return Ansicht()
+    except (TypeError, ValueError, OverflowError, AttributeError):
+        return Ansicht()  # nie eine Ausnahme — die Einstellung wird bei jedem Öffnen gelesen
 
 
 def ansichten_lesen(text: str | None) -> list[Ansicht]:

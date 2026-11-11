@@ -496,8 +496,6 @@ def aufnahme_eintragen(
     steht mit dem Zusatz „(Zwischenstand)“ in der Liste, sein Titel wird nicht gemerkt. Die
     ganze Aufnahme **ersetzt** ihre Zwischenstände (`Gespeichert.ersetzt`): deren Zeilen
     verschwinden, die Dateien samt Beiwerk werden gelöscht."""
-    for alt in ergebnis.ersetzt:
-        zwischenstand_entfernen(state, alt)
     titel = ergebnis.recording.titel
     if ergebnis.zwischenstand:
         titel = f"{titel} (Zwischenstand)" if titel else "Zwischenstand"
@@ -517,6 +515,10 @@ def aufnahme_eintragen(
         title=titel,
     )
     state.hrv.anlegen(eintrag)
+    # Erst wenn die ganze Aufnahme in der Liste steht, gehen ihre Zwischenstände (H92):
+    # scheitert das Anlegen, bleibt wenigstens der letzte Zwischenstand sichtbar.
+    for alt in ergebnis.ersetzt:
+        zwischenstand_entfernen(state, alt)
     if not ergebnis.zwischenstand:
         state.hrv.titel_merken(eintrag.subject_id, eintrag.title)
     return eintrag
@@ -841,7 +843,16 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             gefunden = await PolarQuelle(state.ble_transport).scan(8.0)
         except Exception as fehler:
             gefunden = []
-            hinweis_text.value = f"Suche fehlgeschlagen: {fehler}"
+            # Android ohne die Berechtigung „Geräte in der Nähe“ (Gerätetest T125, Ben
+            # 11.11.2026): sagen, was zu tun ist, statt die Ausnahme der Plattform zu zeigen.
+            if "BLUETOOTH_SCAN" in str(fehler) or "BLUETOOTH_CONNECT" in str(fehler):
+                hinweis_text.value = (
+                    "Die App darf nicht nach Geräten suchen. Erlaube „Geräte in der Nähe“ in "
+                    "den Android-Einstellungen der App (App-Info → Berechtigungen) und suche "
+                    "noch einmal."
+                )
+            else:
+                hinweis_text.value = f"Suche fehlgeschlagen: {fehler}"
         else:
             hinweis_text.value = (
                 f"{len(gefunden)} Gerät(e) gefunden."

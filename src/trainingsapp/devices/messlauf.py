@@ -283,6 +283,14 @@ def teile_zusammenfuegen(pfade: Sequence[Path]) -> Gespeichert:
                 "Zusammenfügen lassen sich nur Teile, die nacheinander liegen."
             )
     rec = zusammenfuegen(teile)
+    # Der Kopf kommt vom ersten Teil — zwei Angaben gelten aber nur für ihn: Ein Roh-EKG liegt
+    # neben der neuen Datei nicht (H91), und das Protokollfeld ``atmung`` gilt für die ganze
+    # Datei nur, wenn alle Teile dasselbe sagen; sonst fehlt es (= unbekannt), statt Atemlage
+    # und Schwellen mit dem Modus des ersten Teils zu rechnen (H58).
+    extra = dict(rec.extra)
+    if any(t.extra.get("atmung") != teile[0].extra.get("atmung") for t in teile):
+        extra.pop("atmung", None)
+    rec = replace(rec, ecg_aufzeichnung=False, extra=extra)
     erster = paare[0][1]
     ziel = freier_pfad(erster.parent, zieldatei([erster]).name)
     pfad = json_atomar_schreiben(ziel, rec.to_dict())

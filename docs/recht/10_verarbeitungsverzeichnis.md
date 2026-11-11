@@ -97,6 +97,11 @@ angebunden wird. **Wird eine angebunden** (Garmin, Fitbit, Oura, Whoop), ist
 dieser Abschnitt neu zu bewerten — dann liegt in der Regel eine Übermittlung in
 die USA vor.
 
+**Private Pakete** (U7, seit 9.11.2026; Nachtrag 11.11.2026): Übungen, Pläne und Kurse für
+eine einzelne Person als verschlüsseltes Paket auf dem Paketserver. Inhalt sind
+Trainingsanweisungen, **keine Diagnose und kein voller Name** („für“ = Vorname oder Kürzel,
+`docs/uebungspakete.md`); der Zugangscode liegt in der App der Person (`40_toms.md`).
+
 ### Löschfristen
 
 | Daten | Frist |

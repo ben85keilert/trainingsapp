@@ -55,7 +55,7 @@ from trainingsapp.core.uebung_timer import (
     uhr_an,
     zaehlt_als,
 )
-from trainingsapp.ui.components.dialoge import Nachher, meldung
+from trainingsapp.ui.components.dialoge import Nachher, meldung, obersten_schliessen
 from trainingsapp.ui.components.hilfe import text_dialog
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.medienliste import medium_zeile
@@ -580,20 +580,20 @@ def uebung_detail(
         await page.push_route(f"/uebung/{kopie.id}/bearbeiten")
 
     def abbrechen() -> None:
-        page.pop_dialog()
+        obersten_schliessen(page)
 
     entfernt = Nachher()  # Routenwechsel erst, wenn der Dialog zu ist (`components/dialoge.py`)
 
     def archivieren() -> None:
         state.uebungen.archivieren(uebung.id)
         entfernt.danach(lambda: page.push_route("/"))
-        page.pop_dialog()
+        obersten_schliessen(page)
         page.show_dialog(ft.SnackBar(ft.Text(f"„{uebung.name}“ archiviert")))
 
     def loeschen() -> None:
         state.uebungen.in_papierkorb(uebung.id)
         entfernt.danach(lambda: page.push_route("/"))
-        page.pop_dialog()
+        obersten_schliessen(page)
         page.show_dialog(meldung(f"„{uebung.name}“ liegt im Papierkorb", rueckgaengig))
 
     def rueckgaengig() -> None:

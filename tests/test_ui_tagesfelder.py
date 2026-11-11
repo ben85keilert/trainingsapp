@@ -292,6 +292,11 @@ def test_eintrag_aendern_mit_alter_uhrzeit(page, state) -> None:
     zeile.on_click(None)
     uhr = [x for x in _alle(blatt) if isinstance(x, ft.TextField) and x.label == "Uhrzeit"]
     assert any(u.value == "14:30" for u in uhr)  # die alte Zeit steht vor
+    # Gerätetest 11.11.2026: Ein dehnbares Feld in einer umbrechenden Zeile zeigt am Handy
+    # nur eine graue Fläche — in keiner solchen Zeile des Blatts darf eines stehen.
+    for zeile_ in _alle(blatt):
+        if isinstance(zeile_, ft.Row) and zeile_.wrap:
+            assert not any(getattr(k, "expand", None) for k in zeile_.controls)
     notiz = next(x for x in _alle(blatt) if isinstance(x, ft.TextField) and x.label == "Notiz")
     notiz.value = "nach dem Laufen"
     _knopf(blatt, "Übernehmen").on_click(None)

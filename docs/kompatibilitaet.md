@@ -553,7 +553,10 @@ zurück — der Vertrag bleibt unverletzt.
     unveränderter Schlüsselfolge zurückgeschrieben (`indent=2`,
     `ensure_ascii=False`, atomar); `messungen`, `ppi_pakete` und alle übrigen
     Felder bleiben Wert für Wert. Danach bekommt ein vorhandenes Sidecar die
-    neue Prüfsumme (`source_file_sha1`, wie `analysis_io.refresh_sidecar_sha1`),
+    neue Prüfsumme (`source_file_sha1`, wie `analysis_io.refresh_sidecar_sha1`) —
+    seit hrv-core vom 11.11.2026 nur, wenn es vorher zur Messdatei passte oder keine
+    Prüfsumme trug: ein veraltetes Sidecar bleibt veraltet, statt durch eine Notiz still
+    wieder zu gelten (H71; praxis_gui prüft das nicht) —,
     und `hrv_recording.sha1` wird nachgeführt. Alles andere bleibt
     unveränderlich (`hrv_core.ereignisse.metadaten_schreiben` weist es ab).
 

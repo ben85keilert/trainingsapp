@@ -101,6 +101,15 @@ def ablauf_zusammenfassung(plan: Plan) -> str:
     return "Workout mit eigenem Ablauf: " + " · ".join(teile) + " — im Reiter „Ablauf“."
 
 
+def _alle_planuebungen(state: AppState, plan_id: str) -> list[str]:
+    """Die IDs aller Planübungen — auch der gerade verborgenen (Übung im Papierkorb, Paket
+    deaktiviert). Gegen sie wird der Ablauf bereinigt: Wer nur gegen die sichtbaren prüft,
+    löscht die Wege der verborgenen für immer, obwohl die Planübung an ihren Platz
+    zurückkommt (N47)."""
+    voll = state.plaene.laden(plan_id, mit_verborgenen=True)
+    return [it.id for it in voll.items] if voll is not None else []
+
+
 def ablauf_speichern(state: AppState, plan_id: str, ablauf: Ablauf) -> None:
     """Speichert den Ablauf und spiegelt die Hauptwege in die Bedingungen der Planübungen (P108:
     dieselben Einstellungen bei Übung und Ablauf) — so bleibt ein Ablauf, der der Liste
@@ -108,7 +117,7 @@ def ablauf_speichern(state: AppState, plan_id: str, ablauf: Ablauf) -> None:
     p = state.plaene.laden(plan_id)
     if p is None:
         return
-    a = ablauf.bereinigt([it.id for it in p.items])
+    a = ablauf.bereinigt(_alle_planuebungen(state, plan_id))
     state.plaene.ablauf_setzen(plan_id, a)
     if not a.an:
         return
@@ -130,7 +139,7 @@ def ablauf_einschalten(state: AppState, plan_id: str) -> None:
     bedingungen = {it.id: it.bedingung for it in p.items}
     if p.ablauf.kanten and not p.ablauf.an:
         neu = ab.hauptwege_spiegeln(replace(p.ablauf, an=True), bedingungen)
-        neu = neu.bereinigt(list(bedingungen))
+        neu = neu.bereinigt(_alle_planuebungen(state, plan_id))
     else:
         neu = Ablauf(an=True)  # folgt der Liste
     state.plaene.ablauf_setzen(plan_id, neu)

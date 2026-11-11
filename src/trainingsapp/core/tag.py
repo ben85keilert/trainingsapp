@@ -284,11 +284,12 @@ def uhrzeit_lesen(text: str) -> time | None:
     t = text.strip().replace(".", ":").replace(" ", "")
     if ":" in t:
         stunde, _, minute = t.partition(":")
-    elif t.isdigit() and len(t) in (3, 4):
+    elif t.isdecimal() and len(t) in (3, 4):
         stunde, minute = t[:-2], t[-2:]
     else:
         stunde, minute = t, "0"
-    if not (stunde.isdigit() and minute.isdigit()):
+    # ``isdecimal``, nicht ``isdigit``: „7²“ gilt als Ziffernfolge, `int` wirft daran (N93)
+    if not (stunde.isdecimal() and minute.isdecimal()):
         return None
     h, m = int(stunde), int(minute)
     return time(h, m) if 0 <= h <= 23 and 0 <= m <= 59 else None

@@ -1269,7 +1269,8 @@ def plan_einstellen(
         uhr_wahl.selected = ["uebung"]
         zaehlt_wahl.selected = ["uebung"]
         acc_stand["acc"], takt_stand["takt"] = None, None
-        bed_stand["b"] = Bedingung()
+        # Die Bedingung bleibt (N83): Sie gehört zum Weg im Ablauf, nicht zu dem, was die
+        # Übung vorgibt — „Alles wie die Übung“ machte sonst aus „12 Wdh.“ still „frei“
         ziel_formulare.clear()
         ziel_gemerkt.clear()
         ziel_gemerkt.update(uebung.default_target)

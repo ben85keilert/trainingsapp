@@ -4,6 +4,8 @@ Skala-Kante mit „ausführen“, Frage als Entscheidungsknoten, Ende über eine
 
 from __future__ import annotations
 
+import pytest
+
 from trainingsapp.core import ablauf as ab
 from trainingsapp.core.ablauf import Ablauf, Frage, Kante
 from trainingsapp.core.plan_durchlauf import Schritt
@@ -362,3 +364,47 @@ def test_ende_nach_fertiger_uebung_setzt_mit_der_naechsten_fort() -> None:
     durch, uhr3 = _baustein(ab.kette(["w"]))
     alles = _lauf(durch, uhr3, 10)
     assert durch.phase == FERTIG and ab.fortsetzung(alles, "p1") is None
+
+
+@pytest.mark.parametrize("hart", [True, False])
+@pytest.mark.parametrize("tipps", [1, 2])
+def test_zweimal_fertig_verliert_den_letzten_satz_nicht(hart, tipps) -> None:
+    """N59: Zwei Tipps auf „Fertig“ innerhalb eines Takts — das Timer-Ende wird trotzdem
+    abgeholt, der angefangene dritte Satz (12 s) steht im Eintrag."""
+    from trainingsapp.core.plan_durchlauf import Schritt
+    from trainingsapp.core.timer import Abschnitt, TimerProfil
+    from trainingsapp.core.timer_eintrag import ergebnis, gelaufene_zeiten
+    from trainingsapp.devices.einheit import Einheitslauf
+    from trainingsapp.devices.plan_ablauf import HART, WEICH, PlanAblaufBaustein
+
+    t = [0.0]
+    profil = TimerProfil(
+        id="t",
+        name="H",
+        runden=3,
+        abschnitte=[Abschnitt("Halten", 30), Abschnitt("Pause", 10, zaehlt=False)],
+    )
+    schritte = [
+        Schritt("i1", "u1", "Planke", profil, "hold"),
+        Schritt("i2", "u2", "Brücke", profil, "hold"),
+    ]
+    teil = PlanAblaufBaustein(
+        "p", "Test", schritte, uebergang=HART if hart else WEICH, workout=True
+    )
+    e = Einheitslauf(uhr=lambda: t[0])
+    e.hinzufuegen(teil)
+    e.starten(0.0)
+    for _ in range(4 * 92):  # zwei Sätze mit Pausen, 12 s im dritten
+        t[0] += 0.25
+        e.takt()
+    for _ in range(tipps):
+        teil.gemacht()
+        t[0] += 0.05
+    for _ in range(8):
+        t[0] += 0.25
+        e.takt()
+    ev = e.ereignisse
+    a = next(n for n, x in enumerate(ev) if x.art == "uebung_start")
+    b = next(n for n, x in enumerate(ev) if x.art == "uebung_ende")
+    assert ergebnis(gelaufene_zeiten(ev[a : b + 1]), "hold") == {"hold": [30, 30, 12]}
+    assert teil.k == 1  # der zweite Tipp hat den nächsten Schritt nicht auch beendet

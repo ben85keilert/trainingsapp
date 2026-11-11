@@ -214,9 +214,14 @@ class LiveHf:
         self.abschnitt: HfAkkumulator | None = None
         self.abschnitt_kennung: str | None = None
         self._ab = 0
+        self._kennung: object = None
 
-    def nachfuehren(self, beats: Sequence[Beat]) -> None:
-        if len(beats) < self._ab:  # neue Aufnahme: von vorn
+    def nachfuehren(self, beats: Sequence[Beat], kennung: object = None) -> None:
+        """``kennung``: woran man die Aufnahme erkennt (etwa ihr Startzeitpunkt) — wechselt
+        sie, beginnt die Rechnung von vorn. Nur an der Länge erkannt, liefen die Werte einer
+        kürzeren vorigen Aufnahme in die neue weiter (H53)."""
+        if len(beats) < self._ab or kennung != self._kennung:  # neue Aufnahme: von vorn
+            self._kennung = kennung
             self.aufnahme = akkumulator_fuer(self.profil, self.grenzen)
             self.abschnitt, self.abschnitt_kennung, self._ab = None, None, 0
         neu = self._ab

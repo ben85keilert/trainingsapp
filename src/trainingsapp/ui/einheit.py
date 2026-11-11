@@ -663,6 +663,11 @@ def _von_selbst_melden(state: Any, e: Einheitslauf, neu: list[Ereignis]) -> None
         # („— 2 min kein Atemzug erkannt“, Plan §4.5)
         state.zaehl_meldung = ZaehlMeldung(e.id, z.kontext.uebung_id, z.name, 0, warum, atmung=True)
         return
+    if isinstance(e.teil("plan"), PlanAblaufBaustein):
+        # Im Workout trägt der Schritt an seinem Ende ein, was gezählt wurde
+        # (`ui.plan_ablauf.nach_der_uebung`) — „nicht eingetragen · Eintragen“ trüge dieselben
+        # Sätze ein zweites Mal ein (N60)
+        return
     wdh = z.summe
     if wdh > 0:
         state.zaehl_meldung = ZaehlMeldung(e.id, z.kontext.uebung_id, z.name, wdh, warum)
@@ -699,8 +704,12 @@ async def _laufen(
             state.timer = None
         abschluss: Abschluss | None = None
         strecke: Any = None
-        with contextlib.suppress(Exception):
+        try:
             abschluss = await e.abschliessen()
+        except Exception as fehler:  # nichts still verlieren (H55): es steht in der Einheit
+            e.warnung = f"Einheit nicht sauber abgeschlossen: {fehler}"
+        if abschluss is not None and abschluss.fehler:
+            e.warnung = " · ".join(abschluss.fehler)
         aufnahme: Any = None
         if abschluss is not None and abschluss.hrv is not None:
             eintragen_mit = eintragen
@@ -1200,7 +1209,7 @@ async def anzeige_takt(state: Any) -> None:
             if jetzt != getattr(state, "laufend_gezeigt", False):
                 if kandidat is jetzt:
                     kandidat = None
-                    state.neu_zeichnen()
+                    (getattr(state, "neu_zeichnen_von_aussen", None) or state.neu_zeichnen)()
                 else:
                     kandidat = jetzt
                 continue

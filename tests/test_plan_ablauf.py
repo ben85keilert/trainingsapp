@@ -406,3 +406,55 @@ async def test_ablauf_traegt_die_gewaehlte_variante_ein(umgebung) -> None:
         for x, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
     }
     assert eintraege["Planke"].result == {"variant": "Unterarm", "hold": [10, 10]}
+
+
+@pytest.mark.parametrize("uebergang", ["weich", "hart"])
+@pytest.mark.parametrize("gezeichnet", [False, True])
+@pytest.mark.parametrize("fertig_bei", [None, 30.0])
+def test_wdh_in_einer_zeit_haelt_den_erfolg_fest(uebergang, gezeichnet, fertig_bei) -> None:
+    """N48: 12 Wiederholungen nach 25 s (Frist 40 s, Timer 60 s) sind geschafft — auch wenn
+    der Timer ausläuft oder „Fertig“ die Uhr ans Ende springen lässt. Vorher stand der Schritt
+    danach bei „nicht erfüllt“, mit Pflicht hing das Workout."""
+    from trainingsapp.core import ablauf as ab
+    from trainingsapp.core.bedingung import WDH_IN_ZEIT, Bedingung
+    from trainingsapp.core.plan_durchlauf import Schritt
+    from trainingsapp.core.timer import Abschnitt, TimerProfil
+    from trainingsapp.devices.plan_ablauf import HART, WEICH, PlanAblaufBaustein
+
+    t = [0.0]
+    profil = TimerProfil(id="p", name="T", abschnitte=[Abschnitt("A", 60)])
+    bedingung = Bedingung(WDH_IN_ZEIT, 12, 40, hart=True)
+    schritte = [
+        Schritt("a", "ua", "A", profil, None, bedingung),
+        Schritt("b", "ub", "B", None, None),
+    ]
+    ablauf = None
+    if gezeichnet:
+        kante = ab.Kante("a", "b", ab.WDH_IN_ZEIT, 12, pflicht=True, sekunden=40)
+        ablauf = ab.Ablauf(True, "a", (kante,))
+    teil = PlanAblaufBaustein(
+        "pl",
+        "Plan",
+        schritte,
+        uebergang=HART if uebergang == "hart" else WEICH,
+        workout=True,
+        ablauf=ablauf,
+    )
+    teil.uhr_uebernehmen(lambda: t[0])
+    teil.starten(0.0)
+    teil.takt(0.0)
+    t[0] = 25.0
+    teil.takt(25.0)
+    teil.wdh_setzen(12)
+    if fertig_bei:
+        t[0] = fertig_bei
+        teil.gemacht()
+        teil.takt(t[0])
+    else:
+        t[0] = 61.0
+        teil.takt(61.0)
+    if teil.schritt.item_id == "a":  # weich ohne „Fertig“: man bleibt, aber erfüllt
+        stand = teil.bedingung_stand() or teil.kanten_stand()[0]
+        assert stand.erfuellt and not stand.verfehlt
+    else:
+        assert teil.schritt.item_id == "b"

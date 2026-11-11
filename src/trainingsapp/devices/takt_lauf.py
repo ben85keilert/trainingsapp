@@ -175,7 +175,16 @@ class TaktVerfolger:
                         vorbei = max(lage.dauer_s - lage.rest_s, 0.0)
                         phasen.append((round(jetzt - vorbei, 3), e.phase.art))
                 elif e.art == RUNDE:
-                    runden.append((round(jetzt - lage.t_runde_s, 3), e.runde, takt.zaehlt))
+                    # Ende dieser Runde: der Beginn der laufenden, je übersprungener Runde
+                    # (stockender Tick, N49) eine Rundendauer früher
+                    zurueck = max(lage.runde - 1 - e.runde, 0) if not lage.fertig else 0
+                    runden.append(
+                        (
+                            round(jetzt - lage.t_runde_s - zurueck * _runde_s(takt), 3),
+                            e.runde,
+                            takt.zaehlt,
+                        )
+                    )
             self._alt = lage
         self._zuletzt = jetzt
         return TaktNeu(ende=ende, beginn=beginn, phasen=phasen, runden=runden)
@@ -229,6 +238,11 @@ def in_die_messung(messlauf: Any, neu: TaktNeu, *, profil: str = "") -> None:
             ende(neu.ende_danach)
     except Exception:  # pragma: no cover — nur Beiwerk
         return
+
+
+def _runde_s(takt: Takt) -> float:
+    """Die Dauer einer Runde mit Tempo."""
+    return sum(takt.dauer_s(i) for i in range(len(takt.phasen)))
 
 
 __all__ = ["TaktNeu", "TaktVerfolger", "in_die_messung"]

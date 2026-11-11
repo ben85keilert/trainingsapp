@@ -38,6 +38,7 @@ Video-Links kommen mit.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import math
 import re
@@ -186,7 +187,7 @@ class PaketPlan:
         ('atmung', 'a', True)
         """
         vorlage = PlanVorlage.from_dict(roh)
-        key = str(roh.get("key") or "").strip() or vorlage.name.strip().casefold()
+        key = plan_schluessel(str(roh.get("key") or "").strip() or vorlage.name.strip().casefold())
         timer = roh.get("timer")
         return cls(
             key=key,
@@ -196,6 +197,57 @@ class PaketPlan:
             weiter_automatisch=bool(roh.get("weiter_automatisch", False)),
             pause_ohne_timer=bool(roh.get("pause_ohne_timer", True)),
         )
+
+
+_KEY_ERLAUBT = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_UMLAUTE = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+
+
+def plan_schluessel(text: str) -> str:
+    """Ein gültiger Schlüssel für einen Paketplan (K34).
+
+    Was schon einer ist (Buchstaben, Ziffern, ``-``, ``_``, höchstens 64), bleibt Zeichen für
+    Zeichen — die IDs der Pläne hängen daran; alles andere wird gefaltet, damit die Datei
+    lesbar bleibt (ein Planname mit Leerzeichen, Umlaut oder Klammer ließ sich vorher
+    exportieren, aber nicht mehr einlesen).
+
+    >>> plan_schluessel("morgens"), plan_schluessel("a_B-1")
+    ('morgens', 'a_B-1')
+    >>> plan_schluessel("rücken stark"), plan_schluessel("Plan (neu)")
+    ('ruecken-stark', 'plan-neu')
+    >>> plan_schluessel("knie-reha woche 1")
+    'knie-reha-woche-1'
+    >>> plan_schluessel("（）").startswith("plan-"), len(plan_schluessel("x y" * 100))
+    (True, 64)
+    """
+    roh = text.strip()
+    if _KEY_ERLAUBT.fullmatch(roh):
+        return roh
+    gefaltet = re.sub(r"[^a-z0-9_]+", "-", roh.casefold().translate(_UMLAUTE))
+    gefaltet = gefaltet.strip("-")[:64].strip("-")
+    return gefaltet or "plan-" + hashlib.sha1(roh.encode("utf-8")).hexdigest()[:12]
+
+
+def paketplaene_aus(plaene: Iterable[Plan]) -> list[PaketPlan]:
+    """Pläne der App als Paketpläne für den Export, **jeder mit eigenem Schlüssel** — zwei
+    Namen, die auf denselben Schlüssel fallen („Plan (neu)“, „Plan neu“), wären beim Einlesen
+    „doppelt im Paket“.
+
+    >>> [p.key for p in paketplaene_aus([Plan(name="Plan (neu)"), Plan(name="Plan neu")])]
+    ['plan-neu', 'plan-neu-2']
+    """
+    fertig: list[PaketPlan] = []
+    vergeben: set[str] = set()
+    for plan in plaene:
+        pp = paketplan_aus(plan)
+        key, nr = pp.key, 1
+        while key in vergeben:
+            nr += 1
+            key = f"{pp.key[: 64 - len(str(nr)) - 1]}-{nr}"
+        pp.key = key
+        vergeben.add(key)
+        fertig.append(pp)
+    return fertig
 
 
 def plan_id(paket: str, key: str, subject_id: str) -> str:
@@ -311,7 +363,7 @@ def paketplan_aus(plan: Plan, key: str | None = None) -> PaketPlan:
         else None,
     )
     return PaketPlan(
-        key=key or plan.package_key or plan.name.strip().casefold(),
+        key=key or plan.package_key or plan_schluessel(plan.name.strip().casefold()),
         vorlage=vorlage,
         beschreibung=plan.description,
         timer=ohne_verweise(dict(plan.timer)) if plan.timer else None,
@@ -643,8 +695,17 @@ def ergaenzung_lesen(eintrag: Any, paket: str) -> Ergaenzung:
         elif feld == "timer":
             if not isinstance(wert, list):
                 raise ValueError("timer ist keine Liste")
-            daten[feld] = json.loads(json.dumps(wert, ensure_ascii=False))
-        else:  # default_target, takt
+            # In derselben Form wie an der Übung (feste IDs, gerundete Zeiten) — die Rohform
+            # stimmte nie mit der gespeicherten Übung überein und hielt den Timer für immer
+            # als „von der Person geändert“ fest (K36)
+            daten[feld] = _timer_lesen(wert, f"{paket}/ergaenzung/{ziel}")
+        elif feld == "takt":
+            if not isinstance(wert, dict):
+                raise ValueError("takt ist keine Tabelle")
+            takt = Takt.aus_dict(wert)
+            if takt is not None and not takt.leer:
+                daten[feld] = takt.als_dict()  # kanonisch, wie `stand` ihn schreibt (K36)
+        else:  # default_target
             if not isinstance(wert, dict):
                 raise ValueError(f"{feld} ist keine Tabelle")
             daten[feld] = json.loads(json.dumps(wert, ensure_ascii=False))
@@ -658,8 +719,6 @@ def _plan_lesen(eintrag: Any, schluessel: Mapping[str, str]) -> PaketPlan:
     if not " ".join(str(eintrag.get("name") or "").split()):
         raise ValueError("der Name fehlt")
     plan = PaketPlan.from_dict(eintrag)
-    if not _KEY_ERLAUBT.fullmatch(plan.key):
-        raise ValueError(f"key {plan.key!r}: nur Buchstaben, Ziffern, - und _")
     plan.vorlage = _vorlage_lesen(eintrag, schluessel)
     _werte_pruefen(plan.timer, "timer")
     return plan
@@ -839,7 +898,6 @@ def _timer_lesen(roh: Any, uebung: str) -> list[dict[str, Any]]:
 #: das; `/`, `?` oder Leerzeichen brächen die Routen (`/uebung/<id>/…`), Leeres oder
 #: Kilobytes landeten in der Datenbank (S6)
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-_KEY_ERLAUBT = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 def _id_lesen(roh: Any, was: str) -> str | None:
@@ -1368,9 +1426,11 @@ __all__ = [
     "paket_id",
     "paket_json",
     "paket_lesen",
+    "paketplaene_aus",
     "paketplan_aus",
     "plan_abgleichen",
     "plan_id",
+    "plan_schluessel",
     "plan_stand",
     "planuebungen_mit_schluessel",
     "stand",

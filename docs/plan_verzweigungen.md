@@ -510,6 +510,9 @@ alleine. Klick auf den Knoten öffnet alle. Gerne die Wege etwas länger halten.
   - Je Weg ein **Griff** (Punkt, mit Beschriftung daneben) nahe am Ziel, wo die Wege
     auseinanderliegen; kommen mehrere Wege im selben Knoten an, liegen ihre Griffe gestaffelt.
 - **Ebenenabstand** 264 statt 156 (`EBENE`), damit Stamm, Abzweig, Wege und Griffe Platz haben.
+  **Enger** (Ben, 10.11.2026 abends): `EBENE` 190; der Abzweig liegt knapp unter der
+  Beschriftung (`AUSTRITT` 12 unter dem Text statt 84 unter dem Bild), der Griff bei
+  `GRIFF_T` — der Abstand Griff → Übung bleibt.
 - **Antippen:** Abzweig → Blatt mit **allen** Wegen der Übung (`on_abzweig`); Griff eines Wegs →
   Blatt mit **nur diesem** Weg (`wege_karte(allein=True)`), „Alle Wege dieser Übung“ holt
   Herkunft und die übrigen dazu.

@@ -154,3 +154,35 @@ def test_eigenes_paket_bringt_geaenderte_fremde_uebung_als_ergaenzung(tmp_path, 
     assert _abschnitte(knie2.description)["für anna"] == "Nur bis 90°."
     assert knie2.default_target == {"reps": [12]}
     con2.close()
+
+
+def test_ergaenzung_mit_timer_und_takt_gilt_nicht_als_eigene_aenderung(con) -> None:
+    """K36: Timer und Takt einer Ergänzung stehen in derselben Form im Paketstand wie an der
+    Übung — sonst hieße eine unberührte Übung sofort „geändert: Timer“, und beim Deaktivieren
+    bliebe der Timer als vermeintlich Eigenes hängen."""
+    pakete, uebungen = PaketRepo(con), ExerciseRepo(con)
+    knie_id = seed_id("kniebeuge")
+    grund = uebungen.laden(knie_id)
+    roh = {
+        "paket": {"name": "Knie-Reha", "version": 1},
+        "ergaenzungen": [
+            {
+                "uebung": "kniebeuge",
+                "timer": [{"name": "Halten", "abschnitte": [{"name": "Halten", "dauer_s": 60}]}],
+                "takt": {
+                    "name": "4-6",
+                    "tempo": 1,
+                    "phasen": [{"dauer_s": 4, "art": "ein"}, {"dauer_s": 6, "art": "aus"}],
+                },
+            }
+        ],
+    }
+    inhalt = paket_lesen(roh)
+    pakete.importieren(inhalt)
+    knie = uebungen.laden(knie_id)
+    assert [t["name"] for t in knie.timer] == ["Halten"] and knie.takt.name == "4-6"
+    assert pakete.abweichungen(knie) == []
+    pakete.deaktivieren(inhalt.paket.id)
+    knie = uebungen.laden(knie_id)
+    assert knie.timer == grund.timer and knie.takt == grund.takt
+    assert pakete.abweichungen(knie) == []

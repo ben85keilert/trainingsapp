@@ -140,6 +140,9 @@ class PlanAblaufBaustein:
         self._wdh: int | None = None
         #: Wiederholungen von Hand im laufenden Schritt (`wdh_von_hand`) — wo niemand zählt
         self.wdh_hand: int | None = None
+        #: ``(Zahl, gelaufene Sekunden)`` je Änderung im laufenden Schritt (N48)
+        self._wdh_bei: list[tuple[int, float]] = []
+        self._wdh_hand_bei: list[tuple[int, float]] = []
         #: die Uhr des Schritts ist ab, aber die Bedingung nicht erfüllt bzw. kein Weg frei —
         #: die Person bleibt bei der Übung (Ben, 8.11.2026)
         self.wartet = False
@@ -191,12 +194,17 @@ class PlanAblaufBaustein:
         weiter, sobald es reicht."""
         if wdh != self._wdh:
             self._wdh = wdh
+            if wdh is not None:
+                self._wdh_bei.append((wdh, self.gelaufen_s()))  # N48: wann es so weit war
             self._weiter_wenn_frei()
 
     def wdh_von_hand(self, wdh: int | None) -> None:
         """Wiederholungen von Hand (Ben, 8.11.2026: „Sollte es Bedingungen geben, muss man
         mindestens in der Lage sein, diese auch einzutragen“) — gilt, wo niemand zählt."""
         self.wdh_hand = wdh
+        # Von Hand kommt die Zahl oft erst nach der Zeit — die Person bestätigt, was sie in
+        # der Zeit geschafft hat (N48); nur die jüngste Angabe gilt
+        self._wdh_hand_bei = [] if wdh is None else [(wdh, 0.0)]
         self._weiter_wenn_frei()
 
     @property
@@ -225,7 +233,8 @@ class PlanAblaufBaustein:
 
     def stand(self) -> bd.Stand:
         """Was der Schritt bisher geleistet hat — für Bedingung und Kanten."""
-        return bd.Stand(self._zeit_ab(), self.gelaufen_s(), self.wdh, self.skala_wert)
+        bei = self._wdh_bei if self._wdh is not None else self._wdh_hand_bei
+        return bd.Stand(self._zeit_ab(), self.gelaufen_s(), self.wdh, self.skala_wert, tuple(bei))
 
     def bedingung_stand(self) -> bd.Erfuellung | None:
         """Linear: die Bedingung des Schritts gegen den Stand — ``None`` ohne Bedingung (und im
@@ -247,6 +256,7 @@ class PlanAblaufBaustein:
             wdh=st.wdh,
             skala=st.skala,
             gelaufen_s=st.gelaufen_s,
+            wdh_bei=st.wdh_bei,
         )
 
     @property
@@ -629,6 +639,12 @@ class PlanAblaufBaustein:
         zählt), ohne Timer: abgehakt."""
         if self._t0 is None:
             return
+        if self.phase == UEBUNG and self.timer is not None and self.timer.lauf.fertig:
+            # Zweiter Tipp, bevor der Takt das Ende sah (N59): wie in `waehlen` erst das Ende
+            # auswerten — sonst endete der Schritt, ohne dass `timer/ende` abgeholt wäre, und
+            # der letzte Satz fehlte im Eintrag. Mehr tut der zweite Tipp nicht.
+            self._ausstehend = self.takt(self._uhr())
+            return
         if self.phase == UEBERZEIT:
             self._ende_versuchen(self._uhr(), "fertig")
         elif self.phase == UEBUNG and self.timer is not None and not self.timer.lauf.fertig:
@@ -769,6 +785,8 @@ class PlanAblaufBaustein:
         self.skala_wert = None
         self._wdh = None
         self.wdh_hand = None
+        self._wdh_bei = []
+        self._wdh_hand_bei = []
         self.wartet = False
         self._grund_wartend = "fertig"
         s = self.schritt

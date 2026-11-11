@@ -492,3 +492,21 @@ def test_warnung_wenn_der_plan_haengen_bleiben_kann(umgebung) -> None:
         isinstance(x, ft.Container) and x.data == "ablauf_warnung" and x.visible is not False
         for x in _alle(ansicht)
     )
+
+
+def test_wege_einer_verborgenen_planuebung_bleiben_beim_speichern(umgebung) -> None:
+    """N47: Liegt eine Übung im Papierkorb, blendet der Plan ihre Planübung aus — eine Änderung
+    im Ablauf darf ihre Wege nicht löschen; holt man die Übung zurück, sind sie wieder da."""
+    state, plan = umgebung
+    iw, ik, ip, id_ = (it.id for it in plan.items)
+    eigen = ab.Ablauf(an=True, start=iw, kanten=(Kante(iw, ik), Kante(ik, ip), Kante(ip, id_)))
+    ablauf_speichern(state, plan.id, eigen.mit_kante(Kante(iw, ip, text="Abkürzung")))
+    planke = next(it.exercise_id for it in plan.items if it.id == ip)
+    state.uebungen.in_papierkorb(planke)
+    sichtbar = state.plaene.laden(plan.id)
+    assert ip not in [it.id for it in sichtbar.items]
+    ablauf_speichern(state, plan.id, sichtbar.ablauf.mit_kante(Kante(ik, id_, text="kurz")))
+    state.uebungen.aus_papierkorb(planke)
+    wieder = state.plaene.laden(plan.id)
+    wege = {(k.von, k.nach) for k in wieder.ablauf.kanten}
+    assert {(ik, ip), (ip, id_), (iw, ip), (ik, id_)} <= wege

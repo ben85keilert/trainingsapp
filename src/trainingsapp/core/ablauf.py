@@ -426,6 +426,13 @@ def hauptwege_spiegeln(ablauf: Ablauf, bedingungen: Mapping[str, Bedingung]) -> 
     >>> neu = hauptwege_spiegeln(a, {"a": Bedingung(B_WDH, 10)})
     >>> [(k.nach, k.ausloeser, k.n, k.text) for k in neu.kanten]
     [('b', 'wdh', 10, 'weiter'), ('c', 'frei', 0, '')]
+
+    Ein Weg, den die Bedingung nur spiegelt, bleibt samt Skala-Bereich (N52):
+
+    >>> s = Ablauf(True, "a", (Kante("a", "b", SKALA, 3, 6),))
+    >>> gespiegelt = hauptwege_spiegeln(s, {"a": bedingung_aus_kante(s.kanten[0])})
+    >>> (gespiegelt.kanten[0].n, gespiegelt.kanten[0].bis)
+    (3, 6)
     """
     kanten = list(ablauf.kanten)
     gesehen: set[str] = set()
@@ -434,6 +441,12 @@ def hauptwege_spiegeln(ablauf: Ablauf, bedingungen: Mapping[str, Bedingung]) -> 
             continue
         gesehen.add(k.von)
         b = kante_aus_bedingung(bedingungen[k.von], k.von, k.nach)
+        schon = kante_aus_bedingung(bedingung_aus_kante(k, bedingungen[k.von]), k.von, k.nach)
+        if _ausloeser(schon) == _ausloeser(b):
+            # Die Bedingung ist nur das Spiegelbild dieses Wegs — er bleibt, wie er ist, samt
+            # dem, was die Bedingung nicht kennt (Skala „bis“): „Skala 0–6“ würde sonst nach
+            # einmal Liste und zurück „frei“ (N52)
+            continue
         kanten[i] = replace(
             k,
             ausloeser=b.ausloeser,
@@ -444,6 +457,10 @@ def hauptwege_spiegeln(ablauf: Ablauf, bedingungen: Mapping[str, Bedingung]) -> 
             inhalt=b.inhalt,
         )
     return replace(ablauf, kanten=tuple(kanten))
+
+
+def _ausloeser(k: Kante) -> tuple[Any, ...]:
+    return (k.ausloeser, k.n, k.sekunden, k.pflicht, k.inhalt)
 
 
 def aus_bedingungen(items: Sequence[tuple[str, Bedingung]]) -> Ablauf:
@@ -526,11 +543,16 @@ def folgt_der_liste(ablauf: Ablauf, items: Sequence[tuple[str, Bedingung]]) -> b
     False
     >>> folgt_der_liste(Ablauf(), liste)  # aus: eine Liste, kein Workout
     False
+    >>> folgt_der_liste(Ablauf(True, "a"), liste), folgt_der_liste(Ablauf(True, "a"), liste[:1])
+    (False, True)
     """
     if not ablauf.an or ablauf.fragen:
         return False
     if not ablauf.kanten:
-        return True
+        # Nur das Zeichen ``{"an": true}`` folgt. Ein Ablauf mit Start, aber ohne Wege, ist
+        # ein **eigener, leerer** (alle anderen Übungen herausgenommen, N53) — außer der Plan
+        # hat höchstens eine Übung: dann ist das die ganze Kette
+        return not ablauf.start or len(items) <= 1
     kette = kette_der_liste(items)
     return ablauf.kanten == kette.kanten and ablauf.start in ("", kette.start)
 
@@ -548,8 +570,11 @@ def fuer_plan(ablauf: Ablauf, workout: bool, items: Sequence[tuple[str, Bedingun
     >>> eigen = Ablauf(True, "b", (Kante("b", "a"),))
     >>> fuer_plan(eigen, True, liste) is eigen
     True
+    >>> nur_a = Ablauf(True, "a")  # „b“ aus dem Ablauf genommen: bleibt draußen (N53)
+    >>> fuer_plan(nur_a, True, liste) is nur_a
+    True
     """
-    if (workout and not ablauf.an) or (ablauf.an and not ablauf.kanten and not ablauf.fragen):
+    if (workout and not ablauf.an) or (not ablauf.kanten and folgt_der_liste(ablauf, items)):
         return kette_der_liste(items)
     return ablauf
 
@@ -593,7 +618,13 @@ class KanteStand:
 
 
 def kante_pruefen(
-    k: Kante, *, zeit_ab: bool, wdh: int | None, skala: float | None, gelaufen_s: float = 0.0
+    k: Kante,
+    *,
+    zeit_ab: bool,
+    wdh: int | None,
+    skala: float | None,
+    gelaufen_s: float = 0.0,
+    wdh_bei: tuple[tuple[int, float], ...] = (),
 ) -> KanteStand:
     """Ob der Stand den Auslöser der Kante erfüllt — dieselbe Rechnung wie die Bedingung der
     Planübung (`core.bedingung.pruefen`), dazu Skala-Bereiche (``bis``).
@@ -621,7 +652,7 @@ def kante_pruefen(
         passt = k.n <= skala <= k.bis
         text = f"Skala {skala:g} — {'erfüllt' if passt else 'nicht erfüllt'}"
         return KanteStand(k, passt, False, False, text)
-    e = b_pruefen(bedingung_aus_kante(k), Stand(zeit_ab, gelaufen_s, wdh, skala))
+    e = b_pruefen(bedingung_aus_kante(k), Stand(zeit_ab, gelaufen_s, wdh, skala, wdh_bei))
     return KanteStand(k, e.erfuellt, False, e.unpruefbar, e.text, e.verfehlt)
 
 
@@ -632,6 +663,7 @@ def kanten_pruefen(
     wdh: int | None,
     skala: float | None,
     gelaufen_s: float = 0.0,
+    wdh_bei: tuple[tuple[int, float], ...] = (),
 ) -> list[KanteStand]:
     """Alle Kanten eines Knotens — mit der Sperre: eine unerfüllte **Pflicht**-Kante sperrt
     die anderen (nicht sich selbst; sie ist erst gangbar, wenn erfüllt).
@@ -643,7 +675,9 @@ def kanten_pruefen(
     [True, True]
     """
     staende = [
-        kante_pruefen(k, zeit_ab=zeit_ab, wdh=wdh, skala=skala, gelaufen_s=gelaufen_s)
+        kante_pruefen(
+            k, zeit_ab=zeit_ab, wdh=wdh, skala=skala, gelaufen_s=gelaufen_s, wdh_bei=wdh_bei
+        )
         for k in kanten
     ]
     sperre = any(s.kante.pflicht and not s.erfuellt for s in staende)

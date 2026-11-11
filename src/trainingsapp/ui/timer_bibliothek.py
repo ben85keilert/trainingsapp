@@ -85,6 +85,10 @@ def zuordnung_setzen(
             u.timer = [neu, *eigene] if als_vorgabe else [*eigene, neu]
             state.uebungen.speichern(u)
             dazu += 1
+        elif u.archived:
+            # Archivierte stehen nicht zur Wahl („Zuordnen“ zeigt sie nicht) — was nicht
+            # angekreuzt werden kann, wird auch nicht still gelöst (N54)
+            continue
         elif hat and not soll and uebung_loesen(u, gemeinsam.id):
             state.uebungen.speichern(u)
             weg += 1

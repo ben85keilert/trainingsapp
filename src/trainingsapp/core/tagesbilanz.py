@@ -112,16 +112,19 @@ class Buendel:
         if self.spec is None:
             return ""
         weg = set(ohne)
-        teile = []
+        teile: list[str] = []
         for key, wert in self.auspraegung:
             if key in weg:
                 continue
             f = self.spec.field_by_key(key)
-            teile.append(format_wert(f, wert) if f is not None else str(wert))
-        # Die Variante zuerst — die Schlüssel sind alphabetisch sortiert („angle“ < „variant“)
-        if (variante := dict(self.auspraegung).get(VARIANTE)) is not None and VARIANTE not in weg:
-            teile.remove(str(variante))
-            teile.insert(0, str(variante))
+            text = format_wert(f, wert) if f is not None else str(wert)
+            # Die Variante zuerst — die Schlüssel sind alphabetisch sortiert („angle“ <
+            # „variant“). An ihrer Stelle erkannt, nicht am Text: Ist ``variant`` in einer
+            # Spec-Kopie kein Auswahlfeld, steht dort „5kg“ — danach zu suchen, warf (N96)
+            if key == VARIANTE:
+                teile.insert(0, text)
+            else:
+                teile.append(text)
         return " · ".join(teile)
 
     def leistung_text(self) -> str:

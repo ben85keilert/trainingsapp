@@ -752,6 +752,8 @@ def wechsel(alt: Lage | None, neu: Lage | None) -> list[TaktEreignis]:
     [('phase', 1)]
     >>> [(e.art, e.index, e.runde) for e in wechsel(lage(t, 9.9), lage(t, 10.1))]
     [('runde', 1, 1), ('phase', 0, 2)]
+    >>> [(e.art, e.runde) for e in wechsel(lage(t, 9.9), lage(t, 31.0))]  # stockte 21 s
+    [('runde', 1), ('runde', 2), ('runde', 3), ('phase', 4)]
     >>> [e.art for e in wechsel(lage(t, 5.0), None)]
     ['ende']
     >>> b = replace(t, runden=1)
@@ -768,7 +770,11 @@ def wechsel(alt: Lage | None, neu: Lage | None) -> list[TaktEreignis]:
         return []
     aus: list[TaktEreignis] = []
     if neu.runde != alt.runde or neu.fertig:
-        aus.append(TaktEreignis(RUNDE, alt.index, alt.runde, alt.phase))
+        # Jede volle Runde einzeln — auch die, über die ein stockender Ticker hinwegsprang
+        # (Neuaufbau, Tiefschlaf): „Takt zählt“ verlöre sonst Wiederholungen (N49)
+        letzte = neu.runde if neu.fertig else neu.runde - 1
+        for runde in range(alt.runde, max(letzte, alt.runde) + 1):
+            aus.append(TaktEreignis(RUNDE, alt.index, runde, alt.phase))
     if neu.fertig:
         aus.append(TaktEreignis(ENDE, neu.index, neu.runde, neu.phase))
     elif (neu.runde, neu.index) != (alt.runde, alt.index):
@@ -791,6 +797,8 @@ def soll_phasen(takt: Takt, von_s: float, bis_s: float) -> list[tuple[float, str
     if not takt.ist_atmung() or bis_s <= von_s:
         return []
     dauer = takt.rundendauer_s
+    if dauer <= 0:  # nur Phasen ohne Dauer: die Schleife käme nie voran (N66)
+        return []
     aus: list[tuple[float, str]] = []
     runde = 0
     while True:

@@ -37,6 +37,7 @@ from ..core.kurse import (
     PlanVorlage,
     Stand,
     bedingung_stand,
+    eigenes_uebernehmen,
     medien_from_list,
     medien_to_list,
     naechstes,
@@ -249,8 +250,16 @@ class KursRepo:
             )
             vorhanden = self.kapitel_plaene(kapitel.id, subject_id)
             if vorhanden:
-                for p in vorhanden:
-                    plaene.aktiv_setzen(p.id, True)
+                # Ein schon abgeschlossenes Kapitel (Freischaltung „frei“: Kapitel 2 vor
+                # Kapitel 1 fertig) bleibt fertig — seine Pläne werden nicht wieder aktiv (K39)
+                fertig = self.con.execute(
+                    "SELECT 1 FROM course_progress WHERE subject_id = ? AND chapter_id = ? "
+                    "AND completed_at IS NOT NULL",
+                    (subject_id, kapitel.id),
+                ).fetchone()
+                if fertig is None:
+                    for p in vorhanden:
+                        plaene.aktiv_setzen(p.id, True)
                 return
             da = {u.id for u in ExerciseRepo(self.con).alle(mit_archivierten=True)}
             for vorlage in kapitel.plaene:
@@ -349,6 +358,8 @@ class KursRepo:
         neu.id, neu.created_at, neu.aktiv = alt.id, alt.created_at, alt.aktiv
         neu.description, neu.timer = alt.description, alt.timer
         neu.weiter_automatisch, neu.pause_ohne_timer = alt.weiter_automatisch, alt.pause_ohne_timer
+        if not hart:
+            eigenes_uebernehmen(neu, alt)  # K35: Timer, Chips, Takt … kennt die Vorlage nicht
         return neu
 
     def _kapitelplan_neu(self, alt: Plan, hart: bool) -> Plan | None:

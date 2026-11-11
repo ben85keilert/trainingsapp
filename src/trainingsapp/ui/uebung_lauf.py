@@ -985,6 +985,8 @@ def lauf_eintragen(state: Any, einheit_id: str) -> SessionEntry | None:
     # sie später ganz (sie stünde als eingetragen da, mit der Zeit bis jetzt ohne den Abschnitt)
     e = getattr(state, "einheit", None)
     einheit = e if isinstance(e, Einheitslauf) and e.id == einheit_id else None
+    if einheit is not None and isinstance(einheit.teil("plan"), PlanAblaufBaustein):
+        return None  # ein laufendes Workout trägt je Schritt selbst ein (N60)
     teile = einzutragen(ereignisse, nachtraeglich=True) - _laufende_teile(einheit)
     if not teile:
         return None  # schon eingetragen (oder läuft noch)

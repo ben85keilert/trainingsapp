@@ -98,6 +98,7 @@ from trainingsapp.ui.components.startleiste import (
     startleiste,
 )
 from trainingsapp.ui.components.zaehlen import meldung_zeigen as zaehlen_meldung_zeigen
+from trainingsapp.ui.components.zurueck import formular_geaendert
 from trainingsapp.ui.flet_absicherung import methodenantworten_absichern, snackbars_absichern
 from trainingsapp.ui.laufend import takt as laufend_takt
 from trainingsapp.ui.state import AppState
@@ -876,11 +877,25 @@ def main(page: ft.Page) -> None:
     gebaut: dict[str, Any] = {"route": None, "nachholen": False}
 
     async def nachholen() -> None:
-        """Den aufgeschobenen Neuaufbau, sobald kein Dialog mehr offen ist."""
-        while dialog_offen(page):
+        """Den aufgeschobenen Neuaufbau, sobald kein Dialog mehr offen ist und oben kein
+        Formular mit ungespeicherten Eingaben steht (N78) — außer der Stapel ist inzwischen
+        ohnehin neu entstanden (Routenwechsel)."""
+        nummer = state.route_nummer
+        while dialog_offen(page) or (state.route_nummer == nummer and formular_geaendert(page)):
             await asyncio.sleep(0.2)
         await asyncio.sleep(0.3)  # Flutter schließt den Dialog erst im nächsten Bild
         gebaut["nachholen"] = False
+        if state.route_nummer == nummer:
+            zeige_route()
+
+    def von_aussen(_e: object = None) -> None:
+        """Neu zeichnen, ohne dass die Person es ausgelöst hat: nicht unter einem Formular
+        mit ungespeicherten Eingaben — es stünde danach wieder auf dem gespeicherten Stand."""
+        if gebaut["route"] == page.route and formular_geaendert(page):
+            if not gebaut["nachholen"]:
+                gebaut["nachholen"] = True
+                page.run_task(nachholen)
+            return
         zeige_route()
 
     def zeige_route() -> None:
@@ -1106,10 +1121,11 @@ def main(page: ft.Page) -> None:
         await page.push_route(page.views[-1].route)
 
     state.neu_zeichnen = zeige_route
+    state.neu_zeichnen_von_aussen = von_aussen
     page.on_route_change = zeige_route
     page.on_view_pop = zurueck
     # Bei „System“ wechseln Thema, Verlauf und Kurvenfarben mit dem Telefon
-    page.on_platform_brightness_change = zeige_route
+    page.on_platform_brightness_change = von_aussen
     zeige_route()  # beim Start ist die Route schon gesetzt — der Handler feuert nicht von selbst
     # Dialoge stapeln sich (`show_dialog`): der zuletzt gezeigte liegt oben,
     # „Später" legt den darunter frei.

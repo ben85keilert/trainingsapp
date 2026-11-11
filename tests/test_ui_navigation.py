@@ -445,3 +445,25 @@ def test_fuer_jetzt_mit_abschnitten_liegt_ueber_dem_timer_der_uebung(umgebung) -
     assert seite.views[-1].appbar.title.value == "Für jetzt"
     seite.zurueck()
     assert seite.routen()[-1] == timer
+
+
+def test_neuaufbau_von_aussen_wartet_auf_ein_formular_mit_eingaben(umgebung) -> None:
+    """N78: Endet ein Timer oder wechselt Hell/Dunkel, während in „Übung bearbeiten“ etwas
+    Ungespeichertes steht, bleibt die Ansicht stehen — ohne Eingaben wird neu gebaut."""
+    from trainingsapp.core.models import Exercise
+
+    seite, state = umgebung()
+    uebung = Exercise(name="Brücke")
+    state.uebungen.speichern(uebung)
+    seite.gehe(f"/uebung/{uebung.id}/bearbeiten")
+    oben = seite.views[-1]
+    state.neu_zeichnen_von_aussen()
+    assert seite.views[-1] is not oben  # nichts getippt: neu gebaut
+    oben = seite.views[-1]
+    name = next(x for x in _alle(oben) if isinstance(x, ft.TextField) and x.value == "Brücke")
+    name.value = "Brücke hoch"
+    state.neu_zeichnen_von_aussen()
+    seite.on_platform_brightness_change(None)
+    assert seite.views[-1] is oben and name.value == "Brücke hoch"
+    state.neu_zeichnen()  # die Person selbst (ein Knopf der Ansicht) baut weiter neu
+    assert seite.views[-1] is not oben

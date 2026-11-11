@@ -113,6 +113,13 @@ def test_live_hf_bezuege_aufnahme_und_abschnitt() -> None:
     # neue Aufnahme (weniger Zeilen als verarbeitet): von vorn
     live.nachfuehren(beats[:10])
     assert live.aufnahme.n <= 10
+    # H53: eine neue Aufnahme, die schon länger ist als die vorige — an der Kennung erkannt
+    live.nachfuehren(beats[:50], kennung=1.0)
+    n = live.aufnahme.n
+    live.nachfuehren(beats[:300], kennung=2.0)
+    frisch = LiveHf(profil, grenzen)
+    frisch.nachfuehren(beats[:300])
+    assert n <= 50 and live.aufnahme.n == frisch.aufnahme.n
 
 
 def test_fenster_zusammenfassung_aus_dem_puffer() -> None:

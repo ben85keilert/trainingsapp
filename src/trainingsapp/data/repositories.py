@@ -1082,8 +1082,8 @@ class PlanRepo:
         Ablauf nur die Kette der Liste, bleibt statt ihrer das Zeichen „folgt der Liste“ — die
         Änderung gilt dann auch im Workout (Ben, 10.11.2026)."""
         roh = self.ablauf_laden(plan_id)
-        if not roh.an or not roh.kanten:
-            return
+        if not roh.an or (not roh.kanten and not roh.start):
+            return  # aus, oder schon das Zeichen
         p = self.laden(plan_id, mit_geloeschten=True)
         if p is not None and folgt_der_liste(roh, [(it.id, it.bedingung) for it in p.items]):
             with transaktion(self.con):
@@ -1911,8 +1911,13 @@ class SessionRepo:
         anderen Notation vorliegen als die alten (siehe `satz_anhaengen`).
         Kopie und Werte müssen immer zusammenpassen. ``ended_at`` schließt
         (Zeitpunkt) oder öffnet (``None``) den Eintrag — ohne Angabe bleibt es.
+
+        Korrigiert wird immer der **gültige Stand**: Nennt der Aufrufer eine Zeile, die
+        inzwischen ersetzt ist (ein Formular war offen, während Timer, Sensor oder ein Tipp
+        einen Satz anhängten), hängt die Korrektur an deren Nachfolger — zwei Korrekturen
+        auf dieselbe Zeile ergäben sonst zwei gültige Einträge, der Tag zählte doppelt (D19).
         """
-        alt = self.eintrag_laden(alter_eintrag_id)
+        alt = self.eintrag_aktuell(alter_eintrag_id)
         if alt is None:
             raise KeyError(alter_eintrag_id)
         session = self.session_laden(alt.session_id)
@@ -1938,8 +1943,8 @@ class SessionRepo:
         mit Verweis), weil Einträge unveränderlich sind. Werte, Notiz und Zeiten bleiben;
         die Kopie der Spezifikation ist die der neuen Übung. Gedacht für die Sportart
         eines Trainings (Ben, 26.10.2026: „Laufen“ gestartet, Rad gefahren) — Gehen,
-        Laufen und Rad haben dieselben Felder."""
-        alt = self.eintrag_laden(alter_eintrag_id)
+        Laufen und Rad haben dieselben Felder. Wie `eintrag_korrigieren` am gültigen Stand."""
+        alt = self.eintrag_aktuell(alter_eintrag_id)
         if alt is None:
             raise KeyError(alter_eintrag_id)
         if alt.exercise_id == uebung.id:

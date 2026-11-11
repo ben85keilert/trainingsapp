@@ -29,7 +29,7 @@ from types import TracebackType
 from typing import IO, Final
 from xml.sax.saxutils import escape, quoteattr
 
-from trainingsapp.core.bewegung import ENTFERNT
+from trainingsapp.core.bewegung import FELDER
 from trainingsapp.core.strecke import Punkt, abstand_m
 
 #: Namen in der GPX-Datei (``<type>``) — frei wählbar, das lesen die meisten Dienste
@@ -233,7 +233,9 @@ def spur_ohne_ort(pfad: Path, kopf: Mapping[str, object]) -> bytes:
         if vorher is not None:
             werte["ds_m"] = round(abstand_m(vorher, p), 3)
         for k, v in asdict(p).items():
-            if k != "t" and k not in ENTFERNT and v is not None and v is not False:
+            # Weißliste (S31): nur, was `FELDER` nennt — ein neues Feld an `Punkt` (Kurs, Ort
+            # als Text) ginge sonst von selbst in jeden Messungs- und Forschungsexport
+            if k != "t" and k in FELDER and v is not None and v is not False:
                 werte[k] = v
         aus.append(json.dumps(werte, separators=(",", ":")))
         vorher = p

@@ -563,7 +563,13 @@ class AppState:
     #: Baut den Ansichtsstapel zur aktuellen Route neu — setzt `app.main()`.
     #: Views rufen es nach Änderungen, die die Route nicht wechseln (ein Tipp
     #: auf „gemacht" bleibt auf derselben Planansicht).
+    #: ein Verbindungsaufbau läuft (`views.messung.verbinden`) — kein zweiter daneben (H70)
+    verbindet: bool = False
     neu_zeichnen: Callable[[], None] = field(default=lambda: None)
+    #: Neu zeichnen, **ohne dass die Person es ausgelöst hat** (Laufendes erscheint oder
+    #: verschwindet, Hell/Dunkel wechselt): wartet, solange oben ein Formular ungespeicherte
+    #: Eingaben hat (N78). ``None`` = wie `neu_zeichnen` (Tests ohne App-Hülle)
+    neu_zeichnen_von_aussen: Callable[[], None] | None = None
 
     # -- Lebenszyklus --------------------------------------------------------
 
@@ -695,9 +701,30 @@ class AppState:
         profil = self.profile.laden(profil_id)
         if profil is None:
             raise KeyError(profil_id)
+        if profil.id != self.profil.id:
+            self._sitzung_des_profils_raeumen()
         self.profil = profil
         self.einstellungen.setzen(SettingRepo.AKTIVES_PROFIL, profil.id)
         return profil
+
+    def _sitzung_des_profils_raeumen(self) -> None:
+        """Vor dem Profilwechsel: was nur zu diesem Profil gehört, bleibt nicht stehen (N81) —
+        ein offener Notiz-Editor (erst gesichert: sein Text gehört dem alten Profil; danach
+        schriebe das neue in dessen Notiz), der Tag-Filter des Tagebuchs (IDs des alten
+        Profils) und der Plan, den „Heute“ hält."""
+        for sichern in list(self.vor_dem_verlassen.values()):
+            with contextlib.suppress(Exception):
+                sichern()
+        self.vor_dem_verlassen.clear()
+        self.schreiben_beenden = None
+        self.tagebuch_bearbeitet = None
+        self.tagebuch_editor = None
+        self.tagebuch_tags = set()
+        self.tagebuch_suche = ""
+        self.heute_haelt = None
+        self.plan_ziel = None
+        self.plan_gezeigt.clear()
+        self.plan_als_plan.clear()
 
     def profil_anlegen(self, name: str, birth_year: int | None = None) -> Subject:
         """Legt ein Profil an und macht es zum aktiven."""

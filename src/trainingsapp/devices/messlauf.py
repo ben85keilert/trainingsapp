@@ -55,6 +55,7 @@ from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -272,6 +273,15 @@ def teile_zusammenfuegen(pfade: Sequence[Path]) -> Gespeichert:
             "Die Aufzeichnungen messen verschieden (Brustgurt, optisch, nur Puls) — "
             "sie lassen sich nicht zu einer zusammenfügen."
         )
+    # Überlappung (H52): zwei Zwischenstände derselben Aufnahme oder Zwischenstand + ganze
+    # Aufnahme hängten dieselben Schläge doppelt aneinander — das ist keine Messung
+    for (vor, vor_pfad), (nach, nach_pfad) in pairwise(paare):
+        if _enthaelt_anfang(vor, nach):
+            raise ValueError(
+                f"„{vor_pfad.stem}“ und „{nach_pfad.stem}“ überschneiden sich — sie enthalten "
+                "dieselben Schläge (etwa ein Zwischenstand und die ganze Aufnahme). "
+                "Zusammenfügen lassen sich nur Teile, die nacheinander liegen."
+            )
     rec = zusammenfuegen(teile)
     erster = paare[0][1]
     ziel = freier_pfad(erster.parent, zieldatei([erster]).name)
@@ -280,6 +290,23 @@ def teile_zusammenfuegen(pfade: Sequence[Path]) -> Gespeichert:
 
 
 _FRUEH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _enthaelt_anfang(vor: Recording, nach: Recording, n: int = 20) -> bool:
+    """Stehen die ersten Schläge von ``nach`` schon in ``vor``? Dann enthalten beide dieselbe
+    Zeit. Verglichen wird der Inhalt (RR-Folge), nicht die Uhr: Zwischenstände tragen dieselbe
+    Startzeit wie ihre Aufnahme, und ``n`` gleiche RR-Werte in Folge gibt es nicht zufällig.
+    Unter fünf Schlägen keine Aussage."""
+    kopf = [b.rr_ms for b in nach.beats[:n]]
+    if len(kopf) < 5:
+        return False
+    reihe = [b.rr_ms for b in vor.beats]
+    k = len(kopf)
+    for i in range(len(reihe) - 4):  # auch ein Ende von ``vor``, das nur ein Stück überlappt
+        stueck = reihe[i : i + k]
+        if stueck[0] == kopf[0] and stueck == kopf[: len(stueck)]:
+            return True
+    return False
 
 
 def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
@@ -631,6 +658,10 @@ class Messlauf:
         # Adresse in `adresse` — nie die Adresse als Name, denn `deid` leert nur
         # das Adressfeld. Für die Anzeige (`geraet_name`) bleibt die Adresse als
         # Notnagel, damit die Person das Gerät wiedererkennt.
+        # Die Liste „Zuletzt verbunden“ merkt sich einen Gurt ohne Namen unter seiner
+        # Adresse und reicht sie beim nächsten Mal als Namen herein (H51) — sie zählt nicht.
+        if name is not None and name.strip().casefold() == device_id.strip().casefold():
+            name = None
         self.geraet_name = name or device_id
         self._name_bekannt = bool(name)
         self.simulation = device_id.startswith("sim:")

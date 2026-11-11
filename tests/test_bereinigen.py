@@ -114,8 +114,38 @@ def test_mp4_nutzerdaten_werden_free_versaetze_bleiben(tmp_path) -> None:
     assert ziel.read_bytes() == sauber
 
 
+@pytest.mark.parametrize("handler", [b"text", b"sbtl", b"camm", b"meta", b"xxxx"])
+def test_video_nur_mit_bild_und_tonspuren(handler) -> None:
+    """S22: Weißliste — Untertitel- und Datenspuren tragen bei Drohnen und Dashcams den Ort."""
+    with pytest.raises(NichtBereinigbar):
+        bereinigen(_mp4(handler), "mp4")
+    assert bereinigen(_mp4(b"soun"), "m4a")
+
+
+def test_video_mit_unbekannten_teilen_wird_abgelehnt() -> None:
+    """S22: ``gps `` oben oder im Filmkopf, komprimierter Filmkopf, Nutzerdaten unter stsd."""
+    kopf = _box(b"ftyp", b"isom\x00\x00\x02\x00")
+    mvhd, daten = _box(b"mvhd", bytes(20)), _box(b"mdat", b"BILDER")
+    gps = _box(b"gps ", GPS)
+    faelle = [
+        kopf + _box(b"moov", mvhd + _spur(b"vide")) + gps + daten,
+        kopf + _box(b"moov", mvhd + gps + _spur(b"vide")) + daten,
+        kopf + _box(b"moov", _box(b"cmov", b"gepackt")) + daten,
+    ]
+    stsd = _box(b"stsd", bytes(8) + _box(b"avc1", bytes(78) + _box(b"udta", GPS)))
+    hdlr = _box(b"hdlr", bytes(4) + b"mhlr" + b"vide" + bytes(12))
+    spur = _box(b"trak", _box(b"mdia", hdlr + _box(b"minf", _box(b"stbl", stsd))))
+    faelle.append(kopf + _box(b"moov", mvhd + spur) + daten)
+    for fall in faelle:
+        with pytest.raises(NichtBereinigbar):
+            bereinigen(fall, "mp4")
+    gut = _box(b"stsd", bytes(8) + _box(b"avc1", bytes(78) + _box(b"avcC", b"\x01d")))
+    spur = _box(b"trak", _box(b"mdia", hdlr + _box(b"minf", _box(b"stbl", gut))))
+    assert bereinigen(kopf + _box(b"moov", mvhd + spur) + daten, "mp4")
+
+
 def test_video_mit_metadatenspur_wird_abgelehnt(tmp_path) -> None:
-    with pytest.raises(NichtBereinigbar, match="Metadatenspur"):
+    with pytest.raises(NichtBereinigbar, match="Textspur"):
         bereinigen(_mp4(b"meta"), "mov")
     quelle, ziel = tmp_path / "a.mov", tmp_path / "b.mov"
     quelle.write_bytes(_mp4(b"meta"))

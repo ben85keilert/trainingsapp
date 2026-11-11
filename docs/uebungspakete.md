@@ -160,7 +160,9 @@ PDFs mitbringen — an Übungen (`media`), Planübungen (`medien`) und Kurskapit
   geleert (gleiche Länge, Durchsicht 10.11.2026 — ein PDF aus Handyfotos trug sie sonst mit),
   ein verschlüsseltes PDF wird abgelehnt; Autor und Titel des Dokuments und Bilder in anderen
   Formaten bleiben — ein PDF sieht man vor dem Weitergeben selbst an. **Was sich nicht sicher
-  bereinigen lässt** (andere Formate, ein Video mit Metadatenspur), **kommt nicht ins Paket**. Bereinigen ist idempotent: Eine saubere Datei
+  bereinigen lässt** (andere Formate; ein Video mit anderem als Bild- und Tonspuren oder mit
+  unbekannten Teilen — seit 11.11.2026 gilt für MP4/MOV eine **Weißliste**, S22: Untertitel-
+  und Datenspuren tragen bei Drohnen und Dashcams den Ort), **kommt nicht ins Paket**. Bereinigen ist idempotent: Eine saubere Datei
   behält ihren Namen.
 - **In der App:** Import nimmt `.json`, `.toml` (ohne Dateien) und `.zip` (über den Pfad, nie
   ganz über die Leitung); die Rückfrage nennt Zahl und Größe der Dateien. Übungsseite, „i“ der
@@ -399,7 +401,9 @@ aus dem Paketstand (`course.package_standard_json`) zurück.
 
 Je Plan (`plaene[]`, Formatversion 3, `docs/plan_import_links_plaene.md` §3): `name`
 (Pflicht), `key` (nie ändern — die Plan-ID folgt daraus, je Profil: UUIDv5 aus Paket,
-`plan:<key>` und Profil), `beschreibung`, `wochentage`, `uebungen[]` wie in der
+`plan:<key>` und Profil; Buchstaben, Ziffern, `-`, `_`, höchstens 64 — fehlt er, entsteht er
+aus dem Namen, und was kein Schlüssel ist, wird gefaltet statt abgelehnt: „Rücken stark“ →
+`ruecken-stark`, `core.pakete.plan_schluessel`, K34 vom 11.11.2026), `beschreibung`, `wochentage`, `uebungen[]` wie in der
 Kapitel-Vorlage (seit 8.11.2026 auch **`bedingung` je Planübung**, `docs/plan_workout.md` §1:
 `{ art = "wdh" | "wdh_in_zeit" | "zeit" | "gemacht" | "skala", n, sekunden, hart, inhalt = { text, url },
 zweig = "A"…"D", dann, sonst, wege = [{ ziel, text }] }` — `dann`, `sonst` und `wege[].ziel` als

@@ -422,3 +422,25 @@ async def test_ende_ohne_anfang_faellt_weg(aufbau) -> None:
     await e.abschliessen()
     rec = laden(lauf.aufnahme_stoppen(tmp_path).pfad)
     assert [x["text"] for x in rec.ereignisse] == []
+
+
+async def test_scheitert_das_speichern_der_aufnahme_bleibt_der_rest(aufbau, monkeypatch) -> None:
+    """H55: Speicher voll am Ende der Einheit — der Abschluss nennt den Fehler, die übrigen
+    Teile sind abgeschlossen, die Aufnahme läuft im Messlauf weiter (noch einmal speichern)."""
+    uhr, gurt, lauf, repo, profil, tmp_path = aufbau
+    e = _einheit(lauf, uhr, repo, profil, "Messung")
+    e.hinzufuegen(HrvBaustein(lauf, basis=tmp_path))  # allein: endet mit der Einheit
+    await e.vorbereiten()
+    e.starten()
+    await _sekunden(uhr, gurt, 20, e)
+    e.beenden()
+
+    async def voll(_basis):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(lauf, "aufnahme_stoppen_async", voll)
+    abschluss = await e.abschliessen()
+    assert abschluss.hrv is None and lauf.aufnahme is not None
+    assert len(abschluss.fehler) == 1 and "nicht gespeichert" in abschluss.fehler[0]
+    monkeypatch.undo()
+    assert lauf.aufnahme_stoppen(tmp_path) is not None  # zweiter Versuch gelingt

@@ -426,6 +426,9 @@ def einzelwert_lesen(f: FieldSpec, text: str) -> Any:
     (12.5, 40, None)
     >>> einzelwert_lesen(FieldSpec("h", FieldType.DURATION, "Halten", unit="s"), "1:30")
     90.0
+    >>> skala = FieldSpec("s", FieldType.SCALE, "Befinden", min=-5, max=5, step=1)
+    >>> einzelwert_lesen(skala, "-3"), einzelwert_lesen(skala, "-6"), einzelwert_lesen(f, "-3")
+    (-3, None, None)
     """
     text = text.strip()
     if not text:
@@ -436,10 +439,14 @@ def einzelwert_lesen(f: FieldSpec, text: str) -> Any:
         zahl = float(text.replace(",", "."))
     except ValueError:
         return None
-    if not math.isfinite(zahl) or not 0 <= zahl <= MAX_WERT:
+    if not math.isfinite(zahl):
         return None
     if f.type == FieldType.SCALE:
+        # Eine Skala hat ihren eigenen Bereich, auch negativ (``-5 - 5``, `docs/notation.md`)
+        # — die Grenze „ab 0“ gilt für Mengen, nicht für sie (N79)
         return skala_wert(f, zahl)
+    if not 0 <= zahl <= MAX_WERT:
+        return None
     return int(zahl) if zahl.is_integer() else zahl
 
 

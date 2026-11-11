@@ -445,6 +445,14 @@ class HrvBaustein:
             return None
         return self.messlauf.aufnahme_stoppen(self.basis)
 
+    async def aufnahme_speichern_async(self) -> Gespeichert | None:
+        """Wie `abschliessen`, aber über `Messlauf.aufnahme_stoppen_async` (H54): Messdatei,
+        Abschnitte und Prüfsumme schreibt ein Thread — eine Nachtmessung hielte die App beim
+        Ende sonst an —, und nur dieser Weg gibt die Ströme des Diagnosemodus zurück."""
+        if self.basis is None or self.messlauf.aufnahme is None:
+            return None
+        return await self.messlauf.aufnahme_stoppen_async(self.basis)
+
 
 @dataclass
 class UebungKontext:
@@ -558,6 +566,14 @@ class UebungBaustein:
 # ---------------------------------------------------------------------------
 
 
+def _loop_laeuft() -> bool:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
 @dataclass
 class Abschluss:
     """Was nach dem Ende übrig ist und der Aufrufer eintragen muss."""
@@ -566,6 +582,10 @@ class Abschluss:
     hrv: Gespeichert | None = None
     #: je weiterem Teil, was er hinterlässt (``devices.strecke_baustein``: die Strecke)
     teile: dict[str, Any] = field(default_factory=dict)
+    #: was beim Aufräumen scheiterte (H55) — je Zeile ein Satz für die Person. Die übrigen
+    #: Teile sind trotzdem abgeschlossen; eine nicht gespeicherte Aufnahme läuft im Messlauf
+    #: weiter und lässt sich in der Messansicht noch einmal speichern (H24)
+    fehler: list[str] = field(default_factory=list)
 
 
 class Einheitslauf:
@@ -1203,12 +1223,28 @@ class Einheitslauf:
             if fertig is None:
                 continue
             # Auch ein Teil, der im Countdown nie startete, gibt frei, was er hält (GPS)
-            ergebnis = await fertig(self.stoppt_am_ende(teil.art))
+            try:
+                ergebnis = await fertig(self.stoppt_am_ende(teil.art))
+            except Exception as fehler:  # ein Teil, der scheitert, nimmt die anderen nicht mit
+                abschluss.fehler.append(f"{teil.art}: {fehler}")
+                continue
             if id(teil) in self._gestartet:
                 abschluss.teile[teil.art] = ergebnis
         hrv = self.hrv
         if hrv is not None and self.stoppt_am_ende("hrv"):
-            abschluss.hrv = hrv.abschliessen()
+            try:
+                asynchron = getattr(hrv, "aufnahme_speichern_async", None)
+                # Ohne laufenden Loop (die Aufgabe wird beim Beenden der App nur noch
+                # aufgeräumt) gibt es keinen Thread — dann speichert der synchrone Weg
+                if asynchron is not None and _loop_laeuft():
+                    abschluss.hrv = await asynchron()
+                else:
+                    abschluss.hrv = hrv.abschliessen()
+            except Exception as fehler:  # Speicher voll: Training und Übung trotzdem eintragen
+                abschluss.fehler.append(
+                    f"Aufnahme nicht gespeichert ({fehler}) — sie läuft weiter; in der "
+                    "Messansicht noch einmal „Stopp & speichern“."
+                )
         return abschluss
 
 

@@ -284,6 +284,18 @@ def vorlage_patchen(quelle: Path, ziel: Path) -> None:
     `MAIN_ACTIVITY_FLET` ab oder fehlt sie, bricht das Skript ab.
     """
     ziel.parent.mkdir(parents=True, exist_ok=True)
+    # Erst in eine Arbeitsdatei, dann umbenennen (N124): Bricht das Patchen ab, bliebe sonst
+    # eine halbe oder ungepatchte Vorlage unter dem endgültigen Namen liegen — der nächste
+    # Lauf nähme sie still (APK ohne eigene MainActivity und ohne Sicherung.kt)
+    arbeit = ziel.with_name(ziel.name + ".teil")
+    try:
+        _vorlage_schreiben(quelle, arbeit)
+        arbeit.replace(ziel)
+    finally:
+        arbeit.unlink(missing_ok=True)
+
+
+def _vorlage_schreiben(quelle: Path, ziel: Path) -> None:
     ersetzt = False
     with zipfile.ZipFile(quelle) as rein, zipfile.ZipFile(ziel, "w", zipfile.ZIP_DEFLATED) as raus:
         for info in rein.infolist():

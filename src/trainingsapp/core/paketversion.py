@@ -35,6 +35,11 @@ MODUS_TEXT: Final = {
 _PUNKTE = re.compile(r"(\d{1,6})\.(\d{1,2})\.(\d{1,2})")
 
 
+#: Größte Version als Zahl — „999999.99.99“; darüber ist sie unlesbar (K38: eine Zahl jenseits
+#: von 64 Bit ließ sqlite beim Import werfen)
+MAX_ZAHL = 999_999 * 100 * 100 + 99 * 100 + 99
+
+
 def version_zahl(wert: Any) -> int | None:
     """Die Version als Zahl — aus einer ganzen Zahl (wie bisher) oder „X.Y.Z“; ``None``, wenn
     sie unlesbar ist.
@@ -43,13 +48,15 @@ def version_zahl(wert: Any) -> int | None:
     (4, 4, 10203, 100)
     >>> [version_zahl(w) for w in ("3", "2.1", "1.100.0", "1.2.3.4", "a", "", True, -1, 2.5)]
     [None, None, None, None, None, None, None, None, None]
+    >>> version_zahl(2**63), version_zahl("999999.99.99") == MAX_ZAHL
+    (None, True)
 
     Text nur in der vollen Form „X.Y.Z“ — „3“ wäre sonst 3.0.0, die Zahl 3 aber 0.0.3.
     """
     if isinstance(wert, bool):
         return None
     if isinstance(wert, int):
-        return wert if wert >= 0 else None
+        return wert if 0 <= wert <= MAX_ZAHL else None
     if not isinstance(wert, str):
         return None
     treffer = _PUNKTE.fullmatch(wert.strip())

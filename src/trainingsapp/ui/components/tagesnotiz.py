@@ -327,6 +327,12 @@ class Tagesnotiz(Notizeditor):
         text = self.text.strip()
         tags = tuple(self.notiz.tag_ids)
         behalten = bool(text) or bool(self.anhaenge) or auch_leer
+        if not behalten and self.vorhanden:
+            # Frisch nachsehen: Ein Editor, der den Weg zur Kamera überlebt hat (Tagebuch),
+            # kennt den eben behaltenen Anhang noch nicht — die Notiz würde sonst gelöscht
+            # und der Anhang hinge an nichts mehr (N80)
+            self.anhaenge = self.state.anhaenge.zur_notiz(self.notiz.id)
+            behalten = bool(self.anhaenge)
         if not behalten:
             if self.vorhanden:
                 self.state.tagesnotizen.loeschen(self.notiz.id)

@@ -49,7 +49,7 @@ def test_ein_austrittspunkt_fuer_alle_wege() -> None:
     # Alle beginnen am Abzweig; der liegt unter Bild und Namen, der Stamm führt dorthin
     assert {w.kurven[0].p0 for w in von_a} == {g.abzweige["a"]}
     x, y = g.mitten["a"]
-    assert g.abzweige["a"] == (x, y + 32 + geo.AUSTRITT)
+    assert g.abzweige["a"] == (x, y + 32 + geo.NAME_H + geo.AUSTRITT)
     oben, unten = g.staemme["a"]
     assert unten == g.abzweige["a"] and y + 32 < oben[1] < unten[1]
     # Jeder Weg hat seinen eigenen Griff — keine zwei liegen aufeinander

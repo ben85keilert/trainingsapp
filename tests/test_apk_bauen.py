@@ -100,3 +100,6 @@ def test_geaenderte_oder_fehlende_mainactivity_bricht_ab(apk_bauen, tmp_path) ->
     ohne = _vorlage(tmp_path / "ohne.zip", None, apk_bauen)
     with pytest.raises(SystemExit, match="Keine MainActivity"):
         apk_bauen.vorlage_patchen(ohne, tmp_path / "b.zip")
+    # N124: nach dem Abbruch liegt keine halbe Vorlage da, die der nächste Lauf nähme
+    assert not (tmp_path / "a.zip").exists() and not (tmp_path / "b.zip").exists()
+    assert list(tmp_path.glob("*.teil")) == []

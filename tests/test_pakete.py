@@ -1540,3 +1540,114 @@ def test_paketplan_update_je_planuebung_neu_laden_und_wieder_anlegen(con) -> Non
         baum.exercise_id,
     ]
     assert [z for _, _, z in pakete.paketplaene_im_profil(inhalt.paket.id, ich.id)] == ["aktiv"]
+
+
+def test_export_mit_plannamen_ausserhalb_des_schluessels_bleibt_lesbar():
+    """K34: Leerzeichen, Umlaut, Klammer im Plannamen — der Export muss sich einlesen lassen."""
+    from trainingsapp.core.models import Plan, PlanItem
+    from trainingsapp.core.pakete import (
+        Paket,
+        paket_json,
+        paket_lesen,
+        paketplaene_aus,
+    )
+
+    u = Exercise(name="Brücke")
+    namen = ["Rücken stark", "Plan (neu)", "Plan neu", "Knie-Reha Woche 1", "Morgens"]
+    plaene = [Plan(name=n, items=[PlanItem(exercise_id=u.id)]) for n in namen]
+    text = paket_json(Paket(id="p1", name="Test"), [u], plaene=paketplaene_aus(plaene))
+    inhalt = paket_lesen(text)
+    assert [p.vorlage.name for p in inhalt.plaene] == namen
+    assert [p.key for p in inhalt.plaene] == [
+        "ruecken-stark",
+        "plan-neu",
+        "plan-neu-2",
+        "knie-reha-woche-1",
+        "morgens",
+    ]
+
+
+def test_plan_ohne_gueltigen_schluessel_wird_gefaltet_statt_abgelehnt():
+    """K34: Dateien aus 0.3.29–0.3.85 tragen den Plannamen als Schlüssel."""
+    import json as _json
+
+    from trainingsapp.core.pakete import Paket, paket_json, paket_lesen
+
+    u = Exercise(name="Brücke")
+    roh = _json.loads(paket_json(Paket(id="p1", name="Test"), [u]))
+    roh["plaene"] = [
+        {"key": "rücken stark", "name": "Rücken stark", "uebungen": [{"uebung": u.id}]}
+    ]
+    inhalt = paket_lesen(_json.dumps(roh))
+    assert inhalt.plaene[0].key == "ruecken-stark"
+
+
+def test_update_eines_paketplans_laesst_was_das_format_nicht_kennt(con) -> None:
+    """K35: Timer der Planübung, eigene Chips, Plan-Takt und Workout-Schalter stehen nicht im
+    Paketformat — ein Update (auch still im Modus „Alle“) und „Fehlendes zurückholen“ setzen
+    sie nicht zurück; „Auf Paketstand“ schon."""
+    from trainingsapp.core.takt import Takt
+
+    def fassung(version: int, wochentage: list[int]) -> dict:
+        roh = qigong_mit_plan(version=version)
+        roh["plaene"][0]["wochentage"] = wochentage
+        return roh
+
+    pakete, plaene = PaketRepo(con), PlanRepo(con)
+    ich = _profil(con, "Ich")
+    inhalt = paket_lesen(fassung(1, [0, 2, 4]))
+    pakete.importieren(inhalt, subject_id=ich.id)
+    (plan,) = plaene.des_pakets(inhalt.paket.id, ich.id)
+    plan.items[0].timer = {"modus": "aus"}
+    plan.items[0].quick = {"reps": [8, 10]}
+    plan.takt = Takt.aus_dict({"name": "Atmung 4-6", "phasen": [{"dauer_s": 4}, {"dauer_s": 6}]})
+    plan.workout = True
+    plaene.speichern(plan)
+    pakete.importieren(paket_lesen(fassung(2, [1, 3])), subject_id=ich.id)
+    (danach,) = plaene.des_pakets(inhalt.paket.id, ich.id)
+    assert danach.wochentage == [1, 3]  # das Update kam an
+    assert danach.items[0].timer == {"modus": "aus"} and danach.items[0].quick == {"reps": [8, 10]}
+    assert danach.takt is not None and danach.takt.name == "Atmung 4-6" and danach.workout
+    weich = pakete._neu_geladen(danach, pakete.paketplan_fuer(danach), hart=False)
+    assert weich.items[0].timer == {"modus": "aus"} and weich.workout
+    hart = pakete._neu_geladen(danach, pakete.paketplan_fuer(danach), hart=True)
+    assert hart.items[0].timer == {} and hart.takt is None and not hart.workout
+
+
+def test_wieder_installieren_behaelt_eigenes_an_den_uebungen(con) -> None:
+    """K37: „Paket entfernen“ + „Wieder installieren“ holt die Übungen zurück, wie sie waren —
+    eigene Abschnitte der Beschreibung und das eigene Symbolbild bleiben (wie bei Update und
+    Reset); „Auf Paketstand“ gibt es weiterhin daneben."""
+    pakete, repo = PaketRepo(con), ExerciseRepo(con)
+    inhalt = paket_lesen(qigong())
+    pakete.importieren(inhalt)
+    baum = repo.laden(inhalt.uebungen[0].id)
+    baum.description = baum.description + "\n\n## Meins\nLinks beginnen."
+    baum.image_path = "Symbole/baum.jpg"
+    repo.speichern(baum)
+    pakete.entfernen(inhalt.paket.id)
+    pakete.importieren(pakete.inhalt(inhalt.paket.id))
+    wieder = repo.laden(baum.id)
+    assert wieder is not None and "Links beginnen." in wieder.description
+    assert wieder.image_path == "Symbole/baum.jpg"
+    assert pakete.abweichungen(wieder) != []  # weiter als „geändert“ erkennbar
+
+
+def test_was_eine_paketdatei_ausloest_ist_ein_paketfehler(con) -> None:
+    """K38: Die Oberfläche fängt `PaketFehler` — die Kapitel-ID eines anderen Kurses darf
+    nicht als nackter `ValueError` durch den Importdialog und die Update-Prüfung fallen."""
+    from trainingsapp.core.pakete import PaketFehler
+
+    def kurs(paket: str, kapitel_id: str) -> dict:
+        return {
+            "paket": {"name": paket, "version": 1},
+            "exercises": [{"key": "a", "name": f"Übung {paket}"}],
+            "kurse": [{"name": f"Kurs {paket}", "kapitel": [{"id": kapitel_id, "titel": "Eins"}]}],
+        }
+
+    pakete = PaketRepo(con)
+    pakete.importieren(paket_lesen(kurs("Erstes", "kap-1")))
+    with pytest.raises(PaketFehler, match="gehört schon zum Kurs"):
+        pakete.importieren(paket_lesen(kurs("Zweites", "kap-1")))
+    assert not con.in_transaction
+    assert [p.name for p, _ in pakete.alle()] == ["Standard", "Erstes"]

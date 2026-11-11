@@ -298,7 +298,7 @@ def durchlauf(
                     except (TypeError, ValueError):
                         offen["antwort"] = None
         elif quelle == "person" and art == "eintrag" and item and daten.get("eintrag"):
-            ziel = _letzte(zeilen, item)
+            ziel = _zeile_des_eintrags(zeilen, item, t)
             if ziel is not None:
                 ziel["eintrag_ids"] = (*ziel["eintrag_ids"], str(daten["eintrag"]))
         elif quelle == "plan" and art == "kante" and daten.get("von") and daten.get("nach"):
@@ -322,6 +322,21 @@ def _letzte(
         ),
         None,
     )
+
+
+def _zeile_des_eintrags(zeilen: list[dict[str, Any]], item: str, t: float) -> dict[str, Any] | None:
+    """Der Durchgang, zu dem ein ``person/eintrag`` gehört: Er trägt die Zeit des Endes seines
+    Durchgangs und wird erst danach nachgetragen — bei einer Schleife a→a hat dann schon der
+    nächste Durchgang begonnen (N50). Also zuerst der Durchgang, der genau da endete, sonst
+    der letzte, der da schon lief; ohne Treffer die letzte Zeile der Planübung."""
+    eigene = [z for z in zeilen if z["item_id"] == item]
+    for z in reversed(eigene):
+        if z.get("bis_s") is not None and abs(float(z["bis_s"]) - t) < 1e-6:
+            return z
+    for z in reversed(eigene):
+        if float(z.get("von_s") or 0.0) <= t and (z.get("bis_s") is None or t <= z["bis_s"]):
+            return z
+    return eigene[-1] if eigene else None
 
 
 def fortsetzungen_markieren(laeufe: Sequence[Durchlauf]) -> list[Durchlauf]:

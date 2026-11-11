@@ -19,6 +19,7 @@ Formulare über `page.push_route`.
 from __future__ import annotations
 
 import inspect
+import weakref
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -89,7 +90,31 @@ def zurueck_speichert(
 
     view.can_pop = False
     view.on_confirm_pop = bestaetigen
+    _FORMULARE[:] = [(v, g) for v, g in _FORMULARE if v() is not None]
+    _FORMULARE.append((weakref.ref(view), geaendert))
     return view
+
+
+#: Formulare mit „Zurück speichert“ und ihre Frage „geändert?“ (N78) — schwach gehalten, eine
+#: verworfene Ansicht verschwindet von selbst
+_FORMULARE: list[tuple[weakref.ref[ft.View], Callable[[], bool]]] = []
+
+
+def formular_geaendert(page: Any) -> bool:
+    """Steht oben ein Formular mit ungespeicherten Eingaben? Ein Neuaufbau, den nicht die
+    Person ausgelöst hat (ein Timer endet, das Telefon wechselt Hell/Dunkel), wartet dann —
+    er baute das Formular aus der Datenbank neu und verwürfe alles Getippte (N78)."""
+    ansichten = getattr(page, "views", None) or []
+    if not ansichten:
+        return False
+    oben = ansichten[-1]
+    for ref, geaendert in _FORMULARE:
+        if ref() is oben:
+            try:
+                return bool(geaendert())
+            except Exception:  # eine Frage, die wirft, hält keinen Aufbau auf
+                return False
+    return False
 
 
 def rueckfrage(grund: str, verwerfen: Callable[[], Awaitable[None]]) -> ft.AlertDialog:

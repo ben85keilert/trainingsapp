@@ -533,9 +533,10 @@ def zwischenstand_entfernen(state: AppState, pfad: Path) -> None:
         if zeile is not None:
             state.hrv.loeschen(zeile.id)
     with contextlib.suppress(OSError):
-        for datei in pfad.parent.glob(f"{pfad.stem}*"):
-            if datei.is_file():
-                datei.unlink(missing_ok=True)
+        # Nur die Datei und ihr Beiwerk — nicht, was mit demselben Anfang eine eigene
+        # Aufzeichnung ist (aus Zwischenständen Zusammengefügtes, H88)
+        for datei in zugehoerige_dateien(pfad):
+            datei.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -735,6 +736,20 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
         page.update()
 
     async def verbinden(device_id: str, name: str | None) -> None:
+        """Einmal: Ein zweiter Tipp (Suchergebnis, „Zuletzt verbunden“, Simulator), während
+        der erste Aufbau läuft, legte einen zweiten Messlauf auf denselben Transport (H70)."""
+        lauf_jetzt = state.messlauf
+        if getattr(state, "verbindet", False) or (
+            lauf_jetzt is not None and lauf_jetzt.status.verbindung is Verbindung.VERBINDE
+        ):
+            return
+        state.verbindet = True
+        try:
+            await _verbinden(device_id, name)
+        finally:
+            state.verbindet = False
+
+    async def _verbinden(device_id: str, name: str | None) -> None:
         hinweis_text.value = f"Verbinde mit {name or device_id} …"
         hinweis_text.visible = True
         ring.visible = True
@@ -1453,6 +1468,17 @@ def _live_teil(
             # Die Messdatei schreibt ein Thread (H39: eine 4-h-Datei hielt die Oberfläche
             # an); bis dahin bleibt die Aufnahme im Lauf, nimmt aber nichts mehr auf
             ergebnis = await lauf.aufnahme_stoppen_async(datenverzeichnis())
+        except OSError as fehler:
+            # Speicher voll, Ordner nicht beschreibbar: Die Aufnahme bleibt im Lauf (H24) —
+            # das muss die Person erfahren, sonst sieht der Tipp wirkungslos aus (H63)
+            page.show_dialog(
+                ft.SnackBar(
+                    ft.Text(
+                        f"Nicht gespeichert: {fehler}. Die Aufnahme läuft weiter — noch einmal."
+                    )
+                )
+            )
+            return
         finally:
             stoppt[0] = False
         if nur_messung and e is not None and not e.ende_wenn_alles_fertig:

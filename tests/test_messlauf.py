@@ -462,6 +462,8 @@ async def test_kaputte_wiedergabedatei_beendet_den_strom(tmp_path) -> None:
     ("device_id", "name", "geraet", "adresse"),
     [
         ("E2:B4:CC:3F:08:44", None, "Unbekannt", "E2:B4:CC:3F:08:44"),
+        # H51: „Zuletzt verbunden“ reicht die Adresse als Namen herein
+        ("E2:B4:CC:3F:08:44", "E2:B4:CC:3F:08:44", "Unbekannt", "E2:B4:CC:3F:08:44"),
         ("E2:B4:CC:3F:08:44", "TICKR 1A2B", "TICKR 1A2B", "E2:B4:CC:3F:08:44"),
         (SIM_SYNTH, None, "Unbekannt", None),
     ],
@@ -1179,3 +1181,8 @@ async def test_teile_zusammenfuegen_ergibt_einen_strom(tmp_path) -> None:
     texte = [e["text"] for e in rec.ereignisse]
     assert texte.index("in Teil 1") < texte.index("Teil 2") < texte.index("in Teil 2")
     assert ganz.dauer_s == pytest.approx(teil1.dauer_s + teil2.dauer_s, abs=2.0)
+    # H52: Was dieselbe Zeit enthält, wird nicht aneinandergehängt (Schläge stünden doppelt)
+    with pytest.raises(ValueError, match="überschneiden sich"):
+        teile_zusammenfuegen([ganz.pfad, teil1.pfad])
+    with pytest.raises(ValueError, match="überschneiden sich"):
+        teile_zusammenfuegen([teil1.pfad, teil1.pfad])

@@ -193,6 +193,16 @@ _BMFF_BEHAELTER: Final = frozenset(
 #: Boxen, die zu ``free`` werden — Nutzerdaten, Metadaten, XMP, Ort
 _BMFF_WEG: Final = frozenset({b"udta", b"meta", b"uuid", b"XMP_", b"\xa9xyz", b"loci"})
 _BMFF_ERSTE: Final = frozenset({b"ftyp", b"moov", b"wide", b"free", b"skip", b"mdat", b"pnot"})
+#: **Weißliste** (S22, 10.11.2026): was auf oberster Ebene und im Filmkopf stehen darf —
+#: alles andere (``gps ``, ``cmov`` mit komprimiertem Kopf, Herstellerboxen) kann Ort tragen
+#: und lässt sich nicht sicher leeren, also kommt die Datei nicht ins Paket
+_BMFF_OBEN: Final = frozenset(
+    {b"ftyp", b"moov", b"mdat", b"free", b"skip", b"wide", b"moof", b"mfra", b"sidx", b"styp"}
+)
+_BMFF_MOOV: Final = frozenset({b"mvhd", b"trak", b"mvex", b"iods", b"free", b"skip"})
+#: Spuren, die bleiben dürfen: Bild und Ton. ``text``/``sbtl`` (Koordinaten als Untertitel bei
+#: Drohnen und Dashcams), ``camm``, ``meta`` und alles Unbekannte nicht
+_BMFF_SPUREN: Final = frozenset({b"vide", b"soun"})
 
 
 def _box_kopf(f: BinaryIO, pos: int, ende: int) -> tuple[bytes, int, int]:
@@ -230,7 +240,7 @@ def _handler(f: BinaryIO, anfang: int, ende: int, tiefe: int = 0) -> bytes | Non
     return None
 
 
-def _bmff_flicken(f: BinaryIO, anfang: int, ende: int, tiefe: int = 0) -> None:
+def _bmff_flicken(f: BinaryIO, anfang: int, ende: int, tiefe: int = 0, eltern: bytes = b"") -> None:
     pos = anfang
     while pos + 8 <= ende:
         typ, groesse, kopf = _box_kopf(f, pos, ende)
@@ -243,13 +253,26 @@ def _bmff_flicken(f: BinaryIO, anfang: int, ende: int, tiefe: int = 0) -> None:
                 n = min(rest, 1 << 20)
                 f.write(bytes(n))
                 rest -= n
-        elif typ == b"trak" and _handler(f, pos + kopf, pos + groesse) == b"meta":
+        elif (tiefe == 0 and typ not in _BMFF_OBEN) or (
+            eltern == b"moov" and typ not in _BMFF_MOOV
+        ):
             raise NichtBereinigbar(
-                "Video mit Metadatenspur (zeitgesteuerte Ortsangaben) — bitte ohne Ort aufnehmen "
-                "oder umwandeln"
+                "Video mit unbekanntem Teil (kann Ortsangaben tragen) — bitte umwandeln"
             )
-        elif typ in _BMFF_BEHAELTER and tiefe < 16:
-            _bmff_flicken(f, pos + kopf, pos + groesse, tiefe + 1)
+        elif typ == b"trak" and _handler(f, pos + kopf, pos + groesse) not in _BMFF_SPUREN:
+            raise NichtBereinigbar(
+                "Video mit Daten- oder Textspur (zeitgesteuerte Ortsangaben) — bitte ohne Ort "
+                "aufnehmen oder umwandeln"
+            )
+        elif typ == b"stsd":
+            # Beschreibung der Spur: kein Behälter, kann aber Nutzerdaten eingebettet tragen
+            f.seek(pos + kopf)
+            inhalt = f.read(min(groesse - kopf, 1 << 20))
+            # (``uuid`` zählt hier nicht: Encoder legen dort wenige Bytes Einstellungen ab)
+            if groesse - kopf > 1 << 20 or any(w in inhalt for w in _BMFF_WEG - {b"uuid"}):
+                raise NichtBereinigbar("Video mit Nutzerdaten in der Spurbeschreibung")
+        if typ in _BMFF_BEHAELTER and tiefe < 16:
+            _bmff_flicken(f, pos + kopf, pos + groesse, tiefe + 1, typ)
         pos += groesse
 
 

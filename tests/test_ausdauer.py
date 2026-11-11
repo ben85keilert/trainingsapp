@@ -1376,3 +1376,41 @@ async def test_sportart_nachtraeglich_aendern(daten) -> None:
     # Noch einmal dieselbe Sportart: kein weiterer Eintrag
     sportart_aendern(state, strecke, RAD)
     assert state.strecken.laden(strecke.id).session_entry_id == eintrag.id
+
+
+@pytest.mark.parametrize("zwischenstand_im_training", [False, True])
+async def test_ende_kuerzen_trifft_die_laufende_messung_nicht_den_zwischenstand(
+    daten, zwischenstand_im_training
+) -> None:
+    """H66: Läuft die Messung nach dem Training weiter und gibt es einen Zwischenstand („Bis
+    hier auswerten“), rückt „Ende kürzen“ die Notiz in der **Aufnahme** — in der fertigen
+    Messdatei steht genau ein „Ende“, am neuen Platz (vorher: am alten oder doppelt)."""
+    from hrv_core.recording import laden
+
+    from trainingsapp.config import messungenverzeichnis
+    from trainingsapp.ui.training import nachlauf_der_strecke, training_kuerzen
+    from trainingsapp.ui.views.ausdauer import hrv_zwischenstand
+
+    state, tmp_path = daten
+
+    async def mitte() -> None:
+        await hrv_zwischenstand(state)
+
+    async def kuerzen(strecke) -> None:
+        if not zwischenstand_im_training:
+            await hrv_zwischenstand(state)
+        n = nachlauf_der_strecke(strecke)
+        training_kuerzen(state, strecke, n.vorschlag_s, lauf=state.messlauf)
+
+    await _training(
+        state,
+        tmp_path,
+        punkte=_mit_nachlauf(),
+        hrv_vorher=60,
+        zwischendurch=mitte if zwischenstand_im_training else None,
+        vor_dem_stopp=kuerzen,
+    )
+    (aufnahme,) = state.hrv.alle(state.profil.id)
+    rec = laden(messungenverzeichnis() / aufnahme.file_path)
+    ende = [e["t_wall_s"] for e in rec.ereignisse if e["text"] == "Gehen: Ende"]
+    assert len(ende) == 1 and ende[0] == pytest.approx(960, abs=3)

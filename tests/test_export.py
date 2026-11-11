@@ -38,6 +38,12 @@ def test_zugehoerige_dateien_rohdatei_zuerst_ohne_fremde(tmp_path) -> None:
         "sensor_2026-10-13_081500_atem.json",  # Atemphasen (§15)
         "sensor_2026-10-13_081500_analyzed.json.tmp",  # halbfertig
         "sensor_2026-10-13_091500.json",  # andere Messung
+        # N121: eigene Aufzeichnungen mit demselben Anfang und ihr Beiwerk
+        "sensor_2026-10-13_081500_zwischen.json",
+        "sensor_2026-10-13_081500_zusammen.json",
+        "sensor_2026-10-13_081500_zusammen_analyzed.json",
+        "sensor_2026-10-13_081500_1.json",
+        "sensor_2026-10-13_081500_1_atem.json",
         ".backup_2026-10-13_081500.json",
     ]
     for n in namen:
@@ -248,3 +254,17 @@ def test_atem_beiwerk_geht_als_dateikopie_mit_und_deid_behaelt_es(tmp_path) -> N
     ziele = deid.deidentifizieren(pfad, tmp_path / "deid", mit_beiwerk=True)
     kopie = next(z for z in ziele if z.name == beiwerk.name)
     assert json.loads(kopie.read_text(encoding="utf-8")) == doc
+
+
+def test_zusammengefuegte_aufzeichnung_nimmt_ihr_beiwerk_mit(tmp_path) -> None:
+    """N121, Gegenstück: Für ``…_zusammen.json`` selbst gilt die Regel wie für jede Messung."""
+    for n in ("s_1.json", "s_1_analyzed.json", "s_1_zwischen.json", "s.json", "s_analyzed.json"):
+        (tmp_path / n).write_text("{}", encoding="utf-8")
+    assert [p.name for p in zugehoerige_dateien(tmp_path / "s_1.json")] == [
+        "s_1.json",
+        "s_1_analyzed.json",
+    ]
+    assert [p.name for p in zugehoerige_dateien(tmp_path / "s.json")] == [
+        "s.json",
+        "s_analyzed.json",
+    ]

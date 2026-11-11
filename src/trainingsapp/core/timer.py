@@ -420,7 +420,8 @@ class TimerProfil:
             return None
         einmal = d.get("id") == EINMAL
         teile: list[Teil] = []
-        for t in d.get("teile") or []:
+        roh_teile = d.get("teile")
+        for t in roh_teile if isinstance(roh_teile, list) else []:  # N51: nie eine Ausnahme
             if isinstance(t, dict) and (ab := _abschnitte_lesen(t.get("abschnitte"))):
                 teile.append(Teil(ab, _runden_lesen(t.get("runden")), str(t.get("name") or "")))
         return cls(

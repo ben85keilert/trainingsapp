@@ -206,7 +206,14 @@ def uhr_teile(
 
     def starten(profil: TimerProfil) -> Callable[[], None]:
         def handler() -> None:
-            state.uhr_wahl[schluessel(uebung, item)] = profil.id  # zuletzt gestartet
+            # „Zuletzt gestartet“ nur, wenn es **nicht** die eingestellte Uhr ist: Wer die
+            # Einstellung startet, folgt ihr weiter — ändert sich der Timer danach im Editor,
+            # in „Übung bearbeiten“ oder über „Zuordnen“, startet ▶ den neuen (N55)
+            vorgabe = timer_fuer(uebung, plan, item)
+            if vorgabe is not None and vorgabe.id == profil.id:
+                state.uhr_wahl.pop(schluessel(uebung, item), None)
+            else:
+                state.uhr_wahl[schluessel(uebung, item)] = profil.id
             try:
                 lauf = uebung_lauf.starten(page, state, kontext(profil), _kopie(profil))
             except RuntimeError as fehler:

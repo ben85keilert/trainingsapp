@@ -1646,8 +1646,14 @@ def uebung_bearbeiten(
     karten_zeichnen()
     ziel_variante_zeichnen()
 
+    #: Die neue Übung, **einmal** angelegt: zweimal Speichern (Doppeltipp, Speichern und
+    #: gleich Zurück) schreibt dieselbe Übung, nicht zwei gleichnamige (N82)
+    neue_uebung = Exercise()
+    #: Stand beim Öffnen bzw. beim letzten Speichern — „geändert?“ vergleicht dagegen
+    ausgang: dict[str, Any] = {}
+
     def eingelesen() -> Exercise:
-        ziel = uebung if uebung is not None else Exercise()
+        ziel = uebung if uebung is not None else neue_uebung
         ziel.name = (name.value or "").strip()
         ziel.typen = typen_lesen()
         ziel.category = ziel.typen[0] if ziel.typen else ""
@@ -1735,6 +1741,9 @@ def uebung_bearbeiten(
         for alt, neu_ in umbenennen:
             state.sitzungen.variante_umbenennen(state.profil.id, ziel.id, alt, neu_)
         umbenennen.clear()
+        ausgang["stand"] = (
+            stand()
+        )  # gespeichert ist der neue Ausgangsstand — Zurück speichert nicht nochmal
         return None
 
     async def speichern() -> None:
@@ -1813,7 +1822,7 @@ def uebung_bearbeiten(
             ),
         ]
 
-    anfang = stand()
+    ausgang["stand"] = stand()
     ansicht = ft.View(
         route=route,
         appbar=formular_leiste(
@@ -1921,7 +1930,9 @@ def uebung_bearbeiten(
             )
         ],
     )
-    return zurueck_speichert(page, ansicht, geaendert=lambda: stand() != anfang, speichern=sichern)
+    return zurueck_speichert(
+        page, ansicht, geaendert=lambda: stand() != ausgang["stand"], speichern=sichern
+    )
 
 
 __all__ = ["KARTE", "SYMBOL_GROESSE", "parameter_name", "spec_bauen", "uebung_bearbeiten"]

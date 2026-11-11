@@ -41,6 +41,10 @@ _EINST_TAKT_S = 5.0
 _DFA_TAKT_S = 10.0
 
 
+#: So alt darf der letzte Schlag sein, damit seine Herzfrequenz noch als „jetzt“ gilt
+HF_FRISCH_S = 10.0
+
+
 class HfLive:
     """Herzfrequenz-Werte eines Messlaufs — eine Instanz je Ansicht, der Zustand im State."""
 
@@ -101,7 +105,10 @@ class HfLive:
             return sum(werte) / len(werte)
         k = self.lauf.live.kennzahlen()
         if k.hf_bpm:
-            return float(k.hf_bpm)
+            # Der letzte Wert des Puffers — nur, solange er frisch ist: Nach Funkstille (Gurt
+            # verrutscht, Verbindung im Wiederaufbau) stünde sonst eine alte Zahl ohne
+            # Kennzeichen da, und der Zielton klänge dazu weiter (H77)
+            return float(k.hf_bpm) if self.punkte(jetzt - HF_FRISCH_S) else None
         return float(self.lauf.status.hf_bpm) if self.lauf.status.hf_bpm else None
 
     def reihe(self, seit_s: float) -> hz.HfReihe:
@@ -143,7 +150,8 @@ class HfLive:
         jetzt = lauf.jetzt_s()
         abschnitt_laeuft = False
         if lauf.aufnahme is not None:
-            self.live_hf.nachfuehren(lauf.aufnahme.beats)
+            kennung = getattr(lauf.aufnahme, "start_mono", None)
+            self.live_hf.nachfuehren(lauf.aufnahme.beats, kennung)
             offen = lauf.offener_abschnitt()
             if offen is not None:
                 von = next((a.von_s for a in lauf.abschnitte() if a.id == offen[0]), None)
@@ -288,7 +296,10 @@ class HfLive:
         einst = self.einst()
         t0 = float(e["t0_s"])
         jetzt = self.lauf.jetzt_s()
-        if jetzt - t0 > einst.messen_bis():
+        # ``jetzt < t0``: die Live-Achse hat neu bei 0 begonnen (Aufnahme gestartet, neu
+        # verbunden) — die Erholung von vorher gilt nicht mehr, sie „liefe“ sonst t0 Sekunden
+        # weiter (H75)
+        if jetzt < t0 or jetzt - t0 > einst.messen_bis():
             self.state.hf_erholung = None
             return None, {}
         erg = hz.hrr_erholung(

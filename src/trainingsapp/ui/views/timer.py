@@ -471,9 +471,10 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         nonlocal profil
         state.timer_einmal_setzen(neu)
         profil = neu
-        if laufend or einheit_ui.besitzt_timer(state, lauf):
-            _in_lauf_uebernehmen(lauf, neu)
-        else:
+        # Name und Schalter immer auch in den Lauf dieser Ansicht: „Start“ nimmt ihn, bis neu
+        # gebaut wird — sonst stünde „Stoppuhr“ statt des Namens in Marken und Titel (N57)
+        _in_lauf_uebernehmen(lauf, neu)
+        if not (laufend or einheit_ui.besitzt_timer(state, lauf)):
             state.timer = None
 
     def mit_name(name: str, in_marken: bool) -> TimerProfil:
@@ -725,6 +726,12 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         padding=16,
         controls=[sicher(inhalt, expand=False)],
     )
+
+
+def _mit_ausfuehrung(profil: TimerProfil) -> bool:
+    """Trägt ein Abschnitt (auch in einem Teil einer Folge) eine Ausführung?"""
+    abschnitte = [*profil.abschnitte, *(a for t in profil.teile for a in t.abschnitte)]
+    return any(a.ausfuehrung for a in abschnitte)
 
 
 def _in_lauf_uebernehmen(lauf: TimerLauf, neu: TimerProfil) -> None:
@@ -1277,6 +1284,14 @@ def timer_bearbeiten_view(
         neu = editor.bauen(profil.id, profil_name)
         if isinstance(neu, str):
             return neu
+        if profil.bibliothek and ziel.nur_hier is not None and _mit_ausfuehrung(neu):
+            # P174: Die Ausführung je Abschnitt gehört zur Übung, ein gemeinsamer Timer trägt
+            # keine — wer in einem zugeordneten Timer eine setzt, bekommt die Kopie für diese
+            # Übung, nie eine Änderung „überall“ (N56)
+            eigene = kopie(neu, kopie_name(neu, ziel.hier))
+            ziel.nur_hier(profil, eigene)
+            gespeichert["name"] = f"{eigene.anzeigename}“ als Kopie für „{ziel.hier or 'hier'}"
+            return None
         orte = ziel.stellen(profil) if ziel.stellen is not None and vorhanden else []
         if len(orte) >= AB_STELLEN and ziel.nur_hier is not None and editor.stand() != anfang:
             name_kopie = kopie_name(neu, ziel.hier)

@@ -164,10 +164,18 @@ class TagesfeldRepo:
         if feld is not None and feld.fest:
             raise ValueError(f"„{feld.name}“ ist ein festes Feld — ausschalten statt löschen.")
         stempel = jetzt().isoformat()
+        schon = self.con.execute(
+            "SELECT deleted_at FROM day_field WHERE id = ?", (feld_id,)
+        ).fetchone()
+        if schon is not None and schon["deleted_at"]:
+            # Schon gelöscht (zweiter Tipp, bevor der Dialog zu war): derselbe Stempel — ein
+            # neuer trennte das Feld von seinen Werten, „Rückgängig“ holte es ohne sie
+            # zurück (N85)
+            stempel = str(schon["deleted_at"])
         with transaktion(self.con):
             self.con.execute(
                 "UPDATE day_field SET deleted_at = ?, updated_at = ?, revision = revision + 1 "
-                "WHERE id = ?",
+                "WHERE id = ? AND deleted_at IS NULL",
                 (stempel, stempel, feld_id),
             )
             if mit_werten:

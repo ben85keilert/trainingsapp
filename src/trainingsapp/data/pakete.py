@@ -61,7 +61,13 @@ from typing import Any
 
 from ..core.abgleich import Hinweis, Unterschied, hinweise_lesen, uebernehmen, unterschiede
 from ..core.ergaenzungen import Ergaenzung, mit_ergaenzungen
-from ..core.kurse import Kurs, ablauf_aufloesen, ids_uebernehmen, verweise_aufloesen
+from ..core.kurse import (
+    Kurs,
+    ablauf_aufloesen,
+    eigenes_uebernehmen,
+    ids_uebernehmen,
+    verweise_aufloesen,
+)
 from ..core.models import TAG_REGION, TAG_TYP, Exercise, MediaSource, Plan, PlanItem, jetzt, new_id
 from ..core.pakete import (
     FELDNAMEN,
@@ -943,7 +949,33 @@ class PaketRepo:
         neu angelegt, oder auf den neuen Stand gebracht, wenn die Person sie nicht
         geändert hat (`docs/plan_import_links_plaene.md` §3). Andere Profile bekommen sie
         beim nächsten Start (`plaene_nachlegen`).
+
+        Raises:
+            PaketFehler: auch für alles, was eine Paketdatei sonst auslösen kann (K38: eine
+                Version jenseits von 64 Bit, die Kapitel-ID eines anderen Kurses) — die
+                Transaktion ist dann zurückgerollt; die Aufrufer fangen nur diese Art, eine
+                andere beendete die Update-Prüfung bei jedem Start.
         """
+        try:
+            return self._importieren(
+                inhalt,
+                aktualisieren=aktualisieren,
+                neue_tags_oben=neue_tags_oben,
+                subject_id=subject_id,
+            )
+        except PaketFehler:
+            raise  # hat schon seinen Satz für Menschen
+        except (ValueError, OverflowError, KeyError, TypeError) as fehler:
+            raise PaketFehler(f"Das Paket lässt sich nicht einspielen: {fehler}") from fehler
+
+    def _importieren(
+        self,
+        inhalt: Paketinhalt,
+        *,
+        aktualisieren: bool,
+        neue_tags_oben: bool,
+        subject_id: str | None,
+    ) -> Vorschau:
         vorschau, ziele, staende, kurs_ziele, plan_ziele = self._planen(
             inhalt, aktualisieren=aktualisieren, subject_id=subject_id
         )
@@ -1129,6 +1161,7 @@ class PaketRepo:
             vorschau.plaene[pp.key] = Status.GEAENDERT
             neu = _plan_aus_paketplan(quelle, inhalt.paket.id, subject_id, da, alt=alt)
             neu.id, neu.created_at, neu.aktiv = alt.id, alt.created_at, alt.aktiv
+            eigenes_uebernehmen(neu, alt)  # K35: was das Format nicht kennt, bleibt
             neu.package_standard = soll
             ziele.append(neu)
         return ziele
@@ -1162,6 +1195,8 @@ class PaketRepo:
             quelle, alt.package_id, alt.subject_id, self._vorhandene_uebungen(), alt=alt
         )
         neu.id, neu.created_at, neu.aktiv = alt.id, alt.created_at, alt.aktiv
+        if not hart:
+            eigenes_uebernehmen(neu, alt)  # K35
         neu.package_standard = plan_stand(pp)
         return neu
 
@@ -1346,9 +1381,18 @@ class PaketRepo:
                 staende[u.id] = soll
             if not schreibt:
                 continue
-            if vorschau.status[u.id] == Status.GEAENDERT:
+            # „Wieder installieren“ holt die Übungen aus dem Papierkorb **zurück** (K37): mit
+            # demselben Abgleich wie ein Update — was die Person geändert hat, ihr Symbolbild
+            # und ihre lokalen Fotos bleiben. Hinter dem Grabstein gibt es nichts mehr zu holen.
+            zurueck = (
+                vorschau.status[u.id] == Status.ZURUECK
+                and r is not None
+                and r["purged_at"] is None
+                and self.standard(u.id) is not None
+            )
+            if vorschau.status[u.id] == Status.GEAENDERT or zurueck:
                 alt = repo.laden(u.id, mit_geloeschten=True)
-                if alt is not None and stand(alt) == soll:
+                if alt is not None and stand(alt) == soll and not zurueck:
                     vorschau.status[u.id] = Status.UNVERAENDERT
                     continue
                 if alt is not None:
@@ -1369,7 +1413,7 @@ class PaketRepo:
                             ziel = gemischt_ziel
                             _tags_angleichen(ziel, bekannte)
                             ziel.archived = alt.archived
-                    if stand(ziel) == stand(alt):
+                    if stand(ziel) == stand(alt) and not zurueck:
                         vorschau.status[u.id] = Status.UNVERAENDERT
                         continue
                     _lokales_behalten(ziel, alt)

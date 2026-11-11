@@ -145,19 +145,27 @@ def ziel_setzen(
     (157.0, 155.0)
     >>> ziel_setzen(e, oben=500, unten=10); (e.alarm_bpm, e.ziel_unten_bpm)
     (230.0, 40.0)
+    >>> ziel_setzen(e, oben=40); (e.alarm_bpm, e.ziel_unten_bpm)
+    (42.0, 40.0)
+    >>> ziel_setzen(e, unten=230); (e.alarm_bpm, e.ziel_unten_bpm)
+    (230.0, 228.0)
     """
 
     def klemmen(w: float) -> float:
         return float(min(max(round(w), ALARM_MIN_BPM), ALARM_MAX_BPM))
 
+    # Am Anschlag bleibt der Mindestabstand: die gesetzte Linie weicht selbst zurück, statt
+    # auf der anderen zu liegen (H105: ``oben=40`` ergab 40/40)
     if oben is not None:
         e.alarm_bpm = klemmen(oben)
-        if e.ziel_unten_bpm and e.ziel_unten_bpm > e.alarm_bpm - ZIEL_SPANNE_MIN:
-            e.ziel_unten_bpm = max(ALARM_MIN_BPM, e.alarm_bpm - ZIEL_SPANNE_MIN)
+        if e.ziel_unten_bpm:
+            e.alarm_bpm = max(e.alarm_bpm, ALARM_MIN_BPM + ZIEL_SPANNE_MIN)
+            e.ziel_unten_bpm = min(e.ziel_unten_bpm, e.alarm_bpm - ZIEL_SPANNE_MIN)
     if unten is not None:
         e.ziel_unten_bpm = klemmen(unten)
-        if e.alarm_bpm and e.alarm_bpm < e.ziel_unten_bpm + ZIEL_SPANNE_MIN:
-            e.alarm_bpm = min(ALARM_MAX_BPM, e.ziel_unten_bpm + ZIEL_SPANNE_MIN)
+        if e.alarm_bpm:
+            e.ziel_unten_bpm = min(e.ziel_unten_bpm, ALARM_MAX_BPM - ZIEL_SPANNE_MIN)
+            e.alarm_bpm = max(e.alarm_bpm, e.ziel_unten_bpm + ZIEL_SPANNE_MIN)
             if e.alarm_bpm - e.ziel_unten_bpm < ZIEL_SPANNE_MIN:
                 e.ziel_unten_bpm = e.alarm_bpm - ZIEL_SPANNE_MIN
 

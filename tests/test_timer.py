@@ -215,6 +215,10 @@ def test_profile_round_trip_und_vorlagen() -> None:
     assert timer_profile_lesen("kaputt")[0].id == "vorlage-intervall"
     assert TimerProfil.aus_dict({"abschnitte": [{"name": "x", "dauer_s": 0}]}) is None
     assert TimerProfil.aus_dict({"abschnitte": [{"dauer_s": 5}], "runden": 500}).runden == 99
+    # N51: ``teile`` als Zahl oder Wahrheitswert (kaputtes Paket) — nie eine Ausnahme
+    for kaputt in (5, True, "x", {"a": 1}):
+        gelesen = TimerProfil.aus_dict({"abschnitte": [{"dauer_s": 5}], "teile": kaputt})
+        assert gelesen is not None and gelesen.teile == []
 
 
 def test_zustand_merkt_profile_und_das_zuletzt_benutzte(tmp_path) -> None:

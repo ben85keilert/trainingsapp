@@ -415,6 +415,20 @@ def test_korrektur_ersetzt(welt) -> None:
     assert repo.metriken(ich.id) == [f"{uebung.id}:reps:max", f"{uebung.id}:reps:sum"]
 
 
+def test_zwei_korrekturen_auf_dieselbe_zeile_ergeben_einen_eintrag(welt) -> None:
+    """D19: Ein Formular hält die Zeile von vorhin, inzwischen hing ein Satz an — die zweite
+    Korrektur hängt am gültigen Stand, nicht noch einmal an der alten Zeile."""
+    con, repo, ich, sitzung = welt
+    uebung = _wadenheben(con)
+    alt = repo.eintrag_anlegen(sitzung, uebung, {"reps": [10]})
+    mitte = repo.eintrag_korrigieren(alt.id, {"reps": [10, 12]})
+    neu = repo.eintrag_korrigieren(alt.id, {"reps": [11]})
+
+    assert [e.id for e in repo.eintraege(sitzung.id)] == [neu.id]
+    assert repo.eintrag_kette(neu.id) == [neu.id, mitte.id, alt.id]
+    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:reps:sum")] == [11.0]
+
+
 def test_loeschen_ist_weich_und_nimmt_kennzahlen_mit(welt) -> None:
     con, repo, ich, sitzung = welt
     uebung = _wadenheben(con)

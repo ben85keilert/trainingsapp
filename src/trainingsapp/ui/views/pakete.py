@@ -60,6 +60,7 @@ from trainingsapp.core.pakete import (
     paket_id,
     paket_json,
     paketmedien_in,
+    paketplaene_aus,
     paketplan_aus,
 )
 from trainingsapp.core.paketquelle import DATEI, fremde_identitaet
@@ -1319,7 +1320,7 @@ def paket_export_view(
             version=vorhanden.version if vorhanden else None,
         )
         auswahl_liste = [u for u in uebungen if u.id in gewaehlt]
-        plan_liste = [paketplan_aus(p) for p in plaene if p.id in gewaehlte_plaene]
+        plan_liste = paketplaene_aus(p for p in plaene if p.id in gewaehlte_plaene)
         if not paketmedien_in(auswahl_liste, [], plan_liste):
             await weitergeben(
                 page,

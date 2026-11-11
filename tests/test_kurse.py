@@ -477,3 +477,19 @@ def test_kurs_neu_laden_holt_geloeschte_kapitelplaene_zurueck(con, profil) -> No
     # Wie im Kurs: der Name kommt zurück
     assert repo.kurs_neu_laden(k, profil.id, hart=True) == (2, 0)
     assert repo.kapitel_plaene(ueben.id, profil.id)[0].name == "Kurs: Üben"
+
+
+def test_abgeschlossenes_kapitel_wird_beim_erreichen_nicht_wieder_aktiv(con, profil) -> None:
+    """K39: Freischaltung „frei“ — Kapitel 2 zuerst abgeschlossen (Plan deaktiviert), danach
+    Kapitel 1: das Erreichen von Kapitel 2 aktiviert dessen Plan nicht wieder."""
+    repo, plaene = KursRepo(con), PlanRepo(con)
+    k = kurs_mit_plan(seed_id("liegestuetzen"))
+    repo.speichern(k)
+    lesen, ueben, _ende = k.kapitel
+    repo.starten(k, profil.id)
+    repo.kapitel_erreichen(k, ueben, profil.id)  # frei geöffnet
+    (plan,) = repo.kapitel_plaene(ueben.id, profil.id)
+    repo.kapitel_abschliessen(k, ueben, profil.id)
+    assert not plaene.laden(plan.id).aktiv
+    repo.kapitel_abschliessen(k, lesen, profil.id)  # erreicht Kapitel 2 noch einmal
+    assert not plaene.laden(plan.id).aktiv

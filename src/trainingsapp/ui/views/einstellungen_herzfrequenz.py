@@ -258,8 +258,16 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
             (e for e in state.hf_eintraege() if e.groesse == groesse),
             key=lambda e: (e.datum, e.created_at),
         )
+        # Die sechs jüngsten — dazu immer der geltende und jeder festgesetzte Eintrag: Nur
+        # an der Zeile lässt sich eine Festsetzung lösen (N84)
+        juengste = {p.id for p in alle[-6:]}
+        gezeigt = [
+            p
+            for p in alle
+            if p.id in juengste or p.fest or (geltend is not None and p.id == geltend.id)
+        ]
         verlauf: list[ft.Control] = []
-        for p in reversed(alle[-6:]):
+        for p in reversed(gezeigt):
             gilt = geltend is not None and p.id == geltend.id
             aus_tagesfeld = p.quelle == "tagesfeld"
             knoepfe: list[ft.Control] = [

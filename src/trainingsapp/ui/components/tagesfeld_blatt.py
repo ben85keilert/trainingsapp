@@ -426,6 +426,8 @@ def tagesfeld_blatt(
                 if wert is None:
                     melden("Diesen Wert verstehe ich nicht.")
                     return
+                if zeit_lesen() is None:  # erst die Uhrzeit, dann leeren (N86)
+                    return
                 frei.value = ""
                 eintragen(wert)
 
@@ -531,6 +533,8 @@ def tagesfeld_blatt(
             def los(_e: object = None) -> None:
                 werte_ = lesen()
                 if werte_ is None:
+                    return
+                if zeit_lesen() is None:  # erst die Uhrzeit, dann leeren (N86)
                     return
                 for x in felder:
                     x.value = ""
@@ -644,6 +648,8 @@ def tagesfeld_blatt(
                 text = (neuer_text.value or "").strip()
                 if not text:
                     melden("Erst etwas schreiben.")
+                    return
+                if zeit_lesen() is None:  # erst die Uhrzeit, dann leeren (N86)
                     return
                 neuer_text.value = ""
                 eintragen(None, note=text)

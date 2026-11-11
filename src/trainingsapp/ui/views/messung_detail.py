@@ -1615,6 +1615,12 @@ def _aufbauen(
     def grenzen() -> tuple[float, float]:
         return z.ausschnitt if z.ausschnitt is not None else (0.0, dauer)
 
+    def ausserhalb_des_zuschnitts(a: Abschnitt) -> bool:
+        """Liegt der Abschnitt ganz vor oder hinter dem Zuschnitt?"""
+        von, bis = grenzen()
+        ende = a.bis_s if a.bis_s is not None else dauer
+        return ende <= von or a.von_s >= bis
+
     def werte_von(a: Abschnitt) -> dict[str, Any]:
         """Die Werte auf dem Rechenbereich — mit Kopf und Endteil (Ben, 27.10.2026: „Die
         Rechnungen nehmen Kopf und Ende mit. Keine 3 separaten Bereiche“)."""
@@ -1637,6 +1643,10 @@ def _aufbauen(
 
     def abschnitt_teile(a: Abschnitt) -> list[str]:
         """„Ø HF 72", „RMSSD 35" … — die Werte eines Abschnitts in Kurzform."""
+        if ausserhalb_des_zuschnitts(a):
+            # Der Rechenbereich würde auf den Rand des Zuschnitts geklemmt (mindestens 10 s):
+            # Werte eines fremden Bereichs unter dem Namen dieses Abschnitts (H73)
+            return ["außerhalb des Zuschnitts"]
         w = werte_von(a)
         von, bis = a.rechenbereich(*grenzen())
         teile = [f"Ø HF {zahl(w['mean_bpm'])}", f"RMSSD {zahl(w['rmssd'])}"]

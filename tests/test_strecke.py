@@ -245,3 +245,17 @@ def test_gpx_ist_gueltig_und_in_schemareihenfolge() -> None:
     )
     assert hr is not None and hr.text == "140"
     assert pts[0].find(f"{GPX}extensions") is None
+
+
+def test_rohspur_ohne_ort_kennt_jedes_feld_von_punkt() -> None:
+    """S31: Die Rohspur schreibt nur `FELDER` — jedes Feld von `Punkt` muss dort oder unter
+    `ENTFERNT` stehen. Kommt ein neues dazu, bricht dieser Test, statt dass es still in den
+    Export geht (oder still fehlt)."""
+    from dataclasses import fields
+
+    from trainingsapp.core.bewegung import ENTFERNT, FELDER
+    from trainingsapp.core.strecke import Punkt
+
+    punkt = {f.name for f in fields(Punkt)}
+    assert punkt <= set(FELDER) | set(ENTFERNT)
+    assert not set(FELDER) & set(ENTFERNT)

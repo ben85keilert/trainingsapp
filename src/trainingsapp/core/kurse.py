@@ -721,6 +721,40 @@ def ids_uebernehmen(items: Sequence[PlanItem], alt: Plan | None) -> None:
             planuebung.id = ids.pop(0)
 
 
+def eigenes_uebernehmen(neu: Plan, alt: Plan) -> None:
+    """Was die Person am Plan eingestellt hat und das Paketformat **nicht kennt**, wandert vom
+    bisherigen Plan in den neu gebauten (K35) — sonst setzte jedes Update eines Paketplans,
+    „Fehlendes zurückholen“ und „Kurs neu laden“ es still zurück: je Planübung (gleiche ID)
+    Timer, eigene Chips, Notiz, Eingabeart und lokale Medien; am Plan Takt, Workout-Schalter
+    und ein harter Übergang, den die Person selbst gesetzt hat. Was das Format kennt, gleicht
+    `core.pakete.plan_abgleichen` ab. Nicht für „Auf Paketstand“ — dort gilt ganz das Paket.
+
+    >>> alt = Plan(workout=True, uebergang_hart=True, items=[
+    ...     PlanItem(id="p1", exercise_id="a", timer={"modus": "aus"}, quick={"reps": [8]})])
+    >>> neu = Plan(items=[PlanItem(id="p1", exercise_id="a"), PlanItem(exercise_id="b")])
+    >>> eigenes_uebernehmen(neu, alt)
+    >>> neu.items[0].timer, neu.items[0].quick, neu.items[1].timer, neu.workout
+    ({'modus': 'aus'}, {'reps': [8]}, {}, True)
+    >>> neu.uebergang_hart
+    True
+    """
+    vorher = {i.id: i for i in alt.items}
+    for planuebung in neu.items:
+        war = vorher.get(planuebung.id)
+        if war is None:
+            continue
+        planuebung.timer = dict(war.timer)
+        planuebung.quick = {k: list(v) for k, v in war.quick.items()}
+        planuebung.note, planuebung.input_mode = war.note, war.input_mode
+        planuebung.media = [
+            *planuebung.media,
+            *[m for m in war.media if m.source == MediaSource.LOCAL],
+        ]
+    neu.takt, neu.workout = alt.takt, alt.workout
+    if alt.uebergang_hart != alt.weiter_automatisch:  # selbst gesetzt, nicht aus dem Paket
+        neu.uebergang_hart = alt.uebergang_hart
+
+
 def plan_aus_vorlage(
     vorlage: PlanVorlage,
     kapitel: Kapitel,
@@ -849,6 +883,7 @@ __all__ = [
     "bedingung_stand",
     "bedingung_text",
     "begonnen",
+    "eigenes_uebernehmen",
     "fehlt_text",
     "fortschritt_text",
     "ids_uebernehmen",

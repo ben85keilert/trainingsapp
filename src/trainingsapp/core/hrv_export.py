@@ -153,6 +153,12 @@ def diagnose_text(kopf: Mapping[str, object], zeilen: Iterable[str]) -> str:
     return "\n".join([*kopfzeilen, "", *zeilen]) + "\n"
 
 
+#: Was hinter ``sensor_<ts>_`` eine **eigene Aufzeichnung** anzeigt, kein Beiwerk (N121):
+#: Zwischenstand, Zusammengefügtes und der Zähler von `hrv_core.recording.freier_pfad`
+#: (gleiche Startsekunde) — samt deren eigenem Beiwerk (``…_zusammen_analyzed.json``)
+_EIGENE = re.compile(r"(zusammen|zwischen|\d+)(_|\.json$)")
+
+
 def zugehoerige_dateien(rec_pfad: Path) -> list[Path]:
     """Die Rohdatei und alles, was an ihrem Stamm hängt — nur vorhandene Dateien.
 
@@ -160,7 +166,9 @@ def zugehoerige_dateien(rec_pfad: Path) -> list[Path]:
     ``_ppg.json``, ``_truth.json``, ``_diagnose.txt``, ``_mitschnitt.jsonl``,
     ``_atem.json``) und ``sensor_<ts>__c*``.
     Halbfertige ``*.tmp`` und Ordner (``analysis-v3`` von praxis_gui) bleiben
-    außen vor. Die Rohdatei steht vorn, der Rest nach Namen.
+    außen vor. Die Rohdatei steht vorn, der Rest nach Namen. **Andere Aufzeichnungen**
+    mit demselben Anfang (``…_zwischen.json``, ``…_zusammen.json``, ``…_1.json``) und ihr
+    Beiwerk gehören nicht dazu — wer Teil 1 teilt, gäbe sonst die ganze Messung mit hinaus.
     """
     rec_pfad = Path(rec_pfad)
     ordner = rec_pfad.parent
@@ -172,7 +180,10 @@ def zugehoerige_dateien(rec_pfad: Path) -> list[Path]:
         for p in ordner.iterdir()
         if p.is_file()
         and not p.name.endswith(".tmp")
-        and (p.name == rec_pfad.name or p.name.startswith(praefix))
+        and (
+            p.name == rec_pfad.name
+            or (p.name.startswith(praefix) and not _EIGENE.match(p.name[len(praefix) :]))
+        )
     ]
     return sorted(treffer, key=lambda p: (p.name != rec_pfad.name, p.name))
 

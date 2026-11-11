@@ -29,8 +29,9 @@ from .ablauf import Ablauf, Kante, Lage
 KNOTEN = 64
 #: Abstand zweier Spalten
 SPALTE = 140
-#: Abstand zweier Ebenen — lang genug für Stamm, Abzweig, Wege und ihre Griffe
-EBENE = 264
+#: Abstand zweier Ebenen — Platz für Beschriftung, Abzweig, Wege und ihre Griffe, aber nicht
+#: mehr (Ben, 10.11.2026: 264 war zu lang)
+EBENE = 190
 RAND = 24
 #: links mehr Platz: Schleifen und „◀ zurück“ liegen links am Knoten
 RAND_X = 108
@@ -39,9 +40,14 @@ FRAGE_B = 120
 FRAGE_H = 66
 #: Breite der Beschriftung unter einem Übungsbild
 NAME_B = SPALTE - 24
-#: so weit unter der Unterkante des Bilds liegt der Abzweig (Name, Beiname, „bei Bedarf“
-#: haben darüber Platz)
-AUSTRITT = 84
+#: so weit unter der **Beschriftung** (Name, Beiname, „bei Bedarf“) liegt der Abzweig — knapp
+#: darunter, nicht in festem Abstand zum Bild (Ben, 10.11.2026)
+AUSTRITT = 12
+#: so weit unter einer Frage liegt ihr Abzweig (sie hat keine Beschriftung darunter)
+AUSTRITT_FRAGE = 20
+#: wo der Griff eines Wegs nach unten auf seiner Kurve liegt — gut zwei Drittel der Höhe, der
+#: Abstand zum Ziel bleibt dabei wie zuvor
+GRIFF_T = 0.72
 #: Höhe der Beschriftung, wenn niemand sie angibt (ein bis zwei Zeilen Name)
 NAME_H = 34.0
 #: Luft um einen Knoten, die ein fremder Weg nicht berührt
@@ -155,7 +161,7 @@ def geometrie(
     >>> g = geometrie(a, {"p": Lage(0.5, 0), "k": Lage(0.0, 1), "r": Lage(1.0, 1)})
     >>> [w.art for w in g.wege], sorted(g.abzweige)
     (['ab', 'ab', 'rueck'], ['k', 'p'])
-    >>> g.abzweige["p"][1] - g.mitten["p"][1] == KNOTEN / 2 + AUSTRITT
+    >>> g.abzweige["p"][1] - g.mitten["p"][1] == KNOTEN / 2 + NAME_H + AUSTRITT
     True
     >>> all(w.kurven[0].p0 == g.abzweige[w.kante.von] for w in g.wege)  # ein Austrittspunkt
     True
@@ -208,8 +214,12 @@ def geometrie(
         if kn not in mitten:
             continue
         x, y = mitten[kn]
-        unten = y + KNOTEN / 2 + AUSTRITT
-        beginn = y + (FRAGE_H / 2 if kn in fragen else KNOTEN / 2 + text_h.get(kn, NAME_H) + 2)
+        if kn in fragen:
+            beginn = y + FRAGE_H / 2
+            unten = beginn + AUSTRITT_FRAGE
+        else:
+            beginn = y + KNOTEN / 2 + text_h.get(kn, NAME_H) + 2
+            unten = y + KNOTEN / 2 + text_h.get(kn, NAME_H) + AUSTRITT
         abzweige[kn] = (x, unten)
         staemme[kn] = ((x, min(beginn, unten - 8)), (x, unten))
 
@@ -259,7 +269,7 @@ def geometrie(
             # selben Knoten an, liegen ihre Griffe gestaffelt und abwechselnd rechts und links
             i = ankommend.get(k.nach, 0)
             ankommend[k.nach] = i + 1
-            griff = beste.bei(max(0.8 - 0.2 * i, 0.4))
+            griff = beste.bei(max(GRIFF_T - 0.2 * i, 0.36))
             wege.append(
                 Weg(k, AB, (beste,), griff, 1 if i % 2 == 0 else -1, (*b, beste.winkel_am_ende()))
             )
@@ -313,7 +323,8 @@ def geometrie(
         + [p[0] for w in wege for kurve in w.kurven for p in (kurve.p0, kurve.p3)]
     )
     breite = rechts + RAND + 120
-    hoehe = RAND + START_H + 22 + ebene_max * EBENE + KNOTEN + AUSTRITT + 80
+    tiefster = max((p[1] for p in abzweige.values()), default=0.0)
+    hoehe = max(RAND + START_H + 22 + ebene_max * EBENE + KNOTEN + NAME_H + AUSTRITT, tiefster) + 80
     return Geometrie(mitten, abzweige, staemme, tuple(wege), breite, hoehe, x_min)
 
 

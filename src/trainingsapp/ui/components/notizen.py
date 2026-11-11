@@ -236,6 +236,8 @@ class Notizfeld:
         self.offen = offen
         #: ``None`` = keine Eingabe offen, ``-1`` = neue Notiz, sonst Index
         self.bearbeite: int | None = None
+        #: die Notiz, auf die die offene Eingabe zeigt (`_wiederfinden`)
+        self._bearbeitet: dict | None = None
         self.x = 0.0
         self.eingefroren = True
         self.waehlen = False
@@ -317,6 +319,7 @@ class Notizfeld:
             return
         x = zb.x(liste[i])
         self.bearbeite = i
+        self._bearbeitet = self._notiz_bei(i)
         self.x = x if x is not None else self._mitte()
         self.eingefroren = True
         self.waehlen = False
@@ -423,8 +426,32 @@ class Notizfeld:
         self.waehlen = False
         self._aendern(kurve=True)
 
+    def _notiz_bei(self, i: int | None) -> dict | None:
+        liste = self._ereignisse()
+        return liste[i] if i is not None and 0 <= i < len(liste) else None
+
+    def _wiederfinden(self) -> None:
+        """Die offene Eingabe zeigt auf **ihre** Notiz, auch wenn die Liste von außen geändert
+        wurde (Abschnitt gespeichert oder gelöscht, „Rückgängig“, der Timer fügt live Notizen
+        ein): der Index wird über die Notiz selbst nachgeführt; gibt es sie nicht mehr,
+        schließt die Eingabe — sonst überschriebe ✓ die Notiz, die jetzt an der Stelle steht
+        (H72)."""
+        if self.bearbeite is None or self.bearbeite < 0:
+            return
+        ziel = getattr(self, "_bearbeitet", None)
+        if ziel is None or self._notiz_bei(self.bearbeite) is ziel:
+            return
+        liste = self._ereignisse()
+        neu = next((j for j, e in enumerate(liste) if e is ziel), None)
+        if neu is None:  # dieselbe Notiz als neues Objekt (neu gelesen)
+            neu = next((j for j, e in enumerate(liste) if e == ziel), None)
+        self.bearbeite = neu
+        if self.bearbeite is None:
+            self._bearbeitet = None
+
     def uebernehmen(self) -> None:
         """Speichern — neue Notiz anhängen oder die bearbeitete ersetzen."""
+        self._wiederfinden()
         zb = self._zeitbezug()
         text = (self._text.value or "").strip()
         if zb is None or self.bearbeite is None or not text:
@@ -444,6 +471,7 @@ class Notizfeld:
 
     def loeschen(self) -> None:
         """„Löschen“ in der Eingabe: die bearbeitete Notiz — nach Rückfrage."""
+        self._wiederfinden()
         if self.bearbeite is not None and self.bearbeite >= 0:
             self.loeschen_fragen(self.bearbeite)
 
@@ -598,6 +626,7 @@ class Notizfeld:
         self.bearbeite = next(
             (j for j, e in enumerate(self._ereignisse()) if e is bearbeitet), None
         )
+        self._bearbeitet = self._notiz_bei(self.bearbeite)
 
     def uebungen_umschalten(self) -> None:
         self.uebungen_offen = not self.uebungen_offen
@@ -645,6 +674,7 @@ class Notizfeld:
         """Neu aufbauen, z. B. wenn live eine Aufnahme beginnt oder endet."""
         if not self.verfuegbar():
             self.bearbeite = None
+        self._wiederfinden()
         self._aendern()
 
     def tick(self) -> None:

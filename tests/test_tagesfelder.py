@@ -159,6 +159,19 @@ def test_loeschen_mit_werten_und_rueckgaengig(felder, werte, profil) -> None:
     assert [f.name for f in felder.alle(profil.id)] == ["Ibu"]
 
 
+def test_zweimal_loeschen_behaelt_den_stempel(felder, werte, profil) -> None:
+    """N85: Doppeltipp auf „Ausführen“ — „Rückgängig“ holt das Feld **mit** seinen Einträgen."""
+    ibu = _ibu(profil)
+    felder.speichern(ibu)
+    werte.hinzufuegen(ibu, TAG, _um(8), wert=1, variante="400")
+    erster = felder.loeschen(ibu.id, mit_werten=True)
+    zweiter = felder.loeschen(ibu.id, mit_werten=True)
+    assert zweiter == erster
+    felder.loeschen_rueckgaengig(ibu.id, zweiter)
+    assert len(werte.zwischen(profil.id, None, None)) == 1
+    assert [f.name for f in felder.alle(profil.id)] == ["Ibu"]
+
+
 def test_zwischen_und_tage_mit_werten(felder, werte, profil) -> None:
     ibu = _ibu(profil)
     felder.speichern(ibu)

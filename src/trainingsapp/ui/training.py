@@ -25,6 +25,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -390,9 +391,12 @@ def _hrv_kuerzen(state: Any, strecke: Strecke, bis_t: float, lauf: Any) -> str:
         return ""
     einheit_id = strecke.einheit_id
     aufnahme = getattr(lauf, "aufnahme", None) if lauf is not None else None
-    if aufnahme is not None and bezug.aufnahme is None:
+    zwischenstand = re.search(rf"{ZWISCHEN_ZUSATZ}(_\d+)?$", bezug.pfad.stem) is not None
+    if aufnahme is not None and (bezug.aufnahme is None or zwischenstand):
         # Die Messung läuft noch: Die Notiz rückt in der Aufnahme — dieselbe Notiz hält
-        # `Messlauf._grenzen`, das Sidecar beim Speichern folgt ihr von selbst
+        # `Messlauf._grenzen`, das Sidecar beim Speichern folgt ihr von selbst. Auch wenn es
+        # einen Zwischenstand gibt (H66): Dessen Datei ersetzt die ganze Messdatei am Ende —
+        # dort geändert, bliebe „Ende“ in der fertigen Datei am alten Platz oder stünde doppelt
         getroffen = 0
         for e in aufnahme.ereignisse:
             if ist_einheit_ende(e, einheit_id):

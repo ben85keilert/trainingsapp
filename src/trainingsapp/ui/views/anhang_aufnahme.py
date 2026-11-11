@@ -485,6 +485,17 @@ class _Aufnahme:
         self.zeichnen()
 
     async def behalten(self) -> None:
+        """„Behalten“ — einmal: Ein zweiter Tipp, während die Datei noch geschrieben wird
+        (Video: spürbar lang), legte sonst einen zweiten Anhang an (N88)."""
+        if self.daten is None or getattr(self, "_speichert", False):
+            return
+        self._speichert = True
+        try:
+            await self._behalten()
+        finally:
+            self._speichert = False
+
+    async def _behalten(self) -> None:
         if self.daten is None:
             return
         if self.ziel.ist_paketdatei:

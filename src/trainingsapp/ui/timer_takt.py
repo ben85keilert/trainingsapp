@@ -21,6 +21,7 @@ from trainingsapp.core.timer import (
     ENDE,
     WECHSEL,
     Marke,
+    TimerLauf,
     TimerSignale,
     TimerStand,
     klang_fuer,
@@ -183,7 +184,18 @@ def ticker_starten(page: Any, state: AppState) -> None:
         # Ohne Einheit bringt der Ticker den Atemtakt selbst in die Messung (Teil 2)
         verfolger = _verfolger_fuer(state, state.timer)
         try:
+            vorher: TimerLauf | None = None
             while (lauf := state.timer) is not None:
+                if vorher is not None and vorher is not lauf:
+                    # Ein neuer Lauf, ohne dass diese Aufgabe das Ende des alten sah (harter
+                    # Übergang zwischen zwei Abfragen): sein Ende-Signal kommt trotzdem (N58)
+                    if alt is not None and alt.laeuft and vorher.fertig and not vorher.vorwaerts:
+                        signale = state.timer_signale()
+                        ende_klang = klang_fuer(ENDE, vorher.stand(), vorher.profil, signale)
+                        await _melden(state, ENDE, signale, ende_klang)
+                    alt = None
+                    takt_alt = _lage_beim_start(lauf)
+                vorher = lauf
                 if verfolger is None or verfolger.lauf is not lauf:
                     verfolger = _verfolger_fuer(state, lauf)
                 stand = lauf.stand()
@@ -212,6 +224,13 @@ def ticker_starten(page: Any, state: AppState) -> None:
                 for beobachter in list(state.timer_beobachter.values()):
                     with contextlib.suppress(Exception):
                         beobachter()
+                if state.timer is not lauf:
+                    # Während der Signale (Ton, Vibration) hat der nächste Schritt begonnen
+                    # (harter Übergang im Workout) und `ticker_starten` kehrte um, weil diese
+                    # Aufgabe noch lief: mit dem neuen Lauf weitermachen statt zu enden (N58)
+                    alt = None
+                    takt_alt = _lage_beim_start(state.timer)
+                    continue
                 if not stand.laeuft:
                     break
                 if not wach and state.timer_signale().wach:

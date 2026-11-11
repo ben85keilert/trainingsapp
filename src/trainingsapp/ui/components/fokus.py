@@ -19,7 +19,7 @@ from __future__ import annotations
 import contextlib
 import math
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import flet as ft
@@ -514,9 +514,13 @@ class Fokus:
                 self.state.hf_zielton = zielton
         stumm = getattr(self.state, "hf_stumm", None)
         jetzt = time.monotonic()
-        klang = zielton.faellig(
-            hf, e, jetzt, stumm=stumm is not None and jetzt < getattr(stumm, "bis", 0.0)
-        )
+        # Stumm gilt je Messung (wie `ui.hf_live.HfLive.stumm`): „stumm bis Messende“ aus
+        # einer früheren Messung schwiege hier sonst für immer (H101)
+        lauf = getattr(self.state, "messlauf", None)
+        aufnahme = getattr(lauf, "aufnahme", None)
+        kennung = id(aufnahme) if aufnahme is not None else id(lauf)
+        still = stumm is not None and hasattr(stumm, "gilt") and stumm.gilt(jetzt, kennung)
+        klang = zielton.faellig(hf, e, jetzt, stumm=still)
         if klang is None:
             return
         if hasattr(self.page, "run_task"):
@@ -576,7 +580,7 @@ class Fokus:
     ) -> None:
         """Sätze: was zählt, mit der gelaufenen Zeit aus der Zeitleiste — und, zählt der Sensor
         mit, den Wiederholungen je Satz (4.11.2026)."""
-        fertig = {(z.name, z.runde): z for z in gelaufene_zeiten(e.ereignisse)}
+        fertig = {(z.name, z.runde): z for z in gelaufene_zeiten(_seit_dem_schritt(e.ereignisse))}
         gezaehlt = e.teil("zaehlen")
         zaehl = gezaehlt if isinstance(gezaehlt, ZaehlBaustein) and gezaehlt.wdh else None
         zeilen: list[ft.Control] = []
@@ -618,6 +622,17 @@ class Fokus:
         self.saetze_spalte.controls = zeilen or [
             hinweis("Kein Abschnitt zählt — eingetragen wird „gemacht“.")
         ]
+
+
+def _seit_dem_schritt(ereignisse: Sequence[Any]) -> Sequence[Any]:
+    """Die Ereignisse ab dem laufenden Workout-Schritt (dem letzten ``plan/uebung_start``) —
+    ohne Workout alle. `gelaufene_zeiten` hört beim ersten ``timer/ende`` auf; mit der ganzen
+    Einheit zeigte die Satzliste ab dem zweiten Schritt die Zeiten des ersten (N61)."""
+    for n in range(len(ereignisse) - 1, -1, -1):
+        e = ereignisse[n]
+        if getattr(e, "quelle", "") == "plan" and getattr(e, "art", "") == "uebung_start":
+            return ereignisse[n:]
+    return ereignisse
 
 
 __all__ = [

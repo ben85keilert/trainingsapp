@@ -360,3 +360,14 @@ def test_mehrfachfelder_einer_art_und_zaehlt_als(page, state) -> None:
     neu = state.uebungen.laden(u.id)
     assert [f.key for f in neu.result_spec.fields] == ["reps", "hold"]
     assert zaehlt_als([f.key for f in neu.result_spec.fields], neu) == "hold"
+
+
+def test_neue_uebung_zweimal_speichern_legt_eine_an(page, state) -> None:
+    """N82: Doppeltipp auf „Speichern“ oder Speichern und gleich Zurück — eine Übung, und
+    nach dem Speichern gilt das Formular nicht mehr als geändert."""
+    ansicht = uebung_bearbeiten(page, state, None)
+    name = next(x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Name")
+    name.value = "Seitstütz neu"
+    _speichern(ansicht)
+    _speichern(ansicht)
+    assert [u.name for u in state.uebungen.alle()].count("Seitstütz neu") == 1

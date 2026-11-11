@@ -35,6 +35,7 @@ Alles hier rechnet aus **Leistungen** (Zeit, Wiederholungen, Abhaken) — nie au
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Final
@@ -250,6 +251,10 @@ class Stand:
     wdh: int | None = None
     #: die Selbsteinschätzung im Schritt (``skala``) — ``None``: noch nicht gewählt
     skala: float | None = None
+    #: wann welche Zahl erreicht war: ``(Wiederholungen, gelaufene Sekunden)`` je Änderung —
+    #: „Wdh. in einer Zeit“ prüft dagegen, nicht gegen den Augenblick (N48). Leer: nur der
+    #: Augenblick ist bekannt. Von Hand eingetragen steht die Zeit 0 (die Person bestätigt)
+    wdh_bei: tuple[tuple[int, float], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,6 +290,16 @@ def pruefen(b: Bedingung, st: Stand) -> Erfuellung:
     True
     >>> pruefen(Bedingung(SKALA, 6), Stand()).text
     'Skala wählen — erreicht bei 6'
+
+    „Wdh. in einer Zeit“ hält den Erfolg fest (N48): 12 nach 25 s, die Uhr läuft bis 60 s
+
+    >>> in_zeit = Bedingung(WDH_IN_ZEIT, 12, 40)
+    >>> pruefen(in_zeit, Stand(True, 60, 12, wdh_bei=((6, 12.0), (12, 25.0)))).erfuellt
+    True
+    >>> pruefen(in_zeit, Stand(True, 60, 12, wdh_bei=((6, 12.0), (12, 45.0)))).verfehlt
+    True
+    >>> pruefen(in_zeit, Stand(True, 60, 12)).verfehlt
+    True
     """
     if b.art in (KEINE, GEMACHT):
         return Erfuellung(True, "")
@@ -304,8 +319,10 @@ def pruefen(b: Bedingung, st: Stand) -> Erfuellung:
         if st.wdh >= b.n:
             return Erfuellung(True, f"{b.n} Wiederholungen — erfüllt")
         return Erfuellung(False, f"noch {b.n - st.wdh} Wiederholungen")
-    # wdh_in_zeit
-    if st.wdh >= b.n and st.gelaufen_s <= b.sekunden:
+    # wdh_in_zeit: erfüllt bleibt erfüllt — wer die Zahl in der Zeit hatte und den Timer
+    # auslaufen lässt (oder „Fertig“ tippt: die Uhr springt ans Ende), hat es geschafft (N48)
+    rechtzeitig = any(n >= b.n and bei <= b.sekunden for n, bei in st.wdh_bei)
+    if rechtzeitig or (st.wdh >= b.n and st.gelaufen_s <= b.sekunden):
         return Erfuellung(True, f"{b.n} in {sekunden_text(b.sekunden)} — erfüllt")
     if st.gelaufen_s >= b.sekunden or st.zeit_ab:
         return Erfuellung(
@@ -451,7 +468,9 @@ def _zahl(roh: Any) -> float:
         wert = float(roh)
     except (TypeError, ValueError):
         return 0.0
-    return wert if wert == wert else 0.0
+    # Nur endliche Werte: ``1e999`` (unendlich) aus einer Paketdatei ließ `kurztext` werfen —
+    # jede Ansicht, die die Bedingung zeigt, bräche (K40)
+    return wert if math.isfinite(wert) else 0.0
 
 
 __all__ = [

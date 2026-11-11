@@ -1,7 +1,8 @@
 """Der Hook `.claude/hooks/sperre_git_ruff.py` (Ben, 10.11.2026).
 
 Mehrere Sitzungen arbeiten im selben Arbeitsbaum; der Hook sperrt, was fremde Arbeit trifft
-(`git stash`, `git add -A`, `ruff format` über Ordner). Hier steht, was er sperrt und was nicht.
+(`git stash`, `git add -A`, `ruff format` und `ruff check --fix` über Ordner). Hier steht, was
+er sperrt und was nicht.
 """
 
 from __future__ import annotations
@@ -51,6 +52,13 @@ GESPERRT = [
     "uv run --extra desktop ruff format .",
     "python -m ruff format .",
     "cd src && ruff format .",
+    "ruff check --fix",
+    "ruff check --fix .",
+    "ruff check . --fix",
+    "uv run ruff check --fix src tests",
+    "ruff check --fix-only src/",
+    "ruff check --select I --fix .",
+    "ruff check --fix --unsafe-fixes .",
     "git status && git add -A && git commit -m x",
     "git status; git stash",
     "git status\ngit add .",
@@ -81,6 +89,11 @@ ERLAUBT = [
     "uv run ruff check . && uv run ruff format --check .",
     "ruff format --diff src",
     "ruff check .",
+    "ruff check --fix src/a.py",
+    "uv run ruff check --select I --fix src/a.py",
+    "ruff check --fix --diff .",
+    "ruff check --unsafe-fixes .",
+    "ruff check --select E501 src",
     "echo git stash",
     "grep -rn 'git add -A' docs",
     "uv run pytest -k stash",

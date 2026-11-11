@@ -57,8 +57,8 @@ uv run python scripts/pruefe_flet_beispiele.py   # Flet-Skripte des Lernpfads oh
   die Gerätetests (`docs/offene_fragen.md`, Abschnitt 2).
 
 **Parallele Arbeit im selben Baum** (Ben, 10.11.2026 — mehrere Sitzungen oder Subagenten, auch
-in `../hrv-core`): `ruff format` nur auf die eigenen Dateien, nie auf einen ganzen Ordner
-(`ruff format --check .` zum Prüfen bleibt); **nie `git stash`** — es räumt die halbfertige
+in `../hrv-core`): `ruff format` und `ruff check --fix` nur auf die eigenen Dateien, nie auf einen
+ganzen Ordner (`ruff format --check .` und `ruff check .` zum Prüfen bleiben); **nie `git stash`** — es räumt die halbfertige
 Arbeit der anderen mit weg. Wer den Stand ohne die eigene Änderung braucht, nimmt
 `git worktree` oder `git show HEAD:<datei>`. Beim Committen die eigenen Dateien einzeln nennen,
 nie `git add -A`/`.`/Ordner oder `git commit -a`. **Ein Hook erzwingt das** (`.claude/settings.json`

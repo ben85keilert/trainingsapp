@@ -8,7 +8,9 @@ selben Ordner. Gesperrt sind darum
 - ``git add -A``/``--all``/``-u``/``.``/``*`` und ``git add <Ordner>``, ``git commit -a`` —
   nehmen fremde Dateien in den Commit;
 - ``ruff format`` ohne ``--check``/``--diff`` auf einen Ordner oder ohne Pfad — formatiert
-  fremde Dateien um.
+  fremde Dateien um;
+- ``ruff check --fix``/``--fix-only`` ebenso (Ben, 11.11.2026) — ändert fremde Dateien;
+  ``ruff check .`` ohne ``--fix`` und mit ``--diff`` bleibt frei.
 
 Claude Code gibt den Aufruf als JSON auf stdin (``tool_input.command``, ``cwd``); Exit 2 sperrt
 den Befehl, der Text auf stderr geht als Begründung an Claude zurück. Nur stdlib.
@@ -38,6 +40,19 @@ RUFF_MIT_WERT = {
     "--range",
     "--cache-dir",
     "--extension",
+    "--select",
+    "--ignore",
+    "--extend-select",
+    "--extend-ignore",
+    "--per-file-ignores",
+    "--extend-per-file-ignores",
+    "--fixable",
+    "--unfixable",
+    "--extend-fixable",
+    "--output-format",
+    "--output-file",
+    "-o",
+    "--dummy-variable-rgx",
 }
 COMMIT_MIT_WERT = {"-m", "-F", "-C", "-c", "-t", "--message", "--file", "--author", "--date"}
 COMMIT_KURZ_MIT_WERT = set("mFCct")
@@ -124,27 +139,35 @@ def _git(rest: list[str], cwd: str) -> str | None:
 
 
 def _ruff(rest: list[str], cwd: str) -> str | None:
-    if not rest or rest[0] != "format":
+    if not rest or rest[0] not in ("format", "check"):
         return None
+    check = rest[0] == "check"
+    was, tut = ("ruff check --fix", "ändert") if check else ("ruff format", "formatiert")
     pfade: list[str] = []
+    schreibt = not check
     i = 1
     while i < len(rest):
         a = rest[i]
-        if a in ("--check", "--diff", "--help", "-h"):
+        if a in ("--check", "--diff", "--help", "-h") or (check and a == "--no-fix"):
             return None
+        if check and a in ("--fix", "--fix-only"):
+            schreibt = True
         if a in RUFF_MIT_WERT:
             i += 2
             continue
         if a == "-" or not a.startswith("-"):
             pfade.append(a)
         i += 1
+    if not schreibt:
+        return None
     if not pfade:
-        return "ruff format ohne Pfad formatiert den ganzen Ordner. Die eigenen Dateien nennen."
+        return f"{was} ohne Pfad {tut} den ganzen Ordner. Die eigenen Dateien nennen."
+    frei = "ruff check ." if check else "ruff format --check ."
     for p in pfade:
         if p != "-" and _ist_ordner(p, cwd):
             return (
-                f"ruff format auf den Ordner „{p}“ formatiert fremde Dateien um. "
-                "Die eigenen Dateien nennen (ruff format --check . zum Prüfen bleibt frei)."
+                f"{was} auf den Ordner „{p}“ {tut} fremde Dateien. "
+                f"Die eigenen Dateien nennen ({frei} zum Prüfen bleibt frei)."
             )
     return None
 

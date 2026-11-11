@@ -1421,6 +1421,7 @@ def test_werte_je_kilometer_und_dfa_werden_einmal_gerechnet(monkeypatch) -> None
     „mit/ohne Pausen“ und jeder Neuaufbau rechnen DFA-Verlauf und Kilometer nicht noch einmal."""
     from types import SimpleNamespace
 
+    pytest.importorskip("flet")  # die erste CI-Stufe läuft ohne flet
     from trainingsapp.ui.views import ausdauer
 
     gerechnet: list[tuple] = []

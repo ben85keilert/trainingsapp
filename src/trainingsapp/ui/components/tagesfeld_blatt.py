@@ -129,6 +129,9 @@ def tagesfeld_blatt(
     #: Was im aufgeklappten Bearbeiter getippt ist — überlebt jedes `zeichnen()` (Schnellknopf,
     #: Variantenwechsel), solange derselbe Eintrag offen bleibt (N120)
     entwurf: dict[str, str] = {}
+    #: der offene Bearbeiter, still zu übernehmen, wenn das Blatt schließt — „Zurück
+    #: speichert“ wie bei allen anderen Texten im Blatt (N120); nie beim Neuzeichnen
+    bearbeiter_offen: dict[str, Callable[[], None]] = {}
     #: Die zuletzt hier eingetippte Uhrzeit — Vorlage für den nächsten Eintrag
     zuletzt: dict[str, time | None] = {"uhr": None}
     art = feld.art
@@ -178,25 +181,36 @@ def tagesfeld_blatt(
         with contextlib.suppress(Exception):
             fehler.update()
 
+    melden_laut = melden
+
     def ausstehende_speichern() -> None:
         aktionen = list(ausstehend.values())
         ausstehend.clear()
         for aktion in aktionen:
             aktion()
 
+    def bearbeiter_sichern() -> None:
+        aktionen = list(bearbeiter_offen.values())
+        bearbeiter_offen.clear()
+        for aktion in aktionen:
+            aktion()
+
     async def geschlossen(e: object = None) -> None:
         ausstehende_speichern()
         neuen_text_sichern()
+        bearbeiter_sichern()
         await nachher.bei_schliessen(e)
 
     def fertig(_e: object = None) -> None:
         ausstehende_speichern()
         neuen_text_sichern()
+        bearbeiter_sichern()
         schliessen(blatt)
 
     def feld_oeffnen(_e: object = None) -> None:
         ausstehende_speichern()
         neuen_text_sichern()
+        bearbeiter_sichern()
         if bearbeiten is not None:
             nachher.danach(bearbeiten)
         schliessen(blatt)
@@ -815,7 +829,9 @@ def tagesfeld_blatt(
             else None
         )
 
-        def uebernehmen(_e: object = None) -> None:
+        def uebernehmen(_e: object = None, *, still: bool = False) -> None:
+            # still = beim Schließen des Blatts: Ungültiges wird verworfen, nichts gezeichnet
+            melden = (lambda _t: None) if still else melden_laut
             t = uhrzeit_lesen(zeit_feld.value or "")
             if t is None:
                 melden("Uhrzeit wie 8:30 oder 1845.")
@@ -847,9 +863,20 @@ def tagesfeld_blatt(
             )
             offen["id"] = None
             entwurf.clear()
+            bearbeiter_offen.clear()
             melden("")
             merken()
-            zeichnen()
+            if not still:
+                zeichnen()
+
+        def still_uebernehmen() -> None:
+            geaendert = len(entwurf) > 1 or (
+                wahl is not None and str(wahl.value or "") != w.variante
+            )
+            if geaendert:
+                uebernehmen(still=True)
+
+        bearbeiter_offen["bearbeiter"] = still_uebernehmen
 
         zeile1: list[ft.Control] = [zeit_feld, *(teil_felder or [wert_feld])]
         if wahl is not None:
@@ -880,6 +907,7 @@ def tagesfeld_blatt(
     def aufklapper_zu(_e: object = None) -> None:
         offen["id"] = None
         entwurf.clear()
+        bearbeiter_offen.clear()
         zeichnen()
 
     def liste() -> list[ft.Control]:
@@ -903,6 +931,7 @@ def tagesfeld_blatt(
 
     def teile() -> list[ft.Control]:
         ausstehend.clear()
+        bearbeiter_offen.clear()  # der Bearbeiter meldet sich beim Aufbau neu an
         mitte: list[ft.Control]
         if art == tf.SKALA:
             mitte = skala_teile()

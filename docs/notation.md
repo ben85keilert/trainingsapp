@@ -56,6 +56,7 @@ auf der Kurve.
 ## Einzelwerte
 
 Gewicht `40` oder `40kg`, Strecke `500` (Meter) oder `2km`, Winkel `45`.
+Der Winkel ist nach oben offen (Ben, 11.11.2026): `720` sind zwei Drehungen.
 Dezimalzahlen mit Punkt oder Komma, `12,5` wird 12.5.
 
 **Skala:** Standard `0` bis `10`; jeder Bereich geht, auch negativ (`-5 - 5`)

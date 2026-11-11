@@ -757,6 +757,13 @@ wechseln), N120 (beim Schließen des Blatts geht der offene Bearbeiter weiter ve
 N87 und N123 nicht bestätigt; neu gefunden und behoben: graue Fläche im aufgeklappten
 Tageswert. N70/N71 warten auf Ben. **Offen bleiben 5 „mittel“**, jeweils mit Grund:
 
+**Nachtrag am Abend des 11.11.2026:** Der Rest von **N94** ist entschieden statt behoben —
+der Winkel hat keine obere Grenze mehr (Ben: „Beliebige Winkelangabe, vielleicht 2 Drehungen
+also 720°“; `FELDVORRAT`, `SPEC_WINKEL`). **N112:** Ein festes Feld behält seine Art auch ohne
+Einträge. **N120:** Der offene Bearbeiter wird beim Schließen des Blatts still übernommen
+(Ungültiges verfällt). **H58:** auch in hrv-core (`zusammenfuegen`: `atmung` nur bei
+Gleichstand aller Teile, `ecg_aufzeichnung` immer `false`; dort 1110-14, Rest offen).
+
 - **N62** — Takt und Zählen je Workout-Schritt hängen an der offenen Ansicht: Umbau in den
   Beobachter der Einheit.
 - **N87, N89** — „Textfeld umhängen“: unbestätigt, erst Gerätetest T125.

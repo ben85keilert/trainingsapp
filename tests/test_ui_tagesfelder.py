@@ -636,3 +636,56 @@ def test_feldansicht_messwert_je_einheit_eine_kurve(page, state) -> None:
     texte = _texte(verlauf_tagesfeld_view(page, state, bd.id))
     assert "systolisch / diastolisch · mmHg" in texte and "Puls · bpm" in texte
     assert any(t.startswith("Ø 127/82") for t in texte)  # Kachel: Mittel der Tageswerte
+
+
+def test_offener_bearbeiter_wird_beim_schliessen_uebernommen(page, state) -> None:
+    """N120: „Fertig“ mit aufgeklapptem Bearbeiter übernimmt, was darin geändert wurde —
+    wie alle anderen Texte im Blatt; ohne Änderung wird nichts geschrieben."""
+    f = _felder(state)["schmerz"]
+    state.tageswerte.einmal_setzen(f, state.heute(), wert=3, variante="Knie", zeit=_um(state, 0, 5))
+
+    def oeffnen():
+        blatt = tagesfeld_blatt(page, state, f, state.heute())
+        zeile = next(
+            x
+            for x in _alle(blatt)
+            if isinstance(x, ft.Container)
+            and x.ink
+            and callable(x.on_click)
+            and "00:05" in _texte(x)
+        )
+        zeile.on_click(None)
+        return blatt
+
+    blatt = oeffnen()
+    (vorher,) = state.tageswerte.am_tag(state.profil.id, state.heute())
+    _knopf(blatt, "Fertig").on_click(None)
+    (w,) = state.tageswerte.am_tag(state.profil.id, state.heute())
+    assert (w.id, w.note) == (vorher.id, vorher.note)  # unverändert: keine Korrektur
+
+    blatt = oeffnen()
+    notiz = [x for x in _alle(blatt) if isinstance(x, ft.TextField) and x.label == "Notiz"][-1]
+    notiz.value = "nach dem Lauf"
+    notiz.on_change(SimpleNamespace(control=notiz))
+    _knopf(blatt, "Fertig").on_click(None)
+    (w,) = state.tageswerte.am_tag(state.profil.id, state.heute())
+    assert w.note == "nach dem Lauf"
+
+
+def test_festes_feld_behaelt_seine_art_auch_ohne_eintraege(page, state) -> None:
+    """N112: Ein festes Feld der App (Blutdruck, Ruhepuls …) wechselt die Art nie."""
+    from trainingsapp.ui.views.tagesfelder import tagesfeld_formular_view
+
+    bd = _blutdruck(state)
+    ansicht = tagesfeld_formular_view(page, state, bd.id)
+    assert "Die Art bleibt — das ist ein festes Feld der App." in _texte(ansicht)
+    knopf = next(
+        c
+        for c in _alle(ansicht)
+        if isinstance(c, ft.Container)
+        and c.col == 3
+        and any(getattr(x, "value", None) == tf.ARTEN[tf.JA_NEIN] for x in _alle(c))
+    )
+    knopf.on_click()
+    assert "Die Art bleibt — das ist ein festes Feld der App." in _texte(ansicht)
+    assert state.tagesfelder.laden(bd.id).art == tf.MESSWERT

@@ -434,6 +434,9 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
     form = _Formular.aus(vorhanden) if vorhanden else _Formular()
     anfang = form.stand()
     hat_werte = vorhanden is not None and state.tageswerte.umfang(vorhanden.id)[0] > 0
+    #: Ein festes Feld der App behält seine Art auch ohne Einträge — die Herzfrequenz-Messung
+    #: spricht mit ihm (N112)
+    art_fest = hat_werte or (vorhanden is not None and vorhanden.fest)
     spalte = ft.Column(spacing=14, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
     fehler = ft.Text("", size=12, color=ft.Colors.ERROR, visible=False)
 
@@ -571,7 +574,7 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
     def art_wahl() -> ft.Control:
         def waehler(art: str) -> Callable[[], None]:
             def handler() -> None:
-                if hat_werte:
+                if art_fest:
                     return
                 form.art = art
                 form.schnell = list({tf.ANZAHL: [1], tf.MENGE: [250], tf.DAUER: [600]}.get(art, []))
@@ -593,9 +596,9 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
                 alignment=ft.Alignment.CENTER,
                 bgcolor=ft.Colors.SECONDARY_CONTAINER if art == form.art else None,
                 border=None if art == form.art else ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
-                ink=not hat_werte,
+                ink=not art_fest,
                 on_click=waehler(art),
-                opacity=1 if not hat_werte or art == form.art else 0.4,
+                opacity=1 if not art_fest or art == form.art else 0.4,
                 content=ft.Text(
                     text,
                     size=13,
@@ -612,6 +615,8 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
             teile.append(
                 hinweis("Die Art bleibt — es gibt schon Einträge. Alles andere lässt sich ändern.")
             )
+        elif art_fest:
+            teile.append(hinweis("Die Art bleibt — das ist ein festes Feld der App."))
         return ft.Column(spacing=6, controls=teile)
 
     def kasten(titel: str, zusatz: str, *inhalt: ft.Control) -> ft.Control:

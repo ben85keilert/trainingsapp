@@ -50,7 +50,7 @@ class FieldType(StrEnum):
     # Das Feld für Wiederholungen UND für Haltezeiten — siehe docs/notation.md.
     SET_LIST = "set_list"
     DURATION = "duration"  # Sekunden gesamt, Eingabe als "1:30" oder "90"
-    DEGREES = "degrees"  # Winkel 0–360
+    DEGREES = "degrees"  # Winkel, nach oben offen (720° = zwei Drehungen; Ben, 11.11.2026)
     WEIGHT = "weight"  # kg
     DISTANCE = "distance"  # Meter
     TEXT = "text"
@@ -614,9 +614,7 @@ FELDVORRAT: list[FieldSpec] = [
     FieldSpec("weight", FieldType.WEIGHT, "Gewicht", unit="kg", quick=[5, 10, 20]),
     FieldSpec("distance", FieldType.DISTANCE, "Strecke", unit="m", quick=[500, 1000, 2000]),
     FieldSpec("duration", FieldType.DURATION, "Zeit", unit="s", quick=[300, 600, 1200]),
-    FieldSpec(
-        "angle", FieldType.DEGREES, "Winkel", unit="°", min=0, max=180, quick=[30, 45, 60, 90]
-    ),
+    FieldSpec("angle", FieldType.DEGREES, "Winkel", unit="°", min=0, quick=[30, 45, 60, 90]),
     FieldSpec("scale", FieldType.SCALE, "Skala 0–10", min=0, max=10, step=1, default=0),
     FieldSpec("side", FieldType.CHOICE, "Seite", quick=["links", "rechts", "beide"]),
     FieldSpec("done", FieldType.BOOL, "Vollständig", default=True),
@@ -761,9 +759,7 @@ SPEC_WDH_ODER_HALTEN = ResultSpec(
 SPEC_WINKEL = ResultSpec(
     layout=Layout.SINGLE,
     fields=[
-        FieldSpec(
-            "angle", FieldType.DEGREES, "Winkel", unit="°", min=0, max=180, quick=[30, 45, 60, 90]
-        ),
+        FieldSpec("angle", FieldType.DEGREES, "Winkel", unit="°", min=0, quick=[30, 45, 60, 90]),
     ],
     shorthand="{angle}°",
     chart_metrics=["angle"],

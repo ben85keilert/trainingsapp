@@ -1596,58 +1596,71 @@ def _mit_pause() -> list[Punkt]:
     ]
 
 
-def test_weg_ueber_die_zeit_strich_marker_und_schnitt() -> None:
+def test_weg_ueber_die_zeit_strich_und_ablesung() -> None:
     """Die Kurve trägt die Farben der Karte, die Pause ist ein eigenes (graues) Stück; ein
-    Tipp setzt den Strich: Ablesezeile, Marker auf der Karte und „Hier kürzen …“ folgen."""
+    Tipp setzt den gemeinsamen Strich (`components.abfahren`): Ablesezeile und Hörer folgen."""
     pytest.importorskip("flet")
     import flet as ft
 
     from trainingsapp.core.strecke_farbe import spanne, stuecke
-    from trainingsapp.ui.components.karte_strecke import GanzeStrecke, faerbung_aus
-    from trainingsapp.ui.components.weg_zeit import WegZeit
+    from trainingsapp.ui.components.abfahren import Abfahrkurve, Strich
+    from trainingsapp.ui.components.karte_strecke import faerbung_aus
+    from trainingsapp.ui.components.kurve import kurve
+    from trainingsapp.ui.components.weg_zeit import Ablesung, weg_zeit_reihen
 
     punkte = _mit_pause()
     r = rechnen(punkte, GEHEN)
     st = stuecke(r.teilstuecke, lambda p: p.tempo_ms)
-    faerbung = faerbung_aus(st, "tempo", spanne(st))
-    karte = GanzeStrecke(r.teilstuecke, faerbung=faerbung)
-    geschnitten: list[float] = []
-    herz = {p.t: 120 + int(p.t - punkte[0].t) // 10 for p in punkte}
-    wz = WegZeit(
-        r,
-        punkte,
-        sportart=GEHEN,
-        faerbung=faerbung,
-        karte=karte,
-        herz=herz,
-        kuerzen=geschnitten.append,
-    )
-    assert ft.Colors.GREY_500 in {reihe.farbe for reihe in wz._reihen}  # die Pause
+    reihen = weg_zeit_reihen(r, faerbung_aus(st, "tempo", spanne(st)))
+    assert ft.Colors.GREY_500 in {reihe.farbe for reihe in reihen}  # die Pause
     # Die Zeit läuft nie zurück, der Weg nimmt nie ab — nichts liegt übereinander
-    alle = [p for reihe in wz._reihen for p in reihe.punkte]
+    alle = [p for reihe in reihen for p in reihe.punkte]
     assert all(a[0] <= b[0] and a[1] <= b[1] + 1e-9 for a, b in itertools.pairwise(alle))
     assert alle[-1][0] == pytest.approx(299 / 60, abs=0.01)
     assert alle[-1][1] == pytest.approx(r.distanz_m / 1000, abs=0.01)
-    assert wz.strich_s is None and not wz._schnitt.visible and "Tippen" in wz._text.value
+    assert len(weg_zeit_reihen(r, None)) >= 1  # ohne Färbung: eine Farbe
+    herz = {p.t: 120 + int(p.t - punkte[0].t) // 10 for p in punkte}
+    ablesung = Ablesung(r, punkte, sportart=GEHEN, herz=herz)
+    assert "Tippen" in ablesung.text(None)
+    assert ablesung.text(149.5).startswith("2:29 · 0,18 km · Pause · 13")  # steht
+    assert " /km" in ablesung.text(60.0) and ablesung.text(60.0).endswith(" m")  # mit Höhe
+    # Zwei Kurven, ein Strich: Der Tipp in die eine zeichnet ihn auch in die andere
+    strich = Strich()
+    gebaut: dict[str, list] = {"a": [], "b": []}
+    gehoert: list[float | None] = []
+
+    def kurve_(name: str) -> Abfahrkurve:
+        def bauen(marken):
+            gebaut[name].append(len(marken))
+            return kurve([*reihen, *marken], einheit="km")
+
+        return Abfahrkurve(
+            strich,
+            bauen,
+            x_von=0.0,
+            x_bis=299 / 60,
+            s_aus_x=lambda x: x * 60.0,
+            x_aus_s=lambda s: s / 60.0,
+            text=lambda: ablesung.text(strich.s),
+        )
+
+    a, b = kurve_("a"), kurve_("b")
+    strich.hoeren(lambda: gehoert.append(strich.s))
     # Tipp in die Mitte der Zeichenfläche (Breite 320, links 52 px Achse): halbe Dauer
-    wz._breite_px = 320.0
-    wz._getippt(SimpleNamespace(local_position=SimpleNamespace(x=52 + 134, y=40)))
-    assert wz.strich_s == pytest.approx(149.5, abs=0.5)
-    assert wz._text.value.startswith("2:29 · 0,18 km · Pause · 13")  # steht, HF aus der Messung
-    assert karte._zeiger.radius > 0
-    assert karte._zeiger.coordinates.latitude == pytest.approx(wz.ortung(149.5).lat)
-    assert wz._schnitt.visible
-    wz._schnitt.on_click()
-    assert geschnitten == [wz.strich_s]
-    # In Bewegung steht das Tempo da; ✕ nimmt Strich und Marker weg
-    wz.setzen(60.0)
-    assert " /km" in wz._text.value and "Pause" not in wz._text.value
-    wz._weg.on_click()
-    assert wz.strich_s is None and karte._zeiger.radius == 0 and not wz._schnitt.visible
-    # Ohne `kuerzen` (laufendes Training) gibt es den Schnitt nicht
-    ohne = WegZeit(r, punkte, sportart=GEHEN)
-    ohne.setzen(30.0)
-    assert not ohne._schnitt.visible and len(ohne._reihen) >= 1
+    a._getippt(SimpleNamespace(local_position=SimpleNamespace(x=52 + 134, y=40)))
+    assert strich.s == pytest.approx(149.5, abs=0.5) and gehoert == [strich.s]
+    assert gebaut == {"a": [0, 1], "b": [0, 1]}
+    assert a._text.value == b._text.value and a._text.value.startswith("2:29 · ")
+    assert a._weg.visible and b._weg.visible
+    # Eine zweite Werteachse rechts zählt nicht zur Zeichenfläche
+    b._rechts_px = 52.0
+    assert b.x_unter(320.0 - 52.0) == pytest.approx(299 / 60)
+    # ✕ nimmt den Strich überall weg; `vergessen` löst die Kurven (Neuaufbau der Ansicht)
+    b._weg.on_click()
+    assert strich.s is None and gebaut["a"][-1] == 0 and not a._weg.visible
+    strich.vergessen()
+    strich.setzen(10.0)
+    assert len(gebaut["a"]) == 3
 
 
 async def test_karte_einpassen_zeigt_wieder_die_ganze_strecke() -> None:
@@ -1682,10 +1695,13 @@ async def test_karte_einpassen_zeigt_wieder_die_ganze_strecke() -> None:
     assert leer.karte is None
 
 
-async def test_auswertung_zeigt_weg_ueber_die_zeit_und_schneidet_am_strich(daten) -> None:
-    """Die Auswertung hat die Karte „Weg über die Zeit“; „Hier kürzen …“ öffnet das Blatt
-    „Ende kürzen“ mit der Zeit des Strichs und dem Chip „Strich der Kurve“."""
+async def test_auswertung_strich_marker_und_schere(daten) -> None:
+    """Die Auswertung hat „Weg über die Zeit“; ein Tipp setzt den Strich in allen Kurven und
+    den Marker der Karte. Gekürzt wird über die **Schere der Titelleiste** — das Blatt öffnet
+    sich mit der Zeit des Strichs (Chip „Strich der Kurve“), ohne Strich mit der letzten
+    Bewegung. An der Kurve selbst steht kein Schnitt-Knopf."""
     import flet as ft
+    import flet_map as fm
 
     from trainingsapp.ui.views.ausdauer import ausdauer_detail_view
 
@@ -1696,22 +1712,111 @@ async def test_auswertung_zeigt_weg_ueber_die_zeit_und_schneidet_am_strich(daten
     seite.show_dialog = gezeigt.append
     view = ausdauer_detail_view(seite, state, state.strecken.laden(strecke.id))
     await asyncio.gather(*seite.aufgaben)
-    assert "WEG ÜBER DIE ZEIT" in _texte(view)
-    finger = next(
-        c for c in _alle(view) if isinstance(c, ft.GestureDetector) and c.on_tap_down is not None
+    texte = _texte(view)
+    assert "WEG ÜBER DIE ZEIT" in texte and "HERZFREQUENZ UND TEMPO" in texte
+    assert not any(
+        isinstance(c, ft.TextButton) and c.content == "Hier kürzen …" for c in _alle(view)
     )
-    finger.on_tap_down(SimpleNamespace(local_position=SimpleNamespace(x=52 + 134, y=40)))
-    schnitt = next(
-        c for c in _alle(view) if isinstance(c, ft.TextButton) and c.data == "weg_zeit_kuerzen"
+    schere = next(
+        c
+        for c in view.appbar.actions
+        if isinstance(c, ft.IconButton) and c.icon == ft.Icons.CONTENT_CUT
     )
-    assert schnitt.visible
-    seite.aufgaben.clear()
-    schnitt.on_click()
-    await asyncio.gather(*seite.aufgaben)
-    blatt = next(d for d in gezeigt if isinstance(d, ft.BottomSheet))
+
+    async def blatt_oeffnen() -> ft.BottomSheet:
+        gezeigt.clear()
+        await schere.on_click(None)
+        return next(d for d in gezeigt if isinstance(d, ft.BottomSheet))
+
+    blatt = await blatt_oeffnen()
+    letzte_bewegung = next(c for c in _alle(blatt) if isinstance(c, ft.TextField)).value
+    assert letzte_bewegung.startswith(("14:5", "15:0"))
+    assert not any(
+        isinstance(c, ft.Chip) and c.label.value == "Strich der Kurve" for c in _alle(blatt)
+    )
+    finger = [
+        c for c in _alle(view) if isinstance(c, ft.GestureDetector) and c.data == "abfahrkurve"
+    ]
+    assert len(finger) >= 2  # Weg über die Zeit, Herzfrequenz und Tempo (+ Höhenprofil)
+    finger[0].on_tap_down(SimpleNamespace(local_position=SimpleNamespace(x=52 + 134, y=40)))
+    zeilen = [c.value for c in _alle(view) if isinstance(c, ft.Text) and c.data == "abfahr_text"]
+    assert len(set(zeilen)) == 1 and zeilen[0].startswith("9:5")  # überall dieselbe Stelle
+    zeiger = [
+        m
+        for k in _alle(view)
+        if isinstance(k, fm.Map)
+        for schicht in k.layers
+        if isinstance(schicht, fm.CircleLayer)
+        for m in schicht.circles
+        if m.radius == 8
+    ]
+    assert len(zeiger) == 1  # der Marker der Karte steht
+    blatt = await blatt_oeffnen()
     feld = next(c for c in _alle(blatt) if isinstance(c, ft.TextField))
-    assert feld.value not in ("", "15:00")  # nicht die letzte Bewegung — der Strich
+    assert feld.value.startswith("9:5") and feld.value != letzte_bewegung
     assert any(isinstance(c, ft.Chip) and c.label.value == "Strich der Kurve" for c in _alle(blatt))
+
+
+async def test_auswertung_bestwerte_pausen_verteilung_und_hoehenprofil(daten) -> None:
+    """Ben, 12.11.2026: Bestwerte (Kacheln), Pausen mit Herzfrequenz, Zeit je Tempo und je
+    Herzfrequenz, Höhenprofil über die Strecke — ein Tipp auf Bestwert oder Pause setzt den
+    Strich. Ohne HRV-Aufnahme bleibt das Tempo als eigene Kurve."""
+    import flet as ft
+
+    from trainingsapp.ui.views.ausdauer import ausdauer_detail_view
+
+    state, tmp_path = daten
+    strecke, _ = await _training(state, tmp_path, punkte=_mit_nachlauf())
+    seite = _seite()
+    view = ausdauer_detail_view(seite, state, state.strecken.laden(strecke.id))
+    await asyncio.gather(*seite.aufgaben)
+    texte = _texte(view)
+    for kopf in ("BESTWERTE", "HÖHENPROFIL", "ZEIT JE TEMPO", "ZEIT JE HERZFREQUENZ", "PAUSEN · 1"):
+        assert kopf in texte, kopf
+    assert "Weiteste 5 min" in texte and "Schnellster km" in texte
+    assert "Stand" in texte and any(t.startswith("schneller als ") for t in texte)
+    assert any(t.endswith(" bpm") and "–" in t for t in texte)  # ein HF-Bereich
+    pause = next(c for c in _alle(view) if isinstance(c, ft.Container) and c.data == "pause")
+    zeilen = _texte(pause)
+    assert zeilen[0].startswith("bei 14:5") and zeilen[0].endswith("Pause")
+    assert zeilen[1].startswith("HF ") and "→" in zeilen[1]
+    pause.on_click()
+    ablese = next(c for c in _alle(view) if isinstance(c, ft.Text) and c.data == "abfahr_text")
+    assert ablese.value.startswith("14:5")
+    bestwert = next(c for c in _alle(view) if isinstance(c, ft.Container) and c.data == "bestwert")
+    bestwert.on_click()
+    assert not ablese.value.startswith("14:5")
+    # Runden gibt es auf der Geraden nicht
+    assert "RUNDEN" not in texte
+
+
+async def test_auswertung_ohne_hrv_zeigt_das_tempo_und_runden(daten, monkeypatch) -> None:
+    """Ohne HRV-Aufnahme: die Kurve „Tempo“ (Ben, 12.11.2026: „Zeit-Geschwindigkeit-Kurve
+    auch“). Wer dreimal ums Karree läuft, bekommt die Tabelle „Runden“."""
+    from trainingsapp.ui.views import ausdauer
+    from trainingsapp.ui.views.ausdauer import ausdauer_detail_view
+
+    def kreis(i: int) -> Punkt:  # 400 m Umfang, 2 m/s
+        w = 2 * math.pi * i / 200
+        return Punkt(
+            t=1_000_000.0 + i,
+            lat=LAT0 + 5.72e-4 * (1 - math.cos(w)),
+            lon=LON0 + 9.39e-4 * math.sin(w),
+            genauigkeit_m=4.0,
+            hoehe_m=40.0,
+            tempo_ms=2.0,
+        )
+
+    state, tmp_path = daten
+    strecke, _ = await _training(state, tmp_path, punkte=[kreis(i) for i in range(650)])
+    monkeypatch.setattr(ausdauer, "hrv_bezug", lambda _state, _strecke: None)
+    seite = _seite()
+    view = ausdauer_detail_view(seite, state, state.strecken.laden(strecke.id))
+    await asyncio.gather(*seite.aufgaben)
+    texte = _texte(view)
+    assert "TEMPO" in texte and "HERZFREQUENZ UND TEMPO" not in texte
+    assert "RUNDEN" in texte and "3" in texte and "4 (Rest)" in texte
+    assert "ZEIT JE HERZFREQUENZ" not in texte
 
 
 def test_tiefschlaf_verschiebt_herzschlaege_gegen_ortungen() -> None:

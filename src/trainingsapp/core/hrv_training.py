@@ -22,9 +22,12 @@ from typing import Any, Final
 
 import numpy as np
 from hrv_core.constants import RR_MAX_MS, RR_MIN_MS
+from hrv_core.herzfrequenz import hf_reihe as hf_raster
+from hrv_core.herzfrequenz import intervall_erholung
 from hrv_core.korrektur import Korrigiert
 from hrv_core.nonlinear import compute_dfa_alpha1
 from hrv_core.recording import Recording
+from hrv_core.time_domain import compute_time_domain
 from hrv_core.trends import DFA_MIN_SCHLAEGE, verlauf
 
 from .intervalle import Herz, HerzQuelle
@@ -229,6 +232,64 @@ def hf_reihe(rec: Recording, korr: Korrigiert, schritt_s: float = 5.0) -> list[t
     ]
 
 
+#: Ab so langer Pause (s) steht ihr RMSSD dabei — darunter sind es zu wenige Schläge
+PAUSE_RMSSD_AB_S: Final[float] = 60.0
+
+
+def erholung_in_pause(
+    rec: Recording, korr: Korrigiert, von_s: float, bis_s: float, *, hrv: bool = True
+) -> dict[str, float | None]:
+    """Herzfrequenz und HRV in einer Pause des Trainings (Ben, 12.11.2026: „Pausen: auch
+    interessant für die HF- und HRV-Erholung“) — beschreibend, ohne Wertung.
+
+    ``von_s``/``bis_s``: die Pause auf der Wanduhr der Messdatei. Die Erholung ist die
+    abgelesene aus hrv-core (`intervall_erholung`: Spitze → Ende, beides 5-s-Mittel); der
+    RMSSD der Pause steht ab `PAUSE_RMSSD_AB_S` dabei und nur mit ``hrv`` (EKG-Gurt).
+
+    >>> from hrv_core.recording import Beat
+    >>> from hrv_core.korrektur import anwenden
+    >>> hf = [150.0] * 30 + [150.0 - i * 0.5 for i in range(90)] + [105.0] * 30
+    >>> t, schlaege = 0.0, []
+    >>> while t < 150:
+    ...     rr = 60000 / hf[int(t)]
+    ...     t += rr / 1000
+    ...     schlaege.append(Beat(t, round(rr), round(hf[min(int(t), 149)]), t))
+    >>> rec = Recording(beats=schlaege)
+    >>> w = erholung_in_pause(rec, anwenden(rec, []), 30.0, 120.0)
+    >>> round(w["hf_von"]), round(w["hf_bis"]), round(w["hrr"]), w["rmssd"] is not None
+    (150, 106, 44, True)
+    >>> erholung_in_pause(rec, anwenden(rec, []), 500.0, 600.0)["hf_von"] is None
+    True
+    """
+    wand, rr, _, _ = _felder(rec, korr)
+    leer: dict[str, float | None] = {
+        "hf_von": None,
+        "hf_bis": None,
+        "hrr": None,
+        "x_s": None,
+        "rmssd": None,
+    }
+    gut = np.isfinite(wand) & (rr >= RR_MIN_MS) & (rr <= RR_MAX_MS)
+    um = gut & (wand >= von_s - 10.0) & (wand <= bis_s + 10.0)
+    if int(um.sum()) < 5:
+        return leer
+    ordnung = np.argsort(wand[um], kind="stable")
+    e = intervall_erholung(hf_raster(wand[um][ordnung], rr[um][ordnung]), von_s, bis_s)
+    rmssd: float | None = None
+    if hrv and bis_s - von_s >= PAUSE_RMSSD_AB_S:
+        innen = gut & (wand >= von_s) & (wand <= bis_s)
+        td = compute_time_domain(rr[innen]) or {}
+        wert = td.get("rmssd")
+        rmssd = float(wert) if wert is not None else None
+    return {
+        "hf_von": e.bezug_hf,
+        "hf_bis": e.hf_bis,
+        "hrr": e.hrr,
+        "x_s": e.x_s,
+        "rmssd": rmssd,
+    }
+
+
 def hf_je_zeit(
     rec: Recording, zeiten_s: Sequence[float], fenster_s: float = 5.0
 ) -> dict[float, int]:
@@ -264,6 +325,7 @@ __all__ = [
     "DFA_FENSTER_S",
     "DFA_SCHRITT_S",
     "dfa_verlauf",
+    "erholung_in_pause",
     "herz_aus_messung",
     "hf_je_zeit",
     "hf_reihe",

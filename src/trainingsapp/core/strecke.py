@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import math
 import statistics
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -548,6 +548,40 @@ class StreckenRechner:
         (d1, b1), (d2, b2) = self._staende[i - 1], self._staende[i]
         anteil = (t - t1) / (t2 - t1) if t2 > t1 else 1.0
         return (d1 + (d2 - d1) * anteil, b1 + (b2 - b1) * anteil)
+
+    def zeit_bei(self, distanz_m: float) -> float | None:
+        """Die Ortungszeit, zu der die Strecke ``distanz_m`` zum ersten Mal erreicht ist —
+        die Umkehrung von `stand_bei` (über der Strecke ist die Zuordnung eindeutig);
+        zwischen zwei Ortungen linear. ``None`` ohne Ortung.
+
+        >>> r = StreckenRechner()
+        >>> for i in range(4):
+        ...     _ = r.hinzufuegen(Punkt(100.0 + 10 * i, 52.0 + i * 0.0005, 13.0, 4.0, tempo_ms=5.5))
+        >>> round(r.zeit_bei(83.4), 1), r.zeit_bei(0.0), r.zeit_bei(1e6) == r.letzter.t
+        (115.0, 100.0, True)
+        """
+        if not self._zeiten:
+            return None
+        i = bisect_left([stand[0] for stand in self._staende], distanz_m)
+        if i == 0:
+            return self._zeiten[0]
+        if i == len(self._zeiten):
+            return self._zeiten[-1]
+        t1, t2 = self._zeiten[i - 1], self._zeiten[i]
+        d1, d2 = self._staende[i - 1][0], self._staende[i][0]
+        return t1 + (t2 - t1) * ((distanz_m - d1) / (d2 - d1) if d2 > d1 else 1.0)
+
+    def weg(self) -> list[tuple[float, float]]:
+        """Je angenommener Ortung ihre Zeit und die bis dahin gezählte Strecke (m) — für
+        Pausen, Bestwerte und Runden (`core.strecke_auswertung`).
+
+        >>> r = StreckenRechner()
+        >>> for i in range(3):
+        ...     _ = r.hinzufuegen(Punkt(100.0 + 10 * i, 52.0 + i * 0.0005, 13.0, 4.0, tempo_ms=5.5))
+        >>> [(t, round(d)) for t, d in r.weg()]
+        [(100.0, 0), (110.0, 56), (120.0, 111)]
+        """
+        return [(t, stand[0]) for t, stand in zip(self._zeiten, self._staende, strict=True)]
 
     def splits_mit_rest(self) -> list[Split]:
         """Die vollen Splits und der angefangene letzte (falls ≥ 10 m)."""

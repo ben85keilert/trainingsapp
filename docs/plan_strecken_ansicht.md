@@ -180,6 +180,36 @@ akkumulierte Strecke, die man auch abfahren kann“). Gebaut:
 - **Drift** zwischen Herzfrequenz und Tempo: zwei Uhren (`core/uhrendrift.py`, Katalog H118). Beide Kurven
   rechnen jetzt auf der Uhr der Ortungen; das Tempo steht in der Fenstermitte wie die Herzfrequenz.
 
-Offen (Vorschläge, nicht gebaut): Katalog P193 (Abschnitt live in der Kurve bearbeiten); Ideen zur Auswertung
-stehen in der Antwort vom 12.11.2026 und kommen bei Zustimmung als P-Einträge in den Katalog.
+## 9. Nachtrag 12.11.2026 (abends) — ein Strich für alle Kurven, Auswertungen aus der Strecke
 
+Ben, 12.11.2026: „nimm das hier kürzen direkt bei der Kurve raus und aktiviere das über die Schere oben“;
+einbauen: Höhenprofil (über die Strecke, „weil eindeutige Zuordnung“), Runden, Bestwerte, Pausen („auch
+interessant für die HF- und HRV-Erholung“), Tempo-Verteilung, HF-Verteilung, Zeit-Geschwindigkeit-Kurve.
+
+- **Ein Strich für alle Kurven** (`components/abfahren`: `Strich`, `Abfahrkurve`): Weg über die Zeit,
+  Herzfrequenz und Tempo (Zeit **und** Strecke) und Höhenprofil teilen eine Stelle (Sekunden seit der ersten
+  Ortung); unter jeder steht dieselbe Ablesezeile (`components/weg_zeit.Ablesung`: Zeit · Strecke · Tempo ·
+  Herzfrequenz · Höhe), die Karte setzt ihren Marker. Über der Strecke gilt die **erste** Zeit an dieser
+  Stelle (`StreckenRechner.zeit_bei`).
+- **Kürzen nur über die Schere** der Titelleiste: Steht ein Strich, öffnet sich „Ende kürzen“ mit seiner
+  Zeit (Chip „Strich der Kurve“), sonst mit der letzten Bewegung. An der Kurve steht kein Schnitt-Knopf mehr.
+- **Tempo auch ohne HRV-Aufnahme:** Die Karte heißt dann „Tempo“ (vorher fehlte sie ganz).
+- **Rechnung in `core/strecke_auswertung.py`** (doctests), auf dem Weg des Rechners (`StreckenRechner.weg`):
+  - `hoehenprofil` — Median über sieben Ortungen, ein Punkt je 10 m; Karte „Höhenprofil“ über die Strecke.
+  - `runden` — eine Runde endet, wo die Strecke nach einem Ausflug (> 60 m) wieder näher als 30 m am Start
+    vorbeiführt, mindestens 200 m; Tabelle „Runden“ ab zwei ganzen Runden (Zeit, km, Tempo, Ø HF).
+  - `bestwerte` — schnellster Kilometer (Rad: fünf), weiteste fünf Minuten, längstes Stück ohne Pause;
+    Kacheln, ein Tipp setzt den Strich.
+  - `pausen` — ab 20 s ohne Weg (unabhängig von der Auto-Pause); je Pause wann · wo · wie lang, mit
+    HRV-Aufnahme die Herzfrequenz Spitze → Ende (hrv-core `intervall_erholung`, 5-s-Mittel) und ab einer
+    Minute mit EKG-Gurt der RMSSD der Pause (`core.hrv_training.erholung_in_pause`). Zahlen, keine Wertung.
+  - `zeit_je_stufe` — „Zeit je Tempo“: dieselben Stufen und Farben wie die Karte, dazu „Stand“.
+  - `hf_verteilung` — „Zeit je Herzfrequenz“ in Bereichen von zehn Schlägen (neutral, keine Zonen).
+- **Zeitachse:** Liegen die Uhr des Handys und die des Empfängers mehr als eine Stunde auseinander, zählt
+  die Achse ab der ersten Ortung (`UHREN_ABSTAND_MAX_S`) — sonst läge das Tempo außerhalb der Achse.
+
+Am Rechner gerendert geprüft (Skill `web-fotos`, Test-Training mit fünf Runden und einer Pause): Karte
+einpassen, Strich und Marker, Schere mit der Zeit des Strichs, alle neuen Karten. Gerätetest T131.
+
+Nicht gebaut (Ideen vom 12.11.): Kilometer-Marken und Notizen auf der Karte, Abspielen im Zeitraffer,
+Vergleich mit einem früheren Training derselben Strecke.

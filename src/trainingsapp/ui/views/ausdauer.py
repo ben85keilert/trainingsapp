@@ -47,8 +47,9 @@ import contextlib
 import math
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any, Final
 
@@ -66,6 +67,7 @@ from trainingsapp.core import atem_auswertung as aa
 from trainingsapp.core.forschung import TEMPO_SCHRITT_S, tempo_reihe
 from trainingsapp.core.hrv_training import (
     dfa_verlauf,
+    erholung_in_pause,
     herz_aus_messung,
     hf_reihe,
     werte_zwischen,
@@ -91,7 +93,21 @@ from trainingsapp.core.strecke import (
     rechnen,
     split_laenge_m,
 )
-from trainingsapp.core.strecke_farbe import spanne, stuecke, tempo_s_pro_km
+from trainingsapp.core.strecke_auswertung import (
+    HF_BREITE_BPM,
+    PAUSE_MIN_S,
+    RUNDE_RADIUS_M,
+    Bestwert,
+    Pause,
+    Runde,
+    bestwerte,
+    hf_verteilung,
+    hoehenprofil,
+    pausen,
+    runden_erkennen,
+    zeit_je_stufe,
+)
+from trainingsapp.core.strecke_farbe import gestuft, spanne, stuecke, tempo_s_pro_km
 from trainingsapp.core.training_einstellungen import (
     FAERBUNG_HF,
     FAERBUNG_TEMPO,
@@ -109,6 +125,7 @@ from trainingsapp.devices.messlauf import ZWISCHEN_ZUSATZ
 from trainingsapp.devices.strecke_baustein import StreckeBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.ausrichtung import querformat
+from trainingsapp.ui.components.abfahren import Abfahrkurve, Strich
 from trainingsapp.ui.components.dialoge import Erledigt, Nachher, reste_dialog, schliessen
 from trainingsapp.ui.components.forschung import forschung_fragen
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte, titel
@@ -120,7 +137,7 @@ from trainingsapp.ui.components.karte_strecke import (
     legende,
 )
 from trainingsapp.ui.components.kuerzen import kuerzen_blatt
-from trainingsapp.ui.components.kurve import Reihe, Skala, kurve
+from trainingsapp.ui.components.kurve import ACHSE_PX, Reihe, Skala, kurve
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.tabellen import (
     intervall_tabelle,
@@ -131,9 +148,9 @@ from trainingsapp.ui.components.tabellen import (
     zahl_text,
     zeit_text,
 )
-from trainingsapp.ui.components.weg_zeit import WegZeit
+from trainingsapp.ui.components.weg_zeit import Ablesung, weg_zeit_reihen
 from trainingsapp.ui.components.weitergeben import weitergeben
-from trainingsapp.ui.farben import FARBEN
+from trainingsapp.ui.farben import FARBEN, PAUSE_FARBE, TEMPO_SKALEN
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.training import (
     HrvBezug,
@@ -1128,15 +1145,21 @@ def _tempo_kurz(sportart: str, s_pro_km: float | None) -> str:
 #: Nach Strecke: weniger Weg (m) in ± so vielen Sekunden heißt „steht“
 STAND_FENSTER_S: Final[float] = 5.0
 STAND_WEG_M: Final[float] = 3.0
+#: Weiter (s) liegen die Uhr des Handys und die des Empfängers nicht auseinander — sonst
+#: zählt die Zeitachse ab der ersten Ortung
+UHREN_ABSTAND_MAX_S: Final[float] = 3600.0
 
 WEG_ZEIT_INFO = (
     "Die zurückgelegte Strecke über die Zeit: Je steiler, desto schneller; eine Pause ist "
     "ein waagrechtes Stück. Anders als auf der Karte liegt hier nie etwas übereinander — "
     "auch nicht bei mehreren Runden.\n\n"
     "- **Farben** wie auf der Karte (Tempo oder Herzfrequenz, Einstellungen → Training).\n"
-    "- **Tippen oder ziehen** setzt einen Strich: Darunter stehen Zeit, Strecke, Tempo und "
-    "Herzfrequenz an dieser Stelle, auf der Karte zeigt ein Marker den Ort.\n"
-    "- **„Hier kürzen …“** öffnet „Ende kürzen“ mit der Zeit des Strichs."
+    "- **Tippen oder ziehen** setzt einen Strich — in dieser Kurve, in „Herzfrequenz und "
+    "Tempo“ und im Höhenprofil derselbe. Darunter stehen Zeit, Strecke, Tempo, "
+    "Herzfrequenz und Höhe an dieser Stelle, auf der Karte zeigt ein Marker den Ort.\n"
+    "- **Bestwerte, Runden und Pausen** setzen den Strich per Tipp an ihren Anfang.\n"
+    "- **Die Schere** oben kürzt das Training am Strich (ohne Strich: an der letzten "
+    "Bewegung)."
 )
 
 
@@ -1156,38 +1179,66 @@ def _reihe_mit_naehten(punkte: Sequence[tuple[float, float] | None], farbe: str)
     return Reihe(werte, farbe=farbe, naehte=naehte)
 
 
+@dataclass(frozen=True, slots=True)
+class _Kurve:
+    """Eine Kurve der Auswertung, die sich abfahren lässt (`components.abfahren`)."""
+
+    #: baut die Kurve; bekommt die zusätzlichen Reihen (den Strich)
+    bauen: Callable[[list[Reihe]], ft.Control]
+    x_von: float
+    x_bis: float
+    #: x der Kurve → Ortungszeit (UTC-Sekunden) und zurück
+    t_aus_x: Callable[[float], float | None]
+    x_aus_t: Callable[[float], float | None]
+    #: rechts steht eine zweite Werteachse
+    rechts: bool = False
+
+
 def _hf_tempo_teil(
-    hrv: tuple[Recording, Korrigiert],
+    hrv: tuple[Recording, Korrigiert] | None,
     r: StreckenRechner | None,
     bezug: HrvBezug | None,
     strecke: Strecke,
     e: TrainingEinstellungen,
-) -> ft.Control | None:
+) -> _Kurve | None:
     """Die Kurve „Herzfrequenz und Tempo“ (Ben, 26.10.2026): links Herzfrequenz, rechts
     Tempo, x = Minuten seit Start oder Kilometer (`TrainingEinstellungen.kurve_x`). Kein
-    RR — dafür der Knopf zur HRV-Auswertung."""
-    rec, korr = hrv
-    herz = hf_reihe(rec, korr, 5.0)
-    if not herz:
+    RR — dafür der Knopf zur HRV-Auswertung. **Ohne HRV-Aufnahme** das Tempo allein (Ben,
+    12.11.2026: „Zeit-Geschwindigkeit-Kurve auch“)."""
+    herz: list[tuple[float, float]] = []
+    rec: Recording | None = None
+    if hrv is not None:
+        rec, korr = hrv
+        herz = hf_reihe(rec, korr, 5.0)
+    if not herz and (r is None or r.erste is None):
         return None
     start_utc = strecke.started_at.timestamp()
     if bezug is not None and bezug.beginn_s is not None:
         beginn = bezug.beginn_s
+    elif rec is not None and rec.start_utc:
+        beginn = (strecke.started_at - rec.start_utc).total_seconds()
     else:
-        beginn = (strecke.started_at - rec.start_utc).total_seconds() if rec.start_utc else 0.0
+        beginn = 0.0
     nach_strecke = e.kurve_x == KURVE_STRECKE and r is not None
     # Beide Kurven decken genau das Training ab (Ben, 26.10.2026: die HRV lief vorher
     # und nachher weiter — nach Zeit endete das Tempo weit vor dem rechten Rand, nach
     # Strecke stapelte sich die Herzfrequenz davor bei 0 km und danach beim letzten km,
     # weil `stand_bei` außerhalb der Ortungen den Rand meldet).
-    dauer_s = (
+    dauer_s = max(
         (strecke.ended_at - strecke.started_at).total_seconds()
         if strecke.ended_at is not None
-        else strecke.dauer_s
+        else 0.0,
+        strecke.dauer_s,
     )
     ende_min = dauer_s / 60.0 if dauer_s > 0 else None
     ortung_von = r.erste.t if r is not None and r.erste is not None else None
     ortung_bis = r.letzter.t if r is not None and r.letzter is not None else None
+    # Der Nullpunkt der Zeitachse auf der Uhr der Ortungen: der Start des Trainings — geht
+    # die Uhr des Handys weit neben der des Empfängers, die erste Ortung (sonst läge alles
+    # außerhalb der Achse)
+    null_t = start_utc
+    if ortung_von is not None and abs(ortung_von - start_utc) > UHREN_ABSTAND_MAX_S:
+        null_t = ortung_von
     if nach_strecke and r is not None:
         x_ende: float | None = max(r.distanz_m, strecke.distanz_m) / 1000.0 or None
     else:
@@ -1197,12 +1248,18 @@ def _hf_tempo_teil(
         """Ortungszeit (UTC) → x: Minuten seit Start oder km; außerhalb des Trainings
         ``None``."""
         if not nach_strecke:
-            x = (t - start_utc) / 60.0
+            x = (t - null_t) / 60.0
             return x if x >= 0 and (ende_min is None or x <= ende_min) else None
         if ortung_von is None or ortung_bis is None or not ortung_von <= t <= ortung_bis:
             return None
         stand = r.stand_bei(t) if r is not None else None
         return stand[0] / 1000.0 if stand is not None else None
+
+    def t_aus_x(x: float) -> float | None:
+        """Die Umkehrung für den Strich: über der Strecke die erste Zeit an dieser Stelle."""
+        if not nach_strecke:
+            return null_t + x * 60.0
+        return r.zeit_bei(x * 1000.0) if r is not None else None
 
     def steht(t: float) -> bool:
         """Nach Strecke: In einer Pause kommt kein Weg dazu — alle Werte lägen auf einer
@@ -1221,11 +1278,16 @@ def _hf_tempo_teil(
             and bezug.beginn_s is not None
         ):
             return (w - beginn) / 60.0  # Einheit ohne Versatz der Ortungen: wie bisher
-        t = bezug.wand_zu_ortung(w, rec.start_utc) if bezug is not None else None
-        if t is None and rec.start_utc is not None:
-            t = w + rec.start_utc.timestamp()
+        start = rec.start_utc if rec is not None else None
+        t = bezug.wand_zu_ortung(w, start) if bezug is not None else None
+        if t is None and start is not None:
+            t = w + start.timestamp()
         if t is None:
             return None if nach_strecke else (w - beginn) / 60.0
+        if not nach_strecke and (bezug is None or bezug.verschiebung_s is None):
+            # Über die Startzeiten: Das ist die Uhr des Handys, nicht die des Empfängers
+            x = (t - start_utc) / 60.0
+            return x if x >= 0 and (ende_min is None or x <= ende_min) else None
         if nach_strecke and steht(t):
             return None
         return x_ortung(t)
@@ -1241,11 +1303,10 @@ def _hf_tempo_teil(
             hf_punkte.append((x, bpm))
         elif nach_strecke:
             hf_punkte.append(None)  # Pause oder außerhalb: Naht statt Verbindungslinie
-    reihen = [_reihe_mit_naehten(hf_punkte, FARBEN["hf_rr"])]
-    rechts: Skala | None = None
+    tempo_punkte: list[tuple[float, float] | None] = []
+    tempo_einheit = "km/h" if strecke.sportart == RAD else "min/km"
     if r is not None and r.erste is not None:
         t0 = r.erste.t
-        tempo_punkte: list[tuple[float, float] | None] = []
         for t_s, v in tempo_reihe(r.punkte, -t0):
             if v is None or v < 0.3:
                 tempo_punkte.append(None)
@@ -1256,24 +1317,335 @@ def _hf_tempo_teil(
                 continue
             y = v * 3.6 if strecke.sportart == RAD else 1000.0 / v / 60.0
             tempo_punkte.append((x, y))
+    tempo_linie = _reihe_mit_naehten(tempo_punkte, FARBEN["reihe_2"])
+    mit_hf = any(p is not None for p in hf_punkte)
+    if not mit_hf and not tempo_linie.punkte:
+        return None
+    rechts: Skala | None = None
+    if mit_hf and r is not None and r.erste is not None:
         rechts = Skala(
-            reihen=[_reihe_mit_naehten(tempo_punkte, FARBEN["reihe_2"])],
-            einheit="km/h" if strecke.sportart == RAD else "min/km",
+            reihen=[tempo_linie],
+            einheit=tempo_einheit,
             farbe=FARBEN["reihe_2"],
             spanne_min=2.0,
             schritt_min=0.5,
         )
-    return kurve(
-        reihen,
-        einheit="bpm",
-        hoehe=180,
-        y_spanne_min=20,
-        y_schritt_min=5,
-        rechts=rechts,
-        x_von=0.0,
-        x_bis=x_ende,
-        x_text=lambda x: f"{x:g}".replace(".", ","),
-        x_schritte=(0.5, 1, 2, 5, 10) if nach_strecke else (1, 2, 5, 10, 15, 30, 60),
+    x_schritte = (0.5, 1, 2, 5, 10) if nach_strecke else (1, 2, 5, 10, 15, 30, 60)
+
+    def bauen(marken: list[Reihe]) -> ft.Control:
+        if mit_hf:
+            return kurve(
+                [_reihe_mit_naehten(hf_punkte, FARBEN["hf_rr"]), *marken],
+                einheit="bpm",
+                hoehe=180,
+                y_spanne_min=20,
+                y_schritt_min=5,
+                rechts=rechts,
+                x_von=0.0,
+                x_bis=x_ende,
+                x_text=lambda x: f"{x:g}".replace(".", ","),
+                x_schritte=x_schritte,
+            )
+        return kurve(
+            [tempo_linie, *marken],
+            einheit=tempo_einheit,
+            hoehe=180,
+            y_spanne_min=2.0,
+            y_schritt_min=0.5,
+            farbe=FARBEN["reihe_2"],
+            x_von=0.0,
+            x_bis=x_ende,
+            x_text=lambda x: f"{x:g}".replace(".", ","),
+            x_schritte=x_schritte,
+        )
+
+    return _Kurve(bauen, 0.0, x_ende or 1.0, t_aus_x, x_ortung, rechts=rechts is not None)
+
+
+def _hoehen_teil(r: StreckenRechner, punkte: Sequence[Punkt]) -> _Kurve | None:
+    """Das Höhenprofil über die Strecke (Ben, 12.11.2026: „hier geht x-Achse, weil
+    eindeutige Zuordnung“) — `core.strecke_auswertung.hoehenprofil`."""
+    profil = hoehenprofil(punkte, lambda t: (r.stand_bei(t) or (0.0, 0.0))[0])
+    if len(profil) < 2:
+        return None
+    x_bis = max(r.distanz_m / 1000.0, profil[-1][0], 0.01)
+
+    def bauen(marken: list[Reihe]) -> ft.Control:
+        return kurve(
+            [
+                Reihe(
+                    profil,
+                    farbe=FARBEN["reihe_3"],
+                    flaeche=ft.Colors.with_opacity(0.18, FARBEN["reihe_3"]),
+                ),
+                *marken,
+            ],
+            einheit="m",
+            hoehe=160,
+            y_spanne_min=20,
+            y_schritt_min=5,
+            x_von=0.0,
+            x_bis=x_bis,
+            x_text=lambda x: f"{x:g}".replace(".", ","),
+            x_schritte=(0.1, 0.2, 0.5, 1, 2, 5, 10),
+        )
+
+    def x_aus_t(t: float) -> float | None:
+        stand = r.stand_bei(t)
+        return stand[0] / 1000.0 if stand is not None else None
+
+    return _Kurve(bauen, 0.0, x_bis, lambda x: r.zeit_bei(x * 1000.0), x_aus_t)
+
+
+def _zeile_antippbar(zellen: Sequence[str], tipp: Callable[[], None] | None) -> ft.Control:
+    """Eine Tabellenzeile wie in „Je Kilometer“ — antippbar setzt sie den Strich."""
+    return ft.Container(
+        on_click=(lambda _e=None: tipp()) if tipp is not None else None,
+        border_radius=6,
+        padding=ft.Padding.symmetric(vertical=3),
+        content=ft.Row(
+            spacing=4,
+            controls=[
+                ft.Text(
+                    zelle,
+                    expand=1,
+                    size=13 if tipp is not None else 12,
+                    weight=None if tipp is not None else ft.FontWeight.W_600,
+                    opacity=1.0 if tipp is not None else 0.7,
+                    text_align=ft.TextAlign.RIGHT if j else ft.TextAlign.LEFT,
+                )
+                for j, zelle in enumerate(zellen)
+            ],
+        ),
+    )
+
+
+def _bestwerte_teil(
+    werte: Sequence[Bestwert], sportart: str, zeigen: Callable[[float], None]
+) -> ft.Control:
+    """Kacheln: schnellster Kilometer, weiteste fünf Minuten, längstes Stück ohne Pause —
+    ein Tipp setzt den Strich an den Anfang."""
+
+    def kachel(b: Bestwert) -> ft.Control:
+        if b.art == "strecke":
+            name = "Schnellster km" if b.mass == 1000 else f"Schnellste {b.mass / 1000:g} km"
+            wert, einheit = zeit_text(b.wert), ""
+            dazu = "" if b.mass == 1000 else tempo_text(sportart, b.wert / (b.mass / 1000.0))
+        elif b.art == "zeit":
+            name = f"Weiteste {b.mass / 60:g} min"
+            wert, einheit = km_text(b.wert).removesuffix(" km"), "km"
+            dazu = tempo_text(sportart, b.mass / (b.wert / 1000.0)) if b.wert >= 10 else ""
+        else:
+            name = "Ohne Pause"
+            wert, einheit = km_text(b.wert).removesuffix(" km"), "km"
+            dazu = zeit_text(b.t_bis - b.t_von)
+        return ft.Container(
+            expand=True,
+            padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+            border_radius=12,
+            bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
+            ink=True,
+            data="bestwert",
+            tooltip="Antippen: die Stelle in Kurven und Karte zeigen",
+            on_click=lambda _e=None, b=b: zeigen(b.t_von),
+            content=ft.Column(
+                spacing=0,
+                tight=True,
+                controls=[
+                    ft.Text(name, size=12, opacity=0.7),
+                    ft.Row(
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.END,
+                        controls=[
+                            ft.Text(wert, size=20, weight=ft.FontWeight.W_600),
+                            ft.Text(einheit, size=12, opacity=0.7),
+                        ],
+                    ),
+                    ft.Text(dazu, size=12, opacity=0.7),
+                ],
+            ),
+        )
+
+    return ft.Row(
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+        controls=[kachel(b) for b in werte],
+    )
+
+
+def _runden_teil(
+    runden_: Sequence[Runde],
+    strecke: Strecke,
+    hrv: tuple[Recording, Korrigiert] | None,
+    bezug: HrvBezug | None,
+    zeigen: Callable[[float], None],
+) -> ft.Control:
+    """Die Runden als Tabelle — Zeit, Strecke, Tempo, Ø HF; ein Tipp zeigt ihren Anfang."""
+    tempo_kopf = "km/h" if strecke.sportart == RAD else "/km"
+    kopf = ["Runde", "Zeit", "km", tempo_kopf] + (["Ø HF"] if hrv is not None else [])
+    zeilen: list[ft.Control] = [_zeile_antippbar(kopf, None)]
+    for x in runden_:
+        zellen = [
+            f"{x.nummer}" + (" (Rest)" if x.rest else ""),
+            zeit_text(x.dauer_s),
+            zahl_text(x.distanz_m / 1000, 2),
+            _tempo_kurz(strecke.sportart, x.tempo_s_pro_km),
+        ]
+        if hrv is not None:
+            rec, korr = hrv
+            von, bis = ortung_zu_wand(bezug, rec, x.t_start), ortung_zu_wand(bezug, rec, x.t_ende)
+            hf = _km_werte(rec, korr, von, bis, False)["mean_bpm"] if von and bis else None
+            zellen.append(zahl_text(hf))
+        zeilen.append(_zeile_antippbar(zellen, partial(zeigen, x.t_start)))
+    return ft.Column(spacing=0, controls=zeilen)
+
+
+def _pausen_teil(
+    pausen_: Sequence[Pause],
+    t0: float,
+    hrv: tuple[Recording, Korrigiert] | None,
+    bezug: HrvBezug | None,
+    ekg: bool,
+    zeigen: Callable[[float], None],
+) -> ft.Control:
+    """Die Pausen: wann, wo, wie lang — mit HRV-Aufnahme die Herzfrequenz von der Spitze
+    bis zum Ende der Pause und (ab einer Minute, EKG-Gurt) der RMSSD. Zahlen, keine Wertung."""
+    zeilen: list[ft.Control] = []
+    for p in pausen_:
+        kopf = (
+            f"bei {zeit_text(p.t_von - t0)} · {km_text(p.distanz_m)} · {zeit_text(p.dauer_s)} Pause"
+        )
+        dazu: list[str] = []
+        if hrv is not None:
+            rec, korr = hrv
+            von, bis = ortung_zu_wand(bezug, rec, p.t_von), ortung_zu_wand(bezug, rec, p.t_bis)
+            if von is not None and bis is not None:
+                w = _pause_werte(rec, korr, von, bis, ekg)
+                if w["hf_von"] is not None and w["hf_bis"] is not None:
+                    text = f"HF {round(w['hf_von'])} → {round(w['hf_bis'])} bpm"
+                    ueber_s = w["x_s"] or 0.0
+                    if w["hrr"] is not None and ueber_s >= 10.0:
+                        text += f" (−{round(w['hrr'])} in {zeit_text(ueber_s)})"
+                    dazu.append(text)
+                if w["rmssd"] is not None:
+                    dazu.append(f"RMSSD {zahl_text(w['rmssd'])} ms")
+        zeilen.append(
+            ft.Container(
+                on_click=lambda _e=None, t=p.t_von: zeigen(t),
+                border_radius=6,
+                padding=ft.Padding.symmetric(vertical=4),
+                data="pause",
+                content=ft.Column(
+                    spacing=0,
+                    tight=True,
+                    controls=[
+                        ft.Text(kopf, size=13),
+                        *([ft.Text(" · ".join(dazu), size=12, opacity=0.75)] if dazu else []),
+                    ],
+                ),
+            )
+        )
+    return ft.Column(spacing=0, controls=zeilen)
+
+
+def _pause_werte(
+    rec: Recording, korr: Korrigiert, von: float, bis: float, ekg: bool
+) -> dict[str, float | None]:
+    zettel = _merkzettel(korr)
+    schluessel = ("pause", round(von, 3), round(bis, 3), bool(ekg))
+    if schluessel not in zettel:
+        zettel[schluessel] = erholung_in_pause(rec, korr, von, bis, hrv=ekg)
+    werte: dict[str, float | None] = zettel[schluessel]
+    return werte
+
+
+def _balken(zeilen: Sequence[tuple[str, float, str]]) -> ft.Control:
+    """Waagrechte Balken „Name · Balken · Minuten“ — die Länge nach dem größten Wert."""
+    groesster = max((s for _, s, _ in zeilen), default=0.0) or 1.0
+    aus: list[ft.Control] = []
+    for name, sekunden, farbe in zeilen:
+        voll = max(round(1000 * sekunden / groesster), 0)
+        aus.append(
+            ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Text(name, size=12, width=108, opacity=0.85),
+                    ft.Row(
+                        expand=True,
+                        spacing=0,
+                        controls=[
+                            *(
+                                [
+                                    ft.Container(
+                                        expand=voll, height=12, bgcolor=farbe, border_radius=3
+                                    )
+                                ]
+                                if voll
+                                else []
+                            ),
+                            *([ft.Container(expand=1000 - voll)] if voll < 1000 else []),
+                        ],
+                    ),
+                    ft.Text(zeit_text(sekunden), size=12, width=52, text_align=ft.TextAlign.RIGHT),
+                ],
+            )
+        )
+    return ft.Column(spacing=4, controls=aus)
+
+
+def _tempo_verteilung(
+    teilstuecke: Sequence[Sequence[Punkt]], e: TrainingEinstellungen, sportart: str
+) -> ft.Control | None:
+    """Zeit je Tempo-Stufe — dieselben Stufen und Farben wie die Karte, dazu der Stand."""
+    st = stuecke(teilstuecke, lambda p: p.tempo_ms)
+    grenzen = spanne(st)
+    if grenzen is None:
+        return None
+    farben = TEMPO_SKALEN.get(e.skala) or TEMPO_SKALEN["tempo"]
+    n = len(farben)
+    sekunden, pause = zeit_je_stufe(gestuft(st, n, grenzen), n)
+    unten, oben = grenzen
+    schritt = (oben - unten) / n
+
+    def tempo(ms: float) -> str:
+        return _tempo_kurz(sportart, tempo_s_pro_km(ms))
+
+    zeilen: list[tuple[str, float, str]] = []
+    for k in reversed(range(n)):  # schnell oben
+        if k == n - 1:
+            name = f"schneller als {tempo(unten + k * schritt)}"
+        elif k == 0:
+            name = f"langsamer als {tempo(unten + schritt)}"
+        elif sportart == RAD:
+            name = f"{tempo(unten + k * schritt)}–{tempo(unten + (k + 1) * schritt)}"
+        else:
+            name = f"{tempo(unten + (k + 1) * schritt)}–{tempo(unten + k * schritt)}"
+        zeilen.append((name, sekunden[k], farben[k]))
+    if pause >= 1:
+        zeilen.append(("Stand", pause, PAUSE_FARBE))
+    return _balken(zeilen)
+
+
+def _hf_verteilung_teil(
+    hrv: tuple[Recording, Korrigiert], bezug: HrvBezug | None, r: StreckenRechner
+) -> ft.Control | None:
+    """Zeit je Herzfrequenz-Bereich von zehn Schlägen — nur die Zeit des Trainings."""
+    rec, korr = hrv
+    if r.erste is None or r.letzter is None:
+        return None
+    von, bis = ortung_zu_wand(bezug, rec, r.erste.t), ortung_zu_wand(bezug, rec, r.letzter.t)
+    if von is None or bis is None:
+        return None
+    reihe_ = [(w, bpm) for w, bpm in hf_reihe(rec, korr, 5.0) if von <= w <= bis]
+    verteilung = hf_verteilung(reihe_, 5.0)
+    if not verteilung:
+        return None
+    return _balken(
+        [
+            (f"{k}–{k + HF_BREITE_BPM - 1} bpm", sekunden, FARBEN["hf_rr"])
+            for k, sekunden in reversed(verteilung)
+        ]
     )
 
 
@@ -1351,6 +1723,8 @@ def ausdauer_detail_view(
     if strecken_pfad is not None and not strecken_pfad.exists():
         strecken_pfad = None
     einst_box: dict[str, TrainingEinstellungen] = {"e": state.training_einstellungen()}
+    #: Die Stelle, die Kurven, Karte und Schere teilen (`components.abfahren`)
+    strich = Strich()
     stillstand_s = STILLSTAND_S if einst_box["e"].auto_pause else math.inf
     bezug = hrv_bezug(state, strecke)
 
@@ -1447,10 +1821,12 @@ def ausdauer_detail_view(
         disabled=not punkte and not (im_thread and strecken_pfad is not None),
     )
 
-    async def ende_kuerzen(_e: object = None, ende_s: float | None = None) -> None:
+    async def ende_kuerzen(_e: object = None) -> None:
         """„Ende kürzen“ (Ben, 28.10.2026): dasselbe Blatt wie beim Speichern — hier immer,
-        vorgeschlagen ist die letzte Bewegung. Lesen und Rechnen im Thread (H80).
-        ``ende_s``: der Strich der Kurve „Weg über die Zeit“ steht schon im Feld."""
+        vorgeschlagen ist die letzte Bewegung. Lesen und Rechnen im Thread (H80). Steht in
+        den Kurven ein Strich, steht seine Zeit im Feld (Ben, 12.11.2026: der Schnitt über
+        die Schere, nicht an der Kurve)."""
+        ende_s = strich.s
         try:
             n = await asyncio.to_thread(nachlauf_der_strecke, strecke, mindestens_s=0.0)
         except (OSError, ValueError):
@@ -1656,17 +2032,35 @@ def ausdauer_detail_view(
                 *([legende_teil] if legende_teil is not None else []),
             ),
         ]
+        strich.vergessen()  # die Kurven des letzten Aufbaus gibt es nicht mehr
+        ablesung: Ablesung | None = None
         if r is not None and r.erste is not None and r.letzter is not None and len(punkte) > 1:
+            ablesung = Ablesung(r, punkte, sportart=strecke.sportart, herz=herz_ort)
+            if strich.s is not None and strich.s > ablesung.dauer_s:
+                strich.s = None  # gekürzt: die Stelle gibt es nicht mehr
             # Weg über die Zeit (Ben, 12.11.2026): Pausen waagrecht, Runden nebeneinander
             # statt übereinander, Farben der Karte; der Strich bewegt den Marker der Karte
-            weg_zeit = WegZeit(
-                r,
-                punkte,
-                sportart=strecke.sportart,
-                faerbung=faerbung,
-                karte=strecken_karte,
-                herz=herz_ort,
-                kuerzen=None if unterwegs else (lambda s: page.run_task(ende_kuerzen, None, s)),
+            weg_reihen = weg_zeit_reihen(r, faerbung)
+            dauer_min = max(ablesung.dauer_s / 60.0, 0.1)
+            weg_kurve = Abfahrkurve(
+                strich,
+                lambda marken: kurve(
+                    [*weg_reihen, *marken],
+                    einheit="km",
+                    hoehe=180,
+                    x_von=0.0,
+                    x_bis=dauer_min,
+                    y_von=0.0,
+                    y_spanne_min=0.2,
+                    y_schritt_min=0.1,
+                    x_text=lambda x: f"{x:g}".replace(".", ","),
+                    x_schritte=(1, 2, 5, 10, 15, 30, 60),
+                ),
+                x_von=0.0,
+                x_bis=dauer_min,
+                s_aus_x=lambda x: x * 60.0,
+                x_aus_s=lambda sek: sek / 60.0,
+                text=lambda: ablesung.text(strich.s) if ablesung is not None else "",
             )
             teile.append(
                 karte(
@@ -1674,7 +2068,66 @@ def ausdauer_detail_view(
                         "Weg über die Zeit",
                         info_knopf(page, "Weg über die Zeit", WEG_ZEIT_INFO),
                     ),
-                    weg_zeit.control,
+                    weg_kurve.control,
+                )
+            )
+
+            def marker_setzen() -> None:
+                stelle = strich.s
+                strecken_karte.zeiger(
+                    ablesung.ortung(stelle) if ablesung is not None and stelle is not None else None
+                )
+
+            strich.hoeren(marker_setzen)
+            marker_setzen()
+
+        def zeigen(t: float) -> None:
+            """Bestwert, Runde oder Pause angetippt: der Strich an ihren Anfang."""
+            if ablesung is not None:
+                strich.setzen(round(max(t - ablesung.t0, 0.0), 1))
+
+        def abfahrbar(k: _Kurve) -> ft.Control:
+            """Eine Kurve mit dem gemeinsamen Strich — ohne Ortungen (Laufband) nur die Kurve."""
+            if ablesung is None:
+                return k.bauen([])
+            a = ablesung
+
+            def s_aus_x(x: float) -> float | None:
+                t = k.t_aus_x(x)
+                return None if t is None else min(max(t - a.t0, 0.0), a.dauer_s)
+
+            return Abfahrkurve(
+                strich,
+                k.bauen,
+                x_von=k.x_von,
+                x_bis=k.x_bis,
+                s_aus_x=s_aus_x,
+                x_aus_s=lambda sek: k.x_aus_t(a.t0 + sek),
+                text=lambda: a.text(strich.s),
+                rechts_px=ACHSE_PX if k.rechts else 0.0,
+            ).control
+
+        weg_liste = r.weg() if r is not None else []
+        beste = bestwerte(weg_liste, split_m=split_laenge_m(strecke.sportart))
+        if beste and ablesung is not None:
+            teile.append(
+                karte(titel("Bestwerte"), _bestwerte_teil(beste, strecke.sportart, zeigen))
+            )
+        rechner = r
+        runden_ = (
+            runden_erkennen(punkte, lambda t: (rechner.stand_bei(t) or (0.0, 0.0))[0])
+            if rechner is not None
+            else []
+        )
+        if sum(1 for x in runden_ if not x.rest) >= 2:
+            teile.append(
+                karte(
+                    titel("Runden"),
+                    _runden_teil(runden_, strecke, hrv, bezug, zeigen),
+                    hinweis(
+                        "Eine Runde endet, wo die Strecke wieder am Start vorbeiführt "
+                        f"(näher als {RUNDE_RADIUS_M:.0f} m)."
+                    ),
                 )
             )
         # Die Abschnitte des Timers, der mitlief (Skizze 6) — aus der Zeitleiste der Einheit
@@ -1708,19 +2161,51 @@ def ausdauer_detail_view(
                     _km_tabelle(strecke, r.splits_mit_rest(), hrv, ekg, bezug, e),
                 )
             )
-        if hrv is not None:
-            hf_teil = _hf_tempo_teil(hrv, r, bezug, strecke, e)
-            if hf_teil is not None:
-                teile.append(
-                    karte(
-                        titel("Herzfrequenz und Tempo", achsenwahl(e)),
-                        hf_teil,
-                        hinweis(
-                            "Herzfrequenz als 5-s-Mittel, Tempo aus dem GPS. RR-Intervalle "
-                            "und Analysefenster: „HRV-Auswertung öffnen“ unten."
-                        ),
-                    )
+        hf_teil = _hf_tempo_teil(hrv, r, bezug, strecke, e)
+        if hf_teil is not None:
+            teile.append(
+                karte(
+                    titel(
+                        "Herzfrequenz und Tempo" if hf_teil.rechts else "Tempo",
+                        achsenwahl(e),
+                    ),
+                    abfahrbar(hf_teil),
+                    hinweis(
+                        "Herzfrequenz als 5-s-Mittel, Tempo aus dem GPS. RR-Intervalle "
+                        "und Analysefenster: „HRV-Auswertung öffnen“ unten."
+                        if hrv is not None
+                        else "Tempo aus dem GPS als 5-s-Mittel; im Stand reißt die Kurve ab."
+                    ),
                 )
+            )
+        hoehen = _hoehen_teil(r, punkte) if r is not None else None
+        if hoehen is not None:
+            teile.append(karte(titel("Höhenprofil"), abfahrbar(hoehen)))
+        tempo_balken = (
+            _tempo_verteilung(r.teilstuecke, e, strecke.sportart) if r is not None else None
+        )
+        if tempo_balken is not None:
+            teile.append(karte(titel("Zeit je Tempo"), tempo_balken))
+        hf_balken = (
+            _hf_verteilung_teil(hrv, bezug, r) if hrv is not None and r is not None else None
+        )
+        if hf_balken is not None:
+            teile.append(karte(titel("Zeit je Herzfrequenz"), hf_balken))
+        pausen_ = pausen(weg_liste)
+        if pausen_ and ablesung is not None:
+            teile.append(
+                karte(
+                    titel(f"Pausen · {len(pausen_)}"),
+                    _pausen_teil(pausen_, ablesung.t0, hrv, bezug, ekg, zeigen),
+                    hinweis(
+                        f"Ab {PAUSE_MIN_S:.0f} s ohne Weg. Mit HRV-Aufnahme: Herzfrequenz von "
+                        "der Spitze bis zum Ende der Pause (5-s-Mittel), ab einer Minute mit "
+                        "EKG-Gurt der RMSSD der Pause."
+                        if hrv is not None
+                        else f"Ab {PAUSE_MIN_S:.0f} s ohne Weg."
+                    ),
+                )
+            )
         if hrv is not None and ekg:
             dfa = _dfa_teil(hrv, strecke.started_at, bezug.beginn_s if bezug else None)
             if dfa is not None:

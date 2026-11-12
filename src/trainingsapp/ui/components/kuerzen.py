@@ -61,8 +61,8 @@ def kuerzen_blatt(
     """Das Blatt: Satz, Feld „Ende bei“, Schnellwahl, was geschieht, „So lassen“ · „Kürzen“.
 
     ``danach`` läuft nach dem Kürzen, wenn das Blatt zu ist (die Auswertung baut sich neu).
-    ``ende_s``: steht statt der letzten Bewegung im Feld — der Strich der Kurve „Weg über
-    die Zeit“ (Ben, 12.11.2026); ein Chip holt ihn zurück.
+    ``ende_s``: steht statt der letzten Bewegung im Feld — der Strich der Kurven der
+    Auswertung (Ben, 12.11.2026); ein Chip holt ihn zurück.
     """
     if ende_s is not None:
         ende_s = min(max(ende_s, 1.0), n.bisher_s)

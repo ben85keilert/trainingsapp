@@ -153,7 +153,7 @@ from trainingsapp.ui.components.planstand import nur_hier, wie_die_uebung
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.skala_regler import skala_regler
 from trainingsapp.ui.components.uebungsbild import uebungsbild
-from trainingsapp.ui.components.uhr import UhrTeile, laufende, uhr_teile
+from trainingsapp.ui.components.uhr import UhrTeile, laufende, uhr_teile, zaehlt_symbol
 from trainingsapp.ui.components.uhr_blatt import uhr_blatt
 from trainingsapp.ui.components.varianten import Variantenwahl, varianten_blatt, zeilenbreite
 from trainingsapp.ui.components.werte import wert_leiste
@@ -1875,6 +1875,22 @@ def plan_view(
                 *([ft.Text(zusatz, size=10, opacity=0.6)] if zusatz else []),
             ],
         )
+        # Wohin die Uhr zählt, steht am Feld (Ben, 12.11.2026): das Uhrensymbol hinter
+        # Haltezeit bzw. Zeit — nicht im Nachtrag, dort gibt es keine Uhr
+        uhr_hier = (
+            zaehlt_symbol(
+                page,
+                state,
+                uebung=katalog[item.exercise_id],
+                plan=None if einzel else plan,
+                item=None if einzel else item,
+                feld=feld.key,
+                name=basis_label(feld),
+            )
+            if nachtrag is None
+            else None
+        )
+        uhr_symbol: list[ft.Control] = [uhr_hier] if uhr_hier is not None else []
         if sensor_zaehlt(item, feld):
             # Entweder die Person oder der Sensor (P122): solange er in dieses Feld zählt,
             # weder Chips noch eigener Wert — ±1 steht an der Zahl
@@ -1889,7 +1905,7 @@ def plan_view(
             return ft.Row(
                 spacing=6,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[name, ft.Container(expand=True, content=frei)],
+                controls=[name, *uhr_symbol, ft.Container(expand=True, content=frei)],
             )
         knoepfe = [
             (("+" if liste else "") + chip_text(feld, q), chip_erlediger(item, feld, q))
@@ -1932,7 +1948,9 @@ def plan_view(
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 ft.Text(kurzname(feld), size=13, weight=ft.FontWeight.W_700),
-                ft.Text(zusatz, size=11, opacity=0.6, expand=True),
+                ft.Text(zusatz, size=11, opacity=0.6),
+                *uhr_symbol,
+                ft.Container(expand=True),
                 *mehr,
             ],
         )

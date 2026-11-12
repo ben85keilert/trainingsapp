@@ -19,9 +19,10 @@ App und ändert keine Einstellung (Ben: „wenn im Übungsfeld ein anderer Timer
 wurde, ändert sich keine Einstellung“); gespeichert wird nur in Übung bzw. Planübung.
 Ob die Uhr überhaupt dasteht, sagt `core.uebung_timer.uhr_an`.
 
-Ben, 22.10.2026 (P79, Skizzen D1–D4): Neben der Zeit steht der kleine Knopf **„zählt“** — ob
-die Timerzeit als Haltezeit bzw. Zeit in den offenen Eintrag geht; er gilt für jetzt
-(`AppState.uhr_zaehlt`), die Vorgabe kommt aus der Übung (`Exercise.zeit_zaehlt`). Ein **Tipp
+Ben, 22.10.2026 (P79, Skizzen D1–D4): **„zählt“** — ob die Timerzeit als Haltezeit bzw. Zeit
+in den offenen Eintrag geht — gilt für jetzt (`AppState.uhr_zaehlt`), die Vorgabe kommt aus der
+Übung (`Exercise.zeit_zaehlt`); der Schalter steht seit P148 im Uhr-Blatt („Uhr einstellen …“),
+nicht mehr in der Zeile. Ein **Tipp
 auf die Zeit** stellt einen Timer ohne Ablauf (Räder und Tippfeld, `components/zeit_stellen.py`)
 und startet ihn; er bleibt für diese Sitzung zur Wahl (`AppState.uhr_einmal`).
 
@@ -29,6 +30,12 @@ Ben, 4.11.2026 (``docs/plan_beschleunigung.md`` §4.2): Zählt der Beschleunigun
 Einheit der Uhr dieselbe Übung („Wdh. zählen“, `components.zaehlen`), steht die Zahl mit −1/+1
 auch in der laufenden Uhr; „Fertig“ der Uhr beendet beides. Beendete ein Start ein Zählen einer
 anderen Übung, kommt dessen Meldung mit „Eintragen“ (`components.zaehlen.meldung_zeigen`).
+
+Ben, 12.11.2026: **Wohin die Uhr zählt, steht am Feld** — `zaehlt_symbol` setzt in der Karte
+„Eintragen“ ein Uhrensymbol hinter Haltezeit bzw. Zeit, je nachdem, wohin die Uhr einträgt
+(`core.uebung_timer.zaehlt_als`); durchgestrichen, wenn sie gerade nicht zählt („zählt“ aus
+oder „Ohne Uhr“). Ein Tipp schaltet „zählt“ für jetzt um — das Zielfeld wechselt man nur in
+„Übung bearbeiten“ (gilt überall).
 """
 
 from __future__ import annotations
@@ -49,6 +56,7 @@ from trainingsapp.core.uebung_timer import (
     takt_der_uebung,
     timer_fuer,
     uhr_an,
+    zaehlt_als,
     zeit_zaehlt_fuer,
 )
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext
@@ -140,6 +148,86 @@ def laufende(state: Any, uebung: Exercise, item: PlanItem | None) -> Einheitslau
     if item is not None and teil.kontext.item_id not in (None, item.id):
         return None
     return e
+
+
+#: Kennung des Uhrensymbols am Zielfeld (``data``) — zählt bzw. zählt gerade nicht
+ZAEHLT_HIER = "uhr_zaehlt_hier"
+ZAEHLT_HIER_NICHT = "uhr_zaehlt_hier_nicht"
+
+
+def zaehlt_symbol(
+    page: Any,
+    state: Any,
+    *,
+    uebung: Exercise,
+    plan: Plan | None,
+    item: PlanItem | None,
+    feld: str,
+    name: str,
+) -> ft.Control | None:
+    """Das Uhrensymbol hinter dem Feld, in das die Uhr einträgt (Ben, 12.11.2026) — ``None``
+    an jedem anderen Feld. ``feld`` ist der Schlüssel der Zeile, ``name`` ihr Name für die
+    Meldung. Läuft die Uhr dieser Übung, gilt, was beim Start feststand (der Kontext des
+    Laufs); sonst die Wahl für jetzt (`AppState.uhr_zaehlt`) über der Vorgabe der Übung.
+
+    Durchgestrichen heißt: hierhin zählte die Uhr, gerade aber nicht. Ein Tipp schaltet
+    „zählt“ für jetzt um — bei „Ohne Uhr“ und bei laufender Uhr sagt er nur, was gilt.
+    """
+    key = schluessel(uebung, item)
+    ziel = zaehlt_als(uebung_lauf.felder_der_uebung(uebung, item), uebung)
+    e = laufende(state, uebung, item)
+    teil = e.teil("plan") if e is not None and e.timer is not None else None
+    laeuft = isinstance(teil, UebungBaustein)
+    ohne = False
+    if isinstance(teil, UebungBaustein):
+        zaehlt = teil.kontext.zeitfeld is not None
+        ziel = teil.kontext.zeitfeld or ziel
+    else:
+        ohne = gesetzt(state, uebung, plan, item).ohne_uhr
+        zaehlt = state.uhr_zaehlt.get(key, zeit_zaehlt_fuer(uebung, item)) and not ohne
+    if feld != ziel:
+        return None
+
+    def melden(text: str) -> None:
+        with contextlib.suppress(Exception):
+            page.show_dialog(ft.SnackBar(ft.Text(text)))
+
+    def tipp() -> None:
+        if laeuft:
+            melden(
+                f"Die laufende Uhr zählt als {name}."
+                if zaehlt
+                else "Die laufende Uhr zählt nicht — sie trägt keine Zeit ein."
+            )
+            return
+        if ohne:
+            melden("„Ohne Uhr“ gewählt — es wird keine Zeit eingetragen.")
+            return
+        state.uhr_zaehlt[key] = not zaehlt
+        melden(
+            f"Die Uhr zählt jetzt nicht als {name} — gilt für jetzt."
+            if zaehlt
+            else f"Die Uhr zählt jetzt als {name} — gilt für jetzt."
+        )
+        state.neu_zeichnen()
+
+    return ft.Container(
+        data=ZAEHLT_HIER if zaehlt else ZAEHLT_HIER_NICHT,
+        padding=ft.Padding.all(8),
+        border_radius=18,
+        tooltip=(
+            f"Die Uhr zählt als {name} — tippen schaltet für jetzt um"
+            if zaehlt
+            else f"Die Uhr zählt gerade nicht als {name}"
+        ),
+        on_click=tipp,
+        content=ft.Icon(
+            ft.Icons.TIMER_OUTLINED if zaehlt else ft.Icons.TIMER_OFF_OUTLINED,
+            size=18,
+            color=ft.Colors.PRIMARY if zaehlt else None,
+            opacity=1.0 if zaehlt else 0.5,
+        ),
+    )
 
 
 def uhr_teile(
@@ -564,4 +652,15 @@ def _kopie(p: TimerProfil) -> TimerProfil:
     return neu
 
 
-__all__ = ["UhrTeile", "angebot", "gesetzt", "laufende", "schluessel", "takt_gross", "uhr_teile"]
+__all__ = [
+    "ZAEHLT_HIER",
+    "ZAEHLT_HIER_NICHT",
+    "UhrTeile",
+    "angebot",
+    "gesetzt",
+    "laufende",
+    "schluessel",
+    "takt_gross",
+    "uhr_teile",
+    "zaehlt_symbol",
+]

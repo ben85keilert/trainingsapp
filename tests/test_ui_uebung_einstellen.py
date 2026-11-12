@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -79,12 +80,8 @@ def _klick(knopf, *args) -> None:
 
 
 def _uebung(state: AppState, **mehr) -> Exercise:
-    u = Exercise(
-        name="Unterarmstütz",
-        result_spec=ResultSpec(fields=[vorrat_feld("hold")]),
-        default_target={"hold": [45, 45, 45]},
-        **mehr,
-    )
+    mehr.setdefault("result_spec", ResultSpec(fields=[vorrat_feld("hold")]))
+    u = Exercise(name="Unterarmstütz", default_target={"hold": [45, 45, 45]}, **mehr)
     state.uebungen.speichern(u)
     return state.uebungen.laden(u.id)
 
@@ -301,6 +298,57 @@ def test_leiste_zaehlt_fuer_jetzt_und_zeit_antippen(page, state) -> None:
     assert isinstance(blatt, ft.BottomSheet)
     assert any(isinstance(x, ft.CupertinoTimerPicker) for x in _alle(blatt))
     assert (zeit_lesen("1:30"), zeit_lesen("90 s"), zeit_lesen("0")) == (90, 90, None)
+
+
+def _uhr_symbole(c) -> list[str]:
+    from trainingsapp.ui.components.uhr import ZAEHLT_HIER, ZAEHLT_HIER_NICHT
+
+    return [
+        x.data for x in _alle(c) if getattr(x, "data", None) in (ZAEHLT_HIER, ZAEHLT_HIER_NICHT)
+    ]
+
+
+def test_uhrensymbol_steht_am_feld_in_das_die_uhr_zaehlt(page, state) -> None:
+    """Ben, 12.11.2026: Wohin die Uhr zählt, steht in der Übung selbst — am Feld."""
+    from trainingsapp.core.timer import ohne_uhr
+    from trainingsapp.ui.components.uhr import ZAEHLT_HIER, ZAEHLT_HIER_NICHT, zaehlt_symbol
+
+    def symbol(u: Exercise, feld: str):
+        return zaehlt_symbol(page, state, uebung=u, plan=None, item=None, feld=feld, name=feld)
+
+    beide = ResultSpec(fields=[vorrat_feld("hold"), vorrat_feld("duration")])
+    uebung = _uebung(state, result_spec=beide)
+    # Vorgabe mit Haltezeit: dorthin — an der Zeit steht nichts
+    assert symbol(uebung, "hold").data == ZAEHLT_HIER
+    assert symbol(uebung, "duration") is None
+    # „Zählt als Zeit“ in der Übung: das Symbol wandert
+    als_zeit = _uebung(state, result_spec=beide, zaehlt_als="duration")
+    assert symbol(als_zeit, "hold") is None
+    assert symbol(als_zeit, "duration").data == ZAEHLT_HIER
+    # Ein Tipp schaltet „zählt“ für jetzt um — die Übung bleibt, wie sie ist
+    _klick(symbol(uebung, "hold"))
+    assert state.uhr_zaehlt[uebung.id] is False
+    assert symbol(uebung, "hold").data == ZAEHLT_HIER_NICHT
+    assert state.uebungen.laden(uebung.id).zeit_zaehlt is True
+    _klick(symbol(uebung, "hold"))
+    assert symbol(uebung, "hold").data == ZAEHLT_HIER
+    # „Ohne Uhr“: durchgestrichen, der Tipp schaltet nichts
+    state.uhr_wahl[uebung.id] = ohne_uhr().id
+    assert symbol(uebung, "hold").data == ZAEHLT_HIER_NICHT
+    _klick(symbol(uebung, "hold"))
+    assert state.uhr_zaehlt[uebung.id] is True
+
+
+def test_uhrensymbol_in_der_karte_eintragen(page, state) -> None:
+    from trainingsapp.ui.components.uhr import ZAEHLT_HIER, ZAEHLT_HIER_NICHT
+    from trainingsapp.ui.views.plan import plan_view
+
+    beide = ResultSpec(fields=[vorrat_feld("hold"), vorrat_feld("duration")])
+    uebung = _uebung(state, result_spec=beide)
+    plan, _item = _plan(state, uebung)
+    assert _uhr_symbole(plan_view(page, state, plan)) == [ZAEHLT_HIER]  # genau ein Feld
+    state.uebungen.speichern(replace(uebung, zeit_zaehlt=False))
+    assert _uhr_symbole(plan_view(page, state, plan)) == [ZAEHLT_HIER_NICHT]
 
 
 def test_im_plan_einstellen_timer_zeile_und_editor_im_fenster(page, state) -> None:

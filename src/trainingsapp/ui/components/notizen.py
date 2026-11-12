@@ -89,6 +89,8 @@ from trainingsapp.ui.farben import FARBEN
 SCHRITTE = (-5, -1, 1, 5)
 
 #: Was der Hinweis sagt, wenn sich die eingetippte Zeit nicht lesen lässt
+#: Unter einer getippten Grenze, die kein Gegenstück hat
+VERWAIST_HINWEIS = "ohne Gegenstück — kein Abschnitt (Start und Ende gleichen Namens fehlen)"
 ZEIT_UNLESBAR = "Zeit nicht lesbar — 2:15 oder 14:03:05"
 
 
@@ -205,12 +207,10 @@ class Notizfeld:
         zeilen: Callable[[], int] | None = None,
         hoehe: Callable[[], int] | None = None,
         hoehe_merken: Callable[[int], None] | None = None,
-        abschnitt_loeschen: Callable[[str], bool] | None = None,
     ) -> None:
         self._zeitbezug = zeitbezug
         #: Wer die Abschnitte führt (Auswertung): löscht den Abschnitt mit dieser Kennung
         #: selbst — mit Rückfrage, Sidecar und „Rückgängig“ — und sagt ``True`` (H74)
-        self._abschnitt_loeschen = abschnitt_loeschen
         self._hoehe = hoehe or (lambda: 0)
         self._hoehe_merken = hoehe_merken
         #: Beim Ziehen: die Höhe, die die Liste gerade hat (None = es wird nicht gezogen)
@@ -490,9 +490,10 @@ class Notizfeld:
         if not 0 <= i < len(liste):
             return
         eintrag = liste[i]
-        kennung = eigene_abschnitte.kennung_von(eintrag)
-        if kennung is not None:
-            self._abschnitt_fragen(eintrag, kennung)
+        zb = self._zeitbezug()
+        gruppe = eigene_abschnitte.gruppe_von(liste, eintrag, zb.x if zb is not None else None)
+        if gruppe is not None and not gruppe[2]:  # Start oder Ende: die ganze Gruppe
+            self._abschnitt_fragen(eintrag, gruppe[0], [liste[j] for j in gruppe[1]])
             return
         if self._dialog is None:
             self._entfernen_eintrag(eintrag)
@@ -506,23 +507,20 @@ class Notizfeld:
 
         zeigen(loeschen_rueckfrage("Notiz löschen?", self.beschreibung(eintrag), ja))
 
-    def _abschnitt_fragen(self, eintrag: dict, kennung: str) -> None:
-        """Eine **Grenz-Notiz** löschen heißt den Abschnitt löschen (Ben, 11.11.2026, H74 —
-        meist nimmt man so einen angefangenen, aber nicht trainierten Block wieder heraus):
-        Start- und Ende-Notiz gehen zusammen, nie eine allein — eine Start-Notiz ohne Ende
-        gälte sonst als „läuft noch“ bis zum Messende."""
-        if self._abschnitt_loeschen is not None and self._abschnitt_loeschen(kennung):
-            return
-        name = str((eintrag.get("marke") or {}).get("name") or "").strip()
+    def _abschnitt_fragen(self, eintrag: dict, name: str, gruppe: list[dict]) -> None:
+        """Eine **Start- oder Ende-Notiz** löschen heißt den Abschnitt löschen (Ben,
+        11.11.2026, H74): Start, Marker und Ende gehen zusammen, nie eine allein — eine
+        halbe Gruppe ergäbe keinen Abschnitt und bliebe als Notizleiche (Ben, 12.11.2026).
+        Ein **Marker** allein geht wie jede Notiz: Er nimmt nur seine Trennung weg."""
 
         def ja() -> None:
             vorher = list(self._ereignisse())
             bearbeitet = self._bearbeitete(vorher)
-            neu = [e for e in vorher if eigene_abschnitte.kennung_von(e) != kennung]
+            neu = [e for e in vorher if e not in gruppe]
             if len(neu) == len(vorher):
                 return
             self._speichern(neu)
-            if bearbeitet is not None and eigene_abschnitte.kennung_von(bearbeitet) == kennung:
+            if bearbeitet is not None and bearbeitet in gruppe:
                 self.bearbeite = None
             self._neu_zaehlen(bearbeitet)
             self._aendern(kurve=True)
@@ -532,11 +530,16 @@ class Notizfeld:
         if self._dialog is None:
             ja()
             return
-        was = f"„{name}“" if name else "Der Abschnitt"
+        marker = len(gruppe) - 2
+        dazu = (
+            ""
+            if marker <= 0
+            else (" und einem Marker" if marker == 1 else f" und {marker} Markern")
+        )
         self._dialog(
             loeschen_rueckfrage(
                 "Abschnitt löschen?",
-                f"{was} wird gelöscht, mit seiner Start- und Ende-Notiz. Die Messung "
+                f"„{name}“ wird gelöscht, mit Start- und Ende-Notiz{dazu}. Die Messung "
                 "selbst bleibt unverändert.",
                 ja,
             )
@@ -1135,6 +1138,18 @@ class Notizfeld:
             if e.get("text")
             else ft.Text("(ohne Text — antippen)", size=13, italic=True, opacity=0.6)
         )
+        # Eine getippte Grenze ohne Gegenstück ergibt keinen Abschnitt — farbig, mit Grund
+        # (Ben, 12.11.2026: keine Notizleichen)
+        verwaist = eigene_abschnitte.verwaist(e)
+        if verwaist:
+            text = ft.Column(
+                spacing=1,
+                tight=True,
+                controls=[
+                    ft.Text(str(e.get("text") or ""), size=13, color=ft.Colors.ERROR),
+                    ft.Text(VERWAIST_HINWEIS, size=11, color=ft.Colors.ERROR),
+                ],
+            )
         # Was die Notiz maschinenlesbar trägt — sichtbar (Ben, 18.10.2026: „Aus
         # Transparenzgründen“): Übung, Marke, Soll, Ablauf
         angaben = marke_angaben(e)
@@ -1158,7 +1173,12 @@ class Notizfeld:
                 spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.START,
                 controls=[
-                    ft.Container(width=3, height=16, bgcolor=FARBEN["notiz"], border_radius=2),
+                    ft.Container(
+                        width=3,
+                        height=16,
+                        bgcolor=ft.Colors.ERROR if verwaist else FARBEN["notiz"],
+                        border_radius=2,
+                    ),
                     ft.Text(zeit, size=12, opacity=0.7, width=96),
                     ft.Container(content=text, expand=True),
                 ],

@@ -431,14 +431,24 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
   Start“ / „Name: Ende“. Die Abschnitte des Timers bleiben ihre Kette (`art=abschnitt` je
   Grenze); auch ihre Start-Notiz darf `kopf_s`/`endteil_s` tragen.
   `hrv_core.ausschnitte.paare_aus_notizen`, `trainingsapp.core.abschnitte`.
-  **Der Text ist der Eingang** (Ben, 12.11.2026): Eine Notiz **ohne Marke** mit dem Text
-  „Name: Start“ bekommt beim Speichern der Notizliste (live und in der Aufzeichnung, auch
-  beim Öffnen einer Messung von früher oder aus praxis_gui) die Start-Marke mit neuer
-  Kennung; „Name: Ende“ schließt den zuletzt begonnenen offenen eigenen Abschnitt dieses
-  Namens (Groß-/Kleinschreibung egal), sonst bleibt sie eine gewöhnliche Notiz. Ändert
-  jemand den Text einer Start-Notiz auf „Anders: Start“, folgt `name` in beiden Marken.
-  Notizen mit einer anderen Marke bleiben unberührt. Kein neues Feld, kein neues Format
-  (`trainingsapp.core.abschnitte.marken_aus_text`).
+  **Der Text ist die Wahrheit** (Ben, 12.11.2026: „alles ohne unsichtbaren Text“): Eigene
+  Abschnitte stehen im Text der Notizen — „Name: Start“, beliebig viele „Name: Marker“
+  (Zusatz in Klammern: „Rad: Marker (5 km)“) und „Name: Ende“, gleicher Name ohne
+  Groß-/Kleinschreibung. Jede Grenze beginnt einen Abschnitt bis zur nächsten; Kopf und
+  Endteil stehen im Zusatz der Notiz, die ihn beginnt („Behandlung: Start (Kopf −2:00 ·
+  Endteil +5:00)“). Die Marke ist daraus **abgeleitet** und wird bei jedem Speichern der
+  Notizliste neu gebildet (live, in der Aufzeichnung, beim Öffnen einer Messung): Start
+  und Marker tragen `person/abschnitt` mit eigener Kennung als `spur`, `name` = Name des
+  Abschnitts („Rad (5 km)“), `kopf_s`/`endteil_s`; die Ende-Notiz `person/ende` mit der
+  Kennung der Start-Notiz. Sie trägt nichts, was nicht im Text steht, außer der Kennung.
+  **Halbe Gruppen gelten nicht:** Ein Start ohne Ende, ein Ende ohne Start, ein Marker
+  außerhalb bekommen keine Marke und ergeben keinen Abschnitt (die App zeigt sie rot);
+  nur live läuft ein begonnener Abschnitt, und Stopp oder „Teil speichern“ geben ihm
+  seine Ende-Notiz. Ein Zwischenstand, in dem der Abschnitt noch lief, hat darum eine
+  Start-Notiz ohne Marke. Notizen mit einer anderen Marke bleiben unberührt. Kein neues
+  Feld, kein neues Format (`trainingsapp.core.abschnitte`; `hrv_core.ausschnitte.
+  paare_aus_notizen` liest nur noch Paare ohne Marker und wird von der App nicht mehr
+  gerufen).
 - **praxis_gui** liest das Feld nicht und behält es beim Bearbeiten wie `uebungen`.
 - Keine neue Schema-Version: ein zusätzliches, optionales Feld wie `uebungen`; ältere
   Leser übergehen es.

@@ -288,8 +288,38 @@ async def test_grenznotiz_loeschen_loescht_den_abschnitt() -> None:
     assert [e["text"] for e in welt.liste].count("Block: Start") == 1
     assert len(welt.liste) == 5
 
-    # wer die Abschnitte führt, löscht selbst
-    gefragt: list[str] = []
-    welt.feld._abschnitt_loeschen = lambda k: gefragt.append(k) or True
-    welt.feld.loeschen_fragen(next(i for i, e in enumerate(welt.liste) if e is start))
-    assert gefragt == [kennung] and len(welt.liste) == 5
+    # Ein Marker geht wie jede Notiz — er nimmt nur seine Trennung weg (Ben, 12.11.2026)
+    marker = notiz("Block: Marker (halb)", anker_aus_wand(BEATS, 30.0), START)
+    welt.liste = eigene.marken_aus_text([*welt.liste[:2], marker, *welt.liste[2:]])
+    assert [e["marke"]["name"] for e in welt.liste if "marke" in e][:2] == [
+        "Block (1)",
+        "Block (halb)",
+    ]
+    welt.feld.loeschen_fragen(2)
+    frage = gezeigt[-1]
+    assert frage.title.value == "Notiz löschen?"
+    next(a for a in frage.actions if getattr(a, "content", None) == "Löschen").on_click()
+    await frage.on_dismiss(None)
+    assert [e["text"] for e in welt.liste].count("Block: Start") == 1
+    assert "Block: Marker (halb)" not in [e["text"] for e in welt.liste]
+
+
+def test_verwaiste_grenze_steht_farbig() -> None:
+    """Ben, 12.11.2026: Ein Ende ohne Start (oder umgekehrt) ergibt keinen Abschnitt — die
+    Notiz steht farbig mit dem Grund in der Liste, damit keine Notizleiche bleibt."""
+    from trainingsapp.ui.components.notizen import VERWAIST_HINWEIS
+
+    welt = _Welt(live=False)
+    welt.liste = [*welt.liste, notiz("Ruhe: Ende", anker_aus_wand(BEATS, 45.0), START)]
+    welt.feld.auffrischen()
+
+    def alle(c) -> list:
+        kinder = [*(getattr(c, "controls", None) or []), getattr(c, "content", None)]
+        return [c, *(x for k in kinder if isinstance(k, ft.Control) for x in alle(k))]
+
+    texte = [
+        c
+        for c in alle(welt.feld.control)
+        if isinstance(c, ft.Text) and c.value in ("Ruhe: Ende", VERWAIST_HINWEIS)
+    ]
+    assert len(texte) == 2 and all(t.color == ft.Colors.ERROR for t in texte)

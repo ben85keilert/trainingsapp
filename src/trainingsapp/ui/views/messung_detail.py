@@ -419,7 +419,11 @@ ABSCHNITTE_INFO = (
     "Werte je Abschnitt — so lassen sich Belastung und Pause oder Übungen vergleichen.\n\n"
     "- **„+ Abschnitt“** wählt einen Bereich in der Kurve.\n"
     "- **Notizen „Name: Start“ und „Name: Ende“** ergeben einen Abschnitt — getippt, live "
-    "oder hier. Wer so eine Notiz verschiebt, umbenennt oder löscht, ändert den Abschnitt.\n"
+    "oder hier. **„Name: Marker“** dazwischen teilt ihn („Rad: Marker (5 km)“); wer den "
+    "Marker löscht, nimmt die Trennung weg. Wer so eine Notiz verschiebt oder umbenennt, "
+    "ändert den Abschnitt. Kopf und Endteil stehen im Text der Start-Notiz.\n"
+    "- **Rot** in der Notizliste: ein Start ohne Ende, ein Ende ohne Start — das ergibt "
+    "keinen Abschnitt.\n"
     "- **Menü daneben:** „Mit zwei Zeiten …“ legt einen Abschnitt nach Dauer oder Uhrzeit "
     "an; „Aus Notizen …“ macht beliebige Notizen zu Grenzen.\n"
     "- **Antippen** eines Abschnitts: Grenzen in der Kurve verschieben, umbenennen, löschen; "
@@ -630,7 +634,10 @@ def _laden(pfad: Path, vorgabe: Korrekturregeln) -> _Geladen:
         ende = float(zeilen_achse[-1]) if zeilen_achse else 0.0
         # Getippte Grenzen („Behandlung: Start“ / „… Ende“) bekommen ihre Marke (Ben,
         # 12.11.2026) — auch in Messungen von früher und aus praxis_gui
-        mit_marken = eigene_abschnitte.marken_aus_text(rec.ereignisse, zb.x)
+        # … und Kopf/Endteil, die früher nur in der Marke standen, in den Text
+        mit_marken = eigene_abschnitte.marken_aus_text(
+            eigene_abschnitte.raender_in_den_text(rec.ereignisse), zb.x
+        )
         getippt = mit_marken != rec.ereignisse
         rec.ereignisse = mit_marken
         paare = eigene_abschnitte.paare(rec.ereignisse, zb.x, ende)
@@ -1815,7 +1822,7 @@ def _aufbauen(
     def notizen_weg(abschnitte: list[Abschnitt]) -> None:
         liste = list(rec.ereignisse)
         for a in abschnitte:
-            liste = eigene_abschnitte.notizen_entfernen(liste, a.id)
+            liste = eigene_abschnitte.notizen_entfernen(liste, a.id, zeitbezug.x)
         if len(liste) != len(rec.ereignisse):
             notizen_speichern(liste)
             notizfeld.auffrischen()
@@ -1830,16 +1837,6 @@ def _aufbauen(
                 lambda: abschnitt_entfernen(a),
             )
         )
-
-    def abschnitt_zur_notiz_loeschen(kennung: str) -> bool:
-        """Aus der Notizliste: Wer eine Grenz-Notiz löscht, löscht den Abschnitt (H74) —
-        derselbe Weg wie der Papierkorb am Abschnitt, damit Liste, Sidecar und Notizen
-        zusammenbleiben. ``False``: kein Abschnitt dazu, das Notizfeld nimmt nur das Paar."""
-        a = next((b for b in eigene if b.id == kennung), None)
-        if a is None:
-            return False
-        abschnitt_loeschen(a)
-        return True
 
     def abschnitt_entfernen(a: Abschnitt) -> None:
         vorher = list(eigene)
@@ -2743,7 +2740,6 @@ def _aufbauen(
         zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
         hoehe=lambda: state.hrv_einstellungen().notizen_hoehe_px,
         hoehe_merken=notizen_hoehe_merken,
-        abschnitt_loeschen=lambda kennung: abschnitt_zur_notiz_loeschen(kennung),
     )
 
     if geladen.nachgetragen_sha1 is not None:  # `_laden` schrieb Grenz-Notizen nach

@@ -134,27 +134,43 @@ fehlten in der Notizliste.
 Ben: „Am besten sind Abschnitte und Notizen direkt aneinander gekoppelt. Abschnitte sind
 keine separate Information, sondern ergeben sich aus den Notizen … Das Edit der Abschnitte
 muss schnell nachträglich möglich sein. Auch die Erstellung eines Abschnittes mit zwei
-Zeiten, um z. B. Belastungen, die im Kalender rückverfolgbar sind.“ Die Ketten (Timer,
-Übung, km) bleiben.
+Zeiten, um z. B. Belastungen, die im Kalender rückverfolgbar sind.“ Und danach: „Die
+Benennung muss gleich sein. Radfahren: Start; Radfahren: Marker (5km), Radfahren: Ende …
+Abschnitt gilt von Marker bis Marker. Gelöschte Notiz X: Marker nimmt diese eine Trennung
+weg. Wenn möglich alles ohne unsichtbaren Text … Notizen ohne zugehörigem Start/Ende werden
+farblich markiert und ergeben beide keine Abschnitte.“ Die Ketten (Timer, Übung, km)
+bleiben.
 
-- **Der Text ist der Eingang** (`core.abschnitte.marken_aus_text`): Eine getippte Notiz
-  „X: Start“ bekommt beim Speichern die Start-Marke, „X: Ende“ schließt den zuletzt
-  begonnenen offenen Abschnitt X. Ein Ende ohne Start bleibt eine Notiz; ein Start ohne
-  Ende reicht bis zum Ende der Messung (live: läuft). Wer „X: Start“ in „Y: Start“ ändert,
-  benennt um. Live in `Messlauf.ereignisse_setzen`, in der Aufzeichnung in
-  `notizen_speichern` und einmalig beim Öffnen (`_laden`).
-- **Die Aufzeichnung folgt den Notizen sofort** (`core.abschnitte.abgleichen`,
-  `messung_detail.abschnitte_nachziehen`): Nach jeder Notizänderung nehmen die Abschnitte
-  Name und Grenzen aus ihren Paaren, das Sidecar wird geschrieben. Vorher galt das erst
-  nach dem nächsten Öffnen, und der Editor setzte eine verschobene Notiz zurück.
+- **Der Text ist die Wahrheit** (`core.abschnitte`): eine **Gruppe** gleichen Namens aus
+  „X: Start“, beliebig vielen „X: Marker“ und „X: Ende“. Ein Abschnitt gilt von Grenze zu
+  Grenze; ohne Marker heißt er „X“, mit Markern „X (1)“, „X (5 km)“ — der Zusatz in
+  Klammern, sonst die Nummer. Kopf und Endteil stehen im Zusatz der Notiz, die den
+  Abschnitt beginnt: „X: Start (Kopf −2:00 · Endteil +5:00)“. Die Marke wird bei jedem
+  Speichern daraus abgeleitet (`marken_aus_text`) und trägt darüber hinaus nur die Kennung.
+- **Nichts gilt halb:** Start ohne Ende, Ende ohne Start, Marker außerhalb ergeben keinen
+  Abschnitt und stehen in der Notizliste **rot** mit dem Grund (`verwaist`). Live läuft ein
+  begonnener Abschnitt; Stopp und „Teil speichern“ setzen ihm die Ende-Notiz
+  (`Messlauf._abschnitte_schliessen`). Ein zweiter Start gleichen Namens vor dem Ende
+  lässt den ersten verwaisen.
+- **Umbenennen:** Wer den Namen in der Start-Notiz ändert, benennt die Gruppe um — Marker
+  und Ende ziehen mit. Wer nur eine andere Notiz der Gruppe umbenennt, löst sie heraus
+  (rot).
+- **Löschen:** Start- oder Ende-Notiz löschen fragt „Abschnitt löschen?“ und nimmt die
+  ganze Gruppe; ein Marker geht wie jede Notiz und nimmt nur seine Trennung weg. Einen
+  Abschnitt löschen (✕, Blatt): der einzige seiner Gruppe → die Gruppe; der erste → der
+  erste Marker wird der Start; der letzte → der letzte Marker wird das Ende; einer in der
+  Mitte → sein Marker geht, er fällt mit dem davor zusammen (`notizen_entfernen`).
+- **Die Aufzeichnung folgt den Notizen sofort** (`abgleichen`,
+  `messung_detail.abschnitte_nachziehen`), samt Sidecar.
 - **Blatt „Abschnitt“** (`ui/components/abschnitt_blatt.py`): Name, Von, Bis als Dauer oder
-  Uhrzeit, ±10 s / ±1 min, Kopf · Endteil, Löschen. Live: „+“ neben „Abschnitt: Start“
-  trägt nach (`Messlauf.abschnitt_setzen`), der Stift an der Zeile ändert einen eigenen
-  Abschnitt (auch einen laufenden — „Bis“ leer = läuft weiter), Löschen mit „Rückgängig“.
-  Aufzeichnung: Menü → „Mit zwei Zeiten …“ und die Uhr an der Zeile; der Editor in der
-  Kurve bleibt.
-- **Nicht gebaut:** Abschnitte eines Ablaufs (Timer, Übung) live ändern — sie entstehen
-  erst beim Speichern als Sidecar-Segmente. „Aus Notizen …“ bleibt (macht beliebige
-  Notizen zu einer Kette).
-- Offen: P192 (Schlüsselwort für die Kette, Marke bei geändertem Text), Gerätetest T127.
-
+  Uhrzeit, ±10 s / ±1 min, Kopf · Endteil, Löschen. Live: „+“ trägt nach, der Stift an der
+  Zeile ändert, die Fahne setzt bei laufendem Abschnitt einen Marker
+  (`Messlauf.abschnitt_setzen`/`abschnitt_marker`). Aufzeichnung: Menü → „Mit zwei Zeiten
+  …“ und die Uhr an der Zeile; der Editor in der Kurve bleibt.
+- **Messungen von früher:** Beim Öffnen kommen Kopf und Endteil aus der Marke in den Text
+  (`raender_in_den_text`), getippte Gruppen bekommen ihre Marken; eine Grenz-Notiz, deren
+  Text jemand frei geändert hatte, verliert die Marke (ihr Abschnitt bleibt als
+  Sidecar-Segment, bis man ihn löscht).
+- **Nicht gebaut:** Abschnitte eines Ablaufs (Timer, Übung) live ändern; ihr Kopf/Endteil
+  steht weiter in der Marke ihrer Start-Notiz. „Aus Notizen …“ bleibt.
+- Gerätetest T127.

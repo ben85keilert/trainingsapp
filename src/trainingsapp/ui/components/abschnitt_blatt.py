@@ -281,8 +281,9 @@ def abschnitt_blatt(
             bereich_text=bereich_text,
         ),
         ft.Text(
-            "Die Grenzen stehen als Notizen „Name: Start“ und „Name: Ende“ in der Notizliste — "
-            "wer dort so eine Notiz tippt oder verschiebt, ändert den Abschnitt.",
+            "Die Grenzen stehen als Notizen „Name: Start“ und „Name: Ende“ in der Notizliste, "
+            "Kopf und Endteil in ihrem Text — wer dort so eine Notiz tippt oder verschiebt, "
+            "ändert den Abschnitt. „Name: Marker“ dazwischen teilt ihn.",
             size=12,
             opacity=0.7,
         ),

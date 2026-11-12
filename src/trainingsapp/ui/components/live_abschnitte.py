@@ -66,6 +66,12 @@ class LiveAbschnitte:
         self.laufzeit: dict[str, ft.Text] = {}
         self.start_knopf = ft.TextButton("Abschnitt: Start", icon=ft.Icons.PLAY_ARROW)
         self.start_knopf.on_click = lambda _=None: self.knopf()
+        self.marker_knopf = ft.IconButton(
+            ft.Icons.FLAG_OUTLINED,
+            tooltip="Marker setzen — teilt den laufenden Abschnitt",
+            visible=False,
+            on_click=lambda _=None: self.marker(),
+        )
         self.nachtrag_knopf = ft.IconButton(
             ft.Icons.ADD,
             tooltip="Abschnitt nachtragen (zwei Zeiten)",
@@ -76,7 +82,7 @@ class LiveAbschnitte:
             offen_merken=(lambda o: setattr(state, "abschnitte_offen", o))
             if offen is None
             else (lambda _o: None),
-            knoepfe=[self.start_knopf, self.nachtrag_knopf],
+            knoepfe=[self.start_knopf, self.marker_knopf, self.nachtrag_knopf],
             zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
         )
 
@@ -97,6 +103,11 @@ class LiveAbschnitte:
     def starten(self, name: str) -> None:
         self.lauf.abschnitt_starten(name)
         self._zeichnen_und_melden()
+
+    def marker(self) -> None:
+        """„‹Name›: Marker“ bei jetzt — der laufende Abschnitt wird hier geteilt."""
+        if self.lauf.abschnitt_marker():
+            self._zeichnen_und_melden()
 
     def knopf(self) -> None:
         """„Abschnitt: Start“ fragt den Namen; „‹Name› · Ende“ beendet ihn."""
@@ -246,7 +257,11 @@ class LiveAbschnitte:
         lauf, start_knopf = self.lauf, self.start_knopf
         teile = lauf.abschnitte()
         offen = lauf.offener_abschnitt()
-        laufend_id = offen[0] if offen else None
+        laufend_id = (
+            eigene_abschnitte.laufende_kennung(lauf.ereignisse(), lauf.notiz_zeitbezug().x)
+            if offen
+            else None
+        )
         schluessel = (
             tuple(
                 (a.id, a.name, round(a.von_s), None if a.id == laufend_id else round(a.bis_s))
@@ -270,6 +285,7 @@ class LiveAbschnitte:
             start_knopf.content = "Abschnitt: Start"
             start_knopf.icon = ft.Icons.PLAY_ARROW
         start_knopf.disabled = lauf.aufnahme is None
+        self.marker_knopf.visible = offen is not None
         self.nachtrag_knopf.disabled = lauf.aufnahme is None
         gebunden = self.stand["gebunden"]
         chips: list[ft.Control] = [
@@ -286,7 +302,7 @@ class LiveAbschnitte:
                 ft.Text(
                     "Noch keine Abschnitte — „Abschnitt: Start“ setzt die Grenze bei jetzt, „+“ "
                     "trägt einen mit zwei Zeiten nach, Notizen „Name: Start“ und „Name: Ende“ "
-                    "ergeben einen, der Timer setzt seine von selbst."
+                    "ergeben einen („Name: Marker“ teilt ihn), der Timer setzt seine von selbst."
                     if lauf.aufnahme is not None
                     else "Abschnitte gibt es in der Aufnahme.",
                     size=12,

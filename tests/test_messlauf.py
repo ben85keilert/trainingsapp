@@ -607,7 +607,12 @@ async def test_eigener_abschnitt_live_als_notizpaar(tmp_path) -> None:
     assert lauf.abschnitt_beenden() and lauf.offener_abschnitt() is None
     assert not lauf.abschnitt_beenden()
     texte = [e["text"] for e in lauf.ereignisse()]
-    assert texte == ["Behandlung: Start", "Behandlung: Ende", "Ruhe: Start", "Ruhe: Ende"]
+    assert texte == [
+        "Behandlung: Start (Kopf −0:02 · Endteil +0:03)",
+        "Behandlung: Ende",
+        "Ruhe: Start",
+        "Ruhe: Ende",
+    ]
     assert abschnitte.kennung_von(lauf.ereignisse()[0]) == kennung
     assert lauf.ereignisse()[0]["marke"]["kopf_s"] == -2
     ergebnis = lauf.aufnahme_stoppen(tmp_path)
@@ -1301,7 +1306,9 @@ async def test_am_zwischenstand_verschobene_grenze_ersetzt_die_alte(tmp_path) ->
     assert ganz is not None and ganz.ersetzt == (zwischen.pfad,)
     notizen = laden(ganz.pfad).ereignisse
     grenzen = [e for e in notizen if abschnitte.kennung_von(e) == kennung]
-    assert len(grenzen) == 1 and grenzen[0]["beat_index"] == 2
+    # … und die Ende-Notiz, die der Stopp dem laufenden Abschnitt gibt (Ben, 12.11.2026)
+    assert [e["text"] for e in grenzen] == ["Behandlung: Start", "Behandlung: Ende"]
+    assert grenzen[0]["beat_index"] == 2
     assert [e["text"] for e in notizen].count("frei") == 1
 
 
@@ -1354,3 +1361,43 @@ async def test_getippte_grenzen_und_nachgetragener_abschnitt(tmp_path) -> None:
     assert ergebnis is not None
     _, teile = zusatz_lesen(ergebnis.pfad, float)
     assert [t.name for t in teile] == ["Rücken", "Treppe"]
+
+
+async def test_marker_teilt_und_halbe_gruppen_gelten_nicht(tmp_path) -> None:
+    """Ben, 12.11.2026: „Rad: Start“ · „Rad: Marker (5 km)“ · „Rad: Ende“ — ein Abschnitt je
+    Stück; ein gelöschter Marker nimmt seine Trennung weg. Ein Ende ohne Start bleibt eine
+    Notiz ohne Marke; was beim Stopp noch läuft, bekommt seine Ende-Notiz."""
+    from hrv_core.ausschnitte import zusatz_lesen
+    from hrv_core.recording import laden
+
+    from trainingsapp.core import abschnitte
+
+    lauf, task = await _laufend(tmp_path)
+    await _bis(lauf, 10)
+    assert not lauf.abschnitt_marker()  # ohne laufenden Abschnitt kein Marker
+    lauf.abschnitt_starten("Rad")
+    await _bis(lauf, 25)
+    assert lauf.abschnitt_marker("5 km")
+    await _bis(lauf, 40)
+    assert [a.name for a in lauf.abschnitte()] == ["Rad (1)", "Rad (5 km)"]
+    assert lauf.offener_abschnitt() is not None
+    assert abschnitte.laufende_kennung(lauf.ereignisse()) == lauf.abschnitte()[1].id
+    lauf.notiz_hinzufuegen("Ruhe: Ende")  # ohne Start
+    lauf.ereignisse_setzen(lauf.ereignisse())
+    assert abschnitte.verwaist(lauf.ereignisse()[-1])
+    # Den Marker löschen: wieder ein Abschnitt
+    ohne = [e for e in lauf.ereignisse() if "Marker" not in e["text"]]
+    mit = lauf.ereignisse()
+    lauf.ereignisse_setzen(ohne)
+    assert [a.name for a in lauf.abschnitte()] == ["Rad"]
+    lauf.ereignisse_setzen(mit)
+    await _bis(lauf, 55)
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)  # „Rad“ läuft noch: der Stopp schließt ihn
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert ergebnis is not None
+    texte = [e["text"] for e in laden(ergebnis.pfad).ereignisse]
+    assert texte == ["Rad: Start", "Rad: Marker (5 km)", "Ruhe: Ende", "Rad: Ende"]
+    _, teile = zusatz_lesen(ergebnis.pfad, float)
+    assert [t.name for t in teile] == ["Rad (1)", "Rad (5 km)"]
+    assert teile[0].bis_s == pytest.approx(teile[1].von_s, abs=0.5)

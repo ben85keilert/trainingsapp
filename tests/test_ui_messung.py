@@ -2021,7 +2021,7 @@ def test_abschnitt_ist_notizpaar_mit_kopf_und_endteil(daten) -> None:
     (seg,) = segmente()
     assert seg["name"] == "Behandlung" and seg["rand"] == {"kopf_s": -30, "endteil_s": 0}
     grenzen = [e for e in laden(pfad).ereignisse if "marke" in e]
-    assert [e["text"] for e in grenzen] == ["Behandlung: Start", "Behandlung: Ende"]
+    assert [e["text"] for e in grenzen] == ["Behandlung: Start (Kopf −0:30)", "Behandlung: Ende"]
     assert grenzen[0]["marke"]["spur"] == seg["id"] and grenzen[0]["marke"]["kopf_s"] == -30
     assert grenzen[1]["marke"] == {
         "quelle": "person",
@@ -2031,7 +2031,7 @@ def test_abschnitt_ist_notizpaar_mit_kopf_und_endteil(daten) -> None:
     }
     texte = _baum_texte(view)
     assert any("Kopf −0:30" in t for t in texte)
-    assert "Behandlung: Start" in texte  # in der Notizliste
+    assert "Behandlung: Start (Kopf −0:30)" in texte  # in der Notizliste
     # Noch einmal öffnen: die Zeile steht gleich, der Wert bleibt; umbenennen folgt den Notizen
     view = messung_detail_view(seite, state, eintrag)
     zeile = next(
@@ -2052,7 +2052,7 @@ def test_abschnitt_ist_notizpaar_mit_kopf_und_endteil(daten) -> None:
     name.value = "Rücken"
     _knopf(view, "Speichern").on_click()
     assert [e["text"] for e in laden(pfad).ereignisse if "marke" in e] == [
-        "Rücken: Start",
+        "Rücken: Start (Kopf −0:30)",
         "Rücken: Ende",
     ]
     assert segmente()[0]["id"] == seg["id"]

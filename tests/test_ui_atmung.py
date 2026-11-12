@@ -240,7 +240,8 @@ def _messung_lang(state, tmp_path) -> HrvRecording:
                 "t_wall_s": beats[i].t_s,
                 "t_s": beats[i].t_s,
                 "wall_time": "06:00:00",
-                "text": "Atmen",
+                # Der Text trägt den Abschnitt (Ben, 12.11.2026) — die Marke folgt ihm
+                "text": "Atmen: Start" if marke["art"] == "abschnitt" else "Atmen: Ende",
                 "marke": marke,
             }
         )
@@ -308,7 +309,8 @@ def _messung_rsa(state, tmp_path, *, art: str, atemuebung: bool, dauer_s: float 
                 "t_wall_s": beats[i].t_s,
                 "t_s": beats[i].t_s,
                 "wall_time": "06:00:00",
-                "text": "Atmen",
+                # Der Text trägt den Abschnitt (Ben, 12.11.2026) — die Marke folgt ihm
+                "text": "Atmen: Start" if marke["art"] == "abschnitt" else "Atmen: Ende",
                 "marke": marke,
             }
         )

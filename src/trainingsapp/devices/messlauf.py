@@ -68,7 +68,6 @@ from hrv_core.ausschnitte import (
     Abschnitt,
     aus_grenzen,
     grenze_aus_notiz,
-    paare_aus_notizen,
     spuren_speichern,
 )
 from hrv_core.constants import malik_threshold
@@ -991,7 +990,9 @@ class Messlauf:
         # Getippte Grenzen („Behandlung: Start“ / „… Ende“) bekommen hier ihre Marke —
         # so ist jede gespeicherte Notizliste zugleich der Stand der eigenen Abschnitte
         # (Ben, 12.11.2026; `core.abschnitte.marken_aus_text`)
-        liste = eigene_abschnitte.marken_aus_text(liste, self.notiz_zeitbezug().x)
+        liste = eigene_abschnitte.marken_aus_text(
+            liste, self.notiz_zeitbezug().x, laufend=self.aufnahme is not None
+        )
         if self.aufnahme is not None:
             self.aufnahme.ereignisse = liste
         else:
@@ -1162,7 +1163,7 @@ class Messlauf:
 
     def offener_abschnitt(self) -> tuple[str, str] | None:
         """``(Kennung, Name)`` des eigenen Abschnitts, der gerade läuft — sonst ``None``."""
-        return eigene_abschnitte.offener(self.ereignisse())
+        return eigene_abschnitte.offener(self.ereignisse(), self.notiz_zeitbezug().x)
 
     def abschnitt_starten(
         self, name: str, *, kopf_s: float = 0.0, endteil_s: float = 0.0
@@ -1174,11 +1175,26 @@ class Messlauf:
         if self.offener_abschnitt() is not None:
             self.abschnitt_beenden()
         kennung = eigene_abschnitte.neue_kennung()
+        gruppe, zusatz = eigene_abschnitte.name_teilen(name)
         self.notiz_hinzufuegen(
-            eigene_abschnitte.start_text(name),
+            eigene_abschnitte.grenze_text(
+                gruppe, eigene_abschnitte.ART_START, zusatz, kopf_s, endteil_s
+            ),
             marke=eigene_abschnitte.start_marke(kennung, name, kopf_s, endteil_s),
         )
         return kennung
+
+    def abschnitt_marker(self, zusatz: str = "") -> bool:
+        """„‹Name›: Marker“ bei jetzt — teilt den laufenden eigenen Abschnitt (Ben,
+        12.11.2026: „Radfahren: Marker (5 km)“); ``False``, wenn keiner läuft."""
+        offen = self.offener_abschnitt()
+        if offen is None or self.aufnahme is None:
+            return False
+        self.notiz_hinzufuegen(
+            eigene_abschnitte.grenze_text(offen[1], eigene_abschnitte.ART_MARKER, zusatz)
+        )
+        self.ereignisse_setzen(self.ereignisse())  # die Marken folgen dem Text
+        return True
 
     def abschnitt_beenden(self) -> bool:
         """„‹Name› · Ende“ — die Ende-Notiz bei jetzt; ``False``, wenn keiner läuft."""
@@ -1190,6 +1206,14 @@ class Messlauf:
             eigene_abschnitte.ende_text(name), marke=eigene_abschnitte.ende_marke(kennung, name)
         )
         return True
+
+    def _abschnitte_schliessen(self) -> None:
+        """Vor dem Speichern: Was noch läuft, bekommt seine Ende-Notiz bei jetzt — eine
+        Start-Notiz ohne Ende ergäbe in der Messdatei keinen Abschnitt (Ben, 12.11.2026:
+        keine Notizleichen)."""
+        for _ in range(50):
+            if not self.abschnitt_beenden():
+                break
 
     def abschnitt_setzen(
         self,
@@ -1222,14 +1246,16 @@ class Messlauf:
         liste = eigene_abschnitte.notizen_aktualisieren(
             self.aufnahme.ereignisse, a, zb, laeuft=bis_s is None
         )
-        self.aufnahme.ereignisse = sortiert(liste, self.aufnahme.beats)
+        self.ereignisse_setzen(sortiert(liste, self.aufnahme.beats))
         return a.id
 
     def abschnitt_loeschen(self, kennung: str) -> list[dict]:
         """Einen eigenen Abschnitt löschen — sein Paar Grenz-Notizen geht mit. Gibt die
         Notizen von vorher zurück (für „Rückgängig“: `ereignisse_setzen`)."""
         vorher = self.ereignisse()
-        self.ereignisse_setzen(eigene_abschnitte.notizen_entfernen(vorher, kennung))
+        self.ereignisse_setzen(
+            eigene_abschnitte.notizen_entfernen(vorher, kennung, self.notiz_zeitbezug().x)
+        )
         return vorher
 
     def abschnitte(self) -> list[Abschnitt]:
@@ -1248,7 +1274,7 @@ class Messlauf:
                 if (x := zb.x(eintrag)) is not None
             ]
             teile.extend(aus_grenzen(punkte, 0.0, jetzt))
-        teile.extend(paare_aus_notizen(self.aufnahme.ereignisse, lambda e: zb.x(dict(e)), jetzt))
+        teile.extend(eigene_abschnitte.paare(self.aufnahme.ereignisse, zb.x, jetzt, laufend=True))
         teile.sort(key=lambda a: (a.von_s, a.bis_s))
         return teile
 
@@ -1648,9 +1674,24 @@ class Messlauf:
             ]
             if neu:
                 verschoben = {g for e in neu if (g := _grenze(e)) is not None}
-                aufnahme.ereignisse = sorted(
-                    [*(e for e in aufnahme.ereignisse if _grenze(e) not in verschoben), *neu],
+                # Am Zwischenstand lief der Abschnitt noch: Seine Start-Notiz ist dort ohne
+                # Ende verwaist und trägt keine Marke mehr — wiedererkannt am Text
+                texte = {str(e.get("text") or "") for e in neu if eigene_abschnitte.verwaist(e)}
+                liste = sorted(
+                    [
+                        *(
+                            e
+                            for e in aufnahme.ereignisse
+                            if _grenze(e) not in verschoben
+                            and not (eigene_abschnitte.ist_grenze(e) and e.get("text") in texte)
+                        ),
+                        *neu,
+                    ],
                     key=lambda e: _notiz_schluessel(e)[1],
+                )
+                # Die Marken folgen dem Text (`core.abschnitte`) — hier ist schon alles zu
+                aufnahme.ereignisse = eigene_abschnitte.marken_aus_text(
+                    liste, lambda e: _notiz_schluessel(e)[1]
                 )
 
     async def aufnahme_teilen_async(self, basis: Path) -> Gespeichert | None:
@@ -1672,6 +1713,7 @@ class Messlauf:
             if self.aufnahme is not alt or self._wird_gespeichert:
                 return None  # inzwischen gestoppt oder geteilt: der andere Aufruf trägt ein
         # Zwischenstände gehören zu Teil 1: er ersetzt sie, Teil 2 beginnt ohne
+        self._abschnitte_schliessen()
         self._zwischen_uebernehmen(alt, gelesen)
         # Scheitert das Schreiben von Teil 1, bleibt nur sein Backup — darum hier den Stand
         # von jetzt sichern, nicht den von vor bis zu 15 s (H89)
@@ -1736,6 +1778,7 @@ class Messlauf:
         if self._wird_gespeichert:
             return None
         self._wird_gespeichert = True
+        self._abschnitte_schliessen()
         if uebernehmen:
             self._zwischen_uebernehmen(aufnahme)
         # Ein offener Lauf „Atmung erfassen“ endet mit der Aufnahme am Stopp, nicht mit dem

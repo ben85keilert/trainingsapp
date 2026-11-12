@@ -24,8 +24,8 @@ from typing import Any
 import flet as ft
 from hrv_core.ausschnitte import Abschnitt
 
+from trainingsapp.core.abschnitte import rand_lesen, rand_text
 from trainingsapp.core.laufend import minuten
-from trainingsapp.core.zeitangabe import dauer_lesen, dauer_text
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 
@@ -37,31 +37,6 @@ RAD_MAX_S = 59 * 60 + 59
 ZEILE_PX = 44
 
 _uhr = minuten
-
-
-def rand_text(sekunden: float) -> str:
-    """Kopf oder Endteil in Kurzform — mit Vorzeichen, „0“ für keinen.
-
-    >>> rand_text(300), rand_text(-120), rand_text(0)
-    ('+5:00', '−2:00', '0')
-    """
-    if not sekunden:
-        return "0"
-    return ("−" if sekunden < 0 else "+") + dauer_text(abs(sekunden))
-
-
-def rand_lesen(text: str) -> float | None:
-    """Ein getippter Rand: „−2:00“, „-120“, „5:00“, „+300“ — ``None``, wenn unlesbar.
-
-    >>> rand_lesen("−2:00"), rand_lesen("-120"), rand_lesen("5:00"), rand_lesen("+300")
-    (-120.0, -120.0, 300.0, 300.0)
-    >>> rand_lesen("0"), rand_lesen("abc")
-    (0.0, None)
-    """
-    t = text.strip().lstrip("+").strip()
-    if t in ("0", "0:00"):
-        return 0.0
-    return dauer_lesen(t)  # kennt „−“ und „-“
 
 
 def rand_blatt(

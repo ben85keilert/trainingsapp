@@ -7,8 +7,9 @@ Drei Reiter:
   zusammengefasst wie „Gemacht“ in der Tagesansicht: Wert, Sätze, Mini-Kurve.
   „Tag öffnen“ führt in die Tagesansicht mit Plänen und Notizen.
 - **Übungen**: alle Übungen, die zuletzt gemachten zuerst, mit Mini-Kurve, letztem Wert
-  und Trend (Mittel der letzten vier Wochen gegen die vier davor); oben ein Filter nach
-  Typ.
+  und Trend (Mittel der letzten vier Wochen gegen die vier davor); oben Suchfeld und
+  Filter wie im Katalog (Typ · Region · Paket, `components/uebungsfilter.py` — Ben,
+  12.11.2026: „einheitlich mit der übrigen Übungsauswahl“).
 
 - **Tagebuch** (Ben, 18.10.2026): alle Notizen — zum Tag, zum Plan, zur Übung — nach Tagen
   (mit Wochenleiste, die beim Scrollen mitgeht) oder nach Übungen (`views/tagebuch.py`).
@@ -20,7 +21,7 @@ Randbedingungen wenig aussagekräftig, P39).
 
 **Einmal lesen, in der Spalte auffrischen** (N23, 19.10.2026): Die Einträge aller Tage
 (`_Daten`) werden je Aufbau der Ansicht einmal gelesen und gehalten. Tag wählen, Woche
-blättern, Typ filtern und der Reiterwechsel ersetzen nur den Inhalt ihrer Spalte
+blättern, Suchen und Filtern und der Reiterwechsel ersetzen nur den Inhalt ihrer Spalte
 (`control.update()`) — kein `neu_zeichnen`, keine neue Abfrage. Ändert sich der Bestand
 (Nachtragen, Löschen, Leistungen-Blatt), geschieht das auf einer anderen Route oder in
 einem Dialog, nach dem die App den Stapel ohnehin neu baut — dann wird neu gelesen.
@@ -39,6 +40,7 @@ import flet as ft
 from trainingsapp.core import tagesfelder as tf
 from trainingsapp.core import varianten as var
 from trainingsapp.core.models import Exercise, SessionEntry
+from trainingsapp.core.uebungsfilter import paket_wahl
 from trainingsapp.core.verlauf import (
     WOCHENTAGE,
     haeufigkeit,
@@ -55,6 +57,7 @@ from trainingsapp.core.verlauf import (
 )
 from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.scroll import scroll_merken
+from trainingsapp.ui.components.uebungsfilter import FilterLeiste
 from trainingsapp.ui.components.uebungszeile import abschnitt, grosser_wert, uebungszeile
 from trainingsapp.ui.components.varianten import etikett as varianten_etikett
 from trainingsapp.ui.components.verlaufskurve import mini, mini_saeulen
@@ -646,58 +649,88 @@ def trend_text(anteil: float | None) -> str:
     return f"{'+' if prozent > 0 else '−'}{abs(prozent)} %"
 
 
-def _uebungen(page: ft.Page, state: AppState, daten: Callable[[], _Daten]) -> ft.Control:
-    """Die Spalte „Übungen“ — der Typfilter füllt nur ihren Inhalt neu."""
-    inhalt = ft.Column(spacing=8)
+def _passt(state: AppState, uebung: Exercise | None) -> bool:
+    """Ob eine Übung durch Suche und Filter des Reiters „Übungen“ kommt — gesucht wird wie im
+    Katalog in Name und Beschreibung, ohne Groß und klein."""
+    text = state.verlauf_suche.strip().casefold()
+    if uebung is None:  # Eintrag ohne Übung im Katalog: nur ohne Suche und Filter
+        return not text and state.verlauf_filter.leer
+    if text and text not in f"{uebung.name}\n{uebung.description}".casefold():
+        return False
+    return state.verlauf_filter.passt(uebung)
 
-    def auffrischen() -> None:
-        inhalt.controls = _uebungen_inhalt(page, state, daten(), auffrischen)
+
+def _uebungen(page: ft.Page, state: AppState, daten: Callable[[], _Daten]) -> ft.Control:
+    """Die Spalte „Übungen“: Suchzeile mit Filterknopf, Labels, darunter die Liste — Suche
+    und Filter füllen nur die Liste neu."""
+    inhalt = ft.Column(spacing=8)
+    #: zur Wahl steht, was an gemachten Übungen vorkommt — häufige Tags zuerst
+    gemacht = [u for k in daten().je_kachel if (u := daten().katalog.get(k)) is not None]
+    typen = Counter(t for u in gemacht for t in u.typen)
+    regionen = Counter(r for u in gemacht for r in u.regionen)
+
+    def fuellen() -> None:
+        inhalt.controls = _uebungen_inhalt(page, state, daten())
+
+    def gefiltert() -> None:
+        fuellen()
+        _zeigen(aussen)
+
+    def suchen(e: ft.Event[ft.TextField]) -> None:
+        state.verlauf_suche = e.control.value or ""
+        fuellen()
         _zeigen(inhalt)
 
-    inhalt.controls = _uebungen_inhalt(page, state, daten(), auffrischen)
+    leiste = FilterLeiste(
+        page,
+        state.verlauf_filter,
+        [t for t, _ in typen.most_common()],
+        [r for r, _ in regionen.most_common()],
+        paket_wahl(gemacht, [p for p, _ in state.pakete.alle()]),
+        on_change=gefiltert,
+        zaehlen=lambda: sum(_passt(state, u) for u in gemacht),
+    )
+    fuellen()
     spalte = ft.Column(
         expand=True,
         scroll=ft.ScrollMode.AUTO,
         controls=[
             ft.Container(
-                padding=ft.Padding.only(left=12, right=12, top=10, bottom=24),
+                padding=ft.Padding.only(left=12, right=12, top=2, bottom=24),
                 content=inhalt,
             )
         ],
     )
-    return scroll_merken(page, state, "verlauf_uebungen", spalte)
+    aussen = ft.Column(
+        expand=True,
+        spacing=8,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        controls=[
+            ft.Container(
+                padding=ft.Padding.only(left=16, right=8, top=12),
+                content=leiste.suchzeile(
+                    ft.TextField(
+                        value=state.verlauf_suche,
+                        hint_text="Übung suchen",
+                        prefix_icon=ft.Icons.SEARCH,
+                        border=ft.OutlineInputBorder(border_radius=12),
+                        on_change=suchen,
+                    )
+                ),
+            ),
+            leiste.labels,  # nur, wenn ein Filter wirkt
+            scroll_merken(page, state, "verlauf_uebungen", spalte),
+        ],
+    )
+    return aussen
 
 
-def _uebungen_inhalt(
-    page: ft.Page, state: AppState, daten: _Daten, auffrischen: Callable[[], None]
-) -> list[ft.Control]:
-    """Typ-Chips und je Übung eine Zeile mit Mini-Kurve und Trend."""
+def _uebungen_inhalt(page: ft.Page, state: AppState, daten: _Daten) -> list[ft.Control]:
+    """Je Übung (und Variante) eine Zeile mit Mini-Kurve und Trend — was durch Suche und
+    Filter kommt."""
     heute = daten.heute
     reihenfolge = sorted(daten.je_kachel, key=lambda k: daten.je_kachel[k][-1][0], reverse=True)
-    typen = Counter(
-        typ for k in reihenfolge if (u := daten.katalog.get(k)) is not None for typ in u.typen
-    )
-    typ = state.verlauf_typ if state.verlauf_typ in typen else None
-
-    def filter_waehlen(neu: str | None) -> Callable[[], None]:
-        def handler() -> None:
-            state.verlauf_typ = neu
-            auffrischen()
-
-        return handler
-
-    chips: list[ft.Control] = [
-        ft.Chip(
-            label=ft.Text(name),
-            selected=wert == typ,
-            show_checkmark=True,
-            on_select=filter_waehlen(wert),
-        )
-        for wert, name in [(None, "Alle"), *((t, t) for t, _ in typen.most_common())]
-    ]
     controls: list[ft.Control] = []
-    if len(chips) > 2:
-        controls.append(ft.Row(wrap=True, spacing=8, run_spacing=6, controls=chips))
     controls.append(abschnitt("Zuletzt gemacht"))
     gezeigt = 0
     # Je Übung und Variante eine Zeile (Ben, 21.10.2026, Skizze B3) — zuletzt Gemachtes zuerst
@@ -709,7 +742,7 @@ def _uebungen_inhalt(
     reihen.sort(key=lambda r: r[2][-1][0], reverse=True)
     for kachel_id, variante, eintraege in reihen:
         uebung = daten.katalog.get(kachel_id)
-        if typ is not None and (uebung is None or typ not in uebung.typen):
+        if not _passt(state, uebung):
             continue
         tage = sorted({t for t, _ in eintraege})
         zuletzt = tage[-1]
@@ -789,7 +822,9 @@ def _uebungen_inhalt(
     if not gezeigt:
         controls.append(
             ft.Text(
-                "Noch nichts eingetragen — Übungen erscheinen hier, sobald du sie machst.",
+                "Keine Übung passt zu Suche und Filter."
+                if reihen
+                else "Noch nichts eingetragen — Übungen erscheinen hier, sobald du sie machst.",
                 opacity=0.7,
             )
         )

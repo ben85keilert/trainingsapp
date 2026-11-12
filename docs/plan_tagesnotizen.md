@@ -172,6 +172,8 @@ nicht angelegt bzw. gelöscht.
 **E1. Dritter Abschnitt „Notizen“** (`state.tagebuch_ordnung = "notizen"`, Konstante `NOTIZEN`):
 - Segment neben „Tage“ und „Übungen und Felder“. Drei Segmente müssen auf 360 px passen;
   sonst „Übungen · Felder“ kürzen (prüfen im Desktop-Vorschau bei 360 px Breite).
+  **12.11.2026 gekürzt auf „Übungen“** — die Segmente sind gleich breit, das längste Wort
+  bestimmt die Zeile, das Kalendersymbol passte nicht mehr daneben.
 - Darunter die **Filterzeile**: ein Chip je Tag (aktive und ausgeschaltete, wenn Notizen sie
   tragen), Mehrfachwahl = ODER, nichts gewählt = alle; `state.tagebuch_tags: set[str]` (P102).
   Außerdem ein Chip „ohne Tag“ für Notizen ohne Etikett.

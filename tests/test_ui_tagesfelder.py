@@ -446,8 +446,9 @@ def test_feldansicht_je_art(page, state, schluessel) -> None:
         assert "2 Stück" in texte
 
 
-def test_tagebuch_mit_werten_und_texten(page, state) -> None:
-    from trainingsapp.ui.views.tagebuch import UEBUNGEN, tagebuch
+def test_tagebuch_nur_texte_der_felder(page, state) -> None:
+    """Nur selbst Geschriebenes (Ben, 12.11.2026): Werte stehen im Verlauf, nicht im Tagebuch."""
+    from trainingsapp.ui.views.tagebuch import NOTIZEN, UEBUNGEN, tagebuch
 
     f = _felder(state)
     state.tageswerte.hinzufuegen(
@@ -455,12 +456,18 @@ def test_tagebuch_mit_werten_und_texten(page, state) -> None:
     )
     state.tageswerte.einmal_setzen(f["essen"], state.heute(), note="Mittags Gemüse")
     texte = _texte(tagebuch(page, state))
-    assert "Ibu 400 × 1" in texte  # die Wertezeile an der Notiz zum Tag
     assert "nach dem Laufen" in texte and "Mittags Gemüse" in texte
+    assert not any("×" in t for t in texte)  # keine Wertezeile („Ibu 400 × 1“)
+    # Ein Tag nur mit Werten erscheint nicht — auch nicht im Abschnitt „Notizen“
+    gestern = state.heute() - timedelta(days=1)
+    state.tageswerte.hinzufuegen(f["ibu"], gestern, _um(state, 0, 1, gestern), wert=1)
+    state.tagebuch_ordnung = NOTIZEN
+    texte = _texte(tagebuch(page, state))
+    assert not any("Ibu" in t for t in texte) and any(t.startswith("Keine Notizen") for t in texte)
     state.tagebuch_ordnung = UEBUNGEN
     texte = _texte(tagebuch(page, state))
     assert "Ernährung" in texte and "Ibu" in texte
-    assert "Übungen · Felder" in texte
+    assert "Übungen" in texte and "Übungen · Felder" not in texte
 
 
 # ---------------------------------------------------------------------------

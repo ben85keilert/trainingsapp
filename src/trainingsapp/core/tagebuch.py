@@ -20,23 +20,26 @@ Frontbilder, nie ein laufendes Video. Nach Übungen geordnet stehen sie unter de
 Seit 22.10.2026 auch Audioaufnahmen, und Anhänge am Tag selbst (Notiz zum Tag): je Tag eine
 `AUFNAHME` ohne Übung, nach Übungen geordnet bei den Notizen zum Tag.
 
-**Tagesfelder** (Ben, 21.10.2026, `core/tagesfelder.py`, Skizze C4): An der Notiz zum Tag
-steht die Zeile mit den Werten des Tags (`Notiz.werte` — „Schmerz Knie 3 · Ibu 400 × 2“);
-ein Tag nur mit Werten erscheint dann auch ohne Text. Texte der Felder („Ernährung“) und
-Werte mit Notiz sind Notizen der Art `TAGESFELD` nach der Uhr; nach Übungen geordnet hat
-jedes Tagesfeld seine Gruppe.
+**Nur selbst Geschriebenes** (Ben, 12.11.2026: „Eigentlich sollten das nur Notizen und
+Anmerkungen sein, selbst geschriebener Text aus den Tagen und zu den Übungen“): Was nur ein
+Wert ist, steht nicht im Tagebuch — die Werte der Tagesfelder („Ibu 400 × 2“) gehören in den
+Verlauf (Tage, Zum Tag), ein Workout nur mit Anstrengung auf seine Seite. Von den
+**Tagesfeldern** (`core/tagesfelder.py`) bleiben die Texte der Felder („Ernährung“) und die
+Notiz, die jemand zu einem Wert schreibt — Art `TAGESFELD`, nach der Uhr; nach Übungen
+geordnet hat jedes Tagesfeld seine Gruppe. Ein **Workout** steht da, wenn zu ihm eine Notiz
+geschrieben ist; seine Skalen stehen dann als Zeile darunter (`Notiz.werte`).
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from .anhaenge import AnhangMitBezug, zusammenfassung
 from .models import DayNote, Session, SessionEntry, lokaler_tag
 from .tagesfelder import TEXT as NUR_TEXT
-from .tagesfelder import Tagesfeld, Tageswert, eintrag_text, tageszeile
+from .tagesfelder import Tagesfeld, Tageswert, eintrag_text
 from .varianten import von as variante_von
 from .workout_eintrag import WorkoutZeile
 
@@ -45,7 +48,7 @@ from .workout_eintrag import WorkoutZeile
 TAG, PLAN, UEBUNG, AUFNAHME, TAGESFELD = "tag", "plan", "uebung", "aufnahme", "tagesfeld"
 #: Ein Workout mit dem, was zu ihm eingetragen ist (Ben, 10.11.2026,
 #: `docs/plan_workout_eintrag.md`) — ``bezug_id`` ist die Einheit, ``werte`` die Zeile der
-#: Skalen („Anstrengung 6“), ``text`` die Notiz zum Workout
+#: Skalen („Anstrengung 6“), ``text`` die Notiz zum Workout; ohne Notiz steht es nicht da
 WORKOUT = "workout"
 #: So viele Zeilen zeigt eine Notiz zum Tag, bevor sie abgeschnitten wird — das Feld unter
 #: Heute (``max_lines``) und die Karte im Tagebuch gleichermaßen (Ben, 2.11.2026, P100)
@@ -69,7 +72,7 @@ class Notiz:
     bezug_id: str | None = None
     #: die Variante ihres Eintrags — leer ohne (Ben, 21.10.2026: „vor allem im Tagebuch“)
     variante: str = ""
-    #: Notiz zum Tag: die Werte der Tagesfelder an diesem Tag
+    #: Workout: die Zeile seiner Skalen („Anstrengung 6“) unter der Notiz
     werte: str = ""
     #: Tagesfeld: welches, und wie die Notiz heißt („Ibu 400“, „Ernährung“)
     feld_id: str | None = None
@@ -116,9 +119,10 @@ def sammeln(
     """Die Ebenen als Notizen — ``tage`` (die Notizen zum Tag, `DayNote`, mit ``tag_namen``
     ID → Name ihrer Tags), ``sessions`` (mit ihrem ersten Eintrag), ``eintraege`` (mit ihrer
     Session), ``aufnahmen`` (Anhänge mit ihrem Eintrag — je Eintrag eine Notiz `AUFNAHME`),
-    ``tageswerte`` mit ihren ``tagesfelder`` (Wertezeile an der ersten Notiz des Tags, Texte
-    als `TAGESFELD`). Leere Notizen fallen weg; eine Notiz zum Tag ohne Text (nur Foto oder
-    Audio — ``tage`` mit ``mit_leeren`` gelesen) gibt ihrer Aufnahme die Tags mit (N90).
+    ``tageswerte`` mit ihren ``tagesfelder`` (nur ihre Texte, als `TAGESFELD` — Werte ohne
+    Notiz stehen nicht im Tagebuch). Leere Notizen fallen weg; eine Notiz zum Tag ohne Text
+    (nur Foto oder Audio — ``tage`` mit ``mit_leeren`` gelesen) gibt ihrer Aufnahme die Tags
+    mit (N90).
 
     >>> from datetime import UTC
     >>> from .anhaenge import Anhang
@@ -160,15 +164,22 @@ def sammeln(
     >>> t = date(2026, 10, 21)
     >>> w = [tf.Tageswert(feld_id="ibu", tag=t, result=tf.ergebnis(1, "400"), spec=ibu.spec,
     ...                   note="nach dem Laufen"),
+    ...      tf.Tageswert(feld_id="ibu", tag=t, result=tf.ergebnis(1, "400"), spec=ibu.spec),
     ...      tf.Tageswert(feld_id="ess", tag=t, note="Gemüse", spec=ess.spec)]
     >>> n = sammeln([DayNote(date=t, text="müde")], [], [], [], w, {"ibu": ibu, "ess": ess})
     >>> for x in n:
-    ...     print(x.art, "|", x.text, "|", x.werte or x.titel)
-    tag | müde | Ibu 400 × 1
+    ...     print(x.art, "|", x.text, "|", x.werte or x.titel or "–")
+    tag | müde | –
     tagesfeld | nach dem Laufen | Ibu 400
     tagesfeld | Gemüse | Ernährung
 
-    Ein Workout mit Anstrengung oder Notiz steht als eigene Zeile da (``bezug_id`` = Einheit):
+    Ein Tag nur mit Werten steht nicht im Tagebuch:
+
+    >>> sammeln([], [], [], [], w[1:2], {"ibu": ibu})
+    []
+
+    Ein Workout mit Notiz steht als eigene Zeile da (``bezug_id`` = Einheit), eines nur mit
+    Anstrengung nicht:
 
     >>> from .workout_eintrag import WorkoutWerte, WorkoutZeile
     >>> wz = WorkoutZeile("x", "p", "Beine", datetime(2026, 10, 17, 10, tzinfo=UTC),
@@ -176,6 +187,9 @@ def sammeln(
     >>> [(x.art, x.titel, x.text, x.werte, x.bezug_id, x.plan_id)
     ...  for x in sammeln([], [], [], workouts=[wz])]
     [('workout', 'Workout Beine', 'zäh', 'Anstrengung 6', 'x', 'p')]
+    >>> sammeln([], [], [], workouts=[WorkoutZeile("y", "p", "Beine", wz.beginn,
+    ...                                            WorkoutWerte("y", {"srpe": 6}))])
+    []
     """
     namen = tag_namen or {}
     tage = list(tage)
@@ -195,7 +209,7 @@ def sammeln(
         for d in tage
         if d.text.strip()
     ]
-    ergebnis = _mit_tageswerten(ergebnis, list(tageswerte), tagesfelder or {})
+    ergebnis.extend(_feldnotizen(tageswerte, tagesfelder or {}))
     for s, erst in sessions:
         if s.note.strip():
             zeit = erst or s.started_at
@@ -241,11 +255,13 @@ def sammeln(
             )
         )
     for w in workouts:
+        if not w.werte.note.strip():
+            continue  # nur Anstrengung: ein Wert, kein Text
         ergebnis.append(
             Notiz(
                 lokaler_tag(w.beginn),
                 WORKOUT,
-                w.werte.note,
+                w.werte.note.strip(),
                 w.beginn,
                 plan_id=w.plan_id or None,
                 bezug_id=w.einheit_id,
@@ -337,38 +353,10 @@ def _reihenfolge(liste: list[AnhangMitBezug]) -> tuple[str, ...]:
     return tuple(x.anhang.id for x in sorted(liste, key=lambda x: x.anhang.aufgenommen))
 
 
-def _mit_tageswerten(
-    notizen: list[Notiz], werte: list[Tageswert], felder: Mapping[str, Tagesfeld]
-) -> list[Notiz]:
-    """Die Notizen zum Tag mit ihrer Wertezeile — dazu die Texte der Tagesfelder."""
-    if not werte:
-        return notizen
-    je_tag: dict[date, list[Tageswert]] = {}
-    for w in werte:
-        je_tag.setdefault(w.tag, []).append(w)
-    # Die Wertezeile steht an der ersten Notiz des Tags (mehrere seit 2.11.2026)
-    zum_tag: dict[date, Notiz] = {}
-    for n in notizen:
-        if n.art == TAG and (
-            n.tag not in zum_tag or n.sortierzeit() < zum_tag[n.tag].sortierzeit()
-        ):
-            zum_tag[n.tag] = n
+def _feldnotizen(werte: Iterable[Tageswert], felder: Mapping[str, Tagesfeld]) -> list[Notiz]:
+    """Was zu Tagesfeldern geschrieben ist: die Texte der Felder „nur Text“ und die Notiz an
+    einem Wert. Der Wert allein ist keine Notiz."""
     ergebnis: list[Notiz] = []
-    zeilen: dict[date, str] = {}
-    for tag in sorted(set(zum_tag) | set(je_tag)):
-        teile = [
-            text
-            for feld in felder.values()
-            if (text := tageszeile(feld, [w for w in je_tag.get(tag, []) if w.feld_id == feld.id]))
-        ]
-        zeilen[tag] = " · ".join(teile)
-        if tag not in zum_tag and teile:
-            ergebnis.append(Notiz(tag, TAG, "", None, werte=zeilen[tag]))
-    for n in notizen:
-        if n.art == TAG and zum_tag.get(n.tag) is n:
-            ergebnis.append(replace(n, werte=zeilen.get(n.tag, "")))
-        else:
-            ergebnis.append(n)
     for w in werte:
         if not w.note.strip():
             continue
@@ -435,8 +423,6 @@ def nach_uebungen(notizen: Iterable[Notiz]) -> list[Gruppe]:
     """
     gruppen: dict[tuple[str, str | None], list[Notiz]] = {}
     for x in notizen:
-        if x.art == TAG and not x.text:
-            continue  # nur Werte — die stehen nach Tagen, nicht als Notiz zum Tag
         # Aufnahmen stehen unter ihrer Übung, zwischen deren Notizen — die am Tag bei den
         # Notizen zum Tag
         art = (UEBUNG if x.exercise_id else TAG) if x.art == AUFNAHME else x.art

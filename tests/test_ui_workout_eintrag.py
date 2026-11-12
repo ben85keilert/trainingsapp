@@ -376,7 +376,9 @@ def test_tagebuch_zeigt_workouts_mit_eintrag(page, state) -> None:
     plan = _plan(state, "kniebeuge", "wandsitz")
     _workout(state, plan, "e-1", 60)
     _workout(state, plan, "e-2", 10)  # nichts eingetragen: steht nicht im Tagebuch
+    _workout(state, plan, "e-3", 5)  # nur Anstrengung, kein Text: auch nicht (Ben, 12.11.2026)
     state.einheiten.workout_eintragen("e-1", result={"srpe": 6}, note="Knie gespürt")
+    state.einheiten.workout_eintragen("e-3", result={"srpe": 4})
     page.run_task = lambda f, *a: asyncio.run(f(*a))
     ansicht = tagebuch(page, state)
     texte = _texte(ansicht)

@@ -245,7 +245,8 @@ def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
 def test_verlauf_ohne_werte(page, state) -> None:
     from trainingsapp.ui.views.verlauf import verlauf
 
-    state.verlauf_typ = "gibt-es-nicht"
+    state.verlauf_filter.typen.add("gibt-es-nicht")  # fällt heraus: steht nicht zur Wahl
+    state.verlauf_suche = "gibt-es-nicht"
     for reiter in (0, 1):
         state.verlauf_tab = reiter
         assert verlauf(page, state) is not None

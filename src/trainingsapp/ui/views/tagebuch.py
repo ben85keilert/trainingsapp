@@ -14,11 +14,11 @@ der Kalender mit.“
   dann Plan- und Übungsnotizen nach der Uhr. Beim Scrollen geht die Woche mit (die Höhe
   jedes Tages meldet ``on_size_change``, `core.tagebuch.oben` rechnet); ein Tipp auf einen
   Tag der Woche springt zu ihm (oder zum nächstälteren mit Notiz), ‹ › blättern.
-- **Übungen und Felder**: je Übung (und je Plan, je Tagesfeld) ihre Notizen, die neueste
+- **Übungen**: je Übung (und je Plan, je Workout, je Tagesfeld) ihre Notizen, die neueste
   oben; die Notizen zum Tag für sich.
-- **Tagesfelder** (Ben, 21.10.2026, Skizze C4): An der Notiz zum Tag steht die Zeile mit den
-  Werten des Tags; Texte der Felder und Werte mit Notiz stehen nach der Uhr. Antippen öffnet
-  das Blatt des Felds (`components/tagesfeld_blatt.py`).
+- **Nur selbst Geschriebenes** (Ben, 12.11.2026): Werte der Tagesfelder stehen nicht hier,
+  sondern im Verlauf (Tage, Zum Tag). Texte der Felder und die Notiz an einem Wert stehen
+  nach der Uhr; antippen öffnet das Blatt des Felds (`components/tagesfeld_blatt.py`).
 - Antippen bearbeitet: die Notiz zum Tag und die zum Plan im Notizdialog, die einer Übung
   in ihren Leistungen des Tages (Blatt, `views/leistungen.py`).
 
@@ -411,13 +411,24 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             spacing=4,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
+                # Die Segmente sind gleich breit — das längste Wort bestimmt die Zeile. Mit
+                # „Übungen · Felder“ passte das Kalendersymbol nicht mehr daneben (Ben,
+                # 12.11.2026); die Gruppen der Tagesfelder stehen weiter unter „Übungen“
                 ft.SegmentedButton(
                     selected=[state.tagebuch_ordnung],
                     show_selected_icon=False,
+                    style=ft.ButtonStyle(
+                        visual_density=ft.VisualDensity.COMPACT,
+                        padding=ft.Padding.symmetric(horizontal=8),
+                    ),
                     segments=[
-                        ft.Segment(value=TAGE, label=ft.Text("Tage")),
-                        ft.Segment(value=UEBUNGEN, label=ft.Text("Übungen · Felder")),
-                        ft.Segment(value=NOTIZEN, label=ft.Text("Notizen")),
+                        ft.Segment(value=TAGE, label=ft.Text("Tage", size=13)),
+                        ft.Segment(
+                            value=UEBUNGEN,
+                            label=ft.Text("Übungen", size=13),
+                            tooltip="Nach Übungen, Plänen und Tagesfeldern",
+                        ),
+                        ft.Segment(value=NOTIZEN, label=ft.Text("Notizen", size=13)),
                     ],
                     on_change=ordnung_gewaehlt,
                 ),
@@ -426,6 +437,7 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
                     ft.Icons.CALENDAR_VIEW_WEEK
                     if state.tagebuch_kalender
                     else ft.Icons.CALENDAR_VIEW_WEEK_OUTLINED,
+                    visual_density=ft.VisualDensity.COMPACT,
                     tooltip="Wochenleiste ausblenden"
                     if state.tagebuch_kalender
                     else "Wochenleiste zeigen",
@@ -433,7 +445,12 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
                     visible=state.tagebuch_ordnung in (TAGE, NOTIZEN),
                     on_click=kalender_umschalten,
                 ),
-                ft.IconButton(ft.Icons.ADD, tooltip="Neue Notiz zu heute", on_click=notiz_zum_tag),
+                ft.IconButton(
+                    ft.Icons.ADD,
+                    tooltip="Neue Notiz zu heute",
+                    visual_density=ft.VisualDensity.COMPACT,
+                    on_click=notiz_zum_tag,
+                ),
             ],
         ),
     )
@@ -502,8 +519,8 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             if n.art == TAG
             else ft.Text(n.text, size=14, selectable=False)
         )
-        if n.art in (TAG, WORKOUT) and n.werte:
-            # Die Werte der Tagesfelder an diesem Tag (Skizze C4) — beim Workout seine Skalen
+        if n.art == WORKOUT and n.werte:
+            # Die Skalen des Workouts unter seiner Notiz
             zeile = ft.Container(
                 bgcolor=ft.Colors.SURFACE_CONTAINER,
                 border_radius=8,

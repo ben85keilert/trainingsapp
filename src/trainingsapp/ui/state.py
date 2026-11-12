@@ -299,11 +299,13 @@ class AppState:
     #: Darstellung der Tagesansicht (Ben, 18.10.2026): "uebersicht" oder "zeitleiste"
     tag_darstellung: str = "uebersicht"
     #: Verlauf (Ben, 17.10.2026): Reiter (0 = Tage, 1 = Übungen, 2 = Tagebuch), gezeigte Woche (ihr
-    #: Montag; None = die aktuelle), gewählter Tag (None = von selbst), Typ-Filter
+    #: Montag; None = die aktuelle), gewählter Tag (None = von selbst); Reiter „Übungen“:
+    #: Suchtext und Filter wie im Katalog (Ben, 12.11.2026 — vorher Typ-Chips)
     verlauf_tab: int = 0
     verlauf_woche: date | None = None
     verlauf_tag: date | None = None
-    verlauf_typ: str | None = None
+    verlauf_suche: str = ""
+    verlauf_filter: Uebungsfilter = field(default_factory=Uebungsfilter)
     #: Reiter „Tagebuch“ (Ben, 18.10.2026; Verlauf-Reiter 2): nach Tagen oder Übungen, mit
     #: Wochenleiste, wie viele Tage mit Notizen gezeigt werden (`views/tagebuch.py`)
     tagebuch_ordnung: str = "tage"

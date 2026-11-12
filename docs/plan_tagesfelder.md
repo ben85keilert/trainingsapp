@@ -257,9 +257,13 @@ CREATE INDEX idx_day_value_feld ON day_value(field_id, date)   WHERE deleted_at 
 - `core/tagebuch.sammeln` bekommt die Tageswerte. Daraus entstehen zwei Dinge:
   - Text-Felder und Werte mit Notiz werden eine Notiz der neuen Art `TAGESFELD`. Der
     Titel ist „Feld · Variante“, dazu kommt der Wert.
-  - An der Notiz zum Tag steht eine Zeile mit den Werten des Tags. Ein Tag nur mit
-    Werten erscheint dann auch ohne Text.
-- „Nach Übungen“ heißt dann „Übungen und Felder“ und bekommt je Tagesfeld eine Gruppe.
+  - ~~An der Notiz zum Tag steht eine Zeile mit den Werten des Tags. Ein Tag nur mit
+    Werten erscheint dann auch ohne Text.~~ **Aufgehoben 12.11.2026** (Ben: „in Tagebuch
+    Notizen werden auch Felder gelistet wie Medikamente usw. … Eigentlich sollten das nur
+    Notizen und Anmerkungen sein, selbst geschriebener Text“): Werte ohne Notiz stehen
+    nicht im Tagebuch, nur im Verlauf (Tage, Zum Tag).
+- „Nach Übungen“ bekommt je Tagesfeld eine Gruppe (das Segment heißt seit 12.11.2026 wieder
+  kurz „Übungen“ — mit „Übungen · Felder“ passte das Kalendersymbol nicht mehr in die Zeile).
 - `zahl_je_tag` zählt Texte und Werte mit Notiz, nicht jeden Tipp auf „+1“.
 
 ## G. Zeitleiste

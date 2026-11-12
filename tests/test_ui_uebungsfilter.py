@@ -194,3 +194,51 @@ def test_uebung_hinzufuegen_hat_dieselbe_leiste(page, state) -> None:
     namen = sorted(z.title.value for z in liste.controls if isinstance(z, ft.ListTile))
     assert namen == sorted(u.name for u in state.uebungen.alle() if "Atmung" in u.typen)
     assert [c.label.value for c in labels(ansicht)] == ["Atmung"]
+
+
+def test_verlauf_uebungen_sucht_und_filtert_wie_der_katalog(page, state) -> None:
+    """Verlauf → Übungen (Ben, 12.11.2026): „Ein Suchfenster mit Filter für Typ/Region/Paket,
+    so wie in Übungen“ — zur Wahl steht, was an gemachten Übungen vorkommt."""
+    from trainingsapp.ui.views.verlauf import verlauf
+
+    atmung = next(u for u in state.uebungen.alle() if "Atmung" in u.typen)
+    andere = next(u for u in state.uebungen.alle() if "Atmung" not in u.typen and u.typen)
+    eigene = Exercise(name="Eigene Brücke", typen=["Kräftigung"])
+    state.uebungen.speichern(eigene)
+    plan = Plan(name="Plan", subject_id=state.profil.id)
+    state.plaene.speichern(plan)
+    session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
+    for u in (atmung, andere, eigene):
+        state.sitzungen.erledigt(session, state.uebungen.laden(u.id))
+    state.verlauf_tab = 1
+    ansicht = verlauf(page, state)
+    alle_drei = {atmung.name, andere.name, eigene.name}
+    assert alle_drei <= set(texte(ansicht))
+    assert suchzeile(ansicht).controls[-1] is knopf(ansicht)
+    assert not labels(ansicht)
+
+    # Suche: nur die Liste zieht nach
+    feld = suchzeile(ansicht).controls[0]
+    feld.value = "eigene brü"
+    feld.on_change(SimpleNamespace(control=feld))
+    assert alle_drei & set(texte(ansicht)) == {eigene.name}
+    feld.value = ""
+    feld.on_change(SimpleNamespace(control=feld))
+    assert alle_drei <= set(texte(ansicht))
+
+    # Filter: das Blatt des Katalogs, nur mit dem, was im Verlauf vorkommt
+    blatt = blatt_oeffnen(page, ansicht)
+    gewaehlt = {c.data for c in alle(blatt) if isinstance(c, ft.Chip)}
+    assert {t for b, t in gewaehlt if b == TYP} == {
+        t for u in (atmung, andere, eigene) for t in u.typen
+    }
+    chip(blatt, TYP, "Atmung").on_select()
+    assert alle_drei & set(texte(ansicht)) == {atmung.name}
+    assert [x.label.value for x in labels(ansicht)] == ["Atmung"]
+    assert "1 Übung" in texte(blatt)
+    chip(blatt, TYP, "Atmung").on_select()
+    chip(blatt, PAKET, None).on_select()  # „Eigene Übungen“
+    assert alle_drei & set(texte(ansicht)) == {eigene.name}
+    # Die Wahl überlebt den Neubau; ohne Treffer steht der Hinweis da
+    state.verlauf_suche = "gibt-es-nicht"
+    assert "Keine Übung passt zu Suche und Filter." in texte(verlauf(page, state))

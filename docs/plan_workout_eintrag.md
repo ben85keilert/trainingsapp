@@ -82,7 +82,9 @@ Notiz; unveränderlich — eine Änderung ist eine neue Zeile mit `replaces_id`,
    **„Alle Durchläufe ›“** (`/workout/<einheit>/alle`): Datum, Dauer, Übungen, Eingetragenes,
    Notiz — der jüngste zuerst, ohne Wertung.
 
-Außerhalb der Seite: Das **Tagebuch** zeigt Workouts, zu denen etwas eingetragen ist
+Außerhalb der Seite: Das **Tagebuch** zeigt Workouts, zu denen eine **Notiz** geschrieben ist
+— die Skalen stehen als Zeile darunter; ein Workout nur mit Anstrengung steht dort nicht (Ben,
+12.11.2026: im Tagebuch nur selbst Geschriebenes)
 (`core.tagebuch.WORKOUT`, `EinheitRepo.workout_zeilen`; nach Tagen an ihrer Uhrzeit, nach Übungen
 als Gruppe je Workout), Tipp → der Eintrag. In der **Zeitleiste** zeigt bei mehreren Workouts nur
 das jüngste seine Übungen, die älteren klappen auf Tipp auf.

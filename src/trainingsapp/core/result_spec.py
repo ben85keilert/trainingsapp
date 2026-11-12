@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
@@ -608,17 +608,21 @@ def parameter_werte(spec: ResultSpec | None, werte: dict[str, Any]) -> list[Para
 #: zu Zeit“).
 ALTE_NAMEN: dict[tuple[str, str], str] = {("duration", "Zeit gesamt"): "Zeit"}
 
+#: Die Folge ist die **Ordnung der Parameter in der ganzen App** (Ben, 12.11.2026): Zeit,
+#: Wiederholungen, Haltezeit, Skala, Text, Seite, Winkel, Gewicht, Strecke, Ja/Nein — in den
+#: Editoren wie beim Üben (`geordnet`). Gespeicherte Übungen und Einträge behalten ihre Folge;
+#: sortiert wird beim Anzeigen.
 FELDVORRAT: list[FieldSpec] = [
+    FieldSpec("duration", FieldType.DURATION, "Zeit", unit="s", quick=[300, 600, 1200]),
     FieldSpec("reps", FieldType.SET_LIST, "Wiederholungen", unit="Wdh.", quick=[10, 15, 20]),
     FieldSpec("hold", FieldType.SET_LIST, "Haltezeit", unit="s", quick=[15, 30, 45, 60]),
+    FieldSpec("scale", FieldType.SCALE, "Skala 0–10", min=0, max=10, step=1, default=0),
+    FieldSpec("note", FieldType.TEXT, "Freitext"),
+    FieldSpec("side", FieldType.CHOICE, "Seite", quick=["links", "rechts", "beide"]),
+    FieldSpec("angle", FieldType.DEGREES, "Winkel", unit="°", min=0, quick=[30, 45, 60, 90]),
     FieldSpec("weight", FieldType.WEIGHT, "Gewicht", unit="kg", quick=[5, 10, 20]),
     FieldSpec("distance", FieldType.DISTANCE, "Strecke", unit="m", quick=[500, 1000, 2000]),
-    FieldSpec("duration", FieldType.DURATION, "Zeit", unit="s", quick=[300, 600, 1200]),
-    FieldSpec("angle", FieldType.DEGREES, "Winkel", unit="°", min=0, quick=[30, 45, 60, 90]),
-    FieldSpec("scale", FieldType.SCALE, "Skala 0–10", min=0, max=10, step=1, default=0),
-    FieldSpec("side", FieldType.CHOICE, "Seite", quick=["links", "rechts", "beide"]),
     FieldSpec("done", FieldType.BOOL, "Vollständig", default=True),
-    FieldSpec("note", FieldType.TEXT, "Freitext"),
 ]
 
 
@@ -638,6 +642,22 @@ def basis_key(key: str) -> str:
     if m is not None and any(f.key == m.group("basis") for f in FELDVORRAT):
         return m.group("basis")
     return key
+
+
+def geordnet(felder: Sequence[FieldSpec]) -> list[FieldSpec]:
+    """Felder in der Ordnung des Vorrats (Ben, 12.11.2026: „Ordnung der Parameter hier und in
+    der ganzen App“) — weitere Felder einer Art (``hold_2``) bleiben bei ihrer Art in ihrer
+    Folge, fremde Felder (Variante, Felder aus früheren Zeiten) behalten ihren Platz am Ende.
+    Die Liste selbst bleibt, wie sie gespeichert ist.
+
+    >>> [f.key for f in geordnet([vorrat_feld(k) for k in ("reps", "weight", "duration")])]
+    ['duration', 'reps', 'weight']
+    >>> felder = [FieldSpec("x", FieldType.TEXT, "X"), vorrat_feld("hold_2"), vorrat_feld("hold")]
+    >>> [f.key for f in geordnet(felder)]
+    ['hold_2', 'hold', 'x']
+    """
+    rang = {f.key: i for i, f in enumerate(FELDVORRAT)}
+    return sorted(felder, key=lambda f: rang.get(basis_key(f.key), len(rang)))
 
 
 def vorrat_feld(key: str) -> FieldSpec | None:
@@ -869,6 +889,7 @@ __all__ = [
     "basis_label",
     "einzelwert_lesen",
     "format_wert",
+    "geordnet",
     "instanzen",
     "ist_altes_satzformat",
     "ist_leer",

@@ -52,6 +52,26 @@ VORLAGE_AUTO: Final = "auto"
 #: Burpee aus dem Katalog nicht, Rudern zählt mit freier Rollenwahl am Nachlassen, Burpee ist
 #: ein Entwurf)
 VORLAGEN_ANGEBOT: Final = ("auto", "kniebeuge", "liegestuetz")
+#: **Bewegungstyp** (Ben, 12.11.2026: „für eine Übung verschiedene Bewegungstypen
+#: vorbestimmen — bei der Kniebeuge Fokus auf die x-Achse, Liegestütze y-Achse“): das Signal,
+#: an dem der Sensor die Wiederholung abliest. Schlüssel = Signal in hrv-core
+#: (``prototyp.wiederholungen.SIGNALE``), leer = wie die Vorlage. Die Rechnung bleibt in
+#: hrv-core (`mit_signal`); die App merkt sich nur die Wahl je Übung.
+BEWEGUNGSTYPEN: Final[dict[str, str]] = {
+    "": "wie die Vorlage",
+    "hauptachse": "Hauptachse",
+    "x": "x-Achse",
+    "y": "y-Achse",
+    "z": "z-Achse",
+    "neigung_zx": "Kippen (z–x)",
+    "neigung_zy": "Kippen (z–y)",
+    "betrag": "Betrag",
+}
+#: Bewegungstyp der **Atmung**: bisher nur das Kippen des Gurts (hrv-core
+#: ``prototyp.atemzuege.RICHTUNG``, ``(x − z) / √2``). Weitere Verfahren kommen mit hrv-core;
+#: die Wahl je Übung steht schon bereit (leer = Vorgabe).
+ATEM_BEWEGUNG_VORGABE: Final = "kippen"
+ATEM_BEWEGUNGEN: Final[dict[str, str]] = {ATEM_BEWEGUNG_VORGABE: "Kippen"}
 #: Ein Gerät je ``Vorlage.geraet`` in Worten (hrv-core nennt das Profil)
 _GERAETE_NAMEN: Final = {"polar_h10": "den Brustgurt"}
 #: Die Art eines Wiederholungsfeldes (``reps``, ``reps_2`` …)
@@ -117,6 +137,8 @@ class SensorWahl:
     True
     >>> SensorWahl().als_dict(), SensorWahl.aus_dict("kaputt") == SensorWahl()
     ({}, True)
+    >>> SensorWahl(signal="x", atmung_bewegung="kippen").als_dict()
+    {'signal': 'x'}
     """
 
     #: Wiederholungen zählen — ``None``: an, wenn die Übung ein Feld der Art ``reps`` hat
@@ -127,6 +149,11 @@ class SensorWahl:
     vorlage: str = VORLAGE_AUTO
     #: „Zählt in“ (nur bei mehreren Wiederholungsfeldern) — ``None``: das erste
     feld: str | None = None
+    #: Bewegungstyp der Wiederholungen (`BEWEGUNGSTYPEN`) — leer: wie die Vorlage. Ein
+    #: unbekannter Schlüssel bleibt erhalten (neueres hrv-core) und gilt beim Zählen als leer
+    signal: str = ""
+    #: Bewegungstyp der Atmung (`ATEM_BEWEGUNGEN`) — leer: die Vorgabe (Kippen)
+    atmung_bewegung: str = ""
 
     def als_dict(self) -> dict[str, Any]:
         """Nur, was von der Vorgabe abweicht — nie ``None`` (TOML kennt es nicht).
@@ -145,6 +172,10 @@ class SensorWahl:
             d["vorlage"] = self.vorlage
         if self.feld:
             d["feld"] = self.feld
+        if self.signal:
+            d["signal"] = self.signal
+        if self.atmung_bewegung and self.atmung_bewegung != ATEM_BEWEGUNG_VORGABE:
+            d["atmung_bewegung"] = self.atmung_bewegung
         return d
 
     @classmethod
@@ -153,20 +184,28 @@ class SensorWahl:
         Texte nur als nicht leere Zeichenketten. Eine unbekannte Vorlage bleibt erhalten
         (neueres hrv-core), gezählt wird mit ihr wie mit „Automatisch“.
 
-        >>> SensorWahl.aus_dict({"wiederholungen": "ja", "atmung": 1, "vorlage": 3, "feld": ""})
-        SensorWahl(wiederholungen=None, atmung=None, vorlage='auto', feld=None)
-        >>> SensorWahl.aus_dict({"atmung": False, "vorlage": " neigung_zy ", "x": 1})
-        SensorWahl(wiederholungen=None, atmung=False, vorlage='neigung_zy', feld=None)
+        >>> kaputt = {"wiederholungen": "ja", "atmung": 1, "vorlage": 3, "feld": ""}
+        >>> SensorWahl.aus_dict(kaputt) == SensorWahl()
+        True
+        >>> w = SensorWahl.aus_dict({"atmung": False, "vorlage": " neigung_zy ", "x": 1})
+        >>> w.atmung, w.vorlage, w.feld
+        (False, 'neigung_zy', None)
+        >>> w = SensorWahl.aus_dict({"signal": " y ", "atmung_bewegung": 3})
+        >>> w.signal, w.atmung_bewegung
+        ('y', '')
         """
         if not isinstance(d, dict):
             return cls()
         wdh, atem = d.get("wiederholungen"), d.get("atmung")
         vorlage, feld = d.get("vorlage"), d.get("feld")
+        signal, atem_art = d.get("signal"), d.get("atmung_bewegung")
         return cls(
             wiederholungen=wdh if isinstance(wdh, bool) else None,
             atmung=atem if isinstance(atem, bool) else None,
             vorlage=(vorlage.strip() or VORLAGE_AUTO) if isinstance(vorlage, str) else VORLAGE_AUTO,
             feld=(feld.strip() or None) if isinstance(feld, str) else None,
+            signal=signal.strip() if isinstance(signal, str) else "",
+            atmung_bewegung=atem_art.strip() if isinstance(atem_art, str) else "",
         )
 
 
@@ -177,6 +216,8 @@ SCHLUESSEL: Final[dict[str, type]] = {
     "atmung": bool,
     "vorlage": str,
     "feld": str,
+    "signal": str,
+    "atmung_bewegung": str,
 }
 _TYPNAME: Final[dict[type, str]] = {bool: "true oder false", str: "ein Text in Anführungszeichen"}
 
@@ -195,12 +236,16 @@ def wahl_pruefen(roh: Any) -> tuple[list[str], list[str]]:
     >>> for f in fehler: print(f)
     „wiederholungen“ muss true oder false sein, nicht "nein"
     „atmung“ muss true oder false sein, nicht 1
-    >>> for h in hinweise: print(h)
-    unbekannter Schlüssel „wdh“ — wird überlesen (bekannt: wiederholungen, atmung, vorlage, feld)
+    >>> for h in hinweise: print(h)  # doctest: +ELLIPSIS
+    unbekannter Schlüssel „wdh“ — wird überlesen (bekannt: wiederholungen, atmung, vorlage, ...)
     >>> wahl_pruefen({"feld": 2})[0]
     ['„feld“ muss ein Text in Anführungszeichen sein, nicht 2']
     >>> for h in wahl_pruefen({"vorlage": "rudern"})[1]: print(h)
     unbekannte Vorlage „rudern“ — zählt wie „Automatisch“ (bekannt: auto, kniebeuge, liegestuetz)
+    >>> for h in wahl_pruefen({"signal": "quer", "atmung_bewegung": "bauch"})[1]:
+    ...     print(h)  # doctest: +ELLIPSIS
+    unbekannter Bewegungstyp „quer“ — zählt wie die Vorlage (bekannt: hauptachse, x, y, ...)
+    unbekannter Bewegungstyp der Atmung „bauch“ — gilt als „kippen“ (bekannt: kippen)
     >>> wahl_pruefen(True)[0]
     ['keine Tabelle (etwa { wiederholungen = true }), sondern true — alles gilt als Vorgabe']
     """
@@ -228,6 +273,16 @@ def wahl_pruefen(roh: Any) -> tuple[list[str], list[str]]:
             hinweise.append(
                 f"unbekannte Vorlage „{wert}“ — zählt wie „Automatisch“ "
                 f"(bekannt: {', '.join(VORLAGEN_ANGEBOT)})"
+            )
+        elif schluessel == "signal" and str(wert).strip() not in BEWEGUNGSTYPEN:
+            bekannt = ", ".join(k for k in BEWEGUNGSTYPEN if k)
+            hinweise.append(
+                f"unbekannter Bewegungstyp „{wert}“ — zählt wie die Vorlage (bekannt: {bekannt})"
+            )
+        elif schluessel == "atmung_bewegung" and str(wert).strip() not in ATEM_BEWEGUNGEN:
+            hinweise.append(
+                f"unbekannter Bewegungstyp der Atmung „{wert}“ — gilt als "
+                f"„{ATEM_BEWEGUNG_VORGABE}“ (bekannt: {', '.join(ATEM_BEWEGUNGEN)})"
             )
     return fehler, hinweise
 
@@ -302,6 +357,8 @@ class VorlageWahl:
 
     vorlage: prototyp_wdh.Vorlage
     rueckfall: str = ""
+    #: Der Name des Bewegungstyps, wenn die Übung einen anderen vorbestimmt als die Vorlage
+    bewegungstyp: str = ""
 
     @property
     def schluessel(self) -> str:
@@ -310,10 +367,25 @@ class VorlageWahl:
     @property
     def text(self) -> str:
         """„Kniebeuge“ — nach einem Rückfall „Automatisch (Vorlage nur für den Brustgurt)“."""
-        return f"{self.vorlage.name} ({self.rueckfall})" if self.rueckfall else self.vorlage.name
+        if self.rueckfall:
+            return f"{self.vorlage.name} ({self.rueckfall})"
+        if self.bewegungstyp:
+            return f"{self.vorlage.name} · {self.bewegungstyp}"
+        return self.vorlage.name
 
 
-def vorlage_waehlen(schluessel: str | None, geraet: str | None) -> VorlageWahl:
+def bewegungstypen_angebot() -> list[tuple[str, str]]:
+    """Die Bewegungstypen der Karte als (Schlüssel, Name) — nur Signale, die hrv-core kennt.
+
+    >>> [k for k, _ in bewegungstypen_angebot()][:4]
+    ['', 'hauptachse', 'x', 'y']
+    """
+    return [(k, n) for k, n in BEWEGUNGSTYPEN.items() if not k or k in prototyp_wdh.SIGNALE]
+
+
+def vorlage_waehlen(
+    schluessel: str | None, geraet: str | None, signal: str | None = None
+) -> VorlageWahl:
     """Die Vorlage, mit der ``geraet`` (Profil-ID) zählt — mit ``umkehr = oben`` (P143: die
     Wiederholung zählt mit der Rückkehr in die Ausgangslage). Unbekannt, Entwurf oder die
     Achsen eines anderen Geräts (``Vorlage.geraet`` ≠ Profil): Automatisch, mit Grund.
@@ -328,6 +400,18 @@ def vorlage_waehlen(schluessel: str | None, geraet: str | None) -> VorlageWahl:
     ('Automatisch', 'Automatisch')
     >>> vorlage_waehlen("burpee", "polar_h10").rueckfall
     'Vorlage noch ein Entwurf'
+
+    ``signal``: der Bewegungstyp der Übung (`BEWEGUNGSTYPEN`) — die Vorlage rechnet dann mit
+    diesem Signal (hrv-core ``mit_signal``). Eine feste Achse oder das Kippen meinen die
+    Ausrichtung des Brustgurts; an einem anderen Gerät zählt Automatisch, mit Grund.
+
+    >>> w = vorlage_waehlen("liegestuetz", "polar_h10", "y")
+    >>> w.vorlage.signal, w.rueckfall, w.text
+    ('y', '', 'Liegestütz · y-Achse')
+    >>> vorlage_waehlen("liegestuetz", "verity_sense", "y").text
+    'Automatisch (Bewegungstyp nur für den Brustgurt)'
+    >>> vorlage_waehlen("auto", None, "gibt_es_nicht").vorlage.signal
+    'hauptachse'
     """
     auto = prototyp_wdh.VORLAGEN[VORLAGE_AUTO]
     v = prototyp_wdh.vorlage(schluessel)
@@ -337,9 +421,17 @@ def vorlage_waehlen(schluessel: str | None, geraet: str | None) -> VorlageWahl:
     elif v.geraet is not None and v.geraet != (geraet or ""):
         name = _GERAETE_NAMEN.get(v.geraet, v.geraet)
         v, rueckfall = auto, f"Vorlage nur für {name}"
+    typ = ""
+    if not rueckfall and signal and signal in prototyp_wdh.SIGNALE and signal != v.signal:
+        mit = prototyp_wdh.mit_signal(v, signal)
+        if mit.geraet is not None and mit.geraet != (geraet or ""):
+            name = _GERAETE_NAMEN.get(mit.geraet, mit.geraet)
+            v, rueckfall = auto, f"Bewegungstyp nur für {name}"
+        else:
+            v, typ = mit, BEWEGUNGSTYPEN.get(signal, signal)
     if v.umkehr != prototyp_wdh.UMKEHR_OBEN:
         v = replace(v, umkehr=prototyp_wdh.UMKEHR_OBEN)
-    return VorlageWahl(v, rueckfall)
+    return VorlageWahl(v, rueckfall, typ)
 
 
 def halbe_text(halbe: int) -> str:

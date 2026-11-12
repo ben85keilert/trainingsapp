@@ -46,13 +46,12 @@ from trainingsapp.core.uebung_timer import (
     profile_zur_wahl,
     takt_der_uebung,
     timer_fuer,
-    zaehlt_als,
     zeit_zaehlt_fuer,
 )
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
-from trainingsapp.ui.components import zaehlen
+from trainingsapp.ui.components import editor_reiter, zaehlen
 from trainingsapp.ui.components.fokus import (
     FOKUS_ANSICHT,
     Fokus,
@@ -314,7 +313,6 @@ def uebung_timer_view(
     eigene_kopie = TimerWahl.aus_dict(item.timer).eigen if item is not None else None
     #: „zählt“ — für jetzt, sonst wie die Übung (P79 D2/D3)
     zaehlt = state.uhr_zaehlt.get(key, zeit_zaehlt_fuer(uebung, item))
-    felder = uebung_lauf.felder_der_uebung(uebung, item)
 
     def kontext() -> Any:
         return uebung_lauf.kontext_fuer(
@@ -322,6 +320,7 @@ def uebung_timer_view(
             plan,
             item,
             zeit_eintragen=zaehlt,
+            feld=uebung_lauf.feld_jetzt(state, uebung, item),
             auspraegung=uebung_lauf.gewaehlte_ausfuehrung(state, uebung, item),
         )
 
@@ -574,11 +573,15 @@ def uebung_timer_view(
                     on_click=gehe_zu(f"/plan/{plan.id}/bearbeiten/ziel/{item.id}"),
                 )
             )
-        knoepfe.append(
-            ft.TextButton(
-                "In der Übung festlegen", on_click=gehe_zu(f"/uebung/{uebung.id}/bearbeiten")
-            )
-        )
+
+        async def zur_uhr_der_uebung() -> None:
+            # Gleich auf den Reiter „Uhr“ des Editors (Ben, 12.11.2026: „nicht auf Höhe der
+            # Uhr. Man muss sich dort erst hinfinden“)
+            ziel = f"/uebung/{uebung.id}/bearbeiten"
+            editor_reiter.merken(state, ziel, editor_reiter.UHR)
+            await page.push_route(ziel)
+
+        knoepfe.append(ft.TextButton("In der Übung festlegen", on_click=zur_uhr_der_uebung))
         return knoepfe
 
     def profil_karte() -> ft.Control:
@@ -676,7 +679,8 @@ def uebung_timer_view(
     def zaehlt_teil() -> ft.Control:
         """Wofür die Zeit zählt (Ben, 22.10.2026, P79: „beim Timer/Stoppuhr-Werkzeug selbst mit
         angegeben“) — für jetzt umschaltbar, die Vorgabe steht in der Übung."""
-        als = feldname(zaehlt_als(felder, uebung))
+        # die Wahl für jetzt (Uhrensymbol am Feld), sonst wie die Übung
+        als = feldname(uebung_lauf.feld_jetzt(state, uebung, item))
         return karte(
             ft.Row(
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,

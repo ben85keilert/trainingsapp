@@ -40,6 +40,7 @@ from trainingsapp.core.result_spec import (
     FieldType,
     ResultSpec,
     einzelwert_lesen,
+    geordnet,
     ist_leer,
     skala_titel,
     skala_wert,
@@ -95,7 +96,9 @@ class SpecForm:
         self._varianten: dict[str, Variantenwahl] = {}
         zeilen: list[ft.Control] = []
         start = {**(spec.defaults() if vorgaben else {}), **(werte or {})}
-        for f in spec.fields:
+        # In der Ordnung des Vorrats (Ben, 12.11.2026) — die Variante bleibt, wo sie steht: vorn
+        vorn = [f for f in spec.fields if var.ist_variante(f)]
+        for f in [*vorn, *geordnet([f for f in spec.fields if not var.ist_variante(f)])]:
             widget = self._widget(f, start.get(f.key))
             self._widgets[f.key] = widget
             zeilen.append(self._zeile(f, widget))

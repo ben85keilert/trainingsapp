@@ -123,7 +123,7 @@ def test_geaendert_und_zuruecksetzen(page, state) -> None:
     state.uebungen.speichern(knie)
     # „Übung bearbeiten“ sagt, welche Stellung man ändert, und bietet ihr Zurücksetzen
     formular = uebung_bearbeiten(page, state, _knie(state))
-    assert formular.appbar.title.value == "Übung bearbeiten · Kraft"
+    assert formular.appbar.title.value == "Kniebeuge · Kraft"  # der Name statt des Titels
     zeile = _daten(formular, "stellung")
     assert "die Erweiterung „Kraft“" in zeile.value and "schon geändert" in zeile.value
     assert _daten(formular, "stellung_zurueck") is not None

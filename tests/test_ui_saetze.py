@@ -98,7 +98,9 @@ def _uebung(state: AppState) -> Exercise:
 
 def _sichtbar(c):
     """Wie `_alle`, aber ohne Ausgeblendetes (abgeschaltete Parameter im Formular)."""
-    if not getattr(c, "visible", True):
+    # Eine Reiterseite des Editors ist nur gerade nicht vorn — sie zählt als sichtbar
+    reiter = str(getattr(c, "data", "") or "").startswith("reiter_")
+    if not getattr(c, "visible", True) and not reiter:
         return
     yield c
     for name in ("content", "controls", "title", "label", "appbar", "actions"):

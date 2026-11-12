@@ -301,52 +301,97 @@ def test_leiste_zaehlt_fuer_jetzt_und_zeit_antippen(page, state) -> None:
 
 
 def _uhr_symbole(c) -> list[str]:
-    from trainingsapp.ui.components.uhr import ZAEHLT_HIER, ZAEHLT_HIER_NICHT
-
     return [
-        x.data for x in _alle(c) if getattr(x, "data", None) in (ZAEHLT_HIER, ZAEHLT_HIER_NICHT)
+        x.data
+        for x in _alle(c)
+        if isinstance(getattr(x, "data", None), str) and x.data.startswith("uhr_zaehlt_")
     ]
 
 
-def test_uhrensymbol_steht_am_feld_in_das_die_uhr_zaehlt(page, state) -> None:
-    """Ben, 12.11.2026: Wohin die Uhr zählt, steht in der Übung selbst — am Feld."""
+def test_uhrensymbol_steht_an_jedem_zeitfeld_ein_tipp_wechselt(page, state) -> None:
+    """Ben, 12.11.2026: Wohin die Uhr zählt, steht in der Übung selbst — und zwischen Zeit
+    und Haltezeit wechselt ein Tipp (Skizze C1)."""
     from trainingsapp.core.timer import ohne_uhr
-    from trainingsapp.ui.components.uhr import ZAEHLT_HIER, ZAEHLT_HIER_NICHT, zaehlt_symbol
+    from trainingsapp.ui import uebung_lauf
+    from trainingsapp.ui.components.uhr import (
+        ZAEHLT_HIER,
+        ZAEHLT_HIER_NICHT,
+        ZAEHLT_WOANDERS,
+        zaehlt_symbol,
+    )
 
     def symbol(u: Exercise, feld: str):
         return zaehlt_symbol(page, state, uebung=u, plan=None, item=None, feld=feld, name=feld)
 
-    beide = ResultSpec(fields=[vorrat_feld("hold"), vorrat_feld("duration")])
-    uebung = _uebung(state, result_spec=beide)
-    # Vorgabe mit Haltezeit: dorthin — an der Zeit steht nichts
+    beide = [vorrat_feld("reps"), vorrat_feld("hold"), vorrat_feld("duration")]
+    uebung = _uebung(state, result_spec=ResultSpec(fields=beide))
+    # Vorgabe mit Haltezeit: dorthin — an der Zeit die blasse Uhr, an Wiederholungen keine
     assert symbol(uebung, "hold").data == ZAEHLT_HIER
-    assert symbol(uebung, "duration") is None
-    # „Zählt als Zeit“ in der Übung: das Symbol wandert
-    als_zeit = _uebung(state, result_spec=beide, zaehlt_als="duration")
-    assert symbol(als_zeit, "hold") is None
-    assert symbol(als_zeit, "duration").data == ZAEHLT_HIER
-    # Ein Tipp schaltet „zählt“ für jetzt um — die Übung bleibt, wie sie ist
-    _klick(symbol(uebung, "hold"))
+    assert symbol(uebung, "duration").data == ZAEHLT_WOANDERS
+    assert symbol(uebung, "reps") is None
+    # Ein Tipp auf die blasse Uhr: für jetzt zählt die Uhr als Zeit — die Übung bleibt
+    _klick(symbol(uebung, "duration"))
+    assert symbol(uebung, "duration").data == ZAEHLT_HIER
+    assert symbol(uebung, "hold").data == ZAEHLT_WOANDERS
+    assert (
+        uebung_lauf.kontext_fuer(uebung, feld=uebung_lauf.feld_jetzt(state, uebung)).zeitfeld
+        == "duration"
+    )
+    assert state.uebungen.laden(uebung.id).zaehlt_als == ""
+    # Ein Tipp auf die kräftige Uhr: zählt für jetzt nicht — durchgestrichen nur an ihrem Feld
+    _klick(symbol(uebung, "duration"))
     assert state.uhr_zaehlt[uebung.id] is False
-    assert symbol(uebung, "hold").data == ZAEHLT_HIER_NICHT
+    assert symbol(uebung, "duration").data == ZAEHLT_HIER_NICHT and symbol(uebung, "hold") is None
     assert state.uebungen.laden(uebung.id).zeit_zaehlt is True
-    _klick(symbol(uebung, "hold"))
-    assert symbol(uebung, "hold").data == ZAEHLT_HIER
+    _klick(symbol(uebung, "duration"))
+    assert symbol(uebung, "duration").data == ZAEHLT_HIER
+    # „Zählt als Zeit“ in der Übung: die Vorgabe steht an der Zeit
+    als_zeit = _uebung(state, result_spec=ResultSpec(fields=beide), zaehlt_als="duration")
+    assert symbol(als_zeit, "duration").data == ZAEHLT_HIER
     # „Ohne Uhr“: durchgestrichen, der Tipp schaltet nichts
     state.uhr_wahl[uebung.id] = ohne_uhr().id
-    assert symbol(uebung, "hold").data == ZAEHLT_HIER_NICHT
-    _klick(symbol(uebung, "hold"))
+    assert symbol(uebung, "duration").data == ZAEHLT_HIER_NICHT
+    _klick(symbol(uebung, "duration"))
     assert state.uhr_zaehlt[uebung.id] is True
 
 
+def test_uhrensymbol_ohne_zeile_zeit_wechselt_reihum(page, state) -> None:
+    """Nur Haltezeit: Die eine Uhr geht reihum — Haltezeit → Zeit → zählt nicht."""
+    from trainingsapp.ui import uebung_lauf
+    from trainingsapp.ui.components.uhr import (
+        ZAEHLT_ALS_ZEIT,
+        ZAEHLT_HIER,
+        ZAEHLT_HIER_NICHT,
+        zaehlt_symbol,
+    )
+
+    uebung = _uebung(state)  # nur Haltezeit
+
+    def symbol():
+        return zaehlt_symbol(
+            page, state, uebung=uebung, plan=None, item=None, feld="hold", name="Haltezeit"
+        )
+
+    assert symbol().data == ZAEHLT_HIER
+    _klick(symbol())
+    assert symbol().data == ZAEHLT_ALS_ZEIT
+    assert uebung_lauf.feld_jetzt(state, uebung) == "duration"
+    assert "Zeit" in _texte(symbol())
+    _klick(symbol())
+    assert symbol().data == ZAEHLT_HIER_NICHT
+    _klick(symbol())
+    assert symbol().data == ZAEHLT_HIER and uebung_lauf.feld_jetzt(state, uebung) == "hold"
+
+
 def test_uhrensymbol_in_der_karte_eintragen(page, state) -> None:
-    from trainingsapp.ui.components.uhr import ZAEHLT_HIER, ZAEHLT_HIER_NICHT
+    from trainingsapp.ui.components.uhr import ZAEHLT_HIER, ZAEHLT_HIER_NICHT, ZAEHLT_WOANDERS
     from trainingsapp.ui.views.plan import plan_view
 
     beide = ResultSpec(fields=[vorrat_feld("hold"), vorrat_feld("duration")])
     uebung = _uebung(state, result_spec=beide)
     plan, _item = _plan(state, uebung)
-    assert _uhr_symbole(plan_view(page, state, plan)) == [ZAEHLT_HIER]  # genau ein Feld
+    # In der Ordnung der Parameter: Zeit vor Haltezeit — die Uhr zählt als Haltezeit
+    assert _uhr_symbole(plan_view(page, state, plan)) == [ZAEHLT_WOANDERS, ZAEHLT_HIER]
     state.uebungen.speichern(replace(uebung, zeit_zaehlt=False))
     assert _uhr_symbole(plan_view(page, state, plan)) == [ZAEHLT_HIER_NICHT]
 

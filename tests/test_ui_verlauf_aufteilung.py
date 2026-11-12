@@ -187,10 +187,11 @@ def test_alles_getrennt_zeigt_jede_kombination(state) -> None:
     namen = [r[0] for r in _reihen(verlauf_kachel_view(Seite(), state, uebung.id))]
     assert namen == [
         "Gesamt",
-        "blind · 5 kg · 0°",
-        "blind · 20 kg · 0°",
-        "blind · 5 kg · 30°",
-        "offen · 5 kg · 30°",
+        # in der Ordnung der Parameter (Ben, 12.11.2026): Winkel vor Gewicht
+        "blind · 0° · 5 kg",
+        "blind · 0° · 20 kg",
+        "blind · 30° · 5 kg",
+        "offen · 30° · 5 kg",
     ]
 
 

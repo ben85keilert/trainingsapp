@@ -192,3 +192,62 @@ eigenes; im Plan einstellen kann es abweichen.“ Falls du etwas anderes meintes
   rundes PNG gerne rund“): `components/uebungsbild.ECKE` = 22 % der Kante, PNG erlaubt (ein
   rundes oder freigestelltes PNG zeigt seine Form). Die Symbole und Bilder werden später ein
   eigenes Kapitel.
+
+## Reiter (Ben, 12.11.2026) — gebaut
+
+Ben: „Der Bereich ist sehr lang, man kennt sich nicht aus.“ Beide Editoren — „Übung
+bearbeiten“ und „Im Plan einstellen“ — teilen ihr Formular in **fünf Reiter mit Symbol und
+kurzem Wort** (`ui/components/editor_reiter.py`; Skizzen: Reiterleiste A1, Reiter B1–B5,
+dazu C1/C2):
+
+| Reiter | „Übung bearbeiten“ | „Im Plan einstellen“ |
+|---|---|---|
+| Übung | Symbol, Name, Beschreibung, Ordnen (Typ, Region), Paket | Kopf, Wege bzw. Bedingungen, „Alles wie die Übung“, „In die Übung übernehmen …“ |
+| Parameter | Stellung, Parameter-Chips, Karten mit Ziel, Varianten, Verlauf-Ansichten | Parameter, „Weitere Parameter holen“, Karten, Varianten |
+| Uhr | Uhr beim Üben, Zeit zählt, Zählt als, Timer, „Timer hinzufügen“, Takt, Bild der Bewegung | Uhr und Timer, Takt |
+| Sensor | Beschleunigungssensor mit Bewegung und **Bewegungstyp** | dieselbe Karte, „nur hier“ |
+| Material | Videos, Links, Dateien (unverändert, P200) | Anweisungen der Planübung (ihr Material, `core/material.py`) |
+
+Regeln:
+
+- **Ein Formular.** Die Reiter schalten nur um, was sichtbar ist — Speichern, Abbrechen und
+  „Zurück speichert“ gelten für alles zusammen. Jede Seite wird einmal gebaut und nur sichtbar
+  geschaltet (ein umgehängtes Textfeld nähme keine Eingaben mehr an). Kein Wischen zwischen
+  den Reitern (Regler, Chip-Reihen, Umordnen).
+- **Titel** ist der Name der Übung, nicht mehr „Übung bearbeiten“ (war abgeschnitten); bei
+  mehreren Stellungen mit der geltenden dahinter.
+- **Welcher Reiter offen ist**, merkt sich die Sitzung je Route (`editor_reiter.merken`): Aus
+  dem Timer-Editor zurück steht wieder „Uhr“ da; „In der Übung festlegen“ auf der Timer-Seite
+  springt gleich dorthin. Speichern und Abbrechen vergessen den Merker; ein Fehler beim
+  Speichern holt seinen Reiter nach vorn (Name → Übung, Skalenbereich → Parameter).
+- **„Timer hinzufügen“** steht direkt unter der Timer-Liste, über dem Takt. Im Dialog ist
+  ausgegraut („schon dabei“), was die Übung mit gleichem Inhalt schon hat
+  (`core.uebung_timer.inhalt`) — dieselbe Vorlage ließ sich vorher mehrfach hinzufügen.
+- **Ordnung der Parameter in der ganzen App:** Zeit, Wiederholungen, Haltezeit, Skala, Text,
+  Seite, Winkel, Gewicht, Strecke, Ja/Nein — die Folge von `FELDVORRAT`
+  (`core.result_spec.geordnet`). Sortiert wird beim Anzeigen (`core.parameter.mengenfelder`,
+  `auspraegungsfelder`, das Beiwerk im Plan, `SpecForm`); gespeicherte Übungen, Pakete und
+  die Kopien in Einträgen behalten ihre Folge. Neu gespeicherte Übungen schreiben die Felder
+  in der neuen Folge.
+- **Wohin die Uhr zählt, steht am Feld** (`components/uhr.zaehlt_symbol`, Skizze C1): In der
+  Karte „Eintragen“ trägt jedes Zeitfeld eine Uhr — kräftig, wohin die Uhr einträgt, blass an
+  den anderen. Ein Tipp auf die blasse holt die Zeit **für jetzt** dorthin (Zeit ↔ Haltezeit,
+  `ui.uebung_lauf.feld_jetzt`), ein Tipp auf die kräftige schaltet „zählt“ für jetzt um
+  (durchgestrichen). Nur Haltezeit ohne Zeile „Zeit“: die eine Uhr geht reihum Haltezeit →
+  Zeit → zählt nicht. Die Übung ändert sich dabei nie; dauerhaft bleibt „Zählt als“ im Reiter
+  „Uhr“. Im Nachtrag und in der Karte „Eintragen“ des Fokus (keine Zeitfelder) gibt es das
+  Symbol nicht.
+- **Bewegungstyp** (`core.zaehlen.BEWEGUNGSTYPEN`, `SensorWahl.signal`): Die Übung bestimmt
+  vor, woran der Sensor die Wiederholung abliest — wie die Vorlage, Hauptachse, x-, y-,
+  z-Achse, Kippen (z–x, z–y), Betrag. Gerechnet wird in hrv-core (`mit_signal`); Achsen und
+  Kippen meinen die Ausrichtung des Brustgurts — an einem anderen Gerät zählt „Automatisch“
+  mit Grund. Die Atmung hat ihren eigenen Bewegungstyp (`SensorWahl.atmung_bewegung`), bisher
+  nur „Kippen“; weitere Verfahren kommen mit hrv-core, die Wahl je Übung steht bereit.
+  Paketfeld `beschleunigung.signal` bzw. `.atmung_bewegung` (`docs/uebungspakete.md`).
+- **Paket** (`components/paketwechsel.py`): „Gehört zu: …“ und „In ein Paket [verschieben]
+  [kopieren]“. Kopieren geht mit jeder Übung (eigene Übung mit neuer ID, nach „Eigene“ oder
+  gleich in ein eigenes Paket); verschieben mit eigenen Übungen zwischen „Eigene“ und den
+  eigenen Paketen. Eine Paketübung herauszulösen ist offen (P199).
+
+Offen: P199 (Paketübung verschieben), P200 (Material: wann wird was gezeigt), P201
+(Parameter-Karten zuklappen); Gerätetest T133.

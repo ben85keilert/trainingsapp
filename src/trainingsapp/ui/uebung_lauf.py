@@ -153,6 +153,42 @@ def felder_der_uebung(uebung: Exercise, item: PlanItem | None = None) -> list[st
     return [f.key for f in uebung.result_spec.fields]
 
 
+_FELD_JETZT = "uhr_feld_jetzt"
+
+
+def _feld_merker(state: Any) -> dict[str, str]:
+    """Je Planübung bzw. Übung das Zeitfeld, in das die Uhr **für jetzt** zählt (Ben,
+    12.11.2026: beim Üben mit einem Tipp zwischen Zeit und Haltezeit wechseln) — hängt an der
+    Sitzung wie `AppState.uhr_zaehlt`, keine Einstellung."""
+    werte = getattr(state, _FELD_JETZT, None)
+    if not isinstance(werte, dict):
+        werte = {}
+        with contextlib.suppress(Exception):
+            setattr(state, _FELD_JETZT, werte)
+    return werte
+
+
+def feld_jetzt(state: Any, uebung: Exercise, item: PlanItem | None = None) -> str:
+    """Wohin die Uhr dieser Übung zählt: die Wahl für jetzt, solange es ihr Feld hier gibt
+    (Zeit geht immer), sonst wie die Übung (`core.uebung_timer.zaehlt_als`)."""
+    felder = felder_der_uebung(uebung, item)
+    wahl = _feld_merker(state).get(item.id if item is not None else uebung.id)
+    if wahl and basis_key(wahl) in ZEITFELDER and (wahl == "duration" or wahl in felder):
+        return wahl
+    return zaehlt_als(felder, uebung)
+
+
+def feld_jetzt_setzen(
+    state: Any, uebung: Exercise, item: PlanItem | None, feld: str | None
+) -> None:
+    """Die Uhr zählt für jetzt in ``feld`` — ``None``: wieder wie die Übung."""
+    key = item.id if item is not None else uebung.id
+    if feld:
+        _feld_merker(state)[key] = feld
+    else:
+        _feld_merker(state).pop(key, None)
+
+
 def kontext_fuer(
     uebung: Exercise,
     plan: Plan | None = None,
@@ -304,6 +340,7 @@ def zaehl_baustein(
         atmung=zl.atmung_an(uebung, item),
         feld=zl.zaehlt_in(uebung, item),
         vorlage=zl.wirksame_wahl(uebung, item).vorlage,
+        signal=zl.wirksame_wahl(uebung, item).signal,
     )
 
 

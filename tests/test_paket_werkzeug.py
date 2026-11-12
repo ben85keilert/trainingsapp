@@ -319,7 +319,7 @@ def test_pruefen_meldet_unsinn_in_beschleunigung(tmp_path) -> None:
     ]
     assert [h for h in hinweise if "beschleunigung" in h] == [
         "Übung „Baum“: beschleunigung: unbekannter Schlüssel „wiederholung“ — wird überlesen "
-        "(bekannt: wiederholungen, atmung, vorlage, feld)",
+        "(bekannt: wiederholungen, atmung, vorlage, feld, signal, atmung_bewegung)",
         "Übung „Lotus“: beschleunigung: unbekannte Vorlage „rudern“ — zählt wie "
         "„Automatisch“ (bekannt: auto, kniebeuge, liegestuetz)",
     ]
@@ -483,7 +483,7 @@ uebungen = [
         "(bekannt: ein, aus, halten, ab, auf, frei)",
         "Kurs „Einstieg“, Kapitel „Stehen üben“, Plan „Stehen“, Übung „baum“: beschleunigung: "
         "unbekannter Schlüssel „wdh“ — wird überlesen (bekannt: wiederholungen, atmung, "
-        "vorlage, feld)",
+        "vorlage, feld, signal, atmung_bewegung)",
     ]
     # Die App liest dasselbe Paket: der kaputte Takt heißt „wie die Übung“, `{}` keiner
     gelesen = paket_lesen(tomllib.loads(text))

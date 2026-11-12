@@ -212,7 +212,9 @@ def test_karte_beschleunigungssensor_speichert_nur_was_man_umlegt(formular) -> N
     (bewegung,) = [
         x
         for x in _alle(ansicht)
-        if isinstance(x, ft.Dropdown) and x.label not in ("Weiter, wenn", "Beim Öffnen")
+        if isinstance(x, ft.Dropdown)
+        and x.label not in ("Weiter, wenn", "Beim Öffnen")
+        and x.data not in ("bewegungstyp", "atem_bewegungstyp")
     ]
     assert bewegung.value == "auto" and [o.text for o in bewegung.options] == [
         "Automatisch",
@@ -279,7 +281,9 @@ def test_bewegung_waehlt_die_vorlage_und_laesst_unbekannte_in_ruhe(formular) -> 
     (bewegung,) = [
         x
         for x in _alle(ansicht)
-        if isinstance(x, ft.Dropdown) and x.label not in ("Weiter, wenn", "Beim Öffnen")
+        if isinstance(x, ft.Dropdown)
+        and x.label not in ("Weiter, wenn", "Beim Öffnen")
+        and x.data not in ("bewegungstyp", "atem_bewegungstyp")
     ]
     bewegung.value = "kniebeuge"
     bewegung.on_select()
@@ -291,7 +295,9 @@ def test_bewegung_waehlt_die_vorlage_und_laesst_unbekannte_in_ruhe(formular) -> 
     (bewegung,) = [
         x
         for x in _alle(ansicht)
-        if isinstance(x, ft.Dropdown) and x.label not in ("Weiter, wenn", "Beim Öffnen")
+        if isinstance(x, ft.Dropdown)
+        and x.label not in ("Weiter, wenn", "Beim Öffnen")
+        and x.data not in ("bewegungstyp", "atem_bewegungstyp")
     ]
     assert bewegung.value == "kniebeuge"
     bewegung.value = "auto"
@@ -304,7 +310,9 @@ def test_bewegung_waehlt_die_vorlage_und_laesst_unbekannte_in_ruhe(formular) -> 
     (bewegung,) = [
         x
         for x in _alle(ansicht)
-        if isinstance(x, ft.Dropdown) and x.label not in ("Weiter, wenn", "Beim Öffnen")
+        if isinstance(x, ft.Dropdown)
+        and x.label not in ("Weiter, wenn", "Beim Öffnen")
+        and x.data not in ("bewegungstyp", "atem_bewegungstyp")
     ]
     assert bewegung.value == "auto"
     asyncio.run(_knopf(ansicht, "Speichern").on_click())
@@ -1331,3 +1339,28 @@ async def test_im_workout_zaehlt_der_sensor_fuer_den_laufenden_schritt(umgebung)
     einheit_ui.alle_beenden(state)
     await _bis_vorbei(state, uhr, gurt)
     assert _knoepfe(plan_view(seite, state, plan), "Wdh. zählen")
+
+
+def test_bewegungstyp_wird_je_uebung_vorbestimmt(formular) -> None:
+    """Ben, 12.11.2026: Für eine Übung lässt sich der Bewegungstyp vorbestimmen (Kniebeuge
+    x-Achse, Liegestütz y-Achse) — gespeichert in der Karte, an den Zähler weitergereicht."""
+    from trainingsapp.core.zaehlen import vorlage_waehlen
+    from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
+
+    page, state = formular
+    u = _kniebeuge(state, "Kniebeuge", "reps")
+    ansicht = uebung_bearbeiten(page, state, u)
+    typ = next(x for x in _alle(ansicht) if getattr(x, "data", None) == "bewegungstyp")
+    assert typ.value == "" and [o.text for o in typ.options][:3] == [
+        "wie die Vorlage",
+        "Hauptachse",
+        "x-Achse",
+    ]
+    typ.value = "x"
+    typ.on_select()
+    asyncio.run(_knopf(ansicht, "Speichern").on_click())
+    wahl = state.uebungen.laden(u.id).beschleunigung
+    assert wahl.signal == "x" and wahl.als_dict() == {"signal": "x"}
+    # Am Brustgurt zählt die Vorlage mit der Achse, an einem anderen Gerät „Automatisch“
+    assert vorlage_waehlen(wahl.vorlage, "polar_h10", wahl.signal).vorlage.signal == "x"
+    assert vorlage_waehlen(wahl.vorlage, "verity_sense", wahl.signal).rueckfall

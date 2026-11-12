@@ -199,6 +199,11 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   (`core/beschreibung.py`), nie ein zweites Feld. „Im Plan einstellen“ hat dieselbe Ordnung
   (P107). Vertrag: `docs/plan_uebung_bearbeiten.md`.
 
+- **Editoren in Reitern** (Ben, 12.11.2026, Vertrag `docs/plan_uebung_bearbeiten.md` „Reiter“):
+  „Übung bearbeiten“ und „Im Plan einstellen“ haben fünf Reiter (`components/editor_reiter.py`) —
+  **ein Formular**, jede Seite einmal gebaut und nur sichtbar geschaltet, kein Wischen. **Ordnung
+  der Parameter** überall aus `FELDVORRAT` (`core.result_spec.geordnet`); Gespeichertes bleibt.
+
 - **Übungen kommen über Pakete** (Ben, 14.10.2026; Verträge `docs/uebungspakete.md`,
   `docs/plan_paketinhalte.md`; Einzelheiten in `.claude/rules/pakete.md`). Der Katalog ist das
   Paket „Standard“ (`data/seed/standard.toml`). Ein Import aktualisiert nur Übungen desselben

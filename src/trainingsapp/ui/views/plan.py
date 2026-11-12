@@ -121,6 +121,7 @@ from trainingsapp.core.result_spec import (
     basis_label,
     einzelwert_lesen,
     format_wert,
+    geordnet,
     ist_leer,
 )
 from trainingsapp.core.standards import (
@@ -1741,7 +1742,8 @@ def plan_view(
         Ausführung, nicht unter „Eintragen“ (P71)."""
         return [
             f
-            for f in aktive_felder(item, uebung)
+            # in der Ordnung des Vorrats: Skala, Text, Ja/Nein (Ben, 12.11.2026)
+            for f in geordnet(aktive_felder(item, uebung))
             if rolle(f) == BEIWERK and f.type in (FieldType.SCALE, FieldType.BOOL, FieldType.TEXT)
         ]
 

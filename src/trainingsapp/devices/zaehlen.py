@@ -382,6 +382,7 @@ class ZaehlBaustein:
         atmung: bool = False,
         feld: str | None = None,
         vorlage: str = VORLAGE_AUTO,
+        signal: str = "",
         rate_hz: int | None = None,
         bereich_g: int = BEREICH_G,
         quelle: str = QUELLE_SENSOR,
@@ -408,6 +409,9 @@ class ZaehlBaustein:
         #: erst später dazukommt (`sensor_dazu` ohne Gerät)
         self._rate_wunsch = int(rate_hz) if rate_hz else None
         self._vorlage_wunsch = vorlage or VORLAGE_AUTO
+        #: der Bewegungstyp, den die Übung vorbestimmt (`core.zaehlen.BEWEGUNGSTYPEN`; leer =
+        #: wie die Vorlage)
+        self._signal_wunsch = signal or ""
         self.rate_hz = int(rate_hz) if rate_hz else zaehl_rate(self.messlauf.profil)
         self.bereich_g = int(bereich_g)
         #: das Profil, von dem die Beschleunigung kommt
@@ -415,7 +419,9 @@ class ZaehlBaustein:
         #: womit gezählt wird (`core.zaehlen.vorlage_waehlen`): die Vorlage der Übung mit dem
         #: Umkehrpunkt oben — oder Automatisch mit Grund (`VorlageWahl.rueckfall`), wenn sie
         #: die Achsen eines anderen Geräts meint oder hrv-core sie nicht kennt
-        self.vorlage_wahl: VorlageWahl = vorlage_waehlen(self._vorlage_wunsch, self.geraet)
+        self.vorlage_wahl: VorlageWahl = vorlage_waehlen(
+            self._vorlage_wunsch, self.geraet, self._signal_wunsch
+        )
         #: der Schlüssel der Vorlage, mit der gezählt wird (Zeitleiste ``vorlage``)
         self.vorlage = self.vorlage_wahl.schluessel
         self.beteiligung: Beteiligung | None = None
@@ -580,7 +586,7 @@ class ZaehlBaustein:
         Name — nach einem Rückfall mit dem Grund („Automatisch (Vorlage nur für den
         Brustgurt)“), nach einem Rückfall in hrv-core „Kniebeuge (Hauptachse)“."""
         w = self.vorlage_wahl
-        if not w.rueckfall and w.schluessel == VORLAGE_AUTO:
+        if not w.rueckfall and not w.bewegungstyp and w.schluessel == VORLAGE_AUTO:
             return ""
         text = w.text
         if self.wdh_signal is not None and self.wdh_signal != w.vorlage.signal:
@@ -837,7 +843,7 @@ class ZaehlBaustein:
         self.geraet = messlauf.profil.id if messlauf.profil is not None else ""
         if self._rate_wunsch is None:
             self.rate_hz = zaehl_rate(messlauf.profil)
-        self.vorlage_wahl = vorlage_waehlen(self._vorlage_wunsch, self.geraet)
+        self.vorlage_wahl = vorlage_waehlen(self._vorlage_wunsch, self.geraet, self._signal_wunsch)
         self.vorlage = self.vorlage_wahl.schluessel
         self._anker = (self._uhr(), messlauf.uhr())
         messlauf.zaehl_satz = self._fuer_diagnose

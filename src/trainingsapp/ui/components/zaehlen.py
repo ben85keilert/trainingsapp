@@ -362,7 +362,14 @@ def _vorher(
     def kontext() -> Any:
         wahl = uebung_lauf.gewaehlte_ausfuehrung(state, uebung, item)
         zaehlt = state.uhr_zaehlt.get(key, uebung.zeit_zaehlt)
-        return uebung_lauf.kontext_fuer(uebung, plan, item, zeit_eintragen=zaehlt, auspraegung=wahl)
+        return uebung_lauf.kontext_fuer(
+            uebung,
+            plan,
+            item,
+            zeit_eintragen=zaehlt,
+            feld=uebung_lauf.feld_jetzt(state, uebung, item),
+            auspraegung=wahl,
+        )
 
     def los() -> None:
         try:

@@ -32,10 +32,11 @@ auch in der laufenden Uhr; „Fertig“ der Uhr beendet beides. Beendete ein Sta
 anderen Übung, kommt dessen Meldung mit „Eintragen“ (`components.zaehlen.meldung_zeigen`).
 
 Ben, 12.11.2026: **Wohin die Uhr zählt, steht am Feld** — `zaehlt_symbol` setzt in der Karte
-„Eintragen“ ein Uhrensymbol hinter Haltezeit bzw. Zeit, je nachdem, wohin die Uhr einträgt
-(`core.uebung_timer.zaehlt_als`); durchgestrichen, wenn sie gerade nicht zählt („zählt“ aus
-oder „Ohne Uhr“). Ein Tipp schaltet „zählt“ für jetzt um — das Zielfeld wechselt man nur in
-„Übung bearbeiten“ (gilt überall).
+„Eintragen“ ein Uhrensymbol hinter jedes Zeitfeld: kräftig, wohin die Uhr einträgt
+(`core.uebung_timer.zaehlt_als`), blass an den anderen; durchgestrichen, wenn sie gerade nicht
+zählt („zählt“ aus oder „Ohne Uhr“). Ein Tipp auf die blasse Uhr holt die Zeit für jetzt
+dorthin (Zeit ↔ Haltezeit, `uebung_lauf.feld_jetzt`), ein Tipp auf die kräftige schaltet
+„zählt“ für jetzt um; dauerhaft stellt man „Zählt als“ in „Übung bearbeiten“ → Uhr ein.
 """
 
 from __future__ import annotations
@@ -49,14 +50,15 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem
+from trainingsapp.core.result_spec import basis_key
 from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import TimerProfil, dauer_text, einmal_timer, ohne_uhr, stoppuhr
+from trainingsapp.core.timer_eintrag import ZEITFELDER
 from trainingsapp.core.uebung_timer import (
     profile_zur_wahl,
     takt_der_uebung,
     timer_fuer,
     uhr_an,
-    zaehlt_als,
     zeit_zaehlt_fuer,
 )
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext
@@ -150,9 +152,13 @@ def laufende(state: Any, uebung: Exercise, item: PlanItem | None) -> Einheitslau
     return e
 
 
-#: Kennung des Uhrensymbols am Zielfeld (``data``) — zählt bzw. zählt gerade nicht
+#: Kennung des Uhrensymbols an einem Zeitfeld (``data``): die Uhr zählt hierher, zählt gerade
+#: nicht, zählt in ein anderes Zeitfeld (ein Tipp holt sie her) oder — ohne Zeile „Zeit“ —
+#: als Zeit
 ZAEHLT_HIER = "uhr_zaehlt_hier"
 ZAEHLT_HIER_NICHT = "uhr_zaehlt_hier_nicht"
+ZAEHLT_WOANDERS = "uhr_zaehlt_woanders"
+ZAEHLT_ALS_ZEIT = "uhr_zaehlt_als_zeit"
 
 
 def zaehlt_symbol(
@@ -165,16 +171,30 @@ def zaehlt_symbol(
     feld: str,
     name: str,
 ) -> ft.Control | None:
-    """Das Uhrensymbol hinter dem Feld, in das die Uhr einträgt (Ben, 12.11.2026) — ``None``
-    an jedem anderen Feld. ``feld`` ist der Schlüssel der Zeile, ``name`` ihr Name für die
-    Meldung. Läuft die Uhr dieser Übung, gilt, was beim Start feststand (der Kontext des
-    Laufs); sonst die Wahl für jetzt (`AppState.uhr_zaehlt`) über der Vorgabe der Übung.
+    """Das Uhrensymbol hinter einem Zeitfeld der Karte „Eintragen“ (Ben, 12.11.2026) —
+    ``None`` an jedem anderen Feld. ``feld`` ist der Schlüssel der Zeile, ``name`` ihr Name
+    für die Meldung.
 
-    Durchgestrichen heißt: hierhin zählte die Uhr, gerade aber nicht. Ein Tipp schaltet
-    „zählt“ für jetzt um — bei „Ohne Uhr“ und bei laufender Uhr sagt er nur, was gilt.
+    **Jedes Zeitfeld trägt eine Uhr** (Skizze C1): die kräftige zeigt, wohin die Uhr zählt,
+    die blasse ist die andere Möglichkeit.
+
+    - Tipp auf die **blasse** Uhr: Die Uhr zählt für jetzt in dieses Feld — Zeit ↔ Haltezeit
+      mit einem Tipp (`uebung_lauf.feld_jetzt_setzen`). Die Übung ändert sich nicht.
+    - Tipp auf die **kräftige** Uhr: zählt für jetzt nicht (durchgestrichen), noch ein Tipp:
+      zählt wieder (`AppState.uhr_zaehlt`).
+    - Bietet die Übung **Haltezeit, aber keine Zeile „Zeit“**, wechselt die eine Uhr reihum:
+      Haltezeit → Zeit (mit dem Wort daneben, die Uhr zählt auch ohne den Parameter als Zeit)
+      → zählt nicht.
+
+    Läuft die Uhr dieser Übung, gilt, was beim Start feststand (der Kontext des Laufs); bei
+    „Ohne Uhr“ sagt der Tipp nur, was gilt.
     """
+    if basis_key(feld) not in ZEITFELDER:
+        return None
     key = schluessel(uebung, item)
-    ziel = zaehlt_als(uebung_lauf.felder_der_uebung(uebung, item), uebung)
+    felder = uebung_lauf.felder_der_uebung(uebung, item)
+    zeitfelder = [f for f in felder if basis_key(f) in ZEITFELDER]
+    ziel = uebung_lauf.feld_jetzt(state, uebung, item)
     e = laufende(state, uebung, item)
     teil = e.teil("plan") if e is not None and e.timer is not None else None
     laeuft = isinstance(teil, UebungBaustein)
@@ -185,8 +205,9 @@ def zaehlt_symbol(
     else:
         ohne = gesetzt(state, uebung, plan, item).ohne_uhr
         zaehlt = state.uhr_zaehlt.get(key, zeit_zaehlt_fuer(uebung, item)) and not ohne
-    if feld != ziel:
-        return None
+    #: Ohne Zeile „Zeit“ hängt die Wahl „als Zeit“ an der ersten Haltezeit (reihum)
+    reihum = ziel not in zeitfelder and bool(zeitfelder) and feld == zeitfelder[0]
+    hier = feld == ziel
 
     def melden(text: str) -> None:
         with contextlib.suppress(Exception):
@@ -195,7 +216,7 @@ def zaehlt_symbol(
     def tipp() -> None:
         if laeuft:
             melden(
-                f"Die laufende Uhr zählt als {name}."
+                f"Die laufende Uhr zählt als {_feldname(ziel, feld, name)}."
                 if zaehlt
                 else "Die laufende Uhr zählt nicht — sie trägt keine Zeit ein."
             )
@@ -203,31 +224,68 @@ def zaehlt_symbol(
         if ohne:
             melden("„Ohne Uhr“ gewählt — es wird keine Zeit eingetragen.")
             return
-        state.uhr_zaehlt[key] = not zaehlt
-        melden(
-            f"Die Uhr zählt jetzt nicht als {name} — gilt für jetzt."
-            if zaehlt
-            else f"Die Uhr zählt jetzt als {name} — gilt für jetzt."
-        )
+        if not zaehlt:  # durchgestrichen → zählt wieder, hier
+            state.uhr_zaehlt[key] = True
+            uebung_lauf.feld_jetzt_setzen(state, uebung, item, feld)
+            melden(f"Die Uhr zählt jetzt als {name} — gilt für jetzt.")
+        elif reihum:  # Haltezeit → Zeit → nicht
+            state.uhr_zaehlt[key] = False
+            melden("Die Uhr zählt jetzt nicht — gilt für jetzt.")
+        elif not hier:  # die blasse Uhr: hierher holen
+            uebung_lauf.feld_jetzt_setzen(state, uebung, item, feld)
+            melden(f"Die Uhr zählt jetzt als {name} — gilt für jetzt.")
+        elif "duration" not in felder and basis_key(feld) == "hold":
+            # die eine Uhr an der Haltezeit: weiter zu „als Zeit“
+            uebung_lauf.feld_jetzt_setzen(state, uebung, item, "duration")
+            melden("Die Uhr zählt jetzt als Zeit — gilt für jetzt.")
+        else:
+            state.uhr_zaehlt[key] = False
+            melden(f"Die Uhr zählt jetzt nicht als {name} — gilt für jetzt.")
         state.neu_zeichnen()
 
+    if not zaehlt:
+        if not (hier or reihum):
+            return None  # durchgestrichen steht sie nur an ihrem Feld
+        kennung, tooltip = ZAEHLT_HIER_NICHT, f"Die Uhr zählt gerade nicht als {name}"
+    elif reihum:
+        kennung, tooltip = ZAEHLT_ALS_ZEIT, "Die Uhr zählt als Zeit — tippen wechselt"
+    elif hier:
+        kennung, tooltip = ZAEHLT_HIER, f"Die Uhr zählt als {name} — tippen wechselt"
+    else:
+        kennung, tooltip = ZAEHLT_WOANDERS, f"Tippen: Die Uhr zählt für jetzt als {name}"
+    kraeftig = kennung in (ZAEHLT_HIER, ZAEHLT_ALS_ZEIT)
     return ft.Container(
-        data=ZAEHLT_HIER if zaehlt else ZAEHLT_HIER_NICHT,
-        padding=ft.Padding.all(8),
+        data=kennung,
+        padding=ft.Padding.symmetric(horizontal=8, vertical=8),
         border_radius=18,
-        tooltip=(
-            f"Die Uhr zählt als {name} — tippen schaltet für jetzt um"
-            if zaehlt
-            else f"Die Uhr zählt gerade nicht als {name}"
-        ),
+        bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.PRIMARY) if kraeftig else None,
+        tooltip=tooltip,
         on_click=tipp,
-        content=ft.Icon(
-            ft.Icons.TIMER_OUTLINED if zaehlt else ft.Icons.TIMER_OFF_OUTLINED,
-            size=18,
-            color=ft.Colors.PRIMARY if zaehlt else None,
-            opacity=1.0 if zaehlt else 0.5,
+        content=ft.Row(
+            tight=True,
+            spacing=4,
+            controls=[
+                ft.Icon(
+                    ft.Icons.TIMER_OFF_OUTLINED
+                    if kennung == ZAEHLT_HIER_NICHT
+                    else ft.Icons.TIMER_OUTLINED,
+                    size=18,
+                    color=ft.Colors.PRIMARY if kraeftig else None,
+                    opacity=1.0 if kraeftig else 0.45,
+                ),
+                *(
+                    [ft.Text("Zeit", size=12, weight=ft.FontWeight.W_600, color=ft.Colors.PRIMARY)]
+                    if kennung == ZAEHLT_ALS_ZEIT
+                    else []
+                ),
+            ],
         ),
     )
+
+
+def _feldname(ziel: str, feld: str, name: str) -> str:
+    """Der Name des Zielfelds für die Meldung — die Zeile selbst oder „Zeit“."""
+    return name if ziel == feld else "Zeit" if basis_key(ziel) == "duration" else "Haltezeit"
 
 
 def uhr_teile(
@@ -262,7 +320,12 @@ def uhr_teile(
         # „Ohne Uhr“: keine Zeit ins Tagebuch (P146)
         eintragen = zaehlt and not (profil is not None and profil.ohne_uhr)
         return uebung_lauf.kontext_fuer(
-            uebung, plan, item, zeit_eintragen=eintragen, auspraegung=wahl
+            uebung,
+            plan,
+            item,
+            zeit_eintragen=eintragen,
+            feld=uebung_lauf.feld_jetzt(state, uebung, item),
+            auspraegung=wahl,
         )
 
     def takt_an_den_lauf(e: Einheitslauf) -> None:
@@ -653,8 +716,10 @@ def _kopie(p: TimerProfil) -> TimerProfil:
 
 
 __all__ = [
+    "ZAEHLT_ALS_ZEIT",
     "ZAEHLT_HIER",
     "ZAEHLT_HIER_NICHT",
+    "ZAEHLT_WOANDERS",
     "UhrTeile",
     "angebot",
     "gesetzt",

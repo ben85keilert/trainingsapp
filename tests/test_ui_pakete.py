@@ -365,8 +365,10 @@ def test_uebung_zeigt_geaendert_und_setzt_zurueck(page, state) -> None:
     knopf.on_click()
     dialoge[-1].actions[1].on_click()
     assert state.pakete.abweichungen(state.uebungen.laden(wade.id)) == []
-    # Eine Übung auf Paketstand hat den Abschnitt nicht
-    assert "PAKET" not in texte(uebung_bearbeiten(page, state, state.uebungen.laden(wade.id)))
+    # Eine Übung auf Paketstand hat die Abweichung nicht mehr — der Abschnitt „PAKET“ bleibt
+    # (seit 12.11.2026 steht dort „In ein Paket verschieben / kopieren“)
+    danach = texte(uebung_bearbeiten(page, state, state.uebungen.laden(wade.id)))
+    assert "PAKET" in danach and not any(t.startswith("Weicht vom Paket") for t in danach)
 
 
 def test_paket_deaktivieren_und_groesse(page, state) -> None:

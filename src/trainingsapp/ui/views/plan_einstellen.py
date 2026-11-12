@@ -21,6 +21,10 @@ im Plan-Editor und über die Übungsseite (Karte „In diesem Plan“, „In Pl�
    wie die Übung. Den Knopf „Wdh. zählen“ gibt es in einer Planübung nur, wenn sie ein
    Wiederholungsfeld anbietet — der Schalter ist sonst ausgegraut.
 
+Seit 12.11.2026 in denselben fünf Reitern wie „Übung bearbeiten“
+(`components/editor_reiter.py`): Übung (Kopf, Wege, „Alles wie die Übung“, „In die Übung
+übernehmen …“) · Parameter (1, 2) · Uhr (3) · Sensor (4) · Material (die Anweisungen).
+
 Jede Einstellung trägt „wie die Übung“ oder „nur hier“ mit ↺ (`components/planstand.py`).
 Unten „Alles wie die Übung“ (setzt die Seite zurück; gespeichert wird mit Speichern) und „In
 die Übung übernehmen …“ — mit Vorschau, was sich ändert und welche Pläne es mitbekommen
@@ -85,9 +89,11 @@ from trainingsapp.core.takt import AUS, Takt
 from trainingsapp.core.uebung_timer import TimerWahl, timer_fuer
 from trainingsapp.core.zaehlen import VORLAGE_AUTO, VORLAGEN_ANGEBOT, SensorWahl, vorlagen_angebot
 from trainingsapp.ui import paketdatei
+from trainingsapp.ui.components import editor_reiter as er
 from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
 from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
+from trainingsapp.ui.components.editor_reiter import editor_reiter
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
@@ -237,10 +243,13 @@ def plan_einstellen(
     #: die Werte gemerkt über ein Aus- und wieder Einschalten
     ziel_formulare: dict[str, SpecForm] = {}
     ziel_gemerkt: dict[str, Any] = dict(ziel_von(item, uebung))
-    inhalt = ft.Column(spacing=16)
+    einstell_route = f"{basis}/ziel/{item.id}"
+    # Dieselben fünf Reiter wie „Übung bearbeiten“ (Ben, 12.11.2026,
+    # `components/editor_reiter.py`): `zeichnen` füllt die Seiten, die Leiste bleibt stehen
+    reiter = editor_reiter(state, einstell_route, {}, abstand=16)
 
     # -- Anweisungen (U2, Ben 9.11.2026, F6): Abschnitte und Links nur in diesem Plan ------
-    # Einmal gebaut: `zeichnen` hängt den Block wieder in dieselbe Spalte (`inhalt`); die
+    # Einmal gebaut: `zeichnen` hängt den Block wieder in dieselbe Seite (Reiter „Material“); die
     # Linkfelder entstehen je Aufbau neu und schreiben in ``links_stand`` (Werte, nicht Controls)
 
     anweisung_editor = AbschnittEditor(
@@ -894,6 +903,10 @@ def plan_einstellen(
         acc_stand["acc"] = replace(acc_basis(), vorlage=wert or VORLAGE_AUTO)
         neu_zeichnen()
 
+    def bewegungstyp_setzen(wert: str) -> None:
+        acc_stand["acc"] = replace(acc_basis(), signal=wert)
+        neu_zeichnen()
+
     def zaehlt_in_setzen(wert: str, keys: list[str]) -> None:
         feld = None if wert == keys[0] and not uebung.beschleunigung.feld else wert
         acc_stand["acc"] = replace(acc_basis(), feld=feld)
@@ -946,6 +959,28 @@ def plan_einstellen(
             )
             if hinweis:
                 teile.append(ft.Text(f"Umkehrpunkt oben — {hinweis}", size=12, opacity=0.7))
+            # Bewegungstyp (Ben, 12.11.2026) — wie in „Übung bearbeiten“
+            teile.append(
+                ft.Row(
+                    spacing=12,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Text("Bewegungstyp", weight=ft.FontWeight.W_600),
+                        ft.Dropdown(
+                            value=basis.signal if basis.signal in zl.BEWEGUNGSTYPEN else "",
+                            options=[
+                                ft.DropdownOption(key=k, text=n)
+                                for k, n in zl.bewegungstypen_angebot()
+                            ],
+                            dense=True,
+                            expand=True,
+                            border=ft.OutlineInputBorder(border_radius=8),
+                            data="bewegungstyp",
+                            on_select=lambda e: bewegungstyp_setzen(str(e.control.value or "")),
+                        ),
+                    ],
+                )
+            )
         if wdh and len(keys) > 1:
             spec = plan_spec(jetzt, uebung)
 
@@ -1085,7 +1120,7 @@ def plan_einstellen(
         ziel_formulare.clear()
         nummer = ab.nummern([it.id for it in plan_jetzt.items]).get(item.id, "?")
         geholte = [f for f in vorrat if f.key in aktiv]
-        teile: list[ft.Control] = [
+        kopf: list[ft.Control] = [
             ft.Text(
                 spans=[
                     ft.TextSpan("Im Plan einstellen", ft.TextStyle(weight=ft.FontWeight.BOLD)),
@@ -1102,8 +1137,13 @@ def plan_einstellen(
                 size=12,
                 opacity=0.75,
             ),
+        ]
+        # Anweisungen sind das Material der Planübung (`core/material.py`)
+        material: list[ft.Control] = [
             abschnitt("ANWEISUNGEN", hilfe_knopf(page, thema="anweisungen")),
             anweisungen_block,
+        ]
+        teile: list[ft.Control] = [
             abschnitt("PARAMETER", hilfe_knopf(page, thema="parameter")),
             ft.Row(
                 wrap=True,
@@ -1167,7 +1207,7 @@ def plan_einstellen(
             ]
             if not aus and (ziel_variante := ziel_variante_teil()) is not None:
                 teile.append(ziel_variante)
-        teile += [
+        uhr: list[ft.Control] = [
             abschnitt(
                 "UHR",
                 ft.Row(
@@ -1180,6 +1220,8 @@ def plan_einstellen(
                 ),
             ),
             *uhr_und_timer(),
+        ]
+        sensor: list[ft.Control] = [
             abschnitt(
                 "BESCHLEUNIGUNGSSENSOR",
                 ft.Row(
@@ -1193,6 +1235,8 @@ def plan_einstellen(
                 ),
             ),
             sensor_karte(),
+        ]
+        kopf += [
             abschnitt(
                 "WEGE IM ABLAUF" if plan_jetzt.ablauf.an else "BEDINGUNGEN",
                 hilfe_knopf(page, thema="ablauf" if plan_jetzt.ablauf.an else "workout"),
@@ -1216,7 +1260,14 @@ def plan_einstellen(
             ),
             ft.TextButton("Übung ansehen", icon=ft.Icons.INFO_OUTLINE, on_click=uebung_ansehen),
         ]
-        inhalt.controls = teile
+        for key, seite in (
+            (er.UEBUNG, kopf),
+            (er.PARAMETER, teile),
+            (er.UHR, uhr),
+            (er.SENSOR, sensor),
+            (er.MATERIAL, material),
+        ):
+            reiter.seiten[key].controls = seite
 
     # -- Speichern, zurücksetzen, übernehmen -----------------------------------------------
 
@@ -1243,6 +1294,7 @@ def plan_einstellen(
     async def zurueckgehen() -> None:
         """Dorthin, woher man kam — der Plan-Editor oder die Übungsseite (Ben, 18.10.2026:
         Zurück führt dorthin, woher man kam; `ui/navigation.py`)."""
+        er.vergessen(state, einstell_route)
         ziel_route = zurueck_ziel(page, ansicht) if ansicht in page.views else basis
         await page.push_route(ziel_route)
 
@@ -1342,11 +1394,11 @@ def plan_einstellen(
     zeichnen()
     anfang = eingestellt()
     ansicht = ft.View(
-        route=f"{basis}/ziel/{item.id}",
+        route=einstell_route,
         appbar=formular_leiste(uebung.name, abbrechen=abbrechen, speichern=speichern),
-        scroll=ft.ScrollMode.AUTO,
-        padding=20,
-        controls=[sicher(inhalt, expand=False)],
+        # Die Ansicht rollt nicht: Die Reiter stehen fest, darunter rollt die Seite
+        padding=0,
+        controls=[sicher(reiter.control)],
     )
     return zurueck_speichert(
         page,

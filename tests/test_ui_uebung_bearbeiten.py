@@ -102,7 +102,9 @@ def test_symbol_oben_blatt_bild_und_ablage(page, state) -> None:
     ansicht = uebung_bearbeiten(page, state, u)
     kachel = _symbol_kachel(ansicht)
     assert isinstance(kachel.content, ft.Icon)
-    assert ansicht.controls[0].content.controls[0].controls[0] is kachel  # ganz oben, links
+    # ganz oben, links — im Reiter „Übung“, der zuerst offen ist
+    seite = next(x for x in _alle(ansicht) if getattr(x, "data", None) == "reiter_uebung")
+    assert seite.visible and seite.controls[0].controls[0] is kachel
     kachel.on_click()
     blatt = page.dialoge[-1]
     assert isinstance(blatt, ft.BottomSheet)

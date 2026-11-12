@@ -225,7 +225,7 @@ def waehlbare_felder(uebung: Exercise) -> tuple[list[FieldSpec], list[FieldSpec]
     >>> u = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("hold")]))
     >>> eigene, vorrat = waehlbare_felder(u)
     >>> [f.key for f in eigene], [f.key for f in vorrat][:3]
-    (['hold'], ['reps', 'weight', 'distance'])
+    (['hold'], ['duration', 'reps', 'scale'])
 
     Die Variante steht nicht darunter — sie hat einen eigenen Bereich (`varianten_an`).
     """

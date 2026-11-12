@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .result_spec import FieldSpec, FieldType, ResultSpec, ist_leer
+from .result_spec import FieldSpec, FieldType, ResultSpec, geordnet, ist_leer
 from .varianten import ist_variante
 
 MENGE = "menge"
@@ -51,11 +51,19 @@ def rolle(feld: FieldSpec) -> str:
 
 
 def mengenfelder(spec: ResultSpec) -> list[FieldSpec]:
-    return [f for f in spec.fields if rolle(f) == MENGE]
+    """Die Mengen — in der Ordnung des Vorrats (`core.result_spec.geordnet`: Zeit vor
+    Wiederholungen vor Haltezeit), nicht in der gespeicherten Folge.
+
+    >>> from trainingsapp.core.result_spec import vorrat_feld
+    >>> spec = ResultSpec(fields=[vorrat_feld("hold"), vorrat_feld("duration")])
+    >>> [f.key for f in mengenfelder(spec)]
+    ['duration', 'hold']
+    """
+    return [f for f in geordnet(spec.fields) if rolle(f) == MENGE]
 
 
 def auspraegungsfelder(spec: ResultSpec) -> list[FieldSpec]:
-    return [f for f in spec.fields if rolle(f) == AUSPRAEGUNG]
+    return [f for f in geordnet(spec.fields) if rolle(f) == AUSPRAEGUNG]
 
 
 def leistungsfelder(spec: ResultSpec) -> list[FieldSpec]:

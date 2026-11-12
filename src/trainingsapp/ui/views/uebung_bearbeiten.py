@@ -27,6 +27,12 @@ wo es hingehört“), von oben nach unten:
 - **Videos und Links**, zuletzt **Ordnen** (Typ und Region: dieselbe Auswahl wie im Katalog,
   `components/tagwahl.py`; der erste Typ ist die Kategorie).
 
+**Seit 12.11.2026 in fünf Reitern** (`components/editor_reiter.py`, `docs/plan_uebung_
+bearbeiten.md` „Reiter“): **Übung** (Kopf, Beschreibung, Ordnen, Paket mit „In ein Paket
+verschieben / kopieren“), **Parameter** (mit Varianten und Verlauf-Ansichten), **Uhr** (Uhr,
+Timer, „Timer hinzufügen“, Takt, Bild der Bewegung), **Sensor**, **Material** (Videos, Links,
+Dateien). Ein Formular — die Reiter schalten nur um, was sichtbar ist.
+
 Die Erklärtexte stehen nicht mehr unter den Überschriften, sondern im (i) je Abschnitt
 (`components/hilfe.py`: parameter, varianten, uhr, symbol). Aus „Übung hinzufügen“ im
 Plan-Editor angelegt (`<bearbeiten>/hinzufuegen/neu`), steht die neue Übung danach gleich im
@@ -77,23 +83,37 @@ from trainingsapp.core.result_spec import (
 from trainingsapp.core.standards import ziel_bereinigen, ziel_spec
 from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import TimerProfil
+from trainingsapp.core.uebung_timer import inhalt as timer_inhalt
 from trainingsapp.core.uebung_timer import profile_der_uebung
 from trainingsapp.core.verlauf import Ansichten, dimensionen
 from trainingsapp.core.zaehlen import (
+    ATEM_BEWEGUNG_VORGABE,
+    ATEM_BEWEGUNGEN,
+    BEWEGUNGSTYPEN,
     VORLAGE_AUTO,
     VORLAGEN_ANGEBOT,
     WDH_ART,
     SensorWahl,
     atmung_an,
+    bewegungstypen_angebot,
     knopf_text,
     vorlagen_angebot,
 )
 from trainingsapp.ui import paketdatei, systemdialog
-from trainingsapp.ui.components import stellung
+from trainingsapp.ui.components import paketwechsel, stellung
 from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
 from trainingsapp.ui.components.bewegungsbild import bewegungsbild_blatt
 from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, obersten_schliessen, schliessen
+from trainingsapp.ui.components.editor_reiter import (
+    MATERIAL,
+    PARAMETER,
+    SENSOR,
+    UEBUNG,
+    UHR,
+    editor_reiter,
+    vergessen,
+)
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL
@@ -117,6 +137,8 @@ from trainingsapp.ui.views.uebung_timer import formular_profil_route
 KARTE = ft.Colors.SURFACE_CONTAINER_LOWEST
 #: Kantenlänge des Symbols im Kopf (px)
 SYMBOL_GROESSE = 72
+#: Kennung einer Vorlage im Dialog „Timer hinzufügen“, die die Übung schon hat (``data``)
+SCHON_DABEI = "timer_schon_dabei"
 
 
 def _saetze_knopf(
@@ -1403,6 +1425,20 @@ def uebung_bearbeiten(
         border=ft.OutlineInputBorder(border_radius=8),
     )
     bewegung_hinweis = ft.Text(size=12, opacity=0.7)
+    # **Bewegungstyp** (Ben, 12.11.2026): woran der Sensor die Wiederholung abliest — die
+    # Übung bestimmt es vor („Kniebeuge Fokus auf die x-Achse, Liegestütze y-Achse“). Leer =
+    # wie die Vorlage; ein gespeicherter Schlüssel, den diese App nicht anbietet, zeigt „wie
+    # die Vorlage“ und bleibt, bis man wählt (`core.zaehlen.BEWEGUNGSTYPEN`)
+    typ_vorher = acc_vorher.signal if acc_vorher.signal in BEWEGUNGSTYPEN else ""
+    typ_wahl = ft.Dropdown(
+        value=typ_vorher,
+        options=[ft.DropdownOption(key=k, text=n) for k, n in bewegungstypen_angebot()],
+        dense=True,
+        expand=True,
+        border=ft.OutlineInputBorder(border_radius=8),
+        data="bewegungstyp",
+    )
+    typ_hinweis = ft.Text(size=12, opacity=0.7)
     bewegung_zeile = ft.Column(
         spacing=4,
         tight=True,
@@ -1413,6 +1449,53 @@ def uebung_bearbeiten(
                 controls=[ft.Text("Bewegung", weight=ft.FontWeight.W_600), bewegung_wahl],
             ),
             bewegung_hinweis,
+            ft.Row(
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[ft.Text("Bewegungstyp", weight=ft.FontWeight.W_600), typ_wahl],
+            ),
+            typ_hinweis,
+        ],
+    )
+    # Die Atmung hat ihren eigenen Bewegungstyp — bisher nur das Kippen des Gurts; weitere
+    # Verfahren kommen mit hrv-core. Mit einer Möglichkeit steht sie als Satz da, ab zweien
+    # als Auswahl
+    atem_vorher = (
+        acc_vorher.atmung_bewegung
+        if acc_vorher.atmung_bewegung in ATEM_BEWEGUNGEN
+        else ATEM_BEWEGUNG_VORGABE
+    )
+    atem_wahl = ft.Dropdown(
+        value=atem_vorher,
+        options=[ft.DropdownOption(key=k, text=n) for k, n in ATEM_BEWEGUNGEN.items()],
+        dense=True,
+        expand=True,
+        border=ft.OutlineInputBorder(border_radius=8),
+        visible=len(ATEM_BEWEGUNGEN) > 1,
+        data="atem_bewegungstyp",
+    )
+    atem_zeile = ft.Column(
+        spacing=4,
+        tight=True,
+        controls=[
+            ft.Row(
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Text("Bewegungstyp", weight=ft.FontWeight.W_600),
+                    atem_wahl,
+                    ft.Text(
+                        ATEM_BEWEGUNGEN[ATEM_BEWEGUNG_VORGABE],
+                        visible=len(ATEM_BEWEGUNGEN) == 1,
+                    ),
+                ],
+            ),
+            ft.Text(
+                "Die Atmung wird am Kippen des Gurts abgelesen — bisher das einzige Verfahren, "
+                "geprüft nur am Polar H10.",
+                size=12,
+                opacity=0.7,
+            ),
         ],
     )
 
@@ -1420,13 +1503,24 @@ def uebung_bearbeiten(
         gewaehlt = str(bewegung_wahl.value or VORLAGE_AUTO)
         hinweis = next((v.hinweis for v in angebot if v.schluessel == gewaehlt), "")
         bewegung_hinweis.value = f"Umkehrpunkt oben — {hinweis}" if hinweis else ""
+        typ = str(typ_wahl.value or "")
+        if not typ:
+            typ_hinweis.value = "Der Sensor liest die Wiederholung ab, wie die Vorlage es sagt."
+        elif typ in ("hauptachse", "betrag"):
+            typ_hinweis.value = "Gerätefrei — gilt an jedem Gerät mit Beschleunigungssensor."
+        else:
+            typ_hinweis.value = (
+                "Meint die Ausrichtung des Brustgurts (Polar H10) — an einem anderen Gerät "
+                "zählt „Automatisch“."
+            )
 
     def bewegung_gewaehlt(_e: object = None) -> None:
         bewegung_hinweis_setzen()
         with contextlib.suppress(Exception):  # noch nicht auf der Seite
-            bewegung_hinweis.update()
+            bewegung_zeile.update()
 
     bewegung_wahl.on_select = bewegung_gewaehlt
+    typ_wahl.on_select = bewegung_gewaehlt
     bewegung_hinweis_setzen()
     zaehlt_in_wahl = ft.SegmentedButton(
         segments=[ft.Segment(value="reps", label=ft.Text("Wiederholungen"))],
@@ -1448,7 +1542,14 @@ def uebung_bearbeiten(
         content=ft.Column(
             spacing=8,
             tight=True,
-            controls=[wdh_schalter, bewegung_zeile, zaehlt_in_zeile, atmung_schalter, acc_text],
+            controls=[
+                wdh_schalter,
+                bewegung_zeile,
+                zaehlt_in_zeile,
+                atmung_schalter,
+                atem_zeile,
+                acc_text,
+            ],
         ),
     )
 
@@ -1479,6 +1580,7 @@ def uebung_bearbeiten(
         wdh = bool(wdh_schalter.value)
         zaehlt_in_zeichnen(keys)
         bewegung_zeile.visible = wdh
+        atem_zeile.visible = bool(atmung_schalter.value)
         zaehlt_in_zeile.visible = wdh and len(keys) > 1
         knopf = knopf_text(wdh, bool(atmung_schalter.value))
         acc_text.value = (
@@ -1507,12 +1609,24 @@ def uebung_bearbeiten(
         wahl = str(bewegung_wahl.value or VORLAGE_AUTO)
         return acc_vorher.vorlage if wahl == vorlage_vorher else wahl
 
+    def typ_lesen() -> str:
+        """Der Bewegungstyp — wie die Vorlage: unberührt bleibt, was gespeichert war."""
+        wahl = str(typ_wahl.value or "")
+        return acc_vorher.signal if wahl == typ_vorher else wahl
+
+    def atem_typ_lesen() -> str:
+        """Die Vorgabe (Kippen) bleibt leer, solange nie etwas anderes gewählt war."""
+        wahl = str(atem_wahl.value or ATEM_BEWEGUNG_VORGABE)
+        return acc_vorher.atmung_bewegung if wahl == atem_vorher else wahl
+
     def acc_lesen() -> SensorWahl:
         return SensorWahl(
             wiederholungen=acc_wahl["wiederholungen"],
             atmung=acc_wahl["atmung"],
             vorlage=vorlage_lesen(),
             feld=zaehlt_in_lesen(),
+            signal=typ_lesen(),
+            atmung_bewegung=atem_typ_lesen(),
         )
 
     async def wechseln(
@@ -1571,6 +1685,8 @@ def uebung_bearbeiten(
             nachher.danach(lambda: timer_editor(None))
             schliessen(dialog)
 
+        vorhandene = {timer_inhalt(p) for p in timer_liste}
+
         dialog = ft.AlertDialog(
             on_dismiss=nachher.bei_schliessen,
             title=ft.Text("Timer für diese Übung"),
@@ -1593,12 +1709,19 @@ def uebung_bearbeiten(
                         opacity=0.7,
                     ),
                     *(
+                        # Was die Übung schon hat, ist ausgegraut (Ben, 12.11.2026: dieselbe
+                        # Vorlage ließ sich mehrfach hinzufügen) — gleich heißt: gleicher Inhalt
                         ft.ListTile(
                             title=ft.Text(p.name),
                             subtitle=ft.Text(p.kurztext(), size=12),
-                            on_click=nehmen(p),
+                            trailing=ft.Text("schon dabei", size=12) if dabei else None,
+                            disabled=dabei,
+                            data=SCHON_DABEI if dabei else None,
+                            on_click=None if dabei else nehmen(p),
                         )
-                        for p in state.timer_profile()
+                        for p, dabei in (
+                            (p, timer_inhalt(p) in vorhandene) for p in state.timer_profile()
+                        )
                     ),
                 ],
             ),
@@ -1732,6 +1855,7 @@ def uebung_bearbeiten(
         """Prüfen und speichern — ``None`` = gespeichert, sonst warum nicht."""
         if not (name.value or "").strip():
             name.error = "Ein Name muss sein."
+            reiter.zeigen(UEBUNG)  # der Fehler steht dort
             page.update()
             return "Ein Name muss sein."
         name.error = None
@@ -1739,6 +1863,7 @@ def uebung_bearbeiten(
             feld = skala_bereiche[key]
             if skala_lesen(feld.value or "") is None:
                 feld.error = "z. B. 0 - 10 oder -5 - 5 oder 0.0 - 10.0"
+                reiter.zeigen(PARAMETER)
                 page.update()
                 return "Der Bereich der Skala ist unlesbar (z. B. 0 - 10)."
             feld.error = None
@@ -1761,6 +1886,7 @@ def uebung_bearbeiten(
     async def speichern() -> None:
         if sichern() is not None:
             return
+        vergessen(state, route)
         if im_plan and plan is not None and basis is not None:
             page.show_dialog(ft.SnackBar(ft.Text(f"Angelegt — steht jetzt in „{plan.name}“")))
             await page.push_route(basis)
@@ -1783,6 +1909,7 @@ def uebung_bearbeiten(
         return ziel
 
     async def abbrechen() -> None:
+        vergessen(state, route)
         if im_plan:
             await page.push_route(f"{basis}/hinzufuegen")
             return
@@ -1841,11 +1968,23 @@ def uebung_bearbeiten(
             )
 
         paket_bereich = [
-            abschnitt("PAKET"),
             ft.Text(f"Weicht vom Paket „{paket.name}“ ab: {', '.join(geaendert)}.", size=13),
             ft.TextButton(
                 "Auf Paketstand zurücksetzen", icon=ft.Icons.RESTORE, on_click=zuruecksetzen_fragen
             ),
+        ]
+    if uebung is not None:
+        # „In ein Paket [verschieben] [kopieren]“ (Ben, 12.11.2026, `components/paketwechsel.py`)
+        paket_bereich = [
+            abschnitt("PAKET"),
+            *paketwechsel.paket_bereich(
+                page,
+                state,
+                uebung,
+                sichern=lambda: sichern(),
+                verlassen=lambda: vergessen(state, route),
+            ),
+            *paket_bereich,
         ]
 
     # -- Stellung (Ben, 12.11.2026, P188): welche Trainingsumgebung man hier ändert — und
@@ -1943,122 +2082,130 @@ def uebung_bearbeiten(
                 )
             )
 
+    # -- Fünf Reiter (Ben, 12.11.2026, `components/editor_reiter.py`): ein Formular, die
+    # Reiter schalten nur um, was sichtbar ist ------------------------------------------
+    reiter = editor_reiter(
+        state,
+        route,
+        {
+            UEBUNG: [
+                ft.Row(
+                    spacing=14,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[symbol_kachel, name],
+                ),
+                abschnitt("BESCHREIBUNG"),
+                beschreibung_spalte,
+                abschnitt("ORDNEN", hilfe_knopf(page, thema="uebungen")),
+                tagwahl.control,
+                ft.Row(
+                    wrap=True,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Text(
+                            "Der erste Typ ist die Kategorie; neue unten in der Liste.",
+                            size=12,
+                            opacity=0.6,
+                        ),
+                        ft.TextButton(
+                            "Typen und Regionen verwalten",
+                            icon=ft.Icons.CHEVRON_RIGHT,
+                            on_click=gehe_zu("/einstellungen/tags"),
+                        ),
+                    ],
+                ),
+                *paket_bereich,
+            ],
+            PARAMETER: [
+                abschnitt("PARAMETER", hilfe_knopf(page, thema="parameter")),
+                *stellung_bereich,
+                parameter_knoepfe,
+                karten_spalte,
+                abschnitt("VARIANTEN", hilfe_knopf(page, thema="varianten")),
+                varianten_spalte,
+                ziel_variante_bereich,
+                ft.TextButton(
+                    "Variante hinzufügen",
+                    icon=ft.Icons.SELL_OUTLINED,
+                    on_click=varianten_bearbeiter(None),
+                ),
+                verlauf_platz,
+            ],
+            UHR: [
+                abschnitt("UHR", hilfe_knopf(page, thema="uhr")),
+                uhr_spalte,
+                timer_spalte,
+                # Direkt unter der Liste, über dem Takt (Ben, 12.11.2026)
+                ft.TextButton(
+                    "Timer hinzufügen", icon=ft.Icons.MORE_TIME, on_click=timer_hinzufuegen
+                ),
+                ft.Row(
+                    spacing=0,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Container(content=takt_platz, expand=True),
+                        hilfe_knopf(page, thema="takt"),
+                    ],
+                ),
+                bewegung_platz,
+            ],
+            SENSOR: [
+                abschnitt(
+                    "BESCHLEUNIGUNGSSENSOR",
+                    ft.Row(
+                        tight=True,
+                        spacing=0,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Text("Prototyp", size=11, italic=True, opacity=0.7),
+                            hilfe_knopf(page, thema="beschleunigung"),
+                        ],
+                    ),
+                ),
+                acc_karte,
+            ],
+            MATERIAL: [
+                abschnitt("VIDEOS, LINKS UND DATEIEN"),
+                medien_spalte,
+                ft.Row(
+                    wrap=True,
+                    spacing=8,
+                    controls=[
+                        ft.TextButton(
+                            "Link hinzufügen", icon=ft.Icons.ADD_LINK, on_click=link_hinzufuegen
+                        ),
+                        datei_menue(),
+                    ],
+                ),
+            ],
+        },
+    )
     ausgang["stand"] = stand()
     ansicht = ft.View(
         route=route,
         appbar=formular_leiste(
             "Neue Übung"
             if neu
-            # Bei mehreren Stellungen steht die geltende dabei (P188)
-            else stellung.mit_stellung("Übung bearbeiten", stellungen),
+            # Der Name statt „Übung bearbeiten“ — der Titel war abgeschnitten (Ben,
+            # 12.11.2026); bei mehreren Stellungen steht die geltende dabei (P188)
+            else stellung.mit_stellung((uebung.name if uebung else "") or "Übung", stellungen),
             abbrechen=abbrechen,
             speichern=speichern,
         ),
-        scroll=ft.ScrollMode.AUTO,
-        padding=20,
-        controls=[
-            sicher(
-                ft.Column(
-                    spacing=18,
-                    controls=[
-                        ft.Row(
-                            spacing=14,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            controls=[symbol_kachel, name],
-                        ),
-                        abschnitt("BESCHREIBUNG"),
-                        beschreibung_spalte,
-                        abschnitt("PARAMETER", hilfe_knopf(page, thema="parameter")),
-                        *stellung_bereich,
-                        parameter_knoepfe,
-                        karten_spalte,
-                        abschnitt("VARIANTEN", hilfe_knopf(page, thema="varianten")),
-                        varianten_spalte,
-                        ziel_variante_bereich,
-                        ft.TextButton(
-                            "Variante hinzufügen",
-                            icon=ft.Icons.SELL_OUTLINED,
-                            on_click=varianten_bearbeiter(None),
-                        ),
-                        abschnitt("UHR", hilfe_knopf(page, thema="uhr")),
-                        uhr_spalte,
-                        timer_spalte,
-                        ft.Row(
-                            spacing=0,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            controls=[
-                                ft.Container(content=takt_platz, expand=True),
-                                hilfe_knopf(page, thema="takt"),
-                            ],
-                        ),
-                        bewegung_platz,
-                        ft.Row(
-                            wrap=True,
-                            spacing=8,
-                            controls=[
-                                ft.TextButton(
-                                    "Timer hinzufügen",
-                                    icon=ft.Icons.MORE_TIME,
-                                    on_click=timer_hinzufuegen,
-                                ),
-                            ],
-                        ),
-                        abschnitt(
-                            "BESCHLEUNIGUNGSSENSOR",
-                            ft.Row(
-                                tight=True,
-                                spacing=0,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                controls=[
-                                    ft.Text("Prototyp", size=11, italic=True, opacity=0.7),
-                                    hilfe_knopf(page, thema="beschleunigung"),
-                                ],
-                            ),
-                        ),
-                        acc_karte,
-                        abschnitt("VIDEOS, LINKS UND DATEIEN"),
-                        medien_spalte,
-                        ft.Row(
-                            wrap=True,
-                            spacing=8,
-                            controls=[
-                                ft.TextButton(
-                                    "Link hinzufügen",
-                                    icon=ft.Icons.ADD_LINK,
-                                    on_click=link_hinzufuegen,
-                                ),
-                                datei_menue(),
-                            ],
-                        ),
-                        verlauf_platz,
-                        abschnitt("ORDNEN", hilfe_knopf(page, thema="uebungen")),
-                        tagwahl.control,
-                        ft.Row(
-                            wrap=True,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            controls=[
-                                ft.Text(
-                                    "Der erste Typ ist die Kategorie; neue unten in der Liste.",
-                                    size=12,
-                                    opacity=0.6,
-                                ),
-                                ft.TextButton(
-                                    "Typen und Regionen verwalten",
-                                    icon=ft.Icons.CHEVRON_RIGHT,
-                                    on_click=gehe_zu("/einstellungen/tags"),
-                                ),
-                            ],
-                        ),
-                        *paket_bereich,
-                    ],
-                ),
-                expand=False,
-            )
-        ],
+        # Die Ansicht rollt nicht: Die Reiter stehen fest, darunter rollt die Seite
+        padding=0,
+        controls=[sicher(reiter.control)],
     )
     return zurueck_speichert(
         page, ansicht, geaendert=lambda: stand() != ausgang["stand"], speichern=sichern
     )
 
 
-__all__ = ["KARTE", "SYMBOL_GROESSE", "parameter_name", "spec_bauen", "uebung_bearbeiten"]
+__all__ = [
+    "KARTE",
+    "SCHON_DABEI",
+    "SYMBOL_GROESSE",
+    "parameter_name",
+    "spec_bauen",
+    "uebung_bearbeiten",
+]

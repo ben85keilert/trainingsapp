@@ -423,7 +423,30 @@ class PaketRepo:
         alt = self.inhalt(inhalt.paket.id)
         if alt is None:
             return None
-        return paket_stufe(alt, inhalt)
+        return paket_stufe(alt, replace(inhalt, uebungen=self._wie_beim_import(alt, inhalt)))
+
+    def _wie_beim_import(self, alt: Paketinhalt, neu: Paketinhalt) -> list[Exercise]:
+        """Die Übungen der Datei so, wie der Import sie sähe (K42) — sonst zählte die Stufe,
+        was gar nicht geschieht: Tags in der Schreibweise, die es hier schon gibt („dehnung“
+        = „Dehnung“, wie im gespeicherten Paketstand), und ohne die Übungen, die der Import
+        nie anlegt, weil ihre ID hier eine eigene, die eines anderen Pakets oder endgültig
+        gelöscht ist („kommt dazu“ bei jedem Update)."""
+        bekannte = self._bekannte_tags()
+        beim_paket = {u.id for u in alt.uebungen}
+        uebungen: list[Exercise] = []
+        for u in neu.uebungen:
+            if u.id not in beim_paket:
+                r = self.con.execute(
+                    "SELECT package_id, purged_at FROM exercise WHERE id = ?", (u.id,)
+                ).fetchone()
+                if r is not None and (
+                    r["package_id"] != neu.paket.id or r["purged_at"] is not None
+                ):
+                    continue
+            ziel = replace(u, typen=list(u.typen), regionen=list(u.regionen))
+            _tags_angleichen(ziel, dict(bekannte))
+            uebungen.append(ziel)
+        return uebungen
 
     def kurse(self, paket_id: str) -> list[Kurs]:
         """Die Kurse eines Pakets, die in der Liste stehen (nicht entfernt)."""

@@ -32,6 +32,9 @@ from collections.abc import Sequence
 #: neu gebaut, auch die verdeckten
 MAX_STAPEL = 8
 
+#: Erster Teil der Routen der Einstellungen — ihre Seiten ersetzen einander nicht
+EINSTELLUNGEN = "einstellungen"
+
 
 def teile(route: str) -> list[str]:
     """Die Teile einer Route — ``"/plan/abc"`` → ``["plan", "abc"]``.
@@ -75,8 +78,19 @@ def geschwister(a: str, b: str) -> bool:
     True
     >>> geschwister("/tag/d", "/tag/d")
     False
+
+    Die Seiten der Einstellungen sind Bereiche, keine Geschwister (Ben, 11.11.2026: Menüs):
+    Von „Übungen“ zu „Typen und Regionen“, von „Training“ zum GPS-Test — Zurück führt
+    dorthin, woher man kam, nicht eine Ebene höher. Darunter gilt die Regel weiter.
+
+    >>> geschwister("/einstellungen/uebungen", "/einstellungen/tags")
+    False
+    >>> geschwister("/einstellungen/tagesfelder/a", "/einstellungen/tagesfelder/b")
+    True
     """
     ta, tb = teile(a), teile(b)
+    if len(ta) == 2 and ta[0] == EINSTELLUNGEN:
+        return False
     return ta != tb and len(ta) == len(tb) >= 2 and ta[:-1] == tb[:-1]
 
 
@@ -116,6 +130,13 @@ def naechster_stapel(stapel: Sequence[str], route: str, *, ersetzen: bool = Fals
     ['/plan/x']
     >>> len(naechster_stapel([f"/a{i}" for i in range(MAX_STAPEL)], "/b"))
     8
+
+    Aus einem Menü der Einstellungen in eine Seite daneben und zurück:
+
+    >>> naechster_stapel(["/einstellungen", "/einstellungen/uebungen"], "/einstellungen/tags")
+    ['/einstellungen', '/einstellungen/uebungen', '/einstellungen/tags']
+    >>> naechster_stapel(_, "/einstellungen/uebungen")
+    ['/einstellungen', '/einstellungen/uebungen']
     """
     route = normal(route)
     if route == "/":

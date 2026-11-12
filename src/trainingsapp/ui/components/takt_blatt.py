@@ -46,6 +46,7 @@ from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.layout import ohne_auto_update
 from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
+from trainingsapp.ui.timer_takt import takt_anbringen
 
 #: Symbol des Taktgebers — Material kennt kein Metronom; der Ausschlag steht für den Takt
 SYMBOL = ft.Icons.GRAPHIC_EQ
@@ -669,19 +670,6 @@ class TempoRegler:
 
     def nachziehen(self, laeuft_takt: bool) -> None:
         self.control.visible = laeuft_takt
-
-
-def takt_anbringen(state: Any, lauf: Any, key: str, uebung_takt: Takt | None) -> None:
-    """Die Wahl dieser Sitzung an einen Lauf hängen: Takt „für jetzt“, die Vorgabe der Übung,
-    der Tempo-Faktor (`AppState.uhr_takt`, `uhr_tempo`)."""
-    if lauf is None:
-        return
-    lauf.takt_uebung = uebung_takt
-    lauf.takt_jetzt = state.uhr_takt.get(key)
-    faktor = state.uhr_tempo.get(key, 1.0)
-    if faktor != lauf.tempo_faktor:
-        lauf.tempo_setzen(faktor)
-        lauf.tempo_aenderungen.clear()  # vor dem Start: keine Änderung im Lauf
 
 
 def takt_knopf(

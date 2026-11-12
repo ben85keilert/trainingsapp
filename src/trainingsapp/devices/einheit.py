@@ -112,6 +112,9 @@ class TimerBaustein:
         self._abgebrochen_gemeldet = False
         #: Der Abschnitt, für den ``timer/takt`` zuletzt geschrieben wurde (`_takt_melden`)
         self._takt_gemeldet: int | None = None
+        #: die Daten des zuletzt geschriebenen ``timer/takt`` — ein Regler-Zug, der an der
+        #: Klemme nichts ändert, schreibt kein zweites mit demselben Inhalt (N65)
+        self._takt_daten: dict[str, Any] | None = None
         #: Der Takt Tick für Tick (Teil 2, `devices.takt_lauf`): Takt-Läufe, Soll-Phasen und
         #: volle Runden — die Einheit holt sie ab (`takt_abholen`) und bringt sie zur HRV
         #: (Beiwerk, Marken) und zum Zähl-Teil („Takt zählt“), nicht über die Zeitleiste
@@ -261,10 +264,15 @@ class TimerBaustein:
                 anfaenge = [m.bei for m in marken if not m.ende and m.bei is not None]
                 bei = anfaenge[-1] if anfaenge else jetzt
                 out.append(self._takt_ereignis(bei - t0, takt, self.lauf.tempo_faktor))
+                self._takt_daten = out[-1].daten
         for bei in self.lauf.tempo_aenderungen:
             takt = self.lauf.takt_aktuell(stand.nummer)
             if takt is not None:
-                out.append(self._takt_ereignis(bei - t0, takt, self.lauf.tempo_faktor))
+                ereignis = self._takt_ereignis(bei - t0, takt, self.lauf.tempo_faktor)
+                if ereignis.daten == self._takt_daten:
+                    continue  # Takt-Tempo × Regler ist begrenzt: wirksam hat sich nichts geändert
+                self._takt_daten = ereignis.daten
+                out.append(ereignis)
         self.lauf.tempo_aenderungen.clear()
         return out
 
@@ -689,6 +697,16 @@ class Einheitslauf:
             return False
         self.teile = [t for t in self.teile if t is not teil]
         self._gestartet.discard(id(teil))
+        # Seine Beteiligung endet jetzt — nicht erst mit der Einheit, und nicht unter einer
+        # Kennung, die der nächste Teil erben kann (Durchsicht 11.11.2026)
+        b = self._beteiligungen.pop(id(teil), None)
+        if b is not None and b.bis_s is None and self.t0 is not None:
+            b.bis_s = round(max(self.uhr() - self.t0, 0.0), 3)
+            if self.senke is not None and self._kopf_geschrieben:
+                try:
+                    self.senke.beteiligung(self.id, b)
+                except Exception as fehler:
+                    self.warnung = f"Zeitleiste nicht gespeichert: {fehler}"
         return True
 
     def beitreten(self, teil: Baustein) -> None:

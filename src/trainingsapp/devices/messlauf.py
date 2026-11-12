@@ -50,6 +50,7 @@ import contextlib
 import hashlib
 import logging
 import os
+import re
 import time
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -226,6 +227,33 @@ class _Zwischenstand:
     notizen: frozenset[tuple[Any, float, str]]
 
 
+#: Je Zwischenstand die Notizen, die jetzt in seiner Datei stehen (`_zwischen_lesen`)
+_ZwischenNotizen = list[tuple[_Zwischenstand, list[dict]]]
+
+
+def _zwischen_lesen(zwischen: Sequence[_Zwischenstand]) -> _ZwischenNotizen:
+    """Die Dateien der Zwischenstände lesen (je Datei die Aufnahme bis dahin — bei langen
+    Messungen mehrere MB) und nur ihre Notizen behalten. Liest nur Dateien, fasst keinen
+    Messlauf an — darum auch in einem Thread (H60). Unlesbares fehlt."""
+    gelesen: _ZwischenNotizen = []
+    for z in zwischen:
+        try:
+            datei = laden(z.pfad)
+        except (OSError, ValueError, KeyError):
+            continue
+        gelesen.append((z, [dict(e) for e in datei.ereignisse or []]))
+    return gelesen
+
+
+def _grenze(e: Mapping[str, Any]) -> tuple[str, str] | None:
+    """``(Kennung, Art)`` der Grenz-Notiz eines eigenen Abschnitts — ``None`` für jede andere."""
+    kennung = eigene_abschnitte.kennung_von(e)
+    marke = e.get("marke")
+    if kennung is None or not isinstance(marke, Mapping):
+        return None
+    return kennung, str(marke.get("art") or "")
+
+
 def _sha1(pfad: Path) -> str:
     return hashlib.sha1(pfad.read_bytes()).hexdigest()  # Prüfsumme, keine Sicherheitsfunktion
 
@@ -336,7 +364,12 @@ def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
         backup_entfernen(backup)
         return None
     pfad = backup.parent / rec.dateiname()
-    if not pfad.exists():
+    # Liegt dort eine **andere** Messung derselben Startsekunde (H65), ist dieses Backup nicht
+    # „schon gespeichert“: dann unter dem nächsten freien Namen sichern (`speichern`, F10)
+    schon = _schon_gespeichert(rec, pfad)
+    if schon is not None:
+        pfad = schon
+    else:
         pfad = speichern(rec, backup.parent)
         # Das Protokollfeld „Atmung“, wie das Backup es zuletzt bestimmte (`Messlauf._zusatz`)
         if (atmung := feld_lesen(zusatz)) is not None:
@@ -379,6 +412,29 @@ def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
         dauer_s=rec.dauer_s,
         subject_id=str(subject_id) if subject_id else None,
     )
+
+
+def _schon_gespeichert(rec: Recording, pfad: Path) -> Path | None:
+    """Die Messdatei, in der die Schläge des Backups ``rec`` schon stehen — ``pfad`` selbst
+    oder einer seiner Zählernamen (``…_1.json``, `freier_pfad`); ``None``, wenn keine davon
+    diese Aufnahme ist. Verglichen wird der Inhalt: Das Backup ist höchstens älter als die
+    Datei, seine RR-Folge ist darum ihr Anfang. Eine unlesbare Datei gilt als fremd — lieber
+    eine Messung doppelt als eine verloren."""
+    if not pfad.parent.is_dir():
+        return None
+    rr = [b.rr_ms for b in rec.beats]
+    zaehler = re.compile(rf"{re.escape(pfad.stem)}_\d+{re.escape(pfad.suffix)}")
+    kandidaten = [pfad, *sorted(p for p in pfad.parent.iterdir() if zaehler.fullmatch(p.name))]
+    for kandidat in kandidaten:
+        if not kandidat.is_file():
+            continue
+        try:
+            datei = laden(kandidat)
+        except (OSError, ValueError, KeyError):
+            continue
+        if [b.rr_ms for b in datei.beats[: len(rr)]] == rr:
+            return kandidat
+    return None
 
 
 def _spuren_lesen(zusatz: dict[str, Any]) -> dict[str, list[tuple[dict, str, bool]]]:
@@ -586,6 +642,11 @@ class Messlauf:
         self._backup_basis = backup_basis
         self._dateiname_fest: str | None = None  # vorab festgelegter Dateiname (F10)
         self.live = self._neues_live_fenster()
+        #: Für `nur_puls`: wie viele Pakete seit dem letzten Leeren des Live-Fensters kamen und
+        #: ob eines ein Intervall trug — gemerkt statt je Takt den ganzen Puffer durchzusehen
+        #: (Review 11.11.2026: 10 ms je Aufruf bei 30 min Puffer, 191 ms bei 12 h)
+        self._live_pakete = 0
+        self._live_rr = False
         #: Gurt-Warnung bei zu vielen Artefakten (`core.gurt_warnung`, 26.10.2026)
         self.artefaktwache = Artefaktwache()
         # Live-x-Achse gebündelter PPI-Pakete (Verity Sense): Schlagzeiten aus der
@@ -603,6 +664,9 @@ class Messlauf:
         self._grenzen: dict[str, list[tuple[dict, str, bool]]] = {}
         #: Zwischenstände der laufenden Aufnahme (`aufnahme_zwischenstand_async`)
         self._zwischen: list[_Zwischenstand] = []
+        #: Ein Zwischenstand wird gerade geschrieben (H90) — ein zweiter Aufruf (Doppeltipp,
+        #: andere Ansicht) wählte im Thread denselben freien Pfad
+        self._zwischen_laeuft = False
         #: Notizen ohne Aufnahme (Ben, 16.10.2026) — `aufnahme_starten` übernimmt sie
         self._vorab: list[dict] = []
         #: Titel und Beschreibung ohne Aufnahme (Ben, 17.10.2026) — ebenso
@@ -675,6 +739,7 @@ class Messlauf:
         self.simulation = device_id.startswith("sim:")
         self.profil = profil_fuer_namen(name or "")
         self.live.leeren()
+        self._live_pakete, self._live_rr = 0, False
         self.status = DeviceStatus(verbindung=Verbindung.VERBINDE, meldung="Verbinde …")
         await self.quelle.connect(device_id, name)
         # Das Profil steht erst nach dem Verbinden fest (ohne Namen: aus den
@@ -683,6 +748,7 @@ class Messlauf:
         self.profil = self.quelle.profil or self.profil
         quelle = self.profil.intervall_quelle if self.profil else ""
         self.live = self._neues_live_fenster(malik=malik_threshold(quelle))
+        self._live_pakete, self._live_rr = 0, False
         self.live.regeln_setzen(self.regeln, quelle)
         self._ppi_uhr = Kontinuitaetsuhr()
         self._schlagzeiten.clear()
@@ -727,6 +793,8 @@ class Messlauf:
                 self.live.hinzufuegen(
                     t_live - self.start_mono, wert.rr_ms, wert.hf_bpm, fehler_ms=fehler
                 )
+                self._live_pakete += 1
+                self._live_rr = self._live_rr or wert.rr_ms > 0
                 self._verworfene_zeigen()
                 self.artefaktwache.pruefen(self.live.artefaktanteil(), t_live - self.start_mono)
                 if aufnahme is not None:
@@ -766,6 +834,8 @@ class Messlauf:
         while self._schlagzeiten and self._schlagzeiten[0][2]:
             rr, t, _, fehler = self._schlagzeiten.popleft()
             self.live.hinzufuegen(t - self.start_mono, rr, 0, verworfen=True, fehler_ms=fehler)
+            self._live_pakete += 1
+            self._live_rr = self._live_rr or rr > 0
 
     def _live_zeit(self, wert: Messwert) -> tuple[float, int]:
         """Anzeigezeit eines Schlags: Kontinuitätsuhr, falls er zum letzten PPI-Paket gehört.
@@ -862,6 +932,9 @@ class Messlauf:
         self._grenzen = {}
         self._letztes_backup = start
         self.live.leeren()
+        self._live_pakete, self._live_rr = 0, False
+        # Die Live-Achse beginnt bei 0 — die Sperrfrist der Gurt-Warnung rechnet auf ihr (H61)
+        self.artefaktwache.neu_beginnen()
         self.start_mono = start
         self._achse_utc = self.aufnahme.start_utc
         vorab, self._vorab = self._vorab, []
@@ -1142,12 +1215,11 @@ class Messlauf:
         z. B. `UHR_BROADCAST`); ohne Angabe dort entscheidet, was ankommt: `NUR_PULS_NACH`
         Pakete ohne ein einziges Intervall. Kommt eines, ist es das Tachogramm.
         """
-        punkte = self.live.punkte()
-        if any(p.rr_ms > 0 for p in punkte):
+        if self._live_rr:
             return False
         if self.profil is not None and not self.profil.hrv_moeglich:
             return True
-        return len(punkte) >= NUR_PULS_NACH
+        return self._live_pakete >= NUR_PULS_NACH
 
     def aufnahme_dauer_s(self) -> float:
         return self.aufnahme.dauer_s() if self.aufnahme is not None else 0.0
@@ -1428,12 +1500,15 @@ class Messlauf:
         stehen (H24) und wird erst danach gelöscht — der Thread verändert nichts an
         ``self``.
         """
-        aufnahme = self._stopp_beginnen()
+        aufnahme = self._stopp_beginnen(uebernehmen=False)
         if aufnahme is None:
             await self._stroeme_zurueck()
             return None
-        atmung = self.atmung_feld(aufnahme)  # im Loop (der Haken liest den Katalog)
         try:
+            if self._zwischen:  # die Dateien liest ein Thread (H60), eingefügt wird im Loop
+                gelesen = await asyncio.to_thread(_zwischen_lesen, tuple(self._zwischen))
+                self._zwischen_uebernehmen(aufnahme, gelesen)
+            atmung = self.atmung_feld(aufnahme)  # im Loop (der Haken liest den Katalog)
             ergebnis = await asyncio.to_thread(
                 self._schreiben, aufnahme, basis, None, _LAUFEND, _LAUFEND, _LAUFEND, atmung
             )
@@ -1464,6 +1539,8 @@ class Messlauf:
         aufnahme = self.aufnahme
         if aufnahme is None or not aufnahme.beats or self._wird_gespeichert:
             return None
+        if self._zwischen_laeuft:
+            return None
         # Alles, was der Thread braucht, hier im Loop kopieren — er liest ``self`` nicht
         rec = replace(aufnahme.recording(), ecg_aufzeichnung=False)
         spuren = {s: list(gs) for s, gs in self._grenzen.items()}
@@ -1487,7 +1564,11 @@ class Messlauf:
                     spuren_speichern(pfad, rec, spuren)
             return replace(_gespeichert(pfad, rec, dauer_s=dauer_s), zwischenstand=True)
 
-        ergebnis = await asyncio.to_thread(schreiben)
+        self._zwischen_laeuft = True
+        try:
+            ergebnis = await asyncio.to_thread(schreiben)
+        finally:
+            self._zwischen_laeuft = False
         if self.aufnahme is aufnahme:  # inzwischen beendet: dann bleibt er eine Aufzeichnung
             self._zwischen.append(
                 _Zwischenstand(
@@ -1499,26 +1580,32 @@ class Messlauf:
     def _zwischen_pfade(self) -> tuple[Path, ...]:
         return tuple(z.pfad for z in self._zwischen)
 
-    def _zwischen_uebernehmen(self, aufnahme: Aufnahme) -> None:
+    def _zwischen_uebernehmen(
+        self, aufnahme: Aufnahme, gelesen: _ZwischenNotizen | None = None
+    ) -> None:
         """Vor dem Speichern der ganzen Aufnahme: Notizen (und damit Abschnitte — sie sind
         Notizpaare), die an einem Zwischenstand **nachträglich** dazukamen, in die Aufnahme.
         Die Schläge des Zwischenstands sind der Anfang dieser Aufnahme, die Anker gelten
         darum unverändert. Geändertes kommt als neue Notiz neben die alte, Gelöschtes bleibt
-        — Zuschnitt und Korrektur eines Zwischenstands gehen mit ihm."""
-        for z in self._zwischen:
-            try:
-                datei = laden(z.pfad)
-            except (OSError, ValueError, KeyError):
-                continue
+        — Zuschnitt und Korrektur eines Zwischenstands gehen mit ihm. Eine **verschobene
+        Abschnittsgrenze** ersetzt die alte (H60): zwei Grenz-Notizen einer Kennung gäbe es
+        sonst, und gelten würde die erste. ``gelesen``: die Notizen der Zwischenstände, wenn
+        ein Thread die Dateien schon gelesen hat (`_zwischen_lesen`) — sonst liest der
+        Aufrufer hier selbst."""
+        if gelesen is None:
+            gelesen = _zwischen_lesen(self._zwischen)
+        for z, notizen in gelesen:
             bekannt = {_notiz_schluessel(e) for e in aufnahme.ereignisse}
             neu = [
                 dict(e)
-                for e in datei.ereignisse or []
+                for e in notizen
                 if (k := _notiz_schluessel(e)) not in z.notizen and k not in bekannt
             ]
             if neu:
+                verschoben = {g for e in neu if (g := _grenze(e)) is not None}
                 aufnahme.ereignisse = sorted(
-                    [*aufnahme.ereignisse, *neu], key=lambda e: _notiz_schluessel(e)[1]
+                    [*(e for e in aufnahme.ereignisse if _grenze(e) not in verschoben), *neu],
+                    key=lambda e: _notiz_schluessel(e)[1],
                 )
 
     async def aufnahme_teilen_async(self, basis: Path) -> Gespeichert | None:
@@ -1534,8 +1621,16 @@ class Messlauf:
         alt = self.aufnahme
         if alt is None or not alt.beats or self._wird_gespeichert:
             return None
+        gelesen: _ZwischenNotizen = []
+        if self._zwischen:  # die Dateien liest ein Thread (H60) — die Aufnahme läuft solange
+            gelesen = await asyncio.to_thread(_zwischen_lesen, tuple(self._zwischen))
+            if self.aufnahme is not alt or self._wird_gespeichert:
+                return None  # inzwischen gestoppt oder geteilt: der andere Aufruf trägt ein
         # Zwischenstände gehören zu Teil 1: er ersetzt sie, Teil 2 beginnt ohne
-        self._zwischen_uebernehmen(alt)
+        self._zwischen_uebernehmen(alt, gelesen)
+        # Scheitert das Schreiben von Teil 1, bleibt nur sein Backup — darum hier den Stand
+        # von jetzt sichern, nicht den von vor bis zu 15 s (H89)
+        self.backup_jetzt()
         ersetzt, self._zwischen = self._zwischen_pfade(), []
         jetzt = self._uhr()
         neu = Aufnahme(
@@ -1580,9 +1675,11 @@ class Messlauf:
         )
         return replace(ergebnis, ersetzt=ersetzt)
 
-    def _stopp_beginnen(self) -> Aufnahme | None:
+    def _stopp_beginnen(self, *, uebernehmen: bool = True) -> Aufnahme | None:
         """Die Aufnahme beenden: ab jetzt kein Schlag mehr hinein. ``None``: nichts
-        aufgezeichnet — oder ein anderer Aufruf speichert sie gerade (der trägt sie ein)."""
+        aufgezeichnet — oder ein anderer Aufruf speichert sie gerade (der trägt sie ein).
+        ``uebernehmen=False``: Der Aufrufer holt die Notizen der Zwischenstände selbst
+        (`aufnahme_stoppen_async` liest die Dateien in einem Thread, H60)."""
         aufnahme = self.aufnahme
         if aufnahme is None or not aufnahme.beats:
             self.aufnahme = None
@@ -1594,7 +1691,8 @@ class Messlauf:
         if self._wird_gespeichert:
             return None
         self._wird_gespeichert = True
-        self._zwischen_uebernehmen(aufnahme)
+        if uebernehmen:
+            self._zwischen_uebernehmen(aufnahme)
         # Ein offener Lauf „Atmung erfassen“ endet mit der Aufnahme am Stopp, nicht mit dem
         # letzten Fenster (bis 5 s früher); die Spur der Einheit läuft ohne Sammler weiter
         # und bekommt mit der nächsten Aufnahme einen neuen (fünfte Prüfrunde, B5)

@@ -24,12 +24,16 @@ from trainingsapp.core.hf_training import (
     BEZUG_FENSTER,
     BEZUG_NAMEN,
     LiveHf,
+    erholung_rest,
     fenster_zusammenfassung,
-    hf_je_schlag,
+    hf_mittel,
+    reihe_aus_beats,
 )
 from trainingsapp.core.hf_ziel import (
     Stumm,
     Zielton,
+    linie_start,
+    messung_kennung,
     trend_bpm_min,
     ziel_grenzen,
     ziel_setzen,
@@ -96,13 +100,9 @@ class HfLive:
     def hf_jetzt(self) -> float | None:
         """Die Herzfrequenz der letzten 5 s aus RR (bpm-Rückfall) — sonst die des Geräts."""
         jetzt = self.lauf.jetzt_s()
-        werte = [
-            w
-            for _, rr, hf, art in self.punkte(jetzt - 5.0)
-            if (w := hf_je_schlag(0.0 if art else rr, hf)) is not None
-        ]
-        if werte:
-            return sum(werte) / len(werte)
+        mittel = hf_mittel([(rr, hf, art) for _, rr, hf, art in self.punkte(jetzt - 5.0)])
+        if mittel is not None:
+            return mittel
         k = self.lauf.live.kennzahlen()
         if k.hf_bpm:
             # Der letzte Wert des Puffers — nur, solange er frisch ist: Nach Funkstille (Gurt
@@ -204,9 +204,9 @@ class HfLive:
 
     # -- Zielbereich und Ton --------------------------------------------------------------
 
-    def _messung(self) -> int:
+    def _messung(self) -> object:
         """Kennung der laufenden Messung — „stumm bis Messende“ gilt, solange sie bleibt."""
-        return id(self.lauf.aufnahme) if self.lauf.aufnahme is not None else id(self.lauf)
+        return messung_kennung(self.lauf)
 
     def stumm(self) -> Stumm | None:
         s: Stumm | None = self.state.hf_stumm
@@ -255,10 +255,9 @@ class HfLive:
         e = self.einst(frisch=True)
         oben, unten = ziel_grenzen(e)
         hf = self.hf_jetzt()
+        start = linie_start(seite, oben, unten, hf)
         if seite == "oben":
-            start = oben if oben is not None else (unten + 20 if unten else (hf or 140.0) + 10)
             return self.ziel_aendern(oben=start + schritt)
-        start = unten if unten is not None else (oben - 20 if oben else (hf or 120.0) - 10)
         return self.ziel_aendern(unten=start + schritt)
 
     def ziel_beide(self, schritt: float) -> HfEinstellungen:
@@ -285,6 +284,15 @@ class HfLive:
     # -- Erholung -----------------------------------------------------------------------
 
     def erholung_reihe(self, t0: float) -> hz.HfReihe:
+        """Die HF um ein Belastungsende — aus dem Live-Puffer; liegt die Stelle weiter zurück,
+        als er reicht, aus den Schlägen der Aufnahme (H104: sonst „HF – · HRR60 –“, obwohl
+        die Aufnahme sie hat)."""
+        lauf = self.lauf
+        aufnahme = getattr(lauf, "aufnahme", None)
+        puffer_s = getattr(lauf.live, "max_s", None)
+        if aufnahme is not None and puffer_s and t0 - 10.0 < lauf.jetzt_s() - float(puffer_s):
+            bis = t0 + self.einst().messen_bis() + 10.0
+            return reihe_aus_beats(aufnahme.beats, t0 - 10.0, bis)
         return self.reihe(t0 - 10.0)
 
     def erholung_live(self) -> tuple[hz.Erholung | None, dict[int, float]]:
@@ -310,8 +318,7 @@ class HfLive:
             haltung=e.get("haltung", ""),
         )
         # Der Wert eines Fensters steht erst, wenn sein Mittel ganz vorliegt
-        halb = 2.5
-        rest = {f: max(0.0, t0 + f + halb - jetzt) for f in erg.hrr}
+        rest = erholung_rest(list(erg.hrr), t0, jetzt)
         for f, r in rest.items():
             if r > 0:
                 erg.hrr[f] = None

@@ -724,6 +724,9 @@ class Quelle:
     paket: Paket
     uebungen: list[Exercise]
     plaene: list[Plan] = field(default_factory=list)
+    #: Übungen (IDs), die in der Datenbank ein **anderes** Paket ergänzt (U5): Ihr Stand dort
+    #: ist Grund + Ergänzungen — die ergänzbaren Felder gehören nicht ins Grundpaket (K44)
+    ergaenzt: frozenset[str] = frozenset()
 
 
 def _quelle_lesen(quelle: Path, paket_id: str) -> Quelle:
@@ -746,21 +749,37 @@ def _quelle_lesen(quelle: Path, paket_id: str) -> Quelle:
                 for plan in PlanRepo(con).alle(subject.id):
                     if plan.kurs_kapitel_id:
                         plaene[plan.id] = plan
+            try:
+                ergaenzt = frozenset(
+                    str(r[0])
+                    for r in con.execute(
+                        "SELECT DISTINCT exercise_id FROM exercise_addon WHERE package_id != ?",
+                        (paket_id,),
+                    )
+                )
+            except sqlite3.OperationalError:  # eine Datenbank von vor den Ergänzungen (U5)
+                ergaenzt = frozenset()
         finally:
             con.close()
-        return Quelle(paket, uebungen, list(plaene.values()))
+        return Quelle(paket, uebungen, list(plaene.values()), ergaenzt)
     inhalt = paket_lesen(quelle.read_bytes(), quelle.stem)
     return Quelle(inhalt.paket, inhalt.uebungen)
 
 
 def _uebungen_uebernehmen(
     quelle: Quelle, bloecke: list[Any], uebungen: list[Exercise]
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str]]:
     """Je Übung der Quelle den Block mit derselben ID: anders als in der Datei → eintragen.
-    ``(Zeilen je übernommener Übung, Namen ohne Block)``."""
+    ``(Zeilen je übernommener Übung, Namen ohne Block, Hinweise)``.
+
+    Ergänzt in der Datenbank ein anderes Paket die Übung (`Quelle.ergaenzt`), ist ihr Stand
+    dort der **wirksame** (Grund + Ergänzungen): Die Felder, die eine Ergänzung setzen darf
+    (`ERGAENZBAR`), werden dann nicht übernommen — sonst landeten Abschnitte, Medien oder
+    Timer des anderen Pakets als Inhalt dieses Pakets in der Datei (K44)."""
     je_id = {u.id: (block, u) for block, u in zip(bloecke, uebungen, strict=True)}
     zeilen: list[str] = []
     fremd: list[str] = []
+    hinweise: list[str] = []
     for u in quelle.uebungen:
         if u.id not in je_id:
             fremd.append(u.name)
@@ -770,12 +789,18 @@ def _uebungen_uebernehmen(
         geaendert = [
             feld for feld in FELDNAMEN if _anders(feld, alt_stand.get(feld), neu_stand.get(feld))
         ]
+        if u.id in quelle.ergaenzt and (aus := [f for f in geaendert if f in ERGAENZBAR]):
+            geaendert = [f for f in geaendert if f not in ERGAENZBAR]
+            hinweise.append(
+                f"{alt.name}: von einem anderen Paket ergänzt — nicht übernommen: "
+                + ", ".join(FELDNAMEN[f] for f in aus)
+            )
         if not geaendert:
             continue
         for feld in geaendert:
             _feld_setzen(block, feld, neu_stand.get(feld), u)
         zeilen.append(f"{alt.name}: " + ", ".join(FELDNAMEN[feld] for feld in geaendert))
-    return zeilen, fremd
+    return zeilen, fremd, hinweise
 
 
 def _vorlage_aus_plan(plan: Plan) -> PlanVorlage:
@@ -860,7 +885,7 @@ def uebernehmen(quelle: Path, datei: Path, schreiben: bool = True) -> tuple[list
     kurs_bloecke = list(dokument.get("kurse") or [])
     if len(bloecke) != len(inhalt_datei.uebungen) or len(kurs_bloecke) != len(inhalt_datei.kurse):
         return [], [f"{datei.name}: Blöcke und gelesene Übungen passen nicht zusammen"]
-    zeilen, fremd = _uebungen_uebernehmen(inhalt_quelle, bloecke, inhalt_datei.uebungen)
+    zeilen, fremd, ergaenzt = _uebungen_uebernehmen(inhalt_quelle, bloecke, inhalt_datei.uebungen)
     schluessel = {
         u.id: str(block.get("key") or "")
         for block, u in zip(bloecke, inhalt_datei.uebungen, strict=True)
@@ -870,6 +895,7 @@ def uebernehmen(quelle: Path, datei: Path, schreiben: bool = True) -> tuple[list
         inhalt_quelle, kurs_bloecke, inhalt_datei.kurse, schluessel
     )
     zeilen += plan_zeilen
+    hinweise = ergaenzt + hinweise
     uebernommen = len(zeilen)
     if not uebernommen:
         zeilen.append("Keine Änderung")

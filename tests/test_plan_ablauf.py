@@ -90,6 +90,41 @@ async def _bis_einheit_weg(state) -> None:
     raise AssertionError("Die Einheit endete nicht")
 
 
+async def test_laufende_aufnahme_gehoert_auch_ohne_schalter_zum_workout(umgebung) -> None:
+    """N74 (Ben, 11.11.2026): Läuft schon eine Aufnahme, gehört sie zum Workout, auch wenn
+    „HRV-Aufnahme mit dabei“ aus ist — so findet man das Workout in der Messung. Beendet wird
+    sie davon nicht (Vorgabe: was vorher lief, läuft weiter)."""
+    state, _uhr, _gurt, messlauf = umgebung
+    assert messlauf.aufnahme is not None
+    e = plan_ablauf.starten(Seite(), state, _plan(state), hrv=False)
+    assert e.hrv is not None
+    assert e.stoppt_am_ende("hrv") is False
+    e.beenden()
+    await _bis_einheit_weg(state)
+    assert messlauf.aufnahme is not None  # die Messung läuft weiter
+
+
+async def test_takt_des_schritts_kommt_ohne_offene_ansicht(umgebung) -> None:
+    """N62 (Ben, 11.11.2026): Der Takt der Übung hängt am Timer des laufenden Schritts, ohne
+    dass die Workout-Ansicht je gebaut wurde — der Beobachter der Einheit richtet ihn ein, je
+    Schritt einmal."""
+    from trainingsapp.core.takt import VORLAGEN
+
+    state, uhr, gurt, _ = umgebung
+    plan = _plan(state)
+    planke = state.uebungen.laden(plan.items[0].exercise_id)
+    planke.takt = VORLAGEN["box_4"]
+    state.uebungen.speichern(planke)
+    e = plan_ablauf.starten(Seite(), state, plan)
+    teil = plan_ablauf.ablauf_teil(e)
+    await _sekunden(uhr, gurt, e, 2)
+    assert teil.schritt.name == "Planke" and teil.timer is not None
+    assert teil.timer.lauf.takt_uebung == VORLAGEN["box_4"]
+    assert state.workout_eingerichtet == (e.id, teil.k, len(teil.verlauf))
+    e.beenden()
+    await _bis_einheit_weg(state)
+
+
 async def test_ablauf_mit_pausen_traegt_jede_uebung_ein(umgebung) -> None:
     state, uhr, gurt, messlauf = umgebung
     plan = _plan(state)

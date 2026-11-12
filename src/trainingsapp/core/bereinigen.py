@@ -20,9 +20,12 @@ Bildbibliothek:
 - **PDF:** Eingebettete JPEG-Bilder (aus Handyfotos oder Scan-Apps) tragen ihr Exif mit —
   ihre APP1/APP13-Blöcke werden **an Ort und Stelle** mit Nullen überschrieben (gleiche Länge,
   alle Verweise im Dokument stimmen weiter, wie bei MP4). Ein verschlüsseltes PDF lässt sich
-  nicht durchsehen und wird abgelehnt. **Was bleibt:** Autor und Titel des Dokuments (sie
-  können in gepackten Teilen stecken) und Bilder in anderen Formaten als JPEG — ein PDF sieht
-  man vor dem Weitergeben selbst an.
+  nicht durchsehen und wird abgelehnt. Ein **XMP-Paket**, das ungepackt im Dokument steht
+  (dort kann ``exif:GPSLatitude`` stehen), wird mit Leerzeichen überschrieben (S25).
+  **Was bleibt:** Autor und Titel des Dokuments im Info-Eintrag, alles in **gepackten** Teilen
+  (ein gepackter XMP-Strom, Objektströme), ein JPEG **hinter einem zweiten Filter**
+  (``[/FlateDecode /DCTDecode]``, ``/ASCII85Decode`` …), Bilder in anderen Formaten als JPEG
+  und eingebettete Dateien — ein PDF sieht man vor dem Weitergeben selbst an.
 
 Bereinigen ist idempotent: Eine bereinigte Datei bleibt beim zweiten Mal Byte für Byte gleich —
 ihre Prüfsumme (ihr Name im Paket) also auch.
@@ -142,6 +145,60 @@ def _png(d: bytes) -> bytes:
         if typ == b"IEND":
             return bytes(aus)
     raise NichtBereinigbar("PNG ohne Ende")
+
+
+# -- GIF (nur für die Ablagen am Gerät, `core.anhaenge.bild_ohne_metadaten` — nicht für Pakete) --
+
+#: Anwendungsblöcke, die bleiben: die Schleife einer Animation
+_GIF_SCHLEIFE: Final = (b"\x0bNETSCAPE2.0", b"\x0bANIMEXTS1.0")
+
+
+def gif_ohne_metadaten(d: bytes) -> bytes:
+    r"""Ein GIF ohne Kommentare, Textblöcke und Anwendungsblöcke (XMP) — Bilder, ihre
+    Steuerblöcke und die Schleife bleiben Byte für Byte; was hinter dem Ende steht, fällt weg
+    (D29). Was sich nicht ablaufen lässt, wirft `NichtBereinigbar`.
+
+    >>> kopf = b"GIF89a" + bytes([1, 0, 1, 0, 0, 0, 0])
+    >>> bild = b"," + bytes(9) + b"\x02\x02\x44\x01\x00"
+    >>> kommentar = b"!\xfe\x04Ort!\x00"
+    >>> gif_ohne_metadaten(kopf + kommentar + bild + b";Rest") == kopf + bild + b";"
+    True
+    """
+    n = len(d)
+    if d[:6] not in (b"GIF87a", b"GIF89a") or n < 13:
+        raise NichtBereinigbar("kein GIF")
+
+    def tabelle(schalter: int) -> int:
+        return 3 << ((schalter & 7) + 1) if schalter & 0x80 else 0
+
+    def bloecke(i: int) -> int:
+        """Hinter die Folge von Datenblöcken ab ``i`` (endet mit einem leeren)."""
+        while i < n:
+            laenge = d[i]
+            i += 1 + laenge
+            if laenge == 0:
+                return i
+        raise NichtBereinigbar("GIF unlesbar")
+
+    i = 13 + tabelle(d[10])
+    aus = bytearray(d[:i])
+    while i < n:
+        art = d[i]
+        if art == 0x3B:  # Ende — was danach kommt, fällt weg
+            return bytes(aus) + b";"
+        if art == 0x2C and i + 11 <= n:  # Bild: Kopf, Farbtabelle, Codegröße, Daten
+            ende = bloecke(i + 10 + tabelle(d[i + 9]) + 1)
+            aus += d[i:ende]
+        elif art == 0x21 and i + 2 <= n:  # Erweiterung
+            ende = bloecke(i + 2)
+            if d[i + 1] == 0xF9 or (d[i + 1] == 0xFF and d[i + 2 : i + 14] in _GIF_SCHLEIFE):
+                aus += d[i:ende]
+        else:
+            raise NichtBereinigbar("GIF unlesbar")
+        if ende > n:
+            raise NichtBereinigbar("GIF unlesbar")
+        i = ende
+    raise NichtBereinigbar("GIF ohne Ende")
 
 
 # -- WebP -----------------------------------------------------------------------------------
@@ -411,8 +468,13 @@ def _mp3(d: bytes) -> bytes:
 # -- PDF ------------------------------------------------------------------------------------
 
 
-#: Ein Datenstrom im PDF, der mit einem JPEG beginnt (Filter ``DCTDecode``)
-_PDF_JPEG: Final = re.compile(rb"stream\r?\n(?=\xff\xd8\xff)")
+#: Ein Datenstrom im PDF, der mit einem JPEG beginnt (Filter ``DCTDecode``) — nach ``stream``
+#: steht CR LF oder LF; manche Schreiber setzen nur CR (S25)
+_PDF_JPEG: Final = re.compile(rb"stream(?:\r\n|\n|\r)(?=\xff\xd8\xff)")
+#: Ein XMP-Paket, das ungepackt im Dokument steht — vom Kopf bis zum Ende des Pakets
+_PDF_XMP: Final = re.compile(
+    rb"<\?xpacket\s+begin=.*?<\?xpacket\s+end=[^>]*\?>|<x:xmpmeta\b.*?</x:xmpmeta\s*>", re.DOTALL
+)
 
 
 def _pdf_jpeg_leeren(d: bytearray, i: int, ende: int) -> None:
@@ -444,6 +506,10 @@ def _pdf(d: bytes) -> bytes:
     for treffer in _PDF_JPEG.finditer(d):
         ende = d.find(b"endstream", treffer.end())
         _pdf_jpeg_leeren(aus, treffer.end(), ende if ende >= 0 else len(d))
+    # XMP-Pakete (Dokument und Bilder): Leerzeichen statt Inhalt, gleiche Länge — auf dem
+    # schon geleerten Stand, damit ein zweiter Durchlauf nichts mehr ändert
+    for treffer in _PDF_XMP.finditer(bytes(aus)):
+        aus[treffer.start() : treffer.end()] = b" " * (treffer.end() - treffer.start())
     return bytes(aus)
 
 
@@ -497,4 +563,4 @@ def datei_bereinigen(quelle: Path, ziel: Path, endung: str) -> None:
         raise
 
 
-__all__ = ["NichtBereinigbar", "bereinigen", "datei_bereinigen"]
+__all__ = ["NichtBereinigbar", "bereinigen", "datei_bereinigen", "gif_ohne_metadaten"]

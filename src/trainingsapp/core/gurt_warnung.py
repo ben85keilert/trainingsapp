@@ -54,6 +54,22 @@ class Artefaktwache:
         self._letzter_alarm_s: float | None = None
         self._gemeldet = False
 
+    def neu_beginnen(self) -> None:
+        """Die Achse beginnt neu bei 0 (Aufnahmestart, H61): Warnung und Sperrfrist gelten
+        für die Zeit davor — der Zähler `alarme` läuft weiter (der Uhr-Kanal vergleicht ihn).
+
+        >>> w = Artefaktwache()
+        >>> w.pruefen(0.2, 1740.0)
+        'Gurt prüfen: 20 % Artefakte'
+        >>> w.neu_beginnen(); w.text is None
+        True
+        >>> w.pruefen(0.2, 200.0), w.alarme       # ohne `neu_beginnen` erst ab 1860 s
+        ('Gurt prüfen: 20 % Artefakte', 2)
+        """
+        self.text = None
+        self._letzter_alarm_s = None
+        self._gemeldet = False
+
     def pruefen(self, anteil: float | None, jetzt_s: float) -> str | None:
         """Den Anteil (0–1, ``None`` = zu wenig Daten) ansehen — der Text eines **neuen**
         Alarms oder ``None``; `text` hält die laufende Warnung."""

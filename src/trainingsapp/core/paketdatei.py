@@ -144,13 +144,47 @@ def _toml(daten: bytes, name_vorgabe: str) -> Paketinhalt:
     return paket_lesen(roh, name_vorgabe=name_vorgabe)
 
 
-def _zip(oeffner: Callable[[], zipfile.ZipFile], groesse: int, name_vorgabe: str) -> Paketinhalt:
+#: Der Ende-Satz einer ZIP: Kennung, dann u. a. Zahl der Einträge (+10) und Größe des
+#: Inhaltsverzeichnisses (+12); höchstens 22 Bytes + 65535 Bytes Kommentar vor dem Dateiende
+_ZIP_ENDE: Final = b"PK\x05\x06"
+_ZIP_ENDE_BEREICH: Final = 22 + 0xFFFF
+#: So groß darf das Inhaltsverzeichnis sein: `MAX_EINTRAEGE` Einträge mit langen Namen. Ein
+#: Eintrag braucht dort mindestens 46 Bytes — mehr als gut 40 000 liest `zipfile` so nie
+_MAX_VERZEICHNIS_BYTES: Final = MAX_EINTRAEGE * 1024
+
+
+def _zip_vorpruefen(quelle: bytes | Path, groesse: int) -> None:
+    """Zahl der Einträge und Größe des Inhaltsverzeichnisses aus dem Ende-Satz lesen und
+    ablehnen, **bevor** `zipfile` das ganze Verzeichnis in den Speicher holt (S26: 400 000
+    leere Einträge kosteten 170 MB). `zipfile` liest nach der Größe, nicht nach der Zahl —
+    darum zählt beides. Ohne Ende-Satz sagt `zipfile` danach selbst „unlesbar“."""
+    if isinstance(quelle, Path):
+        with quelle.open("rb") as f:
+            f.seek(max(0, groesse - _ZIP_ENDE_BEREICH))
+            schluss = f.read(_ZIP_ENDE_BEREICH)
+    else:
+        schluss = quelle[-_ZIP_ENDE_BEREICH:]
+    i = schluss.rfind(_ZIP_ENDE)
+    if i < 0 or i + 22 > len(schluss):
+        return
+    eintraege = int.from_bytes(schluss[i + 10 : i + 12], "little")
+    verzeichnis = int.from_bytes(schluss[i + 12 : i + 16], "little")
+    if eintraege > MAX_EINTRAEGE or verzeichnis > _MAX_VERZEICHNIS_BYTES:
+        raise PaketFehler("Das Paket hat zu viele Dateien.")
+
+
+def _zip(quelle: bytes | Path, groesse: int, name_vorgabe: str) -> Paketinhalt:
     if groesse > MAX_ZIP_BYTES:
         raise PaketFehler(
             f"Die Datei ist zu groß für ein Übungspaket ({groesse / 1e6:.0f} MB, höchstens "
             f"{MAX_ZIP_BYTES / 1e6:.0f} MB)."
         )
+
+    def oeffner() -> zipfile.ZipFile:
+        return zipfile.ZipFile(quelle if isinstance(quelle, Path) else io.BytesIO(quelle))
+
     try:
+        _zip_vorpruefen(quelle, groesse)
         with oeffner() as zf:
             eintraege = zf.infolist()
             if len(eintraege) > MAX_EINTRAEGE:
@@ -250,8 +284,7 @@ def paket_oeffnen(
                 raise PaketFehler("Die Datei ist zu groß für ein Übungspaket.")
             return _entschluesselt(quelle, code, arbeit, name_vorgabe, endung)
         if kopf[:4] == ZIP_KOPF:
-            pfad = quelle
-            return _zip(lambda: zipfile.ZipFile(pfad), groesse, name_vorgabe)
+            return _zip(quelle, groesse, name_vorgabe)
         if groesse > MAX_PAKET_BYTES:
             raise PaketFehler(
                 f"Die Datei ist zu groß für ein Übungspaket ({groesse / 1e6:.0f} MB)."
@@ -262,10 +295,7 @@ def paket_oeffnen(
         if ist_privat(daten[:8]):
             return _entschluesselt(daten, code, None, name_vorgabe, endung)
         if daten[:4] == ZIP_KOPF:
-            gepuffert = daten
-            return _zip(
-                lambda: zipfile.ZipFile(io.BytesIO(gepuffert)), len(gepuffert), name_vorgabe
-            )
+            return _zip(daten, len(daten), name_vorgabe)
     if endung.lower().lstrip(".") == "toml":
         return _toml(daten, name_vorgabe)
     try:

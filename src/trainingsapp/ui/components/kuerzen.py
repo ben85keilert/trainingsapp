@@ -6,7 +6,8 @@ aktivierbar ist, um die Strecke zu croppen.“ Beim Speichern fragt die App von 
 der Stillstand am Ende mindestens `core.nachlauf.NACHLAUF_MIN_S` dauert; in der Auswertung
 öffnet der Knopf „Ende kürzen“ dasselbe Blatt. Vorgeschlagen ist die letzte Bewegung; das
 Feld nimmt jede Zeit seit dem Start („44:28“, „1:02:03“, „2668“). Was dabei geschieht, tut
-`ui.training.training_kuerzen`; das Blatt sagt es in einem Satz.
+`ui.training.training_kuerzen` (hier `training_kuerzen_async`: Dateien im Thread, H78); das
+Blatt sagt es in einem Satz.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from trainingsapp.core.nachlauf import NACHLAUF_MIN_S, Nachlauf
 from trainingsapp.core.zeitangabe import dauer_lesen, dauer_text
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
-from trainingsapp.ui.training import training_kuerzen
+from trainingsapp.ui.training import training_kuerzen_async
 
 
 def nachlauf_text(n: Nachlauf, *, beim_speichern: bool) -> str:
@@ -68,8 +69,10 @@ def kuerzen_blatt(
         helper=ft.Text(f"Letzte Bewegung {minuten(n.vorschlag_s)} · bisher {minuten(n.bisher_s)}"),
         width=220,
         keyboard_type=ft.KeyboardType.DATETIME,
-        on_submit=lambda _: kuerzen(),
+        on_submit=lambda _: page.run_task(kuerzen),
     )
+    #: Während gekürzt wird (Dateien im Thread), zählt kein zweiter Tipp
+    arbeit = {"laeuft": False}
 
     def setzen(s: float) -> None:
         feld.value = dauer_text(s)
@@ -77,15 +80,18 @@ def kuerzen_blatt(
         with contextlib.suppress(Exception):
             feld.update()
 
-    def kuerzen(_e: object = None) -> None:
+    async def kuerzen(_e: object = None) -> None:
+        if arbeit["laeuft"]:
+            return
         s = dauer_lesen(feld.value or "")
         if s is None or s <= 0:
             feld.error = "z. B. 44:28 oder 2668"
             with contextlib.suppress(Exception):
                 feld.update()
             return
+        arbeit["laeuft"] = True
         try:
-            ergebnis = training_kuerzen(state, strecke, s, lauf=lauf)
+            ergebnis = await training_kuerzen_async(state, strecke, s, lauf=lauf)
         except ValueError as fehler:
             feld.error = str(fehler)
             with contextlib.suppress(Exception):
@@ -96,6 +102,8 @@ def kuerzen_blatt(
             with contextlib.suppress(Exception):
                 feld.update()
             return
+        finally:
+            arbeit["laeuft"] = False
         teile = [f"Gekürzt auf {minuten(ergebnis.strecke.dauer_s)}"]
         teile.append(f"{minuten(ergebnis.entfernt_s)} Ortungen entfernt")
         if ergebnis.hrv:

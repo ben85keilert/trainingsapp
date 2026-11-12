@@ -17,6 +17,7 @@ ist nur frei, was keine noch nicht erfüllte Pflicht versperrt (`gesperrt`).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Collection
 from dataclasses import replace
 from datetime import timedelta
@@ -49,6 +50,9 @@ from trainingsapp.ui.uebung_lauf import ausfuehrung, gewaehlte_ausfuehrung
 EINTRAGEN = ("fertig", "gemacht")
 
 
+_log = logging.getLogger(__name__)
+
+
 def ablauf_teil(e: Einheitslauf | None) -> PlanAblaufBaustein | None:
     """Der Plan-Ablauf einer Einheit — ``None``, wenn sie keiner ist."""
     teil = e.teil("plan") if e is not None else None
@@ -62,6 +66,60 @@ def laufender(state: Any, plan_id: str) -> tuple[Einheitslauf, PlanAblaufBaustei
     if e is None or teil is None or teil.plan_id != plan_id:
         return None
     return e, teil
+
+
+def schritt_einrichten(page: Any, state: Any, e: Einheitslauf) -> None:
+    """Takt, „Takt zählt“, Sensor und Zählstand des laufenden Workout-Schritts — **unabhängig
+    davon, welche Ansicht offen ist** (N62, Ben 11.11.2026: „Wenn die Übung nicht pausiert ist,
+    läuft die Zählung einfach weiter“). Aufgerufen vom Beobachter der Einheit nach jedem Takt
+    mit Neuem (`ui.einheit._ereignisse`) und von der Workout-Ansicht beim Aufbau; je Schritt
+    und Durchlauf wird einmal eingerichtet (P99: für jetzt > Planübung > Plan > Übung), der
+    Zählstand jedes Mal nachgezogen. Der Zähler darf das Workout nie aufhalten."""
+    from trainingsapp.core.uebung_timer import takt_der_uebung
+    from trainingsapp.ui import uebung_lauf
+    from trainingsapp.ui.components import zaehl_stand
+    from trainingsapp.ui.timer_takt import takt_anbringen
+
+    teil = ablauf_teil(e)
+    if teil is None or not e.laeuft:
+        return
+    s = teil.schritt
+    if s.uebung_id:
+        z = zaehl_stand.zaehl_teil(state, s.uebung_id, s.item_id)
+        teil.wdh_setzen(z.wert if (z is not None and z.wdh) else None)
+    # Je Durchlauf neu (Schleifen: dieselbe Übung noch einmal) — der Verlauf zählt mit
+    marke = (e.id, teil.k, len(teil.verlauf))
+    if (
+        getattr(state, "workout_eingerichtet", None) == marke
+        or teil.timer is None
+        or teil.phase not in ("uebung", "ueberzeit")
+        or not s.uebung_id
+    ):
+        return
+    u = state.uebungen.laden(s.uebung_id)
+    plan = state.plaene.laden(teil.plan_id)
+    if u is None or plan is None:
+        state.workout_eingerichtet = marke
+        return
+    item = state.plaene.item_laden(s.item_id)
+    # Jeder Teil für sich: scheitert einer, bleiben die anderen — mit Protokoll, nicht still
+    try:
+        key = item.id if item is not None else u.id
+        takt_anbringen(state, teil.timer.lauf, key, takt_der_uebung(u, item, plan))
+    except Exception:
+        _log.exception("Takt des Workout-Schritts nicht eingerichtet")
+    try:
+        uebung_lauf.takt_zaehlen_anbringen(page, state, e, u, item)
+    except Exception:
+        _log.exception("„Takt zählt“ des Workout-Schritts nicht eingerichtet")
+    if zaehl_stand.geraet_kann_zaehlen(state.messlauf) and zaehl_stand.zaehlen_an(u, item):
+        try:
+            uebung_lauf.zaehlen_starten(
+                page, state, uebung_lauf.kontext_fuer(u, plan, item), uebung=u, item=item
+            )
+        except Exception:
+            _log.exception("Zählen des Workout-Schritts nicht gestartet")
+    state.workout_eingerichtet = marke  # erst jetzt: ein Abbruch davor versucht es wieder
 
 
 def hrv_moeglich(state: Any) -> bool:
@@ -119,7 +177,8 @@ def bereitstellen(
     uebergang: str | None = None,
     workout: bool = False,
 ) -> Einheitslauf:
-    """Den Ablauf in die Startleiste — die HRV kommt mit, wenn gewünscht und möglich.
+    """Den Ablauf in die Startleiste — die HRV kommt mit, wenn gewünscht und möglich, und
+    immer, wenn schon eine Aufnahme läuft.
 
     ``uebergang``/``workout`` (7.11.2026, `docs/plan_workout.md`): der Plan läuft als Workout
     — `HART` oder `WEICH` statt Pause/„automatisch weiter“, mit der Klammer in der Messung.
@@ -153,7 +212,12 @@ def bereitstellen(
     e = einheit_ui.teil_bereitstellen(page, state, teil)
     state.plan_ablaeufe[plan.id] = e.id
     state.plan_ablauf_auswahl[plan.id] = [s.item_id for s in schritte]
-    if hrv and hrv_moeglich(state) and e.hrv is None:
+    # Eine Aufnahme, die schon läuft, gehört immer dazu — so findet man das Workout in der
+    # Messung (Ben, 11.11.2026, N74). ``hrv`` regelt nur, ob mit dem Workout eine neue
+    # beginnt; ob sie mit ihm endet, sagt „Messung beenden · Weiterlaufen“ (``hrv_beenden``).
+    lauf = getattr(state, "messlauf", None)
+    laeuft_schon = lauf is not None and lauf.aufnahme is not None
+    if ((hrv and hrv_moeglich(state)) or laeuft_schon) and e.hrv is None:
         einheit_ui.hrv_bereitstellen(page, state)
     if hrv_beenden is not None:
         e.am_ende_stoppen["hrv"] = hrv_beenden

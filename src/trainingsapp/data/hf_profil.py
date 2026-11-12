@@ -108,7 +108,17 @@ class ProfilwertRepo:
 
     def ersetzen(self, alt_id: str, **aenderung: Any) -> Profilwert | None:
         """Eine Korrektur: dieselbe Zeile mit geänderten Feldern als neue Zeile, die die
-        alte ersetzt. Felder wie in `Profilwert` (``wert``, ``fest``, ``note`` …)."""
+        alte ersetzt. Felder wie in `Profilwert` (``wert``, ``fest``, ``note`` …). Nennt
+        ``alt_id`` eine schon überholte Zeile, gilt ihr gültiger Stand — sonst gäbe es zwei
+        gültige Werte derselben Größe (D19, hier nachgezogen 11.11.2026)."""
+        for _ in range(10_000):  # eine Kette ist endlich; Schutz vor einem Zyklus
+            r = self.con.execute(
+                "SELECT id FROM profil_wert WHERE replaces_id = ? AND deleted_at IS NULL",
+                (alt_id,),
+            ).fetchone()
+            if r is None:
+                break
+            alt_id = r["id"]
         alt = self.laden(alt_id)
         if alt is None:
             return None

@@ -138,3 +138,55 @@ def test_ordner_wird_nicht_ueberschrieben(tmp_path) -> None:
 
     a, b = asyncio.run(zweimal())
     assert a != b and b.name.endswith("_2")
+
+
+async def test_alle_diagnosedaten_loeschen_schont_die_laufende_probe_und_raeumt_ganz(
+    tmp_path,
+) -> None:
+    """H107: „Alle Diagnosedaten löschen“ nimmt von einer fertigen Geräteprobe auch Formular
+    und Ordner mit (ohne Mitschnitt wären sie weder zu sehen noch zu löschen) — die laufende
+    bleibt ganz, wenn ihr Mitschnitt geschont wird."""
+    from trainingsapp.core import diagnose as dg
+
+    zeit = iter(datetime(2026, 11, 4, 6, m, tzinfo=UTC) for m in (15, 16))
+    fertig = Geraeteprobe(Attrappe(), tmp_path, jetzt_utc=lambda: next(zeit))
+    await fertig.verbinden(MAC, NAME)
+    alt = await fertig.starten()
+    await fertig.beenden({"was": "still gesessen"})
+    assert (alt / "probe.json").is_file()
+    laufend = Geraeteprobe(Attrappe(), tmp_path, jetzt_utc=lambda: next(zeit))
+    await laufend.verbinden(MAC, NAME)
+    neu = await laufend.starten()
+    assert laufend.schreiber is not None
+
+    assert dg.alle_loeschen(tmp_path, ausser=[laufend.schreiber.pfad]) == 1
+    assert not alt.exists()  # Mitschnitt, Formular und Ordner
+    assert (neu / mt.DATEINAME).is_file() and laufend.laeuft
+    await laufend.beenden()
+    assert [p["ordner"] for p in proben(tmp_path)] == [neu]
+
+
+async def test_probe_endet_auch_wenn_das_schreiben_scheitert(tmp_path, monkeypatch) -> None:
+    """H108: Wirft der Schreiber beim Beenden (Speicher voll), läuft die Probe danach nicht
+    mehr — und ein zweiter Verbindungsaufbau ist während des ersten zu erkennen."""
+    innen = Attrappe()
+    probe = Geraeteprobe(innen, tmp_path)
+    echt = innen.connect
+    gesehen: list[bool] = []
+
+    async def connect(device_id, bei_trennung) -> int:
+        gesehen.append(probe.verbindet)
+        return await echt(device_id, bei_trennung)
+
+    innen.connect = connect  # type: ignore[method-assign]
+    await probe.verbinden(MAC, NAME)
+    assert gesehen == [True] and not probe.verbindet
+    await probe.starten()
+    assert probe.schreiber is not None
+
+    def voll(*_a, **_k):
+        raise OSError("Speicher voll")
+
+    monkeypatch.setattr(probe.schreiber, "kontext", voll)
+    await probe.beenden()
+    assert not probe.laeuft and probe.schreiber is None and not probe.verbunden

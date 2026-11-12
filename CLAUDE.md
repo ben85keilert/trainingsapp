@@ -61,7 +61,9 @@ in `../hrv-core`): `ruff format` und `ruff check --fix` nur auf die eigenen Date
 ganzen Ordner (`ruff format --check .` und `ruff check .` zum Prüfen bleiben); **nie `git stash`** — es räumt die halbfertige
 Arbeit der anderen mit weg. Wer den Stand ohne die eigene Änderung braucht, nimmt
 `git worktree` oder `git show HEAD:<datei>`. Beim Committen die eigenen Dateien einzeln nennen,
-nie `git add -A`/`.`/Ordner oder `git commit -a`. **Ein Hook erzwingt das** (`.claude/settings.json`
+nie `git add -A`/`.`/Ordner oder `git commit -a`. Ebenso nie `git reset --hard`, `git clean -f`,
+`git checkout -- <Ordner>` oder `git restore <Ordner>` (Ben, 11.11.2026) — sie verwerfen fremde
+Arbeit wie `stash`; einzelne eigene Dateien bleiben frei. **Ein Hook erzwingt das** (`.claude/settings.json`
 → `.claude/hooks/sperre_git_ruff.py`, Fälle in `tests/test_hook_sperre.py`): Er sperrt diese
 Befehle für alle Sitzungen und Subagenten und nennt den Ersatz; er fängt Versehen ab, dicht ist
 er nicht (Variablen, Skripte).
@@ -108,17 +110,7 @@ Abhängigkeiten zeigen **nur nach innen**: `ui → core, data, hrv_core, devices
 `core → (nur hrv_core)`; `hrv_core → (nur numpy)`.
 Keine Rechenlogik in `ui/` — Views rufen Funktionen aus den unteren Schichten auf.
 
-## Aufbau
-
-```
-src/trainingsapp/
-  config.py    Edition (solo/praxis), Funktionsschalter, Speicherorte
-  core/        Domänenmodelle, ResultSpec (Notation), Limit-Regeln, Einheiten
-  data/        SQLite (kein ORM), .sql-Migrationen, Seed-Daten
-  devices/     Geräte-Port (BLE/Simulator), Geräteprofile
-  ui/          Flet — dünn
-../hrv-core/src/hrv_core/   HRV-Mathematik + Austauschformat raw-v1 (Schwesterrepo, extern)
-```
+## Nachbarrepos
 
 **Nachbarrepos:** `trainingsapp` und `hrv-core` sind öffentlich und hängen **nie** von
 einem privaten Repo ab (`trainingsapp-praxis`, `trainingsapp-inhalte`, `hrv-research`) —
@@ -128,6 +120,10 @@ und den Sitzungslink (Ben, 16.10.2026: Nachvollziehbarkeit).
 ## Zentrale Entwurfsentscheidungen
 
 Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
+
+**Diese Datei bleibt kurz** (Ben, 11.11.2026 — sie lag über der Warnschwelle von rund 40.000
+Zeichen): Neue Funktionen bekommen hier höchstens vier Zeilen (feste Regeln und
+Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `paths`.
 
 - **Die Datei ist die Wahrheit.** HRV-Rohdaten liegen als `raw-v1`-JSON-Dateien
   (byte-kompatibel zu `praxis_gui`), **nicht** in der Datenbank. Die DB hält nur den
@@ -203,56 +199,15 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   (`core/beschreibung.py`), nie ein zweites Feld. „Im Plan einstellen“ hat dieselbe Ordnung
   (P107). Vertrag: `docs/plan_uebung_bearbeiten.md`.
 
-- **Übungen kommen über Pakete** (Ben, 14.10.2026). Der mitgelieferte Katalog ist
-  das Paket „Standard“ (`data/seed/standard.toml` — TOML, weil von Hand gepflegt; IDs per UUIDv5
-  aus dem Schlüssel); weitere kommen per Import, der Export schreibt nur Übungen.
-  `exercise.package_id` = Herkunft, `NULL` = eigene Übung (auch Kopien). Ein Import
-  aktualisiert nur die Übungen desselben Pakets — **was die Person geändert hat, bleibt**
-  (Ben, 16.10.2026: Drei-Wege-Abgleich je Feld gegen den Paketstand,
-  `core/pakete.zusammenfuehren`; seit 9.11.2026 die Beschreibung **je Abschnitt** und Medien
-  **je Eintrag**, `core/abgleich.py`, mit Hinweisen und „Mit dem Paket vergleichen“ —
-  `docs/plan_paketinhalte.md`, Stufen U1–U7); eigene Übungen ändert er nie. **Paketpläne je
-  Planübung** (U2, 9.11.2026): `core.pakete.plan_abgleichen` (Planübung = Übung + wievieltes
-  Vorkommen, IDs bleiben, mit Ablauf/Zweigen und verschobenen Stellen bleibt die eigene Fassung),
-  „Neu laden …“ im Plan-Editor (`components/neu_laden.py`: Fehlendes zurückholen · Auf
-  Paketstand bzw. Wie im Kapitel), „Wieder anlegen“ im Paketmanager, „Kurs neu laden …“;
-  **Anweisungen je Planübung** (`plan_item.description`/`media_json`, Migration 046, Paketfeld
-  `beschreibung`/`medien`) in „Im Plan einstellen“ und im „i“, beim Üben der Knopf **Material**
-  (`core/material.py`, `components/material.py`) — **solange das Blatt offen ist, steht die Uhr
-  dieser Übung** (`einheit_ui.uhr_fuer_material_anhalten`), Schließen lässt sie weiterlaufen. **Pakete mit
-  Dateien** (U3, 9.11.2026): ZIP (Formatversion 4) mit `paket.json` und
-  `medien/<sha256>.<endung>`, Medium `source = "paket"` (Migration 047), Ablage
-  `Medien/Pakete/` neben der Datenbank (`data/paketmedien.py`, räumt auf), Lesen/Schreiben
-  `core/paketdatei.py` (auch TOML mit `datei = "…"`), **jede Datei vor dem Weitergeben ohne
-  Ortsangaben** (`core/bereinigen.py` — was nicht sicher geht, kommt nicht ins Paket; im PDF
-  werden die Exif-Blöcke eingebetteter JPEGs an Ort und Stelle geleert), Anzeige
-  `components/medienliste.py` und `…/paketmedium/<datei>`. **Eigene Pakete** (U4): Karte im
-  Paketmanager (`views/eigene_pakete.py`, Migration 048 `own_package`, feste ID, Version
-  vorschlagen nach Inhalts-Prüfsumme), „Datei fürs Paket“ in beiden Editoren (sofort bereinigt,
-  `ui/paketdatei.py`, Ziel `paketdatei/…` für Kamera und Fotoauswahl). Datenbank nie in
-  `asyncio.to_thread` — dort nur Dateien (SQLite gehört dem Event-Loop). **Ergänzungen**
-  (U5): `ergaenzungen[]` (Formatversion 5) ergänzen Übungen anderer Pakete — Abschnitte, Medien,
-  Parameter, Ziel, Timer, Takt (`core/ergaenzungen.py`); wirksamer Paketstand = Grund
-  (`package_base_json`) + Ergänzungen (`exercise_addon`, Migration 049), abgeglichen wie ein
-  Update (`PaketRepo.ergaenzungen_anwenden`) — Eigenes bleibt. **Private Pakete** (U7):
-  verschlüsselt mit einem 8-stelligen Code (`core/privat.py`, nur stdlib: scrypt, SHAKE-256,
-  HMAC), Link in einem Ordner mit Zufallsnamen; die App fragt beim Import nach dem Code
-  (`CodeNoetig`/`ZugangNoetig`), merkt ihn sich (`package.access_json`, Migration 050) und
-  öffnet Updates selbst; das Werkzeug legt Ordner und Code einmal an (`[privat]`, Zugangskarte — Link und
-  Code nur am Terminal, nie in umgeleiteter Ausgabe) und schreibt daneben `paket.stand.json`
-  (Version, Prüfsumme, Größe): Pakete aus einem Datei-Link fragen beim Prüfen nur sie
-  (`paketquelle.stand_url`), eine ZIP ohne Standdatei lädt nur „Jetzt prüfen“; große Pakete
-  aus dem Netz gehen über eine Datei in `Import/`, nie durch den Arbeitsspeicher, und wie der
-  Klartext eines privaten Pakets liegen sie dort nur, bis die Rückfrage zu ist
-  (`Paketinhalt.raeumen`). Paketmanager: Jede
-  Paketübung trägt ihren Paketstand (`package_standard_json`) für „Auf Paketstand setzen“;
-  Entfernen legt die Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück;
-  **Deaktivieren** (Migration 017) versteckt alles, ohne zu löschen; was beim Update aus
-  dem Paket fällt, wird nie gelöscht, sondern erfragt (übernehmen = eigene Übung mit
-  gleicher ID, oder löschen). Inhalte entstehen im privaten `trainingsapp-inhalte` als
-  TOML; `TRAININGSAPP_PAKETE=<ordner>` spielt sie beim Start ein, `trainingsapp-paket`
-  (`paket_werkzeug.py`) prüft, baut JSON und schreibt den Quellen-Index. Vertrag:
-  `docs/uebungspakete.md`.
+- **Übungen kommen über Pakete** (Ben, 14.10.2026; Verträge `docs/uebungspakete.md`,
+  `docs/plan_paketinhalte.md`; Einzelheiten in `.claude/rules/pakete.md`). Der Katalog ist das
+  Paket „Standard“ (`data/seed/standard.toml`). Ein Import aktualisiert nur Übungen desselben
+  Pakets — **was die Person geändert hat, bleibt** (Drei-Wege-Abgleich), eigene Übungen ändert
+  er nie; was aus dem Paket fällt, wird nie gelöscht, sondern erfragt. **Jede Datei vor dem
+  Weitergeben ohne Ortsangaben** (`core/bereinigen.py` — was nicht sicher geht, kommt nicht ins
+  Paket). Datenbank nie in `asyncio.to_thread` — dort nur Dateien (SQLite gehört dem
+  Event-Loop). Private Pakete: Link und Code nur am Terminal, nie in umgeleiteter Ausgabe;
+  große Pakete aus dem Netz über eine Datei in `Import/`, nie durch den Arbeitsspeicher.
 
 - **Kurse** (Ben, 15.10.2026): dritte Kategorie neben Übungen und Plänen —
   Kapitel linear, je Kapitel eine Bedingung (`gelesen`, `summe`, `tage`, `messung`),
@@ -278,255 +233,66 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   werden darf; ein Notiz-Tag ist ein langlebiges Etikett am Tagebuchtext, abgesichert gegen
   Löschen — es nimmt nie Text mit. Beides bleibt nebeneinander.
 
-- **Updates** (Ben, 16.10.2026): `core/update.py` fragt die GitHub-Releases der App ab
-  (Version und Build-Nummer gegen `config.app_version()` — in der gebauten App aus
-  `_build.py`, die `scripts/apk_bauen.py` schreibt, aus dem Quelltext aus `pyproject.toml`;
-  APK-Link im Browser, nur Android). `core/paketquelle.py`
-  fragt **Paketquellen** (Index-JSON per HTTPS, Format von `trainingsapp-paket index`,
-  SHA-256 geprüft, Signaturfeld reserviert). Paketversionen „X.Y.Z“ reisen als Zahl
-  X·10000 + Y·100 + Z (`core/paketversion.py`, ältere Apps vergleichen weiter); die **Stufe**
-  eines Updates kommt aus dem Unterschied, nicht aus der Nummer (U6, `core/paketstufe.py`: groß
-  = etwas fällt weg, mittel = Neues/Texte/Medien, klein = Vorgaben); Modus je Paket **Alle**
-  (klein + mittel von selbst, groß fragt) · **Kleine** · Manuell, „Für alle Pakete“ unter
-  Updates; `trainingsapp-paket pruefen --gegen` lehnt eine zu kleine Nummer ab. `ui/views/updates.py` macht beides beim Start
-  (abschaltbar, einmaliger Hinweis — jede neue Netzverbindung in Solo braucht Schalter,
-  Hinweis und einen Nachtrag in `docs/recht/40_toms.md`, `80_store_freigaben.md`,
-  `build/solo.toml`), spielt Pakete im Modus „auto“ ein und hängt das Label unter das
-  Zahnrad (`AppState.updates_label`, einmal je Stand). Schalter `update_pruefung` und
-  `paket_quellen` nur Solo. **Stufe 2** (Ben, 9.11.2026, Katalog A8): „Laden und installieren“
-  in der Karte „App“ — `core.update.apk_laden` (nur von den Releases des Repos, Größe und
-  SHA-256 aus GitHubs `digest`), Ablauf `ui/app_update.py`, Installieren über die Erweiterung
-  `erweiterungen/flet_installieren` (`PackageInstaller`, ab Android 12 ohne Rückfrage; nie,
-  solange etwas läuft — Android beendet die App dabei). **Automatik** (Schalter
-  `AppState.app_update_auto`, Vorgabe an, einmaliger Hinweis): nach der Prüfung im WLAN laden,
-  Sitzung vorbereiten (nicht abschicken), beim Verlassen der App einen Wecker der Erweiterung
-  stellen, der sie nach `app_update.WARTEN_S` abschickt — nie mit offenem Formular, laufendem
-  Vordergrunddienst oder sichtbarer App; danach Benachrichtigung über `MY_PACKAGE_REPLACED`.
-  Nicht für eine Fassung in Google Play.
+- **Updates** (Ben, 16.10.2026; Einzelheiten in `.claude/rules/updates.md`): App-Releases
+  (`core/update.py`) und Paketquellen (`core/paketquelle.py`), Schalter `update_pruefung` und
+  `paket_quellen` nur Solo. **Jede neue Netzverbindung in Solo braucht Schalter, Hinweis und
+  einen Nachtrag** in `docs/recht/40_toms.md`, `80_store_freigaben.md`, `build/solo.toml`. APK
+  nur von den Releases des Repos, Größe und SHA-256 geprüft; installieren nie, solange etwas
+  läuft; die Automatik nie mit offenem Formular, laufendem Vordergrunddienst oder sichtbarer
+  App. Nicht für eine Fassung in Google Play.
 
-- **Diagnosemodus** (Ben, 4.11.2026, `docs/plan_diagnosemodus.md`, Vertrag §14): in den
-  Einstellungen angeboten, je Messung gestartet (Sensorblatt mit Vorabtest), roter Punkt oben
-  rechts im Overlay. Rohmitschnitt `mitschnitt-v1` aus hrv-core (`hrv_core.mitschnitt`) über
-  `devices/mitschnitt.MitschnittTransport`, Beschleunigung in `PolarQuelle` (`acc=`,
-  `stroeme_setzen`), Lebenszyklus im `Messlauf` (neben dem Backup, beim Speichern Beiwerk);
-  **Marken** (Wdh/Atem/Störung, `core/diagnose.kontext_aus_notizen`) aus der Leiste im Overlay
-  (`components/marken_leiste`, Tipp beim Aufsetzen) oder mit ⏯ an der Uhr (Seite „Diagnose“,
-  Dart-Stempel) — **nie in den Notizen**, immer im Mitschnitt; nach dem Satz Marken · Sensor
-  (Zähl-Teil, sonst `hrv_core.prototyp`; nur angezeigt) · Korrektur · eingetragen. Unbekannte Geräte: Geräteprobe ohne
-  Messung (`devices/erkundung.py`, `/geraeteprobe`), nie schreiben, nie 0x2A25/0x2A23 lesen.
-  Hinaus nur bereinigt (`hrv_core.deid.mitschnitt_zeilen`). In hochfrequenten Ereignissen
-  immer `ohne_auto_update()` (V1).
+- **Diagnosemodus** (Ben, 4.11.2026, Vertrag `docs/plan_diagnosemodus.md`; Einzelheiten in
+  `.claude/rules/sensor_takt.md`): Marken **nie in den Notizen**, immer im Mitschnitt.
+  Unbekannte Geräte: nie schreiben, nie 0x2A25/0x2A23 lesen. Hinaus nur bereinigt
+  (`hrv_core.deid.mitschnitt_zeilen`). In hochfrequenten Ereignissen immer `ohne_auto_update()`
+  (V1).
 
-- **Beschleunigungssensor in Übungen** (Ben, 4.11.2026, Vertrag `docs/plan_beschleunigung.md`):
-  je Übung die Karte „Beschleunigungssensor“ (Wiederholungen, Atmung; `core/zaehlen.SensorWahl`,
-  `exercise.acc_json`, Migration 037, Paketfeld `beschleunigung`). Hat das Gerät einen
-  (`CAP_PMD_ACC`), ist **der Knopf die Messung** („Wdh. zählen“), **±1 nur ihre Korrektur** —
-  ohne Sensor kein Knopf, kein Handzähler. Das Zählen ist der Einheit-Teil `zaehlen`
-  (`devices/zaehlen.ZaehlBaustein`), **unabhängig von der Uhr** (mit der Uhr derselben Übung in
-  einer Einheit), Strom erst ab dem Tipp, aus mit dem Ende (`Messlauf.acc_anfordern`/
-  `acc_freigeben`). Ende: „Fertig“, Abhaken, Timer durch = eingetragen (`person/eintrag` mit
-  `teil`, nie doppelt); Abbrechen, andere Übung, 60 s ohne Bewegung, Trennen = abgebrochen,
-  nachtragbar unter „Läufe heute“; ein Wechsel der Ansicht beendet nichts. **Entweder zählt die
-  Person oder der Sensor** (P122; beides nur im Diagnosemodus, A2). Im Alltag nur Ergebnisse
-  (Zeitleiste `zaehlung`/`korrektur`/`zaehlen_ende`, `reps` im Eintrag), **nie Rohdaten der
-  Beschleunigung** (P123). **Atmung** (A3, Ben 5.11.2026): dieselbe Einheit, die **Atem-Spur**
-  neben den Sätzen (`hrv_core.prototyp.atemzuege.AtemLive`, Phasen ▲/▼ und Fenster ins Beiwerk
-  `_atem.json` der laufenden Messung, Zeitleiste `zaehlung` mit `zaehlart` atem / `satz` 0) —
-  sie läuft nebenbei (P133: Chips, Sätze, Anhalten berühren sie nicht), nur Atmung ±1 und
-  `kein_atem`, **nie ins Tagebuch** (P120). **B1** (5.11.2026): die Auswertung zeigt das
-  Beiwerk als Ebene „Atmung“ (Einatmen schattiert) und Karte „Atmung (Prototyp)“ mit dem
-  Hinweis „Atmung < 9/min — liegt im LF-Band“ an HF-Power, LF/HF und DFA α1 (Startregel F6 in
-  `core/atem_auswertung.py`, nichts gespeichert, keine Wertung), live liegt das Einatmen der
-  letzten 60 s hinter den Kurven (`components/atem_live.py`), und die Messdatei bekommt das
-  Protokollfeld `atmung` (`core/atem_protokoll.py`: Atemübung → `uebung`, keine Übung →
-  `spontan`, sonst kein Feld; Vertrag §5). **B2** (5.11.2026, hrv-core 0.10.0): die Atem-HRV je
-  Atemzug aus `hrv_core.prototyp.atem_hrv` — Atemspanne, **Phasenlage als Sekunden ab
-  Einatembeginn** (P135), RR je Phase — rechnet `core/atem_auswertung.py` beim Anzeigen je
-  Messung und Abschnitt (korrigierte Reihe, Wanduhr) und der `ZaehlBaustein` live („Spanne 58
-  ms“, nur mit Aufnahme); Regel F6 nach P136 (Sensor ab 3 gültigen Fenstern und 25 %, sonst
-  RR-Atmung im Modus aus dem Protokollfeld, `rr_modus`), nichts gespeichert. **A5** (5.11.2026,
-  hrv-core 0.11.0): je Satz zählt der Live-Zähler `prototyp.wiederholungen.WdhLive` jede
-  Wiederholung sofort, **Umkehrpunkt oben** (P143, `core.zaehlen.vorlage_waehlen` überschreibt
-  den Katalogwert), halbe daneben, nie mitgezählt; Vorlagen in der Karte nur Automatisch ·
-  Kniebeuge · Liegestütz (`VORLAGEN_ANGEBOT`), die Achsen eines anderen Geräts → Automatisch mit
-  Grund; `zaehlen_fenster` nur noch als Rückfall im Diagnose-Vergleich ohne Zähl-Teil. **B2b**
-  (5.11.2026, hrv-core 0.12.0, `ALGO_VERSION` bleibt 8): dieselbe Rate nach F6 geht an
-  `frequenzbereich(atemrate_pro_min=)` — Kacheln „HF (Atemband)“/„LF/HF (Atemband)“, Tabelle und
-  Bandleiste zeigen `hf_atem`/`lf_hf_atem` **neben** den festen Bändern (Fensterspektren über
-  `core.atem_auswertung.mit_atemband`), kein Cache; die **Atemlage** (`hrv_core.atmung.atemlage`)
-  steht unter DFA α1, und Schwellen aus α1 (`core/hf_auswertung`, `AUSWERTUNG_VERSION` 4) gelten
-  nur bei spontaner Atmung ab 9/min oder unbekannter Lage — sonst Grund statt Schwelle.
+- **Beschleunigungssensor in Übungen** (Ben, 4.11.2026, Vertrag `docs/plan_beschleunigung.md`;
+  Einzelheiten in `.claude/rules/sensor_takt.md`): Der Knopf ist die Messung, ±1 nur ihre
+  Korrektur — ohne Sensor kein Knopf, kein Handzähler. **Entweder zählt die Person oder der
+  Sensor** (P122). Im Alltag nur Ergebnisse, **nie Rohdaten der Beschleunigung** (P123); Atmung
+  **nie ins Tagebuch** (P120). Atem-Auswertung: nichts gespeichert, keine Wertung; halbe
+  Wiederholungen nie mitgezählt.
 
 - **Liste oder Workout — Workout = Ablauf** (Ben, 10.11.2026, P170, Vertrag
-  `docs/plan_verzweigungen.md` §8.12): Ein Plan ist eine **Liste** (frei abhaken, **keine
-  Bedingungen** — Eingestelltes ruht, „Im Plan einstellen“ zeigt nur den Hinweis) oder ein
-  **Workout**; jedes Workout hat den Reiter „Ablauf“, Bedingungen gibt es nur als Wege dort.
-  Schalter „Liste | Workout“ (`views/ablauf.modus_zeile`, derselbe unter Uhren). **Der Ablauf
-  folgt der Liste, bis man im Ablauf etwas ändert** (`core.ablauf.kette_der_liste`,
-  `folgt_der_liste`, `fuer_plan` beim Laden in `PlanRepo._mit_items`; gespeichert nur
-  ``{"an": true}``; vor jeder Änderung der Liste `PlanRepo._folgt_merken`) — neue Planübungen
-  gehören dazu, Umordnen ordnet um; ein Abzweig macht den Ablauf eigen. Pläne von früher mit
-  dem Schalter ``workout`` bekommen die Kette beim Laden, ohne Datenschritt. Ob ein Plan ein
-  Workout ist, sagt ``plan.ablauf.an`` (`startet_als_workout`); „Trainieren“ zeigt es am Symbol.
+  `docs/plan_verzweigungen.md` §8.12; Einzelheiten in `.claude/rules/ablauf_workout.md`): Eine
+  **Liste** hat **keine Bedingungen**; Bedingungen gibt es nur als Wege im Reiter „Ablauf“
+  eines Workouts. **Der Ablauf folgt der Liste, bis man im Ablauf etwas ändert.**
 
-- **Workout-Eintrag** (Ben, 10.11.2026, Vertrag `docs/plan_workout_eintrag.md`, Migration 053):
-  **Werte gehören der Übung, der Verlauf gehört dem Workout.** Ein Durchlauf (beendete Einheit mit
-  `plan/start` + `workout`, aus der etwas ins Tagebuch kam) wird aus der Zeitleiste gelesen
-  (`core/workout_eintrag.py`, flet-frei) und steht je Durchlauf als **eine Zeile** unter Heute
-  (Übersicht „Workouts · n“, Zeitleiste: Kopf des Blocks; `views/tag.workout_teile`/
-  `workout_block`), Tipp → `/workout/<einheit>` (`views/workout_eintrag.py`: Kacheln, „Zum
-  Workout“, Verlauf in gegangener Reihenfolge, Messung, Zuletzt). Die Übungen zeigt das Workout nur
-  mit Kurzwert; die Werte bleiben in `session_entry`, dort nennt eine Zeile die Herkunft
-  (`views/leistungen.py`). **Die Anstrengung (sRPE) gehört zum Durchlauf** — `workout_entry`
-  (Ergebnis + Spec-Kopie + Notiz, unveränderlich mit `replaces_id`, `EinheitRepo.
-  workout_eintragen`), eingetragen in „Workout fertig“ oder nachträglich im Eintrag
-  (`components/srpe.workout_srpe_zeile`); das Tagesfeld „Anstrengung (sRPE)“ bleibt für den Tag,
-  das Workout schreibt nicht hinein, keine Lastrechnung daraus (P179). **Eigene Skalen 0–10 je
-  Workout** (Migration 054, `plan.workout_felder_json`, gerätelokal wie `freischaltung_seit` —
-  `PlanRepo.workout_felder`/`workout_felder_setzen`, nie über `speichern`; „Felder …“ auf der
-  Seite, Schlüssel `core.workout_eintrag.feld_key`, die Kopie der Felder am Eintrag hält auch
-  entfernte lesbar). Die Seite hat dazu die HF-Kurve mit Schrittgrenzen (Thread, `hf_lesen`),
-  den gegangenen Weg im Ablaufbild (nur mit Abzweig, eingeklappt; `Durchlauf.kanten`) und
-  `/workout/<einheit>/alle`; das Tagebuch zeigt Workouts mit Eintrag (`core.tagebuch.WORKOUT`,
-  `EinheitRepo.workout_zeilen`), die Zeitleiste klappt ältere Workout-Blöcke ein. **Ein Workout bleibt ein
-  Workout:** „Trainieren“ öffnet es immer als Workout (`uebungen.heute_trainieren` nimmt
-  `plan_als_plan` zurück), die Liste gibt es nur von Hand.
+- **Workout-Eintrag** (Ben, 10.11.2026, Vertrag `docs/plan_workout_eintrag.md`; Einzelheiten in
+  `.claude/rules/ablauf_workout.md`): **Werte gehören der Übung, der Verlauf gehört dem
+  Workout.** Die Anstrengung (sRPE) gehört zum Durchlauf (`workout_entry`, unveränderlich mit
+  `replaces_id`); das Workout schreibt nicht ins Tagesfeld, keine Lastrechnung daraus (P179).
+  `workout_felder` nie über `speichern`. **Ein Workout bleibt ein Workout.**
 
-- **Gezeichneter Ablauf** (Ben, 8.11.2026, Vertrag `docs/plan_verzweigungen.md` §8, Stand
-  §8.8; Migration 044, Datenschritt 6): Der Plan-Editor hat die Reiter **Plan · Uhren**, mit
-  „Workout“ dazu **„Ablauf“**. **Zweige A–D, dann/sonst/Wege sind veraltet** (P108) —
-  Altbestand wird zum Ablauf; die Karte „Weiter, wenn …“ je Planübung gibt es nicht mehr.
-  `core/ablauf.py`: `Ablauf(an, start, kanten, fragen)`, `plan.ablauf_json`; **Knoten** sind
-  Planübungen (Nummer = Stelle in der Liste, `nummern`; `beiname`) und **Fragen**, **Kanten**
-  tragen den Auslöser (frei · Zeit ab · Wdh. · Wdh. in einer Zeit · Skala ≥ n bis m), Pflicht,
-  „von selbst“ (hart sofort, weich erst bei Zeit ab), Ziel auch `ENDE`/`ZURUECK`. Bedingung und
-  Hauptweg werden **gespiegelt** (`views/ablauf.ablauf_speichern`, `hauptwege_spiegeln`); „Im
-  Plan einstellen“ zeigt dasselbe Wege-Formular (`components/wege_form.py`) mit „Kommt von“.
-  Im Workout **bleibt** man bei der Übung, solange die Bedingung fehlt bzw. kein Weg frei ist
-  (`PlanAblaufBaustein.wartet`, keine Pause), hart geht es von selbst weiter, sobald es reicht;
-  jeder Schritt hat eine Uhr (ohne Timer `core.timer.stoppuhr`, „Zeit ab“ = „Fertig“) und damit
-  den Fokus; Wiederholungen von Hand (`person/wdh`), wo niemand zählt. Rechnung nur in
-  `core/ablauf.py`, `core/ablauf_geometrie.py` (wo Stamm, Abzweig, Wege und Griffe liegen —
-  **Wege wie ein Nerv**, Ben 10.11.2026, §8.11: ein Austrittspunkt je Übung; Tipp auf den
-  Abzweig = alle Wege, auf den Griff eines Wegs = nur dieser, `wege_karte(allein=)`; Rückwege
-  in Gassen zwischen den Spalten) und `devices/plan_ablauf.py`; `ui/` zeichnet (`components/ablaufbild.py`:
-  Fläche einmal bauen, Inhalt tauschen, Lagen bleiben bis „Neu anordnen“, Eltern mittig;
-  `views/ablauf.py`: Seite scrollt nicht, Palette = Planübungen mit `Draggable.affinity`
-  senkrecht, Knöpfe unter dem Bild). Zeitleiste `plan/kante|frage|antwort`, `person/wdh`;
-  Paket `plaene[].ablauf` mit Positionen. **Korrekturen 9.11.2026** (§8.9): „Aus dem Ablauf
-  nehmen“ lässt die Planübung im Plan (aus dem Plan: Kachel gedrückt halten), jede Kante hat
-  einen Punkt zum Antippen (Blatt auf diesem Weg), Warnungen `core.ablauf.warnungen` sichtbar
-  beim Zeichnen; **mehrere gleichwertige Wege — erst fragen**, hart wie weich
-  (`core.ablauf.wahl_offen`, `PlanAblaufBaustein.wahl_noetig`, Karte „Wie geht es weiter?“);
-  der Workout-Fokus liegt über dem Plan (`/plan/<id>/workout`, Zurück = Plan, Hinweis „Workout
-  läuft“). **Durcharbeiten statt abarbeiten** (Ben, 9.11.2026, §8.10, P166–P169): mit Ablauf zählt
-  „heute gemacht“ nie, ein vorzeitig beendetes Workout setzt heute fort (`plan/ende` mit `bei`,
-  `core.ablauf.fortsetzung`); in der Liste ist nur frei, was keine nie erfüllte Pflicht versperrt
-  (`core.ablauf.gesperrt`, Tore aus `plan/kante`, Migration 051 zum Zurücksetzen) — wie ein
-  Kurs; „Trainieren“ öffnet so einen Plan als Workout (`plan_durchlauf.startet_als_workout`),
-  oben wechselt **Workout · Liste** (`components/modus_wahl.py`).
+- **Gezeichneter Ablauf** (Ben, 8.11.2026, Vertrag `docs/plan_verzweigungen.md` §8;
+  Einzelheiten in `.claude/rules/ablauf_workout.md`): **Zweige A–D, dann/sonst/Wege sind
+  veraltet** (P108). Rechnung nur in `core/ablauf.py`, `core/ablauf_geometrie.py` und
+  `devices/plan_ablauf.py`; `ui/` zeichnet. **Mehrere gleichwertige Wege — erst fragen**, hart
+  wie weich. Mit Ablauf zählt „heute gemacht“ nie (durcharbeiten statt abarbeiten).
 
-- **Uhr und Fokus beim Üben** (Ben, 8.11.2026 spät, Vertrag `docs/plan_uhr_fokus.md`, Stand §9):
-  Die Uhr-Zeile ist `Uhr ▾ · Zeit · Takt · ▶` (`components/uhr.py`); **▶ öffnet den Fokus**
-  (`AppState.fokus_auto`, Vorgabe an, Schalter rechts in der Zeile von „Gemacht“), „Uhr aus“
-  heißt **„Ohne Uhr“** (`core.timer.ohne_uhr`: Stoppuhr, die nicht zählt). Das ⏱ öffnet das
-  **Uhr-Blatt** mit Geltung Für jetzt · In „Plan“ · Übung (`components/uhr_blatt.py`). Der Fokus
-  hat die Karte **„Eintragen“** (`components/fokus_eintragen.py`, auch im Workout): Eingaben als
-  `person/wdh|skala|auspraegung`, eingetragen erst mit dem Ende des Laufs; Wiederholungen mit
-  den Knöpfen des Blocks — **jeder Tipp ein Satz dazu**, „−“ nimmt den letzten zurück
-  (`person/wdh` mit `dazu`). Im laufenden Fokus nur, was gerade passiert: keine „Läufe heute“,
-  Erklärungen im „i“ (Titelleiste), Takt · Zeit · Ebenen-Knopf in einer Zeile, die **beim
-  Scrollen oben stehen bleibt** (`fokus.OBEN`) — direkt darunter, ebenfalls fest, die
-  **Steuerzeile** (`fokus.steuerzeile`, Ben 10.11.2026, §9.4): ⏸ · Fertig · „Wiederholen“ · ⏭ ·
-  ✕ in einer Zeile, Pause/Überspringen/Abbrechen nur als Symbol; „Weiter: …“ und Wege darunter; Fokus-Ansichten (``data = FOKUS_ANSICHT``) bekommen **keine
-  Laufleiste**. **Messung läuft weiter** ist Vorgabe (`Einheitslauf.stoppt_am_ende`): nach Timer,
-  Übung, Workout und GPS-Training läuft eine mitgestartete Messung weiter — außer sie ist allein
-  oder die Einheit begann als reine Messung (`beitreten`); die Strecke findet sie dann über die
-  Einheit (`hrv_bezug`). Ein Timer-Abschnitt
-  kann eine **Ausführung** tragen (`Abschnitt.ausfuehrung`, flach in `timer/abschnitt`) —
-  eingetragen wird **je Ausführung ein Eintrag** (`core.timer_eintrag.nach_ausfuehrung`,
-  `Eingaben`; beim Üben und im Workout). Pfeilzeile `components/planpfeile.py` im Plan und im
-  Fokus; alle Timer unter Einstellungen → Timer → „Alle“ (`views/alle_timer.py`,
-  `core.uebung_timer.alle_timer`). **Timer-Editor** (Ben, 9.11.2026, `docs/plan_timer_editor.md`,
-  Skizzen G1–G5): fest oben Name und Gesamtzeit, Reiter **Zeiten · Klänge** (Wischen: eine
-  Scrollfläche, die Namen bleiben stehen, nur die rechte Spalte gleitet — feste Zeilenhöhen),
-  je Abschnitt eine Zeile, Teile ⧉ kopieren, Abschnitte per langem Druck; die Felder halten
-  Werte, nicht Controls (jeder Aufbau legt sie neu an). **Für jetzt mit Abschnitten**: das
-  Zeit-Blatt hat „Mit Abschnitten …“ (`zeit_blatt(erweitert=)`), `…/bearbeiten/einmal` mit
-  `views.uebung_timer.jetzt_profilziel` — `AppState.uhr_einmal` hält Profile, gespeichert wird nur
-  per „Als Timer der Übung speichern …“.
+- **Uhr und Fokus beim Üben** (Ben, 8.11.2026, Verträge `docs/plan_uhr_fokus.md`,
+  `docs/plan_timer_editor.md`; Einzelheiten in `.claude/rules/uhr_timer.md`): ▶ öffnet den
+  Fokus; Eingaben im Fokus werden erst mit dem Ende des Laufs eingetragen, **je Ausführung ein
+  Eintrag**. Fokus-Ansichten bekommen keine Laufleiste. **Messung läuft weiter** ist Vorgabe.
+  Im Timer-Editor halten die Felder Werte, nicht Controls.
 
 - **Herzfrequenz-Sicht und HF-Vollbild** (Ben, 10.11.2026, A22, Vertrag
-  `docs/plan_hf_vollbild.md`): `/live` zeigt in der Sicht „Herzfrequenz“ (und bei reinen
-  Pulsgebern) `views/hf_vollbild.py`, sonst das HRV-Vollbild; ein Knopf wechselt
-  (`state.hrv_sicht_setzen`). Werte, Erholung, Marken und Ton teilen hochkant und Vollbild über
-  `ui/hf_live.HfLive`; Zustand im `AppState` (`hf_erholung`, `hf_zielton`, `hf_stumm`,
-  `hf_intervall`). **Zielbereich** = zwei selbst gesetzte Linien
-  (`HfEinstellungen.alarm_bpm`/`ziel_unten_bpm`), Ton darüber/darunter verschieden, **Tonfolge
-  nach Abstand** (`core.hf_ziel.TONFOLGE`, Takt 0; feste Takte bleiben), eine Uhr für Messung,
-  Vollbild und Fokus (`Zielton`), Stumm für eine Zeit oder bis Messende — sichtbar immer
-  „Zielbereich“, nie „Warnung/Grenze/Alarm“, keine Steuerung. **Wertebereich** der HF-Achse je
-  Seite (Automatik · Profil · fest, `core.hf_ziel.wertebereich`), weicht der Kurve.
-  **Erholung:** Fenster 30/60/120 und ein freies X, „Messen bis“ beendet sie. **Intervall**
-  (nur Vollbild): abgelesene Erholung aus hrv-core `intervall_erholung` — nur 5-s-Mittel, Bezug
-  Spitze (Plateau: letzte Stelle) oder Anfang, HRR = Bezug − Ende, Hinweis, wenn das Ende über
-  dem tiefsten Wert liegt; nichts gespeichert außer auf Wunsch als Notiz.
+  `docs/plan_hf_vollbild.md`; Einzelheiten in `.claude/rules/messansicht.md`): sichtbar immer
+  „Zielbereich“, **nie „Warnung/Grenze/Alarm“, keine Steuerung**. Abgelesene Erholung: nichts
+  gespeichert außer auf Wunsch als Notiz.
 
-- **Timer zuordnen statt kopieren** (Ben, 10.11.2026, Vertrag `docs/plan_timer_zuordnen.md`,
-  Stand §7, Skizzen Z1–Z4): Die **Timer-Bibliothek** ist die Tabelle `timer` (Migration 052,
-  `TimerRepo`; vorher die Einstellung `timer_profile`, sie zieht beim ersten Lesen um). Übung
-  (`exercise.timer_json`), Plan (`plan.timer_json`) und Planübung (`TimerWahl.eigen`) dürfen
-  statt einer Kopie **verweisen**: gespeichert ``{"ref": "<id>"}``, geladen das Profil mit dem
-  Vermerk `TimerProfil.bibliothek` (`core.timer.verweise_aufloesen`/`verweise_schreiben`, im
-  Repo `_timer_lesen`/`_timer_json`). **Wer ein Profil mit Vermerk speichert, ändert den Timer
-  überall** — die Oberfläche fragt ab zwei Stellen vorher „Überall ändern · Nur hier: Kopie
-  anlegen“ (`components/timer_stellen.py`, auch bei Zurück); „nur hier“ heißt Vermerk weg und
-  neue ID (`ui/timer_bibliothek.kopie`). Keine Zuordnungstabelle: wo ein Timer gilt, rechnet
-  `core.uebung_timer.stellen`. Zuordnen unter Einstellungen → Timer → „Alle“ → „Zuordnen …“
-  (`views/timer_zuordnen.py`: Filter der Übungsauswahl, „Alle n ankreuzen“), „Gleiche
-  zusammenlegen …“ nie still. Pakete und alles, was das Gerät verlässt: `ohne_verweise`
-  (eingebettete Kopie). Im Plan-Editor **eine Timer-Zeile** (`components/timer_zeile.py`: Name ▾
-  = Uhr-Blatt mit Für jetzt · In „Plan“ · Übung, ✎ = derselbe Editor wie beim Haupttimer in der
-  Karte, `components/timer_editor.py`, darunter „Geändert gilt:“); „Für jetzt“ gibt es dort
-  nur, solange geübt wird.
+- **Timer zuordnen statt kopieren** (Ben, 10.11.2026, Vertrag `docs/plan_timer_zuordnen.md`;
+  Einzelheiten in `.claude/rules/uhr_timer.md`): Übung, Plan und Planübung dürfen auf die
+  Timer-Bibliothek **verweisen** (``{"ref": "<id>"}``). **Wer ein Profil mit Vermerk speichert,
+  ändert den Timer überall** — die Oberfläche fragt vorher. Keine Zuordnungstabelle; „Gleiche
+  zusammenlegen …“ nie still; alles, was das Gerät verlässt: `ohne_verweise`.
 
-- **Taktgeber** (Ben, 5.11.2026, Vertrag `docs/plan_taktgeber.md`; Teil 1 T1–T3 gebaut): ein
-  **Takt** ist eine Folge von Phasen (Name, Sekunden, Art `ein`/`aus`/`halten`/`ab`/`auf`/`frei`,
-  Klang) mit Tempo, als Schleife, solange die Uhr läuft. Die Rechnung lebt **nur** in `core/takt.py`
-  (`Takt`, `lage` aus der Uhr — nie mitgezählt —, `wechsel`, `TaktLauf` für Tempo ohne Sprung,
-  `VORLAGEN`, `animation_fuer`, `soll_phasen`); `ui/` zeichnet nur. Drei Orte, Vorrang Uhr „für
-  jetzt“ (`AppState.uhr_takt`, `takt.AUS` = keiner) > Timer-Abschnitt (`Abschnitt.takt`) > Übung
-  (`Exercise.takt`, Migration 038 `takt_json`, Paketfeld `takt`, Drei-Wege-Abgleich ein Feld) —
-  `core.uebung_timer.takt_fuer`, am Lauf `TimerLauf.takt_aktuell`/`takt_lage`. Der Ticker
-  (`ui/timer_takt.py`) spielt je neuer Phase ihren Klang (Vorgabe je Art, `KLANG_VORGABE`) und
-  vibriert kurz (Einstellungen → Übungen, Vorgabe an, P140 offen); `TimerBaustein` schreibt
-  `timer/takt` am Abschnittsbeginn und je Tempoänderung (`plan_einheit` §4). Takt-Blatt
-  (`components/takt_blatt.py`, `blatt_spalte`) mit Vorschau und Tempo-Regler; der Regler **im
-  Lauf** (`TempoRegler`) ist `TimerLauf.tempo_setzen` — für jetzt (P139). Die Animation
-  (`components/takt_anzeige.TaktAnzeige`, nach Phasenzahl: Puls, Kreis, Kreis mit Halten, Box,
-  Balken, Welle) wird **einmal gebaut**, `nachziehen` setzt je Tick nur Werte, `animate_scale` mit
-  der Phasendauer (V1). **Teil 2** (5.11.2026, 0.3.51, `docs/plan_taktgeber.md` §10): der
-  `TaktVerfolger` (`devices/takt_lauf.py`) sagt je Tick der Einheit, was im Takt geschah
-  (Takt-Lauf begann/endete, Soll-Phasen, volle Runden) — die Einheit bringt es **nicht über die
-  Zeitleiste**, sondern direkt zur HRV (`Messlauf.atem_takt_beginn/phase/ende`: Feld `takt` im
-  Beiwerk `atem-v1`, ein Paar Notizen `timer/takt` … `timer/ende` auf der Spur `atemtakt` ohne
-  Abschnittsgrenze und ohne 5-s-Regel, Protokollfeld `atmung` `getaktet` mit der Rate des
-  längsten Laufs — nur Atemtakte) und zum Zähl-Teil (`ZaehlBaustein.takt_runden`). Die
-  Auswertung legt Soll über Ist (feine Linien, Versatz-Median je Atemzug, Phasenlage gegen Ist
-  und Soll, `core/atem_auswertung.soll_ist_versatz`/`soll_atem`), die Takt-Rate ist für F6 die
-  **dritte** Quelle (ein Soll ist keine Messung). **Takt zählt** (P138): `Takt.zaehlt`
-  (Schalter im Blatt, Bewegungs-Vorlagen an) → `uebung_lauf.takt_zaehlen_anbringen` lässt mit
-  der Uhr der Übung einen Zähl-Teil mit `quelle="takt"` antreten, auch **ohne Gerät**
-  (`messlauf=None`, `_OhneGeraet`); jede volle Runde eine Wiederholung, Zählzeile „Takt 12“ (nie
-  „Prototyp“), mit Sensor zählt der Sensor und der Takt steht daneben (`zaehlung` mit `quelle`,
-  `takt`, `takt_zeiten_s`; nur der Sensor im Eintrag). Das **Bild der Bewegung** ist ein Medium
-  der Übung (`core/bewegungsbild.py`, Ablage `Medien/Bewegung/`, `BewegungsbildRepo`, Weg
-  `bewegung/<id>`), läuft als `ft.Image`-Schleife neben der Takt-Anzeige im „Während“ — nie in
-  Paket, Export oder Sync. **Planübung folgt der Übung auch hier** (A6, 5.11.2026):
-  `PlanItem.acc`/`PlanItem.takt` (Migration 039, NULL = wie die Übung, `takt_json = '{}'` =
-  keiner), aufgelöst nur in `core.zaehlen.wirksame_wahl` und `core.uebung_timer.takt_der_uebung`
-  (Uhr für jetzt > Abschnitt > Planübung > Übung) — „Im Plan einstellen“ hat Karte und Takt-Zeile
-  mit ↺, den Knopf „Wdh. zählen“ nur mit Wiederholungsfeld; Paketfeld je Planübung.
+- **Taktgeber** (Ben, 5.11.2026, Vertrag `docs/plan_taktgeber.md`; Einzelheiten in
+  `.claude/rules/sensor_takt.md`): Die Rechnung lebt **nur** in `core/takt.py` (Lage aus der
+  Uhr — nie mitgezählt); `ui/` zeichnet nur, die Animation wird einmal gebaut. Vorrang: Uhr
+  „für jetzt“ > Timer-Abschnitt > Planübung > Übung. Ein Soll ist keine Messung. Das Bild der
+  Bewegung geht **nie in Paket, Export oder Sync**.
 
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`
@@ -568,23 +334,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   sonst stehen). **Blätter von unten** nehmen `components/blatt.blatt_spalte`: Inhalt
   scrollt, gemessene Höhe, Knöpfe fest über der Navigationsleiste — keine Höhenschätzung.
 
-- **Speichern, ohne zu beenden** (Ben, 10.11.2026, A21): Das Menü neben „Stopp & speichern“
-  hat **„Zwischenstand speichern“** — die Aufnahme bis hier wird eine Aufzeichnung
-  (`Messlauf.aufnahme_zwischenstand_async`, Datei `…_zwischen.json`, ohne Beiwerk), **dieselbe
-  Aufnahme läuft weiter**, am Ende steht alles in einer Datei (lange Ströme für VLF/ULF). Die
-  ganze Messdatei **ersetzt** ihre Zwischenstände (`Gespeichert.ersetzt` →
-  `views.messung.aufnahme_eintragen` nimmt Zeile und Dateien weg); am Zwischenstand ergänzte
-  Notizen und Abschnitte kommen vorher in die Aufnahme, Zuschnitt und Korrektur nicht.
-  „Teil speichern, weiter aufnehmen“ (zwei Dateien) steht daneben; **„Zusammenfügen …“** über
-  der Liste der Aufzeichnungen macht aus Teilen wieder eine Datei (`…_zusammen.json`,
-  `devices.messlauf.teile_zusammenfuegen` über `hrv_core.zusammenfuegen`, Teile bleiben).
-  **Training:** läuft die Messung eines gespeicherten Trainings noch, liest die Auswertung
-  ihren jüngsten Zwischenstand (`ui.training.hrv_bezug`); „Bis hier auswerten“ zeigt das
-  **laufende** Training (`/ausdauer/unterwegs`, `AppState.strecke_unterwegs` — steht in keiner
-  Tabelle, nichts wird gespeichert).
-  **Messansicht** (A21): Bereich Zeit · Frequenz · Nichtlinear und die Kurven-Chips stehen im
-  Blatt „Fenster & Darstellung“ (`verlauf.Kurvenwahl`), nicht zwischen den Kurven; die
-  Poincaré-Wolke ist dort abschaltbar, die Notizliste hat einen Griff für ihre Höhe.
+- **Speichern, ohne zu beenden** (Ben, 10.11.2026, A21; Einzelheiten in
+  `.claude/rules/messansicht.md`): „Zwischenstand speichern“ — **dieselbe Aufnahme läuft
+  weiter**; die ganze Messdatei **ersetzt** ihre Zwischenstände. „Zusammenfügen …“ lässt die
+  Teile bestehen. „Bis hier auswerten“ zeigt das laufende Training, nichts wird gespeichert.
 
 - **Laufende Messung überlebt das Wegwischen** (Ben, 16.10.2026): `scripts/apk_bauen.py`
   setzt in Flets Vorlage eine eigene MainActivity, die die Flutter-Engine im

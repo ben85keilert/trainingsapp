@@ -14,7 +14,7 @@ import contextlib
 from typing import TYPE_CHECKING, Any
 
 from trainingsapp.core.klang import GLOCKEN, LAUTSTAERKE, TOENE, glocke, wav
-from trainingsapp.core.takt import PHASE, Lage, TaktEreignis
+from trainingsapp.core.takt import PHASE, Lage, Takt, TaktEreignis
 from trainingsapp.core.takt import wechsel as takt_wechsel
 from trainingsapp.core.timer import (
     COUNTDOWN,
@@ -90,7 +90,7 @@ async def takt_melden(
 ) -> list[str]:
     """Klang und kurze Vibration zu den Phasenwechseln eines Takts (`docs/plan_taktgeber.md`
     §3): je neuer Phase ihr Klang (eigener, sonst Vorgabe je Art) über den Tonregler der
-    Signale; die Vibration hat ihren eigenen Schalter (Einstellungen → Übungen, Vorgabe an).
+    Signale; die Vibration hat ihren eigenen Schalter (Einstellungen → Timer und Takt, Vorgabe an).
     ``still``: ein Timer-Signal spielte in diesem Takt schon — der Abschnittsklang bleibt, die
     erste Phase tönt nicht noch einmal darüber. Zurück kommen die gespielten Klänge (Tests)."""
     gespielt: list[str] = []
@@ -250,4 +250,25 @@ def ticker_starten(page: Any, state: AppState) -> None:
         raise
 
 
-__all__ = ["TICK_S", "takt_melden", "ticker_starten", "toene_laden", "ton_spielen", "wach_setzen"]
+def takt_anbringen(state: Any, lauf: Any, key: str, uebung_takt: Takt | None) -> None:
+    """Die Wahl dieser Sitzung an einen Lauf hängen: Takt „für jetzt“, die Vorgabe der Übung,
+    der Tempo-Faktor (`AppState.uhr_takt`, `uhr_tempo`)."""
+    if lauf is None:
+        return
+    lauf.takt_uebung = uebung_takt
+    lauf.takt_jetzt = state.uhr_takt.get(key)
+    faktor = state.uhr_tempo.get(key, 1.0)
+    if faktor != lauf.tempo_faktor:
+        lauf.tempo_setzen(faktor)
+        lauf.tempo_aenderungen.clear()  # vor dem Start: keine Änderung im Lauf
+
+
+__all__ = [
+    "TICK_S",
+    "takt_anbringen",
+    "takt_melden",
+    "ticker_starten",
+    "toene_laden",
+    "ton_spielen",
+    "wach_setzen",
+]

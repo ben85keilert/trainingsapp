@@ -692,6 +692,11 @@ class PolarQuelle(HeartRateSource):
             await self._pmd_abonnieren(gen)
             if self._ekg_modus or self._ppi_modus:
                 await self._schlafen(PMD_KOMMANDO_PAUSE_S)
+            if self._acc_wunsch is None:
+                # Der Wunsch fiel weg, während Abo und Pause liefen (H62): nicht mit der
+                # Vorgabe starten — niemand stoppte den Strom bis zum Trennen
+                self._log("Beschleunigung nicht gestartet: nicht mehr angefordert")
+                return
             self._acc_modus = True
             await self._acc_start_senden()
         except Exception as e:
@@ -732,8 +737,12 @@ class PolarQuelle(HeartRateSource):
                     )
                 )
                 await self._schlafen(0.5)
-                if gen == self._generation and self._laeuft:
-                    await self._acc_start_senden()
+                if gen != self._generation or not self._laeuft:
+                    return
+                if self._acc_wunsch is None:  # inzwischen freigegeben (H62): aus lassen
+                    self._acc_modus = False
+                    return
+                await self._acc_start_senden()
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -779,14 +788,20 @@ class PolarQuelle(HeartRateSource):
                 self._acc_modus = False  # Rahmen der alten Einstellung verfallen
                 await self._kommando(ACC_STOP, "ACC-Stopp gesendet (03 02) — neue Einstellung")
                 await self._schlafen(PMD_KOMMANDO_PAUSE_S)
-                if gen == self._generation and self._laeuft:
+                if gen == self._generation and self._laeuft and self._acc_wunsch is not None:
                     self._acc_gesehen = False
                     self._acc_neugestartet = False
                     self._acc_modus = True
                     await self._acc_start_senden()
             elif not acc_soll and self._acc_modus:
                 self._acc_modus = False
-                await self._kommando(ACC_STOP, "ACC-Stopp gesendet (03 02)")
+                try:
+                    await self._kommando(ACC_STOP, "ACC-Stopp gesendet (03 02)")
+                except Exception:
+                    # Der Gurt sendet weiter (H62): als laufend merken, damit der nächste
+                    # Auftrag den Stopp noch einmal versucht — ohne Abnehmer verfallen die Rahmen
+                    self._acc_modus = gen == self._generation and self._verbunden
+                    raise
         except Exception as e:  # die Messung läuft weiter
             self._log(f"Zusatzströme nicht umgeschaltet: {e!r}")
 

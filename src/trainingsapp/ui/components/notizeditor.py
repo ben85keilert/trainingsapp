@@ -240,11 +240,29 @@ class Notizeditor:
         if self.anfang is None:
             self.anfang = self.gespeichert
             self.verlauf.schritt_beenden()
-            self.state.vor_dem_verlassen[self.sichern_schluessel] = self.speichern
-            self.state.schreiben_beenden = self.fertig
-            self.state.schreib_gesten = self.geste
+            self._anmelden()
             self._nachtragen_knopf(False)
             self._zeigen()
+
+    def _anmelden(self) -> None:
+        """Die Haken des Schreibenden im `AppState`: vor dem Verlassen speichern, „Heute“
+        beendet das Schreiben, Gesten daneben."""
+        self.state.vor_dem_verlassen[self.sichern_schluessel] = self.speichern
+        self.state.schreiben_beenden = self.fertig
+        self.state.schreib_gesten = self.geste
+
+    def wieder_anmelden(self) -> None:
+        """Der Editor hat den Neubau der Ansicht überlebt (Tagebuch), während geschrieben
+        wird: Der Routenaufbau hat die Haken geleert — wieder eintragen, sonst fehlt „vor dem
+        Hintergrund speichern“ (N100). Ohne Schreiben nichts."""
+        if self.schreibt:
+            self._anmelden()
+
+    def ablegen(self) -> None:
+        """Ein anderer Editor übernimmt (eine andere Karte wurde angetippt, N98): speichern
+        und aufhören — ohne ``danach``, und eine laufende Nachfrist läuft ins Leere."""
+        self.speichern()
+        self._beenden(melden=False)
 
     def _geaendert(self, e: Any) -> None:
         neu = str(e.control.value or "")
@@ -386,7 +404,8 @@ class Notizeditor:
         self.speichern()
         self._beenden()
 
-    def _beenden(self) -> None:
+    def _beenden(self, *, melden: bool = True) -> None:
+        schrieb = self.anfang is not None
         self.anfang = None
         self._daneben_um = None
         # Nur die eigenen Haken — eine neue Ansicht kann schon ihre angemeldet haben
@@ -396,10 +415,11 @@ class Notizeditor:
             self.state.schreiben_beenden = None
         if self.state.schreib_gesten == self.geste:
             self.state.schreib_gesten = None
-        self._nachtragen_knopf(True)
+        if schrieb:  # nur wer ihn ausgeblendet hat — nicht ein schon abgelegter Editor (N98)
+            self._nachtragen_knopf(True)
         self._loslassen()
         self._zeigen()
-        if self.danach is not None:
+        if melden and self.danach is not None:
             self.danach()
 
     def _loslassen(self) -> None:

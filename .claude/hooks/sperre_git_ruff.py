@@ -5,8 +5,12 @@ Ben, 10.11.2026 (CLAUDE.md „Parallele Arbeit im selben Baum“): Mehrere Sitzu
 selben Ordner. Gesperrt sind darum
 
 - ``git stash`` (außer ``list``/``show``) — räumt die halbfertige Arbeit der anderen mit weg;
-- ``git add -A``/``--all``/``-u``/``.``/``*`` und ``git add <Ordner>``, ``git commit -a`` —
-  nehmen fremde Dateien in den Commit;
+- ``git add -A``/``--all``/``-u``/``.``/``*`` und ``git add <Ordner>`` (auch ``src/*`` und
+  ``$(…)``), ``git commit -a``, ``git commit <Ordner>`` — nehmen fremde Dateien in den Commit;
+- ``git pull``/``rebase``/``merge`` mit ``--autostash`` — ein Stash durch die Hintertür;
+- ``git reset --hard``, ``git clean -f``, ``git checkout -- <Ordner>`` und
+  ``git restore <Ordner>`` (Ben, 11.11.2026) — verwerfen fremde Arbeit; einzelne Dateien
+  bleiben frei;
 - ``ruff format`` ohne ``--check``/``--diff`` auf einen Ordner oder ohne Pfad — formatiert
   fremde Dateien um;
 - ``ruff check --fix``/``--fix-only`` ebenso (Ben, 11.11.2026) — ändert fremde Dateien;
@@ -28,6 +32,8 @@ import sys
 
 TRENNER = set(";|&()<>\n")
 HUELLEN = {"sh", "bash", "zsh", "dash"}
+#: Shell-Schlüsselwörter, hinter denen ein Befehl steht (``if …; then git stash; fi``, N126)
+SCHLUESSEL = {"if", "then", "else", "elif", "do", "while", "until", "{", "!", "time"}
 VORSPANN = {"uv", "uvx", "env", "time", "command", "nice", "exec", "sudo", "xargs", "nohup"}
 GIT_MIT_WERT = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 RUFF_MIT_WERT = {
@@ -80,7 +86,18 @@ def _name(wort: str) -> str:
 def _ist_ordner(pfad: str, cwd: str) -> bool:
     if pfad in (".", "..", "*") or pfad.endswith("/"):
         return True
+    # ``src/*`` nimmt alles im Ordner, ``$(git ls-files -m)`` alles Geänderte — beides sind
+    # keine einzeln genannten Dateien (N126). Die Klammer trennt den Teilbefehl ab, übrig
+    # bleibt das ``$``.
+    if pfad == "$" or pfad.endswith("/*") or pfad.startswith(("$(", "`")):
+        return True
     return os.path.isdir(os.path.join(cwd, os.path.expanduser(pfad)))
+
+
+_COMMIT_ORDNER = (
+    "git commit mit dem Ordner „{}“ nimmt fremde Änderungen mit. "
+    "Erst git add <dateien>, dann git commit ohne Pfad."
+)
 
 
 def _git(rest: list[str], cwd: str) -> str | None:
@@ -99,6 +116,30 @@ def _git(rest: list[str], cwd: str) -> str | None:
             "git stash räumt die halbfertige Arbeit anderer Sitzungen mit weg. "
             "Stattdessen: git show HEAD:<datei> oder git worktree."
         )
+    # Wegwerf-Befehle (Ben, 11.11.2026, N126): sie räumen fremde halbfertige Arbeit genauso
+    # weg wie ``stash`` — auf einzelne Dateien bleiben ``checkout``/``restore`` frei
+    if unter == "reset" and "--hard" in args:
+        return (
+            "git reset --hard verwirft die halbfertige Arbeit anderer Sitzungen. "
+            "Stattdessen: git worktree, oder einzelne Dateien mit git restore <datei>."
+        )
+    if unter == "clean":
+        kurz = "".join(a[1:] for a in args if a.startswith("-") and not a.startswith("--"))
+        if "f" in kurz and "n" not in kurz:
+            return (
+                "git clean -f löscht die neuen Dateien anderer Sitzungen. "
+                "Die eigenen Dateien einzeln löschen (git clean -n zeigt nur)."
+            )
+    if unter in ("checkout", "restore"):
+        nach_strich = unter == "restore"
+        for a in args:
+            if a == "--":
+                nach_strich = True
+            elif nach_strich and not a.startswith("-") and _ist_ordner(a, cwd):
+                return (
+                    f"git {unter} auf den Ordner „{a}“ verwirft die halbfertige Arbeit anderer "
+                    "Sitzungen. Die eigenen Dateien einzeln nennen."
+                )
     if unter == "add":
         nur_pfade = False
         for a in args:
@@ -115,12 +156,22 @@ def _git(rest: list[str], cwd: str) -> str | None:
                     "Die eigenen Dateien einzeln nennen."
                 )
         return None
+    if unter in ("pull", "rebase", "merge") and "--autostash" in args:
+        return (
+            f"git {unter} --autostash legt die halbfertige Arbeit anderer Sitzungen in den "
+            "Stash. Ohne --autostash, oder git worktree."
+        )
     if unter == "commit":
         j = 0
         while j < len(args):
             a = args[j]
             if a == "--":
+                for pfad in args[j + 1 :]:
+                    if _ist_ordner(pfad, cwd):
+                        return _COMMIT_ORDNER.format(pfad)
                 break
+            if not a.startswith("-") and _ist_ordner(a, cwd):
+                return _COMMIT_ORDNER.format(a)
             if a == "--all":
                 return "git commit --all nimmt fremde Änderungen mit. Erst git add <dateien>."
             if a in COMMIT_MIT_WERT:
@@ -187,17 +238,31 @@ def grund(befehl: str, cwd: str = ".", tiefe: int = 0) -> str | None:
     except ValueError:  # offene Anführungszeichen — die Shell wird es selbst ablehnen
         return None
     for worte in teile:
-        while worte and "=" in worte[0] and not worte[0].startswith("-"):
-            worte = worte[1:]  # VAR=wert davor
+        while worte and (
+            worte[0] in SCHLUESSEL or ("=" in worte[0] and not worte[0].startswith("-"))
+        ):
+            worte = worte[1:]  # Schlüsselwort oder VAR=wert davor
         if not worte:
             continue
         kopf = _name(worte[0])
         if kopf == "cd" and len(worte) > 1:
             cwd = os.path.join(cwd, os.path.expanduser(worte[1]))
             continue
-        if kopf in HUELLEN and "-c" in worte and tiefe < 3:
-            stelle = worte.index("-c")
-            if stelle + 1 < len(worte) and (g := grund(worte[stelle + 1], cwd, tiefe + 1)):
+        if kopf in HUELLEN and tiefe < 3:
+            # ``-c``, auch gebündelt (``-lc``, ``-ic``)
+            stelle = next(
+                (
+                    n
+                    for n, w in enumerate(worte)
+                    if n and w.startswith("-") and not w.startswith("--") and "c" in w[1:]
+                ),
+                None,
+            )
+            if (
+                stelle is not None
+                and stelle + 1 < len(worte)
+                and (g := grund(worte[stelle + 1], cwd, tiefe + 1))
+            ):
                 return g
             continue
         if kopf not in ("git", "ruff") and kopf not in VORSPANN and not kopf.startswith("python"):

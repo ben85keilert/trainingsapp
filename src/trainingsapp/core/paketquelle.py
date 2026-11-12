@@ -475,10 +475,14 @@ def _oeffnen(daten: bytes, url: str, code: str | None) -> Paketinhalt:
 _ENDUNG = re.compile(r"\.[a-z0-9]{1,5}")
 
 
-def _in_datei(url: str, laden: Callable[[str], bytes], arbeit: Path) -> Path:
+def _in_datei(
+    url: str, laden: Callable[[str], bytes], arbeit: Path, grenze: int = MAX_ZIP_BYTES + 1024
+) -> Path:
     """Eine große Paketdatei (ZIP bis `MAX_ZIP_BYTES`) nach ``arbeit`` laden — Block für Block,
     nie ganz im Arbeitsspeicher (K33). Ein übergebener Lader (Tests) liefert Bytes; sie werden
-    geschrieben. Wirft `QuellenFehler`; dann bleibt keine Datei."""
+    geschrieben. ``grenze``: mehr Bytes werden nicht geladen — die Größe, die der Index nennt
+    (S27: eine Datei, die größer ist als angekündigt, bricht dort ab statt bei 300 MB).
+    Wirft `QuellenFehler`; dann bleibt keine Datei."""
     endung = Path(urllib.parse.urlsplit(url).path).suffix.lower()
     ziel = arbeit / f"{GELADEN}{secrets.token_hex(6)}{endung if _ENDUNG.fullmatch(endung) else ''}"
     zu_gross = QuellenFehler("Die Paketdatei ist zu groß.")
@@ -490,12 +494,12 @@ def _in_datei(url: str, laden: Callable[[str], bytes], arbeit: Path) -> Path:
             with OEFFNER.open(anfrage, timeout=_ZEITLIMIT_S) as antwort, ziel.open("wb") as aus:
                 while block := antwort.read(1 << 20):
                     menge += len(block)
-                    if menge > MAX_ZIP_BYTES + 1024:
+                    if menge > grenze:
                         raise zu_gross
                     aus.write(block)
         else:
             daten = laden(url)
-            if len(daten) > MAX_ZIP_BYTES + 1024:
+            if len(daten) > grenze:
                 raise zu_gross
             ziel.write_bytes(daten)
     except urllib.error.HTTPError as e:
@@ -631,7 +635,12 @@ def paket_laden(
     gross = ist_zip(eintrag.url) or eintrag.bytes > MAX_PAKET_BYTES
     falsch = QuellenFehler("Die Prüfsumme stimmt nicht — die Datei ist nicht die aus dem Index.")
     if gross and arbeit is not None:
-        pfad = _in_datei(eintrag.url, laden, arbeit)
+        # Nennt der Index die Größe, wird nicht mehr geladen (die Prüfsumme passte sonst
+        # ohnehin nicht); ohne Angabe gilt die Obergrenze für Pakete mit Dateien
+        grenze = MAX_ZIP_BYTES + 1024
+        pfad = _in_datei(
+            eintrag.url, laden, arbeit, min(eintrag.bytes, grenze) if eintrag.bytes > 0 else grenze
+        )
         try:
             passt = sha256_datei(pfad) == eintrag.sha256
         except OSError as e:
@@ -659,6 +668,11 @@ def paket_laden(
         # sonst meldete `updates_finden` nach dem Einspielen dasselbe Update erneut (K23)
         inhalt.raeumen()
         raise QuellenFehler("Die Datei trägt eine andere Version als im Index angegeben.")
+    if eintrag.version is not None and inhalt.paket.version is None:
+        # Die Datei nennt keine Version, der Index schon (von Hand geschrieben): Die Datei ist
+        # über die Prüfsumme an den Eintrag gebunden, also gilt seine Version — sonst bliebe
+        # die installierte stehen und dasselbe Update käme bei jedem Start wieder (K43)
+        inhalt.paket.version = eintrag.version
     return inhalt
 
 

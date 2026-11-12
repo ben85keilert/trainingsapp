@@ -145,10 +145,13 @@ def uhr_lesen(text: str, start_utc: datetime | None, *, einstellig: bool = False
     if len(m.group(1)) < 2 and not einstellig:
         return None
     start = _lokal(start_utc)
-    punkt = start.replace(hour=h, minute=mi, second=se, microsecond=0)
-    sekunden = (punkt - start).total_seconds()
+    # Die getippte Uhrzeit ohne Zone lesen und erst dann einordnen: `astimezone()` nimmt den
+    # Versatz, der an **diesem** Zeitpunkt gilt — in der Nacht der Zeitumstellung ist das ein
+    # anderer als beim Start (N97); ebenso zählt „der folgende Tag“ im Kalender, nicht 24 h
+    naiv = start.replace(tzinfo=None, hour=h, minute=mi, second=se, microsecond=0)
+    sekunden = (naiv.astimezone() - start).total_seconds()
     if sekunden < -3600:
-        sekunden += _TAG_S
+        sekunden = ((naiv + timedelta(days=1)).astimezone() - start).total_seconds()
     return float(sekunden)
 
 

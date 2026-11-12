@@ -74,6 +74,9 @@ class _Ton:
         self.fertig = False
         #: „Behalten“ läuft — ein zweiter Tipp und „Verwerfen“ warten nicht dazwischen
         self.speichert = False
+        #: ● ist getippt, der Rekorder hat noch nicht geantwortet — ein zweiter Tipp legte
+        #: sonst eine zweite Datei vor und startete noch einmal (N116)
+        self.startet = False
         self.spieler: Tonspieler | None = None
         self.ticker: Any = None
         self.notiz = ft.TextField(
@@ -138,8 +141,15 @@ class _Ton:
 
     async def starten(self) -> None:
         """● — Berechtigung holen, Datei vorlegen, aufnehmen."""
-        if self.laeuft or self.fertig:
+        if self.laeuft or self.fertig or self.startet:
             return
+        self.startet = True
+        try:
+            await self._starten()
+        finally:
+            self.startet = False
+
+    async def _starten(self) -> None:
         if getattr(self.page, "web", False):
             self.melden("Im Browser geht das nicht — in der App am Handy aufnehmen.")
             return
@@ -221,7 +231,9 @@ class _Ton:
             return
         datei = self.datei
         if (datei is None or not _hat_inhalt(datei)) and gemeldet and _hat_inhalt(Path(gemeldet)):
-            datei = Path(gemeldet)  # der Rekorder schrieb woanders hin
+            # der Rekorder schrieb woanders hin — die leer vorgelegte Datei bliebe liegen (N116)
+            self.datei_loeschen()
+            datei = Path(gemeldet)
         if datei is None or not _hat_inhalt(datei):
             self.datei_loeschen()
             self.melden("Die Aufnahme ist leer — noch einmal versuchen.")

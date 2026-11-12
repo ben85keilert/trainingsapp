@@ -598,7 +598,7 @@ def tagesansicht(
                     ft.ListTile(
                         leading=ft.Icon(ft.Icons.PLAYLIST_ADD),
                         title=ft.Text(p.name),
-                        subtitle=ft.Text(warum_nicht(p, tag), size=12),
+                        subtitle=ft.Text(warum_nicht(p, tag_jetzt()), size=12),
                         on_click=waehler(p),
                     )
                     for p in daten().andere
@@ -613,8 +613,8 @@ def tagesansicht(
         """Der Tag im Verlauf (Reiter „Tage“)."""
         state.reiter = "verlauf"
         state.verlauf_tab = 0
-        state.verlauf_woche = montag(tag)
-        state.verlauf_tag = tag
+        state.verlauf_woche = montag(tag_jetzt())
+        state.verlauf_tag = tag_jetzt()
         if basis:
             await page.push_route("/")
         else:
@@ -682,7 +682,7 @@ def tagesansicht(
                     page,
                     state,
                     uebung,
-                    tag,
+                    tag_jetzt(),  # nicht der Tag des Aufbaus: „Heute“ über Mitternacht (N102)
                     nachtragen=nachtragen_route(basis, g.exercise_id, plan_id),
                     danach=auffrischen,
                 )
@@ -707,7 +707,7 @@ def tagesansicht(
         trainings = sum(1 for g in reihen if d.training(g) is not None)
         zeilen: list[ft.Control] = []
         if mit_datum:
-            zeilen.append(ft.Text(tag_lang(tag), size=18, weight=ft.FontWeight.W_600))
+            zeilen.append(ft.Text(tag_lang(tag_jetzt()), size=18, weight=ft.FontWeight.W_600))
         zeilen.append(
             ft.Text(
                 zusammenfassung(len(reihen) - trainings, trainings, d.notizen(), d.tageswerte()),
@@ -721,12 +721,12 @@ def tagesansicht(
                 ft.IconButton(
                     ft.Icons.CHEVRON_LEFT,
                     tooltip="Vortag",
-                    on_click=oeffner(f"/tag/{(tag - timedelta(days=1)).isoformat()}"),
+                    on_click=oeffner(f"/tag/{(tag_jetzt() - timedelta(days=1)).isoformat()}"),
                 ),
                 ft.IconButton(
                     ft.Icons.CALENDAR_MONTH_OUTLINED,
                     tooltip="Anderen Tag wählen",
-                    on_click=lambda: tag_waehlen(page, state, tag),
+                    on_click=lambda: tag_waehlen(page, state, tag_jetzt()),
                 ),
             ]
         return ft.Container(
@@ -1037,6 +1037,7 @@ def tagesansicht(
             hier={zl.TAG, haupt.key},
             strecke_id=strecke.id if strecke is not None else None,
             danach=auffrischen,
+            uebung=daten().katalog.get(g.exercise_id),
         )
         return haupt, weitere
 
@@ -1556,7 +1557,8 @@ def tagesansicht(
         # Jede Notiz mit Text oder Anhängen an ihrer Uhrzeit (mehrere seit 2.11.2026) —
         # als Karte, die offene als Editor
         for n in notizen.mit_inhalt:
-            zeit = n.created_at if n.created_at and lokaler_tag(n.created_at) == tag else None
+            am_tag = n.created_at is not None and lokaler_tag(n.created_at) == tag_jetzt()
+            zeit = n.created_at if am_tag else None
             punkte.append((zeit, notiz_container("Notiz zum Tag", [notizen.teil(n)])))
         if einmal:
             zeit = min(

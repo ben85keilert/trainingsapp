@@ -794,3 +794,36 @@ def test_zeitraum_der_aufnahmen_baut_die_seite_nicht_neu(welt, page, monkeypatch
     filter_.on_change(SimpleNamespace(control=filter_))
     assert welt.state.anhaenge_zeitraum == "alle" and not neu
     assert huelle.content is not vorher and len(huelle.content.controls) == 2
+
+
+async def test_audio_doppeltipp_und_rekorder_schreibt_woanders(welt, page) -> None:
+    """N116: Ein zweiter Tipp auf ●, bevor der Rekorder geantwortet hat, legt keine zweite
+    Datei vor und startet nicht noch einmal; schrieb der Rekorder woanders hin, bleibt die
+    leer vorgelegte Datei nicht liegen."""
+    import asyncio
+    from pathlib import Path
+
+    from trainingsapp.ui.views.anhang_ton import _Ton
+
+    class Langsam(_Rekorder):
+        starts = 0
+
+        async def start_recording(self, output_path=None, configuration=None) -> bool:
+            self.starts += 1
+            await asyncio.sleep(0)  # die Antwort kommt später — dazwischen der zweite Tipp
+            return await super().start_recording(output_path, configuration)
+
+        async def stop_recording(self) -> str | None:
+            woanders = Path(self.pfad).with_name("woanders.m4a")
+            woanders.write_bytes(M4A)
+            return str(woanders)
+
+    t = _Ton(page, welt.state, _ziel(welt))
+    t.rekorder = Langsam()
+    await asyncio.gather(t.starten(), t.starten())
+    ordner = welt.state.anhaenge.aufnahme_ordner()
+    assert t.rekorder.starts == 1 and t.laeuft and not t.startet
+    assert [d.name for d in ordner.iterdir()] == [t.datei.name]
+    await t.stoppen()
+    assert t.fertig and t.datei.name == "woanders.m4a"
+    assert [d.name for d in ordner.iterdir()] == ["woanders.m4a"]

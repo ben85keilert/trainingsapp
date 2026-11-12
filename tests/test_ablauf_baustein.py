@@ -264,6 +264,27 @@ def test_mehrere_freie_wege_weich_fertig_fragt() -> None:
     assert teil.schritt.item_id == "p"
 
 
+def test_einheit_endet_waehrend_ein_gemachter_schritt_wartet() -> None:
+    """N64 (Ben, 11.11.2026): Ist die Übung gemacht und wartet nur noch (Bedingung, Wahl des
+    Wegs), trägt das Ende der Einheit sie ein — auch ohne Timer; beim Fortsetzen kommt sie
+    trotzdem noch einmal. Mitten in der Übung bleibt es bei „beendet“ ohne Eintrag."""
+    a = Ablauf(True, "k", (Kante("k", "w"), Kante("k", "p")))
+    teil, uhr = _baustein(a, WEICH)
+    teil.gemacht()
+    _lauf(teil, uhr, 1)
+    assert teil.schritt.item_id == "k" and teil.wartet
+    ereignisse = teil.beenden(uhr[0])
+    assert teil.ergebnisse["k"] == "gemacht"  # eingetragen, wie beim Tipp auf „Gemacht“
+    ende = next(e for e in ereignisse if (e.quelle, e.art) == ("plan", "ende"))
+    assert ende.daten.get("bei") == "k"  # kommt beim Fortsetzen noch einmal
+
+    teil, uhr = _baustein(a, WEICH)
+    _lauf(teil, uhr, 1)
+    assert not teil.wartet
+    teil.beenden(uhr[0])
+    assert teil.ergebnisse["k"] == "beendet"
+
+
 def test_ein_angebotener_weg_entscheidet_von_selbst() -> None:
     """Ist genau ein Weg angeboten (sein Auslöser ist erfüllt), braucht es keine Wahl."""
     a = Ablauf(True, "w", (Kante("w", "k"), Kante("w", "p", ab.ZEIT)))

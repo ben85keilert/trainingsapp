@@ -537,13 +537,22 @@ class PlanAblaufBaustein:
         return self.timer is not None and self.timer.lauf.laeuft_roh
 
     def beenden(self, jetzt: float) -> list[Ereignis]:
-        """Die Einheit endet mitten im Ablauf: die laufende Übung endet ohne Eintrag. Gezeichnet
-        merkt sich ``plan/ende``, wo es weitergeht (``bei``, P166)."""
+        """Die Einheit endet mitten im Ablauf: die laufende Übung endet ohne Eintrag — außer
+        sie war gemacht und wartete nur noch auf ihre Bedingung. Gezeichnet merkt sich
+        ``plan/ende``, wo es weitergeht (``bei``, P166)."""
         out = self.takt(jetzt)
         bei = self._fortsetzen_bei()
         if self.phase == UEBERZEIT and self._t0 is not None:
             # Weich und die Einheit endet: die Übung war fertig — eintragen, mit Überzeit
             self._ende_eintragen(jetzt, "fertig")
+        elif self.phase == UEBUNG and self.wartet and self._t0 is not None:
+            # Die Übung war gemacht, nur die Bedingung fehlte noch (N64, Ben 11.11.2026: „es
+            # geht nicht darum, nur Bedingungen zu erfüllen, sondern zu sammeln, was man
+            # überhaupt gemacht hat“): eintragen wie in der Überzeit — beim Fortsetzen kommt
+            # sie trotzdem noch einmal (`_fortsetzen_bei`)
+            if self.timer is not None:
+                out += self._uebungs_timer(self.timer.beenden(jetzt))
+            self._ende_eintragen(jetzt, self._grund_wartend)
         elif self.phase == UEBUNG and self._t0 is not None:
             if self.timer is not None:
                 out += self._uebungs_timer(self.timer.beenden(jetzt))

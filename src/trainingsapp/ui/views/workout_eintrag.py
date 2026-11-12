@@ -598,14 +598,15 @@ def workout_eintrag_view(page: Any, state: AppState, einheit_id: str) -> ft.View
                 workout_skala_zeile(state, einheit_id, we.feld_key(name), titel=name, felder=felder)
             )
         # Eine Skala, die es am Workout nicht mehr gibt, bleibt mit ihrem Wert sichtbar
-        for f in werte.spec.fields:
-            if f.key not in gezeigt and werte.wert(f.key) is not None:
+        # — auch die fünfte, die in einer früheren Feldkopie fehlt (N75)
+        for key, name in werte.skalen_mit_wert():
+            if key not in gezeigt:
                 zeilen.append(
                     workout_skala_zeile(
                         state,
                         einheit_id,
-                        f.key,
-                        titel=f.label,
+                        key,
+                        titel=name,
                         hinweis="nicht mehr am Workout",
                         felder=felder,
                     )

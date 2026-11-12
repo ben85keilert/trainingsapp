@@ -259,3 +259,35 @@ def test_rohspur_ohne_ort_kennt_jedes_feld_von_punkt() -> None:
     punkt = {f.name for f in fields(Punkt)}
     assert punkt <= set(FELDER) | set(ENTFERNT)
     assert not set(FELDER) & set(ENTFERNT)
+
+
+# ---------------------------------------------------------------------------
+# Durchsicht 10.11.2026: H82 (Bewegungszeit monoton)
+# ---------------------------------------------------------------------------
+
+_M = 1 / 111_320.0  # Grad Breite je Meter
+
+
+def _ohne_doppler(nord_m: float, ost_m: float, t: float) -> Punkt:
+    return Punkt(t, 52.0 + nord_m * _M, 13.0 + ost_m * _M / math.cos(math.radians(52.0)))
+
+
+def test_bewegungszeit_laeuft_in_stand_bei_nie_rueckwaerts() -> None:
+    """H82: Greift die Auto-Pause, wird die Stehzeit rückwirkend abgezogen — auch aus den
+    gemerkten Ständen. Ein Zeitraum in den 10 s davor bekam sonst negative Bewegungszeit."""
+    from trainingsapp.core.strecke import StreckenRechner
+
+    r = StreckenRechner()
+    for i in range(60):  # gehen, dann 40 s stehen, dann wieder gehen
+        r.hinzufuegen(Punkt(float(i), 52.0 + i * 2.0 * _M, 13.0, 4.0, tempo_ms=2.0))
+    for i in range(60, 100):
+        r.hinzufuegen(Punkt(float(i), 52.0 + 118.0 * _M, 13.0, 4.0, tempo_ms=0.0))
+    for i in range(100, 130):
+        r.hinzufuegen(
+            Punkt(float(i), 52.0 + (118.0 + (i - 99) * 2.0) * _M, 13.0, 4.0, tempo_ms=2.0)
+        )
+    bewegt = [r.stand_bei(t / 2)[1] for t in range(0, 262)]
+    assert all(b >= a for a, b in pairwise(bewegt))
+    # im Stand steht die Bewegungszeit von der letzten Bewegung an — nicht erst nach 10 s
+    assert r.stand_bei(62.0)[1] == r.stand_bei(95.0)[1] == pytest.approx(59.0)
+    assert r.stand_bei(129.0) == (r.distanz_m, r.bewegt_s)

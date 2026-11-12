@@ -25,14 +25,19 @@ Routen:
     /eintrag/<id>                   Ein Eintrag: ansehen, löschen
     /eintrag/<id>/korrigieren       Korrektur als neuer Eintrag
     /uebung/neu, /uebung/<id>, /uebung/<id>/bearbeiten   Katalog
-    /einstellungen                  Profile und App-Einstellungen
+    /einstellungen                  Einstellungen: das Menü (views/einstellungen.py)
+    /einstellungen/darstellung      Hell/Dunkel, Farbprofil, Verlauf des Profils
+    /einstellungen/uebungen         Übungen: offener Eintrag, Fokus, Typen und Regionen
+    /einstellungen/uhr              Timer und Takt: Timer, Signale, Schnellzeiten, Vibration
+    /einstellungen/daten            Daten und Sicherung: Geräte-Backup, Papierkorb, Archiv
+    /einstellungen/hilfe            Hilfe und Über: Hilfethemen, Edition, Version
     /archiv, /papierkorb            Archivierte und gelöschte Übungen (und Pläne)
     /verlauf/<kachel_id>            Kurve der Tagessummen einer Übung (je Variante eine Linie)
     /einstellungen/hrv              Einstellungen der HRV-Messung
     /einstellungen/herzfrequenz     Herzfrequenz: Profilwerte mit Herkunft, Bereiche, Sicht
     /einstellungen/hrv/ueberschriften   Gespeicherte Überschriften der Messungen (Migration 030)
     /einstellungen/training         Training: Karte einfärben, Tempo mit Pausen, Spalten je km
-    /einstellungen/profile          Profile anlegen, umbenennen, löschen
+    /einstellungen/profile          Profile wählen, anlegen, umbenennen, löschen
     /einstellungen/tags             Typen und Regionen der Übungen: anlegen, umbenennen, löschen
     /einstellungen/notiz-tags       Tags der Notizen zum Tag (docs/plan_tagesnotizen.md)
     /einstellungen/tagesfelder[/<id>|/neu]   Tagesfelder: Liste, Formular (docs/plan_tagesfelder.md)
@@ -112,6 +117,7 @@ from trainingsapp.ui.views.anhang_hochladen import (
     anhang_hochladen_view,
     hochladen_route,
 )
+from trainingsapp.ui.views.anhang_hochladen import reste_raeumen as hochladen_reste_raeumen
 from trainingsapp.ui.views.anhang_ton import anhang_ton_view
 from trainingsapp.ui.views.ausdauer import (
     UNTERWEGS,
@@ -124,10 +130,17 @@ from trainingsapp.ui.views.eigene_pakete import SEGMENT as EIGEN_SEGMENT
 from trainingsapp.ui.views.eigene_pakete import eigenes_paket_view
 from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.einstellungen_anhaenge import einstellungen_anhaenge
+from trainingsapp.ui.views.einstellungen_darstellung import einstellungen_darstellung
 from trainingsapp.ui.views.einstellungen_herzfrequenz import einstellungen_herzfrequenz
 from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
 from trainingsapp.ui.views.einstellungen_hrv_titel import einstellungen_hrv_titel
 from trainingsapp.ui.views.einstellungen_notiz_tags import einstellungen_notiz_tags_view
+from trainingsapp.ui.views.einstellungen_seiten import (
+    einstellungen_daten,
+    einstellungen_hilfe,
+    einstellungen_uebungen,
+    einstellungen_uhr,
+)
 from trainingsapp.ui.views.einstellungen_tags import einstellungen_tags_view
 from trainingsapp.ui.views.einstellungen_training import einstellungen_training
 from trainingsapp.ui.views.eintrag import eintrag_view
@@ -451,6 +464,17 @@ def formular_korrektur(
 # ---------------------------------------------------------------------------
 
 
+def schreibende_sichern(state: AppState) -> None:
+    """Speichern, was gerade geschrieben wird (`AppState.vor_dem_verlassen`) — vor dem Neubau
+    und vor dem Hintergrund. Ein Fehler hält den Aufbau nicht auf, steht aber im Protokoll:
+    Sonst verschwände der Text ohne jede Spur (N101)."""
+    for schluessel, sichern in list(state.vor_dem_verlassen.items()):
+        try:
+            sichern()
+        except Exception:
+            logging.getLogger(__name__).exception("Speichern vor dem Verlassen: %s", schluessel)
+
+
 def main(page: ft.Page) -> None:
     # Antworten für ersetzte Controls beenden sonst die Empfangsschleife (Web, Socket)
     methodenantworten_absichern()
@@ -512,9 +536,7 @@ def main(page: ft.Page) -> None:
             state.messlauf.backup_jetzt()
         # Ebenso, was gerade geschrieben wird (Notiz zum Tag: sonst bis zu 1 s)
         if not vorn:
-            for sichern in list(state.vor_dem_verlassen.values()):
-                with suppress(Exception):
-                    sichern()
+            schreibende_sichern(state)
         # Das App-Update (A8): zurück von „Unbekannte Apps installieren“ geht es von selbst
         # weiter; in den Hintergrund stellt die Automatik den Wecker, zurück nimmt sie ihn
         if state.installieren is not None:
@@ -543,6 +565,8 @@ def main(page: ft.Page) -> None:
         page.run_task(toene_laden, state)
     # Hochladen aus der Fotoauswahl (P74) ebenso — der Fortschritt geht an die Seite, die
     # gerade zusieht (`AppState.hochladen_beobachter`)
+    with suppress(Exception):  # eine liegen gebliebene Kopie mit Ort (N132)
+        hochladen_reste_raeumen(state.einstellungen)
     try:
         from flet_hochladen import FletHochladen
         from flet_hochladen import verfuegbar as hochladen_verfuegbar
@@ -949,9 +973,7 @@ def main(page: ft.Page) -> None:
         state.route_nummer += 1
         # Was gerade geschrieben wird (Notiz zum Tag), ist gespeichert, bevor die Ansicht
         # neu entsteht — Zurück speichert (Ben, 22.10.2026); die Schreibenden entstehen neu
-        for sichern in list(state.vor_dem_verlassen.values()):
-            with suppress(Exception):
-                sichern()
+        schreibende_sichern(state)
         state.vor_dem_verlassen.clear()
         state.schreiben_beenden = None
         # Alle Beobachter gehören Ansichten, Leiste oder Komponenten, die gleich neu
@@ -1049,6 +1071,17 @@ def main(page: ft.Page) -> None:
                     ablegen(lambda: einstellungen_hrv_titel(page, state))
             elif teile[1:2] == ["training"]:
                 ablegen(lambda: einstellungen_training(page, state))
+            # Die Menüseiten der Einstellungen (Ben, 11.11.2026)
+            elif teile[1:2] == ["darstellung"]:
+                ablegen(lambda: einstellungen_darstellung(page, state))
+            elif teile[1:2] == ["uebungen"]:
+                ablegen(lambda: einstellungen_uebungen(page, state))
+            elif teile[1:2] == ["uhr"]:
+                ablegen(lambda: einstellungen_uhr(page, state))
+            elif teile[1:2] == ["daten"]:
+                ablegen(lambda: einstellungen_daten(page, state))
+            elif teile[1:2] == ["hilfe"]:
+                ablegen(lambda: einstellungen_hilfe(page, state))
             elif teile[1:2] == ["herzfrequenz"]:
                 ablegen(lambda: einstellungen_herzfrequenz(page, state))
             elif teile[1:2] == ["profile"]:

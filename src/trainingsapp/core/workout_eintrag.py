@@ -42,12 +42,15 @@ def feld_key(name: str) -> str:
     return SKALA_VOR + " ".join(name.split())
 
 
-def felder_bereinigt(namen: Iterable[str]) -> list[str]:
+def felder_bereinigt(namen: Iterable[str], hoechstens: int | None = FELDER_MAX) -> list[str]:
     """Die Namen eigener Skalen: ohne leere und doppelte (Groß/klein egal), höchstens
-    `FELDER_MAX`; „Anstrengung“ gibt es schon.
+    `FELDER_MAX`; „Anstrengung“ gibt es schon. ``hoechstens`` ``None``: alle — für die Kopie
+    der Felder am Eintrag, die auch entfernte Skalen mit Wert lesbar hält (N75).
 
     >>> felder_bereinigt([" Schmerz ", "schmerz", "", "Anstrengung (sRPE)", "Fokus"])
     ['Schmerz', 'Fokus']
+    >>> len(felder_bereinigt("abcdef")), len(felder_bereinigt("abcdef", None))
+    (4, 6)
     """
     out: list[str] = []
     gesehen = {"anstrengung (srpe)", "anstrengung", "srpe"}
@@ -56,12 +59,17 @@ def felder_bereinigt(namen: Iterable[str]) -> list[str]:
         if name and name.casefold() not in gesehen:
             gesehen.add(name.casefold())
             out.append(name)
-    return out[:FELDER_MAX]
+    return out if hoechstens is None else out[:hoechstens]
 
 
-def spec(felder: Iterable[str] = ()) -> ResultSpec:
+def spec(felder: Iterable[str] = (), *, kopie: bool = False) -> ResultSpec:
     """Die Felder eines Workout-Eintrags — immer die Anstrengung (CR10, 0–10), dazu die eigenen
     Skalen des Workouts (``felder``: ihre Namen, je 0–10; `PlanRepo.workout_felder`).
+    ``kopie``: die Feldkopie am Eintrag — ohne die Obergrenze `FELDER_MAX`, denn sie nennt
+    neben den Skalen von jetzt auch entfernte, zu denen ein Wert steht (N75).
+
+    >>> len(spec("abcde").fields), len(spec("abcde", kopie=True).fields)
+    (5, 6)
 
     >>> [f.key for f in spec().fields], spec().fields[0].max
     (['srpe'], 10)
@@ -74,7 +82,7 @@ def spec(felder: Iterable[str] = ()) -> ResultSpec:
             FieldSpec(SRPE, FieldType.SCALE, "Anstrengung (sRPE)", min=0, max=10, step=1),
             *(
                 FieldSpec(feld_key(n), FieldType.SCALE, n, min=0, max=10, step=1)
-                for n in felder_bereinigt(felder)
+                for n in felder_bereinigt(felder, None if kopie else FELDER_MAX)
             ),
         ],
     )
@@ -113,6 +121,21 @@ class WorkoutWerte:
             return None if wert is None else int(wert)
         except (TypeError, ValueError):
             return None
+
+    def skalen_mit_wert(self) -> list[tuple[str, str]]:
+        """``(Schlüssel, Name)`` jeder eigenen Skala, zu der ein Wert steht — erst die der
+        Feldkopie, dann Werte, die in keiner Kopie mehr stehen (N75: frühere Kopien schnitten
+        bei `FELDER_MAX` ab; der Name steckt im Schlüssel, `feld_key`).
+
+        >>> w = WorkoutWerte("e", {"srpe": 6, "skala:Alt": 3, "skala:Ruhe": 1}, spec=spec(["Ruhe"]))
+        >>> w.skalen_mit_wert()
+        [('skala:Ruhe', 'Ruhe'), ('skala:Alt', 'Alt')]
+        """
+        namen = {f.key: f.label for f in self.spec.fields if f.key != SRPE}
+        for key in self.result:
+            if key.startswith(SKALA_VOR):
+                namen.setdefault(key, key.removeprefix(SKALA_VOR))
+        return [(k, n) for k, n in namen.items() if self.wert(k) is not None]
 
     @property
     def leer(self) -> bool:

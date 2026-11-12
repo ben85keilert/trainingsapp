@@ -159,6 +159,51 @@ async def test_stroeme_zur_laufzeit_an_und_aus_und_nach_dem_neuverbinden() -> No
         await quelle.disconnect()
 
 
+async def test_beschleunigung_startet_nicht_wenn_der_wunsch_inzwischen_wegfiel() -> None:
+    """H62 (1): Fällt der Wunsch auf ``None``, während das Einrichten in der Pause nach dem
+    EKG-Start wartet, startet die Beschleunigung nicht mit der Vorgabe 200 Hz."""
+    zeit = FakeZeit()
+    quelle, innen, _ = await _verbunden(zeit, ekg=True)
+    try:
+        quelle._acc_wunsch = (50, 2)
+        einrichten = asyncio.create_task(quelle._acc_einrichten(quelle._generation))
+        await _ruhe()  # wartet in der Pause zwischen zwei Kommandos
+        await quelle.stroeme_setzen(ekg=True, acc=None)  # freigegeben
+        await zeit.vorspulen(1.0)
+        await einrichten
+        assert _writes(innen) == [pmd.ECG_START] and not quelle.acc_modus
+    finally:
+        await quelle.disconnect()
+
+
+async def test_gescheiterter_acc_stopp_wird_beim_naechsten_auftrag_wiederholt() -> None:
+    """H62 (2): Scheitert das Stopp-Kommando, gilt der Strom weiter als laufend — der nächste
+    Auftrag versucht den Stopp noch einmal, statt den Gurt bis zum Trennen senden zu lassen."""
+    zeit = FakeZeit()
+    quelle, innen, _ = await _verbunden(zeit, acc=(200, 8))
+    try:
+        echt = innen.write
+        scheitern = [True]
+
+        async def write(device_id, service, characteristic, data, mit_antwort=True) -> None:
+            if bytes(data) == pmd.ACC_STOP and scheitern[0]:
+                raise OSError("GATT 133")
+            await echt(device_id, service, characteristic, data, mit_antwort)
+
+        innen.write = write  # type: ignore[method-assign]
+        aus = asyncio.create_task(quelle.stroeme_setzen(ekg=False, acc=None))
+        await zeit.vorspulen(1.0)
+        await aus  # wirft nie
+        assert quelle.acc_modus and pmd.ACC_STOP not in _writes(innen)
+        scheitern[0] = False
+        aus = asyncio.create_task(quelle.stroeme_setzen(ekg=False, acc=None))
+        await zeit.vorspulen(1.0)
+        await aus
+        assert _writes(innen)[-1] == pmd.ACC_STOP and not quelle.acc_modus
+    finally:
+        await quelle.disconnect()
+
+
 async def test_transport_schreibt_mit_und_liest_nie_die_seriennummer(tmp_path) -> None:
     zeit = FakeZeit()
     quelle, innen, transport = await _verbunden(zeit)

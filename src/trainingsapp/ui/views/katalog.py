@@ -126,7 +126,9 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
         """Tipp = Übungsseite, „Trainieren“ daneben; das Zielsymbol oder Gedrückthalten
         zeigt alle Wege: Nachtragen, Üben, Verlauf, Übungsseite, Bearbeiten (28.10.2026)."""
         haupt = zl.Ziel(zl.UEBUNG, oeffner(u.id))
-        weitere = ziele_fuer(page, state, u.id, tag=None, hier={zl.UEBUNG}, bearbeiten=True)
+        weitere = ziele_fuer(
+            page, state, u.id, tag=None, hier={zl.UEBUNG}, bearbeiten=True, uebung=u
+        )
         blatt = zl.blatt_oeffner(page, u.name, "", weitere, hauptziel=haupt)
         return ft.ListTile(
             leading=uebungsbild(state, u.icon_key, u.image_path),

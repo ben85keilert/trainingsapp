@@ -156,3 +156,42 @@ def test_export_ohne_vermerk(con) -> None:
     u = Exercise(name="Planke", timer=[profil.als_dict()])
     d = stand(u)
     assert d["timer"][0]["name"] == "Planke 30/15" and "bibliothek" not in d["timer"][0]
+
+
+def test_liste_liest_die_bibliothek_einmal(con) -> None:
+    """D24: Katalog und Planliste lesen die Timer-Bibliothek je Aufruf einmal, nicht je Zeile
+    mit Verweis — und jede Zeile bekommt ihre eigene Kopie des Profils."""
+    TimerRepo(con).speichern(_halten())
+    profil = _halten()
+    profil.bibliothek = "t1"
+    uebungen = ExerciseRepo(con)
+    ids = []
+    for n in range(12):
+        u = Exercise(name=f"Übung {n:02d}")
+        uebung_zuordnen(u, profil)
+        uebungen.speichern(u)
+        ids.append(u.id)
+    ben = Subject(name="Ben")
+    SubjectRepo(con).speichern(ben)
+    plan = Plan(name="Plan", subject_id=ben.id)
+    plan.items = [
+        PlanItem(plan_id=plan.id, exercise_id=i, order=n, timer=TimerWahl("", profil).als_dict())
+        for n, i in enumerate(ids)
+    ]
+    PlanRepo(con).speichern(plan)
+
+    gelesen: list[str] = []
+    con.set_trace_callback(lambda sql: gelesen.append(sql) if "FROM timer" in sql else None)
+    try:
+        katalog = [u for u in uebungen.alle() if u.id in ids]
+        assert len(gelesen) == 1
+        gelesen.clear()
+        plaene = PlanRepo(con).alle(ben.id)
+        assert len(gelesen) == 1
+    finally:
+        con.set_trace_callback(None)
+    assert all(u.timer[0]["bibliothek"] == "t1" for u in katalog) and len(katalog) == 12
+    assert all(it.timer["eigen"]["bibliothek"] == "t1" for it in plaene[0].items)
+    # eigene Kopien: eine Änderung an einer Zeile ändert die nächste nicht
+    katalog[0].timer[0]["abschnitte"].clear()
+    assert katalog[1].timer[0]["abschnitte"]

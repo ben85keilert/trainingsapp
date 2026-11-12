@@ -382,6 +382,19 @@ class TageswertRepo:
         self._schreiben(w)
         return w
 
+    def _aktuell(self, wert_id: str) -> str:
+        """Die jüngste Zeile der Korrekturkette, in der ``wert_id`` steht."""
+        aktuell = wert_id
+        for _ in range(10_000):  # eine Kette ist endlich; Schutz vor einem Zyklus
+            r = self.con.execute(
+                "SELECT id FROM day_value WHERE replaces_value_id = ? AND deleted_at IS NULL",
+                (aktuell,),
+            ).fetchone()
+            if r is None:
+                break
+            aktuell = r["id"]
+        return aktuell
+
     def korrigieren(
         self,
         wert_id: str,
@@ -390,8 +403,10 @@ class TageswertRepo:
         note: str | None = None,
         zeit: datetime | None = None,
     ) -> Tageswert:
-        """Eine Korrektur: neue Zeile, die die alte ersetzt — Spec-Kopie und Tag bleiben."""
-        alt = self.laden(wert_id)
+        """Eine Korrektur: neue Zeile, die die alte ersetzt — Spec-Kopie und Tag bleiben.
+        Nennt ``wert_id`` eine schon überholte Zeile, gilt ihr gültiger Stand: sonst stünden
+        zwei gültige Werte nebeneinander (D19, hier nachgezogen 11.11.2026)."""
+        alt = self.laden(self._aktuell(wert_id))
         if alt is None:
             raise KeyError(wert_id)
         neu = Tageswert(

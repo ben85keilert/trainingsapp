@@ -1166,6 +1166,8 @@ class TimerLauf:
             self._enden.append(summe)
         #: Laufende Nummer des zuletzt gemeldeten Abschnittsanfangs (`neue_marken`)
         self._gemeldet: int | None = None
+        #: „Fertig“ gedrückt: bis zu diesem Abschnitt melden, danach nur das Ende (N63)
+        self._gemeldet_bis_fertig: int | None = None
         #: Uhr beim letzten Anhalten (`pause`); ``None``, solange er läuft oder nie hielt
         self.angehalten_bei: float | None = None
         #: Abgebrochen (`abbrechen`): angehalten, und nichts wird eingetragen
@@ -1299,6 +1301,7 @@ class TimerLauf:
         self._basis_s = 0.0
         self._start = None
         self._gemeldet = None  # der nächste Start meldet den ersten Abschnitt wieder
+        self._gemeldet_bis_fertig = None
         self.angehalten_bei = None
         self.abgebrochen = False
         # Der Takt beginnt mit dem nächsten Start von vorn: ein `TaktLauf` mit Tempoanker aus
@@ -1318,7 +1321,20 @@ class TimerLauf:
 
     def fertig_machen(self) -> None:
         """„Fertig“: jetzt ans Ende — der laufende Abschnitt endet mit der gelaufenen Zeit,
-        die übrigen fallen weg."""
+        die übrigen fallen weg. Ausgelassenes wird nicht erwähnt (Ben, 11.11.2026, N63):
+        `neue_marken` meldet danach nur noch das Ende, nicht jeden übersprungenen Abschnitt.
+
+        >>> t = [0.0]
+        >>> p = TimerProfil(name="P", abschnitte=[Abschnitt("A", 10), Abschnitt("B", 5)], runden=8)
+        >>> lauf = TimerLauf(p, uhr=lambda: t[0])
+        >>> lauf.start(); len(lauf.neue_marken())
+        1
+        >>> t[0] = 12.0; lauf.fertig_machen(); [m.text for m in lauf.neue_marken()]
+        ['B (Runde 1/8)', 'Timer fertig']
+        """
+        if self.begonnen and self._gemeldet is not None:
+            # was bis jetzt wirklich begann, wird noch gemeldet — der Rest nicht
+            self._gemeldet_bis_fertig = self.stand().nummer
         self._springen(None)
 
     def weiter(self) -> None:
@@ -1337,6 +1353,9 @@ class TimerLauf:
         self._basis_s = ziel
         if self._start is not None:
             self._start = self._uhr()
+        # Der Takt beginnt am Ziel neu bei seiner ersten Phase — der Tempo-Faktor bleibt, sein
+        # Anker im alten Lauf nicht (Durchsicht 11.11.2026: nach Tempo-Zug und ◀ lag er daneben)
+        self._takt_lauf, self._takt_nummer = None, None
 
     # -- Marken für Notizen -------------------------------------------------------
 
@@ -1481,6 +1500,10 @@ class TimerLauf:
             nummern = [stand.nummer]
         else:
             nummern = list(range(self._gemeldet + 1, stand.nummer + 1))
+        bis = self._gemeldet_bis_fertig
+        if bis is not None:  # „Fertig“: nur was schon lief, dann das Ende
+            self._gemeldet_bis_fertig = None
+            nummern = [k for k in nummern if k <= bis or k >= len(self._folge)]
         self._gemeldet = stand.nummer
         marken: list[Marke] = []
         for k in nummern:

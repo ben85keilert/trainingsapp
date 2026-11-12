@@ -745,6 +745,10 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             lauf_jetzt is not None and lauf_jetzt.status.verbindung is Verbindung.VERBINDE
         ):
             return
+        if lauf_jetzt is not None and lauf_jetzt.aufnahme is not None:
+            # Ein neuer Messlauf ersetzte den alten samt seiner ungespeicherten Aufnahme (H93)
+            warnen("Erst die laufende Aufnahme speichern („Stopp & speichern“ unter Live).")
+            return
         state.verbindet = True
         try:
             await _verbinden(device_id, name)
@@ -2816,8 +2820,10 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
     if state.messung_tab == 0:
         inhalt = liste(
             "messung_live",
+            # Auch ohne Verbindung, solange eine Aufnahme ungespeichert ist (H93: der Strom
+            # endete mitten in der Aufnahme) — sonst gäbe es kein „Stopp & speichern“
             _live_teil(page, state, lauf, live_reiter)
-            if verbunden
+            if lauf is not None and (verbunden or lauf.aufnahme is not None)
             else _verbinden_teil(page, state),
         )
     else:

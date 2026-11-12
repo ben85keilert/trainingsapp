@@ -181,6 +181,16 @@ async def test_workout_start_weich_ueberzeit_weiter_und_ende(umgebung) -> None:
     ende = workout_view(seite, state, plan, route=route)
     texte = _texte(ende)
     assert "Workout fertig" in texte and "2 Schritte, 2 eingetragen" in texte
+    # N76: Das Bild „Workout fertig“ steht — der Takt des Beobachters (1×/s mit laufender
+    # Messung) liest dafür nicht jedes Mal Kopf und Zeitleiste der Einheit aus der Datenbank
+    gelesen: list[str] = []
+    state.con.set_trace_callback(lambda sql: gelesen.append(sql) if "FROM einheit" in sql else None)
+    try:
+        for _ in range(3):
+            state.einheit_beobachter["workout"]()
+    finally:
+        state.con.set_trace_callback(None)
+    assert gelesen == [] and "Workout fertig" in _texte(ende)
     eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
     kniebeuge = next(e for e in eintraege if e.result.get("hold"))
     assert kniebeuge.result["hold"] == [13.0]  # 10 s Timer + 3 s Überzeit

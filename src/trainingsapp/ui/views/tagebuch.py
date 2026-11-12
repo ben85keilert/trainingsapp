@@ -63,7 +63,9 @@ from trainingsapp.core.verlauf import MONATE, WOCHENTAGE, WOCHENTAGE_LANG, woche
 from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
 from trainingsapp.ui.components.icons import symbol
+from trainingsapp.ui.components.layout import ohne_auto_update
 from trainingsapp.ui.components.notizeditor import Notizeditor, Textnotiz
+from trainingsapp.ui.components.scroll import SCROLLT
 from trainingsapp.ui.components.tagesfeld_blatt import tagesfeld_blatt
 from trainingsapp.ui.components.tagesnotiz import Tagesnotiz, tag_etiketten
 from trainingsapp.ui.components.wochenleiste import tageszelle
@@ -125,7 +127,8 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
     notiz_tags = state.notiz_tags.alle(profil)
     tag_namen = {t.id: t.name for t in notiz_tags}
     alle = sammeln(
-        state.tagesnotizen.alle(profil),
+        # mit den Notizen ohne Text (nur Foto/Audio): ihre Tags gehen an die Aufnahme (N90)
+        state.tagesnotizen.alle(profil, mit_leeren=True),
         state.sitzungen.session_notizen(profil),
         state.sitzungen.notizen(profil),
         aufnahmen,
@@ -229,12 +232,20 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
     def bearbeiten(schluessel: str) -> None:
         """Die Notiz in der Liste öffnen — ihr Editor steht statt der Karte."""
         if state.tagebuch_bearbeitet != schluessel:
+            # Der bisher offene Editor hört zuerst auf (gespeichert, ohne Neubau) — seine
+            # Nachfrist klappte sonst die eben geöffnete Notiz wieder zu (N98)
+            gemerkt = state.tagebuch_editor
+            if isinstance(gemerkt, tuple):
+                gemerkt[1].ablegen()
             state.tagebuch_bearbeitet = schluessel
             state.tagebuch_editor = None
         neu()
 
-    def geschlossen() -> None:
-        """Fertig oder Abbrechen im Editor: wieder die Karte."""
+    def geschlossen(wer: str) -> None:
+        """Fertig oder Abbrechen im Editor: wieder die Karte — außer es meldet ein Editor
+        (``wer``), während schon eine andere Notiz offen ist (N98)."""
+        if state.tagebuch_bearbeitet not in (None, wer):
+            return
         state.tagebuch_bearbeitet = None
         state.tagebuch_editor = None
         neu()
@@ -244,17 +255,23 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
         hinweg (`AppState.tagebuch_editor`). ``None``, wenn es sie nicht mehr gibt."""
         gemerkt = state.tagebuch_editor
         if isinstance(gemerkt, tuple) and gemerkt[0] == schluessel:
+            # Der Routenaufbau hat die Haken des Schreibenden geleert (N100)
+            gemerkt[1].wieder_anmelden()
             return gemerkt[1]
+
+        def danach() -> None:
+            geschlossen(schluessel)
+
         e: Notizeditor | None = None
         art, _, rest = schluessel.partition(":")
         if schluessel == NEU:
             notiz = DayNote(subject_id=profil, date=heute)
-            e = Tagesnotiz(page, state, notiz, tags=notiz_tags, danach=geschlossen)
+            e = Tagesnotiz(page, state, notiz, tags=notiz_tags, danach=danach)
         elif art == "tag":
             geladen = state.tagesnotizen.laden(rest)
             if geladen is not None:
                 angebot = [t for t in notiz_tags if t.aktiv or t.id in geladen.tag_ids]
-                e = Tagesnotiz(page, state, geladen, tags=angebot, danach=geschlossen)
+                e = Tagesnotiz(page, state, geladen, tags=angebot, danach=danach)
         elif art == "plan" and n is not None:
 
             def sichern(text: str, session_id: str = rest) -> None:
@@ -267,7 +284,7 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
                 sichern,
                 schluessel=schluessel,
                 hinweis="Wie ging das Training? Tippen oder diktieren.",
-                danach=geschlossen,
+                danach=danach,
             )
         if e is not None:
             e.fokus = True
@@ -758,7 +775,12 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
 
     def gescrollt(e: ft.OnScrollEvent) -> None:
         """Die Woche geht mit: Welcher Tag steht oben? (Gemeldete Höhen, sonst geschätzt.)"""
+        ohne_auto_update()  # V1: sonst vergleicht Flet je Scroll-Ereignis die ganze Seite
         state.scroll_offsets[merk] = e.pixels
+        # Wer gerade schreibt, will wissen, dass der Finger daneben scrollt statt tippt —
+        # wie `components/scroll.scroll_merken` (N99: „Scrollen daneben nicht“, P103)
+        if state.schreib_gesten is not None and getattr(e, "event_type", None) in SCROLLT:
+            state.schreib_gesten("scroll")
         if not mit_leiste:
             return
         reihe = [

@@ -399,6 +399,12 @@ class StreckenRechner:
             # schon gezählt; sie gehört nicht zur Bewegungszeit (15.10.2026).
             gestanden = vorher.t - self._letzte_bewegung if self._letzte_bewegung else 0.0
             self.bewegt_s = max(0.0, self.bewegt_s - max(0.0, gestanden))
+            # … und nicht zu den Ständen, die seit der letzten Bewegung gemerkt wurden: sonst
+            # liefe `stand_bei` in der Bewegungszeit rückwärts (H82)
+            k = len(self._staende) - 1
+            while k >= 0 and self._staende[k][1] > self.bewegt_s:
+                self._staende[k] = (self._staende[k][0], self.bewegt_s)
+                k -= 1
         elif not self.pausiert:
             self.bewegt_s += dt
         self._hoehe(p)

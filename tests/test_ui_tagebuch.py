@@ -258,3 +258,82 @@ def test_der_verlauf_hat_vier_reiter(page, state) -> None:
     reiter = verlauf(page, state)
     leiste = next(x for x in _alle(reiter) if isinstance(x, ft.TabBar))
     assert [t.label for t in leiste.tabs] == ["Tage", "Übungen", "Zum Tag", "Tagebuch"]
+
+
+def test_andere_notiz_antippen_scrollen_und_neubau_beim_schreiben(page, state) -> None:
+    """N98: Eine andere Notiz antippen beendet den offenen Editor, sein spätes „Fertig“
+    schließt die neue nicht. N99: Scrollen der Liste meldet sich dem Schreibenden. N100: Der
+    Editor überlebt den Neubau — und trägt seine Haken wieder ein, die der Routenaufbau leert."""
+    _welt(state)
+    state.tagesnotizen.anlegen(state.profil.id, state.heute(), "Knie gut")
+    state.tagebuch_ordnung = NOTIZEN
+
+    def karte(ansicht, text):
+        return next(
+            x
+            for x in _alle(ansicht)
+            if isinstance(x, ft.Container) and x.on_click and text in _texte(x)
+        )
+
+    def editor_in(ansicht):
+        (feld,) = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.multiline]
+        return feld.on_change.__self__
+
+    karte(tagebuch(page, state), "Schulter fest").on_click()
+    ansicht = tagebuch(page, state)
+    a = editor_in(ansicht)
+    a.feld.on_focus(None)
+    a.feld.value = "Schulter frei"
+    a.feld.on_change(SimpleNamespace(control=a.feld))
+    # N100: der Routenaufbau leert die Haken, der Neubau der Ansicht trägt sie wieder ein
+    state.vor_dem_verlassen.clear()
+    state.schreiben_beenden = None
+    ansicht = tagebuch(page, state)
+    assert editor_in(ansicht) is a
+    assert state.vor_dem_verlassen[a.sichern_schluessel] == a.speichern
+    assert state.schreiben_beenden == a.fertig
+    # N99: Scrollen daneben — die Nachfrist läuft ins Leere
+    liste = next(x for x in _alle(ansicht) if isinstance(x, ft.Column) and x.on_scroll)
+    a.feld.on_tap_outside(None)
+    liste.on_scroll(SimpleNamespace(pixels=40.0, event_type=ft.ScrollType.UPDATE))
+    assert a._daneben_um is None and a.schreibt
+    liste.on_scroll(SimpleNamespace(pixels=40.0))  # ohne Ereignisart (andere Tests): nichts
+    # N98: die andere Notiz antippen
+    karte(ansicht, "Knie gut").on_click()
+    assert not a.schreibt
+    assert "Schulter frei" in [
+        n.text for n in state.tagesnotizen.zum_tag(state.profil.id, state.heute())
+    ]
+    offen = state.tagebuch_bearbeitet
+    b = editor_in(tagebuch(page, state))
+    assert b is not a and b.feld.value == "Knie gut"
+    asyncio.run(a.fertig())  # A's Nachfrist bzw. spätes „Fertig“
+    assert state.tagebuch_bearbeitet == offen and state.tagebuch_editor[1] is b
+    asyncio.run(b.fertig())
+    assert state.tagebuch_bearbeitet is None
+
+
+def test_notiz_nur_mit_aufnahme_bleibt_beim_filtern(page, state) -> None:
+    """N90: Eine Notiz zum Tag ohne Text, nur mit Audio, steht im Abschnitt „Notizen“ auch
+    beim Filter auf ihren Tag und bei „ohne Tag“ (dort eine ohne Tag)."""
+    from trainingsapp.core.anhaenge import AUDIO, Qualitaet, Ziel, neuer_anhang
+    from trainingsapp.core.tagebuch import OHNE_TAG
+
+    heute = state.heute()
+    etikett = state.notiz_tags.sicherstellen(state.profil.id)
+
+    def mit_audio(tag_ids):
+        notiz = state.tagesnotizen.anlegen(state.profil.id, heute, "", tag_ids)
+        ziel = Ziel.fuer_notiz(state.profil.id, heute, notiz.id)
+        anhang = neuer_anhang(ziel, AUDIO, Qualitaet.MITTEL)
+        state.anhaenge.anlegen(anhang, b"\x00\x00\x00\x1cftypM4A " + b"0" * 400)
+
+    mit_audio([etikett.id])
+    state.tagebuch_ordnung = NOTIZEN
+    assert "1 Audioaufnahme" in _texte(tagebuch(page, state))
+    state.tagebuch_tags = {etikett.id}
+    assert "1 Audioaufnahme" in _texte(tagebuch(page, state))
+    state.tagebuch_tags = {OHNE_TAG}
+    assert "1 Audioaufnahme" not in _texte(tagebuch(page, state))
+    mit_audio([])
+    assert "1 Audioaufnahme" in _texte(tagebuch(page, state))

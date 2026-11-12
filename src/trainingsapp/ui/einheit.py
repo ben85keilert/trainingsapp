@@ -606,8 +606,11 @@ def _ereignisse(page: Any, state: Any, e: Einheitslauf, neu: list[Ereignis]) -> 
     if any((x.quelle, x.art) in (("einheit", "start"), ("plan", "uebung_start")) for x in neu):
         _timer_ticken(page, state, e)  # auch der Timer jeder Übung eines Plan-Ablaufs
     if isinstance(e.teil("plan"), PlanAblaufBaustein):
-        from trainingsapp.ui.plan_ablauf import nach_der_uebung
+        from trainingsapp.ui.plan_ablauf import nach_der_uebung, schritt_einrichten
 
+        # Takt und Zählen des laufenden Schritts — auch wenn die Workout-Ansicht zu ist (N62)
+        with contextlib.suppress(Exception):
+            schritt_einrichten(page, state, e)
         for x in neu:
             if x.quelle == "plan" and x.art == "uebung_ende":
                 try:  # je Übung eintragen, sobald sie endet
@@ -713,11 +716,13 @@ async def _laufen(
         aufnahme: Any = None
         if abschluss is not None and abschluss.hrv is not None:
             eintragen_mit = eintragen
-            if eintragen_mit is None:
-                from trainingsapp.ui.views.messung import aufnahme_eintragen
-
-                eintragen_mit = aufnahme_eintragen
             try:
+                if eintragen_mit is None:
+                    # ohne flet (erste CI-Stufe) scheitert schon der Import — dann wie jeder
+                    # andere Fehler beim Eintragen, nicht als Ausnahme im ``finally`` (N130)
+                    from trainingsapp.ui.views.messung import aufnahme_eintragen
+
+                    eintragen_mit = aufnahme_eintragen
                 aufnahme = eintragen_mit(state, abschluss.hrv, e.subject_id)
             except Exception as fehler:  # die Datei liegt unter Messungen/, nur die DB-Zeile fehlt
                 e.warnung = f"Aufnahme gespeichert, aber nicht eingetragen: {fehler}"
@@ -770,11 +775,14 @@ def _nachlauf_fragen(page: Any, state: Any, strecke: Any) -> None:
     from trainingsapp.ui.components.kuerzen import kuerzen_blatt
     from trainingsapp.ui.training import nachlauf_der_strecke
 
-    n = nachlauf_der_strecke(strecke)
-    if n is None:
-        return
-
     async def zeigen() -> None:
+        # Streckendatei lesen und rechnen: im Thread (H80 — bei 5 h spürbar)
+        try:
+            n = await asyncio.to_thread(nachlauf_der_strecke, strecke)
+        except (OSError, ValueError):
+            return
+        if n is None:
+            return
         for _ in range(120):
             if not dialog_offen(page):
                 break

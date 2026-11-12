@@ -1444,3 +1444,138 @@ def test_werte_je_kilometer_und_dfa_werden_einmal_gerechnet(monkeypatch) -> None
     assert len(gerechnet) == 2  # nachgeschlagen
     ausdauer._km_werte(rec, SimpleNamespace(), 0.0, 300.0, False)
     assert len(gerechnet) == 3  # eine andere Aufnahme rechnet selbst
+
+
+# ---------------------------------------------------------------------------
+# Durchsicht 10.11.2026: H78 (Kürzen: Thread, Reihenfolge), H80, H81, H87
+# ---------------------------------------------------------------------------
+
+
+async def test_kuerzen_rechnet_die_auto_pause_wie_eingestellt(daten) -> None:
+    """H81/H78: Mit „Auto-Pause aus“ zählt auch nach dem Kürzen die ganze Zeit als Bewegung
+    (vorher sprang die Zeile auf den Wert mit Pausenabzug); `training_kuerzen_async` liest,
+    schreibt und rechnet im Thread und kommt zum selben Ergebnis."""
+    from dataclasses import replace
+
+    from trainingsapp.config import streckenverzeichnis
+    from trainingsapp.data.strecken import jsonl_lesen
+    from trainingsapp.ui.training import training_kuerzen_async
+
+    state, tmp_path = daten
+    state.training_einstellungen_setzen(replace(state.training_einstellungen(), auto_pause=False))
+    strecke, _ = await _training(state, tmp_path, punkte=_mit_nachlauf())
+    assert strecke.bewegt_s == pytest.approx(strecke.dauer_s, abs=3)  # live ohne Auto-Pause
+    ergebnis = await training_kuerzen_async(state, strecke, 1000.0)  # 100 s Stand bleiben
+    assert ergebnis.entfernt_s == pytest.approx(200, abs=3)
+    neu = state.strecken.laden(strecke.id)
+    assert neu.dauer_s == pytest.approx(1000, abs=3)
+    assert neu.bewegt_s == pytest.approx(neu.dauer_s, abs=3)
+    pfad = streckenverzeichnis() / neu.file_path
+    assert len(jsonl_lesen(pfad)) == pytest.approx(1000, abs=2)
+    assert not pfad.with_name(pfad.name + ".neu").exists()
+
+
+async def test_kuerzen_scheitert_ohne_die_datei_zu_kuerzen(daten, monkeypatch) -> None:
+    """H78: Scheitert die Datenbank, ist nichts gekürzt — Streckendatei, Zeile und Tagebuch
+    sind die alten. Scheitert erst die HRV-Messung, ist gekürzt, und die Meldung sagt es."""
+    from trainingsapp.config import streckenverzeichnis
+    from trainingsapp.data.strecken import jsonl_lesen
+    from trainingsapp.ui import training
+
+    state, tmp_path = daten
+    strecke, _ = await _training(state, tmp_path, punkte=_mit_nachlauf())
+    pfad = streckenverzeichnis() / strecke.file_path
+    vorher = (strecke.dauer_s, strecke.distanz_m, strecke.session_entry_id, len(jsonl_lesen(pfad)))
+    eintraege = state.con.execute("SELECT COUNT(*) FROM session_entry").fetchone()[0]
+
+    def kaputt(_s) -> None:
+        raise RuntimeError("Platte voll")
+
+    echt = state.strecken.kuerzen
+    monkeypatch.setattr(state.strecken, "kuerzen", kaputt)
+    with pytest.raises(RuntimeError):
+        await training.training_kuerzen_async(state, strecke, 900.0)
+    assert (strecke.dauer_s, strecke.distanz_m, strecke.session_entry_id) == vorher[:3]
+    assert len(jsonl_lesen(pfad)) == vorher[3]
+    assert not pfad.with_name(pfad.name + ".neu").exists()
+    assert state.con.execute("SELECT COUNT(*) FROM session_entry").fetchone()[0] == eintraege
+    assert state.strecken.laden(strecke.id).dauer_s == vorher[0]
+
+    monkeypatch.setattr(state.strecken, "kuerzen", echt)
+
+    def hrv_kaputt(*_a) -> str:
+        raise OSError("Messdatei gesperrt")
+
+    monkeypatch.setattr(training, "_hrv_auftrag", hrv_kaputt)
+    ergebnis = training.training_kuerzen(state, strecke, 900.0)
+    assert ergebnis.hrv == "HRV-Notizen nicht verschoben: Messdatei gesperrt"
+    assert state.strecken.laden(strecke.id).dauer_s == pytest.approx(900, abs=3)
+    assert len(jsonl_lesen(pfad)) == pytest.approx(900, abs=2)
+
+
+async def test_lange_strecke_liest_die_auswertung_im_thread(daten, monkeypatch) -> None:
+    """H80: Ab `STRECKE_IM_THREAD` Bytes liest und rechnet ein Thread — auch ohne Messdatei;
+    Karte, Kilometer und die Knöpfe oben kommen danach."""
+    import threading
+
+    from trainingsapp.config import messungenverzeichnis
+    from trainingsapp.ui.views import ausdauer
+
+    state, tmp_path = daten
+    strecke, _ = await _training(state, tmp_path)
+    (aufnahme,) = state.hrv.alle(state.profil.id)
+    (messungenverzeichnis() / aufnahme.file_path).unlink()  # nur die Strecke ist zu lesen
+    gelesen_in: list[str] = []
+    echt = ausdauer.jsonl_lesen
+
+    def lesen(pfad):
+        gelesen_in.append(threading.current_thread().name)
+        return echt(pfad)
+
+    monkeypatch.setattr(ausdauer, "jsonl_lesen", lesen)
+    monkeypatch.setattr(ausdauer, "STRECKE_IM_THREAD", 0)
+    seite = _seite()
+    ansicht = ausdauer.ausdauer_detail_view(seite, state, strecke)
+    assert any("Strecke wird gelesen" in t for t in _texte(ansicht))
+    await asyncio.gather(*seite.aufgaben)
+    assert gelesen_in and all(name != threading.main_thread().name for name in gelesen_in)
+    texte = _texte(ansicht)
+    assert not any("wird gelesen" in t for t in texte) and any("Ø Tempo" in t for t in texte)
+    knoepfe = {c.tooltip: c for c in ansicht.appbar.actions}
+    assert knoepfe["Ende kürzen"].visible and not knoepfe["GPX exportieren"].disabled
+
+
+def test_werte_zwischen_baut_die_felder_einmal_je_messung(monkeypatch) -> None:
+    """H87: Wanduhr, RR und Flags als Felder entstehen einmal je Messung, nicht je Kilometer
+    und Intervall — mit denselben Zahlen."""
+    import numpy as np
+    from hrv_core.korrektur import anwenden
+    from hrv_core.recording import Beat, Recording
+
+    from trainingsapp.core import hrv_training
+
+    rr = (800 + np.random.default_rng(1).normal(0, 30, 600)).round()
+    t = np.cumsum(rr) / 1000
+    rec = Recording(
+        beats=[Beat(float(a), int(b), 75, float(a)) for a, b in zip(t, rr, strict=True)]
+    )
+    korr = anwenden(rec, [])
+    gebaut: list[int] = []
+    echt = hrv_training.wanduhr
+
+    def wanduhr(*a):
+        gebaut.append(1)
+        return echt(*a)
+
+    monkeypatch.setattr(hrv_training, "wanduhr", wanduhr)
+    werte = [hrv_training.werte_zwischen(rec, korr, v, v + 100.0) for v in (0.0, 100.0, 200.0)]
+    assert len(gebaut) == 1
+    assert [w["n"] for w in werte] == [
+        int(((t >= v) & (t <= v + 100.0)).sum()) for v in (0.0, 100.0, 200.0)
+    ]
+    assert werte[0]["mean_bpm"] == pytest.approx(60000 / rr[t <= 100.0].mean())
+    # eine andere Korrektur derselben Messung, eine gewachsene Messung: neu gebaut
+    hrv_training.werte_zwischen(rec, anwenden(rec, []), 0.0, 100.0)
+    rec.beats.append(Beat(float(t[-1]) + 0.8, 800, 75, float(t[-1]) + 0.8))
+    hrv_training.werte_zwischen(rec, korr, 0.0, 100.0)
+    assert len(gebaut) == 3

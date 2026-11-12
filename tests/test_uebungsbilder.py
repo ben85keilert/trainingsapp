@@ -13,7 +13,9 @@ from trainingsapp.data.uebungsbilder import ORDNER, UebungsbildRepo
 
 #: Ein JPEG mit Exif-Kopf — der Kopf muss in der Ablage verschwinden (kein Ort)
 JPEG_MIT_EXIF = b"\xff\xd8\xff\xe1\x00\x0eExif\x00\x00GPS!!!\xff\xda\x00\x02DATEN\xff\xd9"
-JPEG = b"\xff\xd8\xff\xe0" + b"0" * 100
+#: Ein kleines, gültiges JPEG ohne Metadaten (JFIF-Kopf, Bilddaten, Ende) — das Netz
+#: darunter lehnt ab, was sich nicht ablaufen lässt
+JPEG = b"\xff\xd8\xff\xe0\x00\x06JFIF\xff\xda\x00\x02" + b"0" * 100 + b"\xff\xd9"
 
 
 def test_ablage_schreiben_uebernehmen_listen_loeschen(tmp_path: Path) -> None:

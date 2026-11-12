@@ -34,6 +34,7 @@ from datetime import date, datetime, timedelta
 from enum import StrEnum
 from typing import Literal
 
+from .bereinigen import NichtBereinigbar, bereinigen, gif_ohne_metadaten
 from .models import jetzt, lokaler_tag, new_id
 
 #: `entry_media.kind`
@@ -581,20 +582,18 @@ def geschaetzte_bytes(q: Qualitaet, dauer_s: float) -> int:
     return int((q.video_bitrate + q.audio_bitrate) / 8 * max(dauer_s, 0.0))
 
 
-#: Was `jpeg_ohne_metadaten` aus einem JPEG nimmt: APP1 (Exif und XMP — dort steht der
-#: Ort), APP13 (IPTC) und Kommentare
-_JPEG_WEG = {0xE1, 0xED, 0xFE}
-
-
 def jpeg_ohne_metadaten(daten: bytes) -> bytes:
-    r"""Ein JPEG ohne Exif, XMP, IPTC und Kommentare — die Bilddaten bleiben Byte für Byte.
+    r"""Ein JPEG ohne Exif, XMP, IPTC, Kommentare, MPF und übrige APPn — die Bilddaten bleiben
+    Byte für Byte, was hinter dem Bildende steht (Zweitbild, Motion-Photo-Video), fällt weg.
 
     Die Erweiterung schreibt schon ohne Exif; das hier ist das Netz darunter (Regel wie GPS:
-    kein Ort in Anhängen). Kein JPEG → unverändert. Nur die **Ausrichtung** bleibt (Ben,
+    kein Ort in Anhängen) — **derselbe Bereiniger wie für Pakete** (`core.bereinigen`, S24):
+    ein JPEG, das sich nicht ablaufen lässt, wirft `NichtBereinigbar`, statt halb bereinigt
+    durchzugehen (N95). Kein JPEG → unverändert. Nur die **Ausrichtung** bleibt (Ben,
     7.11.2026: „Aufnahmen von eigenen Bildern werden 90° verkippt“): Die Kamera speichert
     das Bild so, wie der Sensor liegt, und die Drehung nur im Exif-Tag 0x0112 — ohne ihn
     stand ein Hochkantfoto quer. Er kommt als eigenes, winziges Exif zurück
-    (`exif_nur_ausrichtung`), ohne Ort, Gerät oder Zeit.
+    (`exif_nur_ausrichtung`, gleich hinter JFIF), ohne Ort, Gerät oder Zeit.
 
     >>> jfif = b"\xff\xe0\x00\x06JFIF"
     >>> exif = b"\xff\xe1\x00\x0eExif\x00\x00GPS!!!"
@@ -615,34 +614,63 @@ def jpeg_ohne_metadaten(daten: bytes) -> bytes:
     (False, True)
     >>> jpeg_ohne_metadaten(ohne) == ohne
     True
+
+    Ein Zweitbild hinter dem Bildende behielte sein eigenes Exif — es fällt weg:
+
+    >>> jpeg_ohne_metadaten(bild + b"\xff\xd8" + exif + scan) == b"\xff\xd8" + jfif + scan
+    True
     """
     if not daten.startswith(b"\xff\xd8"):
         return daten
-    teile = [daten[:2]]
-    ausrichtung_da = False
+    rein = bereinigen(daten, "jpg")  # wirft NichtBereinigbar
+    wert = _jpeg_ausrichtung(daten)
+    if wert is None:
+        return rein
+    i = 2
+    while rein[i : i + 2] == b"\xff\xe0":  # JFIF steht gleich hinter dem Anfang
+        i += 2 + int.from_bytes(rein[i + 2 : i + 4], "big")
+    return rein[:i] + exif_nur_ausrichtung(wert) + rein[i:]
+
+
+def _jpeg_ausrichtung(daten: bytes) -> int | None:
+    """Die Ausrichtung aus dem ersten Exif des Kopfs, das eine trägt — ``None`` für aufrecht
+    (1 braucht keinen Tag) oder ohne Angabe. Nur für ein JPEG, das `bereinigen` ablaufen
+    konnte (die Längen stimmen)."""
     i = 2
     while i + 4 <= len(daten) and daten[i] == 0xFF:
         marker = daten[i + 1]
         if marker == 0xFF:  # Füllbyte vor einem Marker
             i += 1
             continue
-        if marker in (0xDA, 0xD9):  # Start of Scan: ab hier Bilddaten
+        if marker in (0xDA, 0xD9):  # ab hier Bilddaten
             break
         if 0xD0 <= marker <= 0xD7 or marker == 0x01:  # Marker ohne Länge
-            teile.append(daten[i : i + 2])
             i += 2
             continue
         ende = i + 2 + int.from_bytes(daten[i + 2 : i + 4], "big")
-        if marker not in _JPEG_WEG:
-            teile.append(daten[i:ende])
-        elif marker == 0xE1 and not ausrichtung_da:
+        if marker == 0xE1:
             wert = exif_ausrichtung(daten[i + 4 : ende])
-            if wert is not None and wert != 1:  # 1 = aufrecht, braucht keinen Tag
-                teile.append(exif_nur_ausrichtung(wert))
-                ausrichtung_da = True
+            if wert is not None and wert != 1:
+                return wert
         i = ende
-    teile.append(daten[i:])
-    return b"".join(teile)
+    return None
+
+
+def bild_ohne_metadaten(daten: bytes) -> bytes:
+    r"""Ein Bild für eine Ablage am Gerät (Anhang vom Rechner, Symbol, Bild der Bewegung) ohne
+    Metadaten — nach dem Inhalt, nicht nach der Endung: JPEG (`jpeg_ohne_metadaten`), PNG
+    (ohne ``eXIf`` und Textblöcke) und GIF (ohne Kommentare und XMP; D29). Alles andere bleibt,
+    wie es ist; was wie eines der drei beginnt und sich nicht ablaufen lässt, wirft
+    `NichtBereinigbar`.
+
+    >>> bild_ohne_metadaten(b"irgendwas")
+    b'irgendwas'
+    """
+    if daten.startswith(b"\x89PNG\r\n\x1a\n"):
+        return bereinigen(daten, "png")
+    if daten.startswith(b"GIF8"):
+        return gif_ohne_metadaten(daten)
+    return jpeg_ohne_metadaten(daten)
 
 
 def exif_ausrichtung(inhalt: bytes) -> int | None:
@@ -711,9 +739,11 @@ def _exif_testsegment(wert: int, rest: bytes = b"") -> bytes:
 _MP4_ORT = {b"\xa9xyz", b"loci", b"meta"}
 #: Behälter, in die `mp4_ortsboxen` hineinsieht
 _MP4_BEHAELTER = {b"moov", b"trak", b"udta", b"mdia", b"minf"}
+#: So tief sieht `mp4_ortsboxen` hinein — darüber wird abgelehnt statt abgestürzt
+_MP4_TIEFE = 16
 
 
-def mp4_ortsboxen(daten: bytes, basis: int = 0) -> list[int]:
+def mp4_ortsboxen(daten: bytes, basis: int = 0, tiefe: int = 0) -> list[int]:
     r"""Wo in einem MP4 eine Box mit Ortsangabe steht — der Versatz ihres Typs (ab
     ``basis``). `data.anhaenge.mp4_ort_entfernen` schreibt dort ``free`` hinein: Die Größe
     bleibt, also stimmen alle Versätze im Video (``stco``), und Spieler überspringen ``free``.
@@ -730,6 +760,9 @@ def mp4_ortsboxen(daten: bytes, basis: int = 0) -> list[int]:
     >>> mp4_ortsboxen(box(b"ftyp") + b"\x00\x00")  # abgeschnitten: nichts erfunden
     []
     """
+    if tiefe > _MP4_TIEFE:
+        # so tief schachtelt kein Video — nicht durchgesehen heißt: nicht hinaus (N95)
+        raise NichtBereinigbar("Video unlesbar (zu tief verschachtelt)")
     stellen: list[int] = []
     i = 0
     while i + 8 <= len(daten):
@@ -749,7 +782,7 @@ def mp4_ortsboxen(daten: bytes, basis: int = 0) -> list[int]:
             stellen.append(basis + i + 4)
         elif typ in _MP4_BEHAELTER:
             ende = min(i + groesse, len(daten))
-            stellen += mp4_ortsboxen(daten[i + kopf : ende], basis + i + kopf)
+            stellen += mp4_ortsboxen(daten[i + kopf : ende], basis + i + kopf, tiefe + 1)
         i += groesse
     return stellen
 
@@ -997,6 +1030,7 @@ __all__ = [
     "anzahl_text",
     "art_der_datei",
     "aufraeumen_vorschlag",
+    "bild_ohne_metadaten",
     "blitz_text",
     "blitz_weiter",
     "countdown_text",

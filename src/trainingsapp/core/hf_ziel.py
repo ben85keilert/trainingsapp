@@ -23,7 +23,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import Final
+from typing import Any, Final
 
 from trainingsapp.core.hf_einstellungen import (
     ACHSE_AUTO,
@@ -173,26 +173,78 @@ def ziel_setzen(
 @dataclass
 class Stumm:
     """Der Ton schweigt — bis ``bis`` (Uhr des Aufrufers, s) oder, mit `BIS_MESSENDE`, solange
-    die Messung ``messung`` dieselbe bleibt.
+    die Messung ``messung`` dieselbe bleibt (`messung_kennung`). Nur „bis Messende“ hängt an
+    der Messung (Vertrag §3): „stumm 5 min“, vor dem Aufnahmestart gesetzt, gilt seine fünf
+    Minuten (H102).
 
     >>> s = Stumm(bis=100.0, messung=7)
     >>> s.gilt(99.0, 7), s.gilt(100.0, 7), s.gilt(50.0, 8)
-    (True, False, False)
-    >>> Stumm(bis=BIS_MESSENDE, messung=7).text(0.0), s.text(40.0)
+    (True, False, True)
+    >>> ende = Stumm(bis=BIS_MESSENDE, messung=7)
+    >>> ende.gilt(1e9, 7), ende.gilt(0.0, 8)
+    (True, False)
+    >>> ende.text(0.0), s.text(40.0)
     ('stumm bis Messende', 'stumm noch 1:00')
     """
 
     bis: float
-    messung: int
+    messung: object
 
-    def gilt(self, jetzt: float, messung: int) -> bool:
-        return messung == self.messung and jetzt < self.bis
+    def gilt(self, jetzt: float, messung: object) -> bool:
+        if math.isinf(self.bis):
+            return messung == self.messung
+        return jetzt < self.bis
 
     def text(self, jetzt: float) -> str:
         if math.isinf(self.bis):
             return "stumm bis Messende"
         rest = max(0, math.ceil(self.bis - jetzt))
         return f"stumm noch {rest // 60}:{rest % 60:02d}"
+
+
+def messung_kennung(lauf: Any) -> object:
+    """Woran „dieselbe Messung“ erkannt wird (`Stumm`): die Aufnahme an ihrem Start, ohne
+    Aufnahme die Verbindung an ihrem Beginn. Werte statt ``id()`` — die Kennung eines
+    freigegebenen Objekts kann eine neue Messung wieder tragen (H102).
+
+    >>> from types import SimpleNamespace as N
+    >>> a = N(start_mono=12.5, start_utc="2026-11-10T08:00:00")
+    >>> messung_kennung(N(aufnahme=a, start_mono=3.0))
+    ('aufnahme', 12.5, '2026-11-10T08:00:00')
+    >>> messung_kennung(N(aufnahme=None, start_mono=3.0))[:1], messung_kennung(None)
+    (('verbindung',), ('keine',))
+    """
+    if lauf is None:
+        return ("keine",)
+    aufnahme = getattr(lauf, "aufnahme", None)
+    if aufnahme is not None:
+        return (
+            "aufnahme",
+            getattr(aufnahme, "start_mono", None),
+            str(getattr(aufnahme, "start_utc", "")),
+        )
+    return ("verbindung", id(lauf), getattr(lauf, "start_mono", None))
+
+
+def linie_start(seite: str, oben: float | None, unten: float | None, hf: float | None) -> float:
+    """Wo eine Linie des Zielbereichs beginnt, die es noch nicht gibt (``"oben"``/``"unten"``):
+    20 bpm neben der anderen Linie, sonst 10 bpm neben der Herzfrequenz von jetzt, sonst
+    150 bzw. 110. Gibt es sie schon, bleibt sie.
+
+    >>> linie_start("oben", 150.0, 130.0, 99.0), linie_start("oben", None, 130.0, 99.0)
+    (150.0, 150.0)
+    >>> linie_start("oben", None, None, 99.0), linie_start("oben", None, None, None)
+    (109.0, 150.0)
+    >>> linie_start("unten", 150.0, None, 99.0), linie_start("unten", None, None, None)
+    (130.0, 110.0)
+    """
+    if seite == "oben":
+        if oben is not None:
+            return oben
+        return unten + 20 if unten else (hf or 140.0) + 10
+    if unten is not None:
+        return unten
+    return oben - 20 if oben else (hf or 120.0) - 10
 
 
 @dataclass
@@ -448,6 +500,8 @@ __all__ = [
     "hrr_text",
     "intervall_notiz",
     "lage_text",
+    "linie_start",
+    "messung_kennung",
     "tal_hinweis",
     "tonfolge_s",
     "trend_bpm_min",

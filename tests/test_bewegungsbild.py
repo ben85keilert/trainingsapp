@@ -22,9 +22,19 @@ from trainingsapp.data.repositories import ExerciseRepo
 from trainingsapp.data.seed import seed_einspielen
 from trainingsapp.data.uebungsbilder import BewegungsbildRepo, UebungsbildRepo
 
-JPEG = b"\xff\xd8\xff\xe0" + b"0" * 100
-GIF = b"GIF89a" + b"\x00" * 40
-PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 40
+#: Kleine, gültige Dateien ohne Metadaten — die Ablage lehnt ab, was sich nicht ablaufen lässt
+JPEG = b"\xff\xd8\xff\xe0\x00\x06JFIF\xff\xda\x00\x02" + b"0" * 100 + b"\xff\xd9"
+GIF = b"GIF89a" + bytes([1, 0, 1, 0, 0, 0, 0]) + b"," + bytes(9) + b"\x02\x02\x44\x01\x00;"
+PNG = (
+    b"\x89PNG\r\n\x1a\n"
+    + b"\x00\x00\x00\x0dIHDR"
+    + bytes(13)
+    + bytes(4)
+    + b"\x00\x00\x00\x02IDAT\x78\x9c"
+    + bytes(4)
+    + b"\x00\x00\x00\x00IEND"
+    + bytes(4)
+)
 
 
 def test_ablage_der_bewegung_mit_gif_und_medium_an_der_uebung(tmp_path: Path) -> None:

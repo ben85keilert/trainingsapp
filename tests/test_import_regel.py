@@ -1,7 +1,8 @@
 """Erzwingt die wichtigste Architekturregel des Projekts.
 
-`core/`, `data/` und `devices/` dürfen **kein** `flet` importieren (auch nicht die
-Erweiterung `flet_ble`), und nichts unter `trainingsapp/` darf `scipy` importieren.
+`core/`, `data/` und `devices/` dürfen **kein** `flet` importieren (auch keine
+Erweiterung `flet_…`), und nichts unter `trainingsapp/` darf `scipy` importieren. Dazu die
+Richtung der Abhängigkeiten zwischen den Paketen der App.
 
 Warum als Test und nicht als Konvention: Konventionen erodieren. Ein einzelner
 `import flet` in `core/models.py` würde die gesamte Domäne untestbar machen und
@@ -23,31 +24,82 @@ import pytest
 
 SRC = Path(__file__).parent.parent / "src" / "trainingsapp"
 
-# Paket -> Module, die es nicht importieren darf.
-# `flet_ble` (eigene Erweiterung, erweiterungen/flet_ble) importiert selbst flet —
-# und der Scan vergleicht nur die Wurzel des Modulnamens, `flet_ble` fiele also
-# nicht unter `flet`. Darum steht es ausdrücklich dabei: der Adapter gehört nach ui/.
+# Paket -> Module, die es nicht importieren darf. `flet` meint auch jede Erweiterung
+# (`flet_ble`, `flet_geolocator`, `flet_ton`, `flet_medien` …): sie importieren selbst flet,
+# der Adapter gehört nach ui/ (N127).
 VERBOTEN: dict[str, set[str]] = {
-    "core": {"flet", "flet_ble"},
-    "data": {"flet", "flet_ble"},
-    "devices": {"flet", "flet_ble"},
+    "core": {"flet"},
+    "data": {"flet"},
+    "devices": {"flet"},
+}
+
+# Abhängigkeiten zeigen nur nach innen (CLAUDE.md): welches Paket der App welches andere
+# nicht kennen darf — `ui → core, data, devices`; `devices → core`; `data → core`.
+RICHTUNG: dict[str, set[str]] = {
+    "core": {"data", "devices", "ui"},
+    "data": {"devices", "ui"},
+    "devices": {"data", "ui"},
 }
 
 # Nirgends in der App — auch nicht in ui/ — gibt es das auf Android/iOS.
 UEBERALL_VERBOTEN: set[str] = {"scipy", "neurokit2"}
 
 
-def _importierte_wurzeln(datei: Path) -> set[str]:
-    """Alle importierten Top-Level-Module einer Datei."""
+def _wurzel(name: str) -> str:
+    """Oberstes Modul; jede Flet-Erweiterung zählt als ``flet``.
+
+    >>> _wurzel("flet_ble.adapter"), _wurzel("flet.controls"), _wurzel("numpy.fft")
+    ('flet', 'flet', 'numpy')
+    """
+    wurzel = name.split(".")[0]
+    return "flet" if wurzel.startswith("flet_") else wurzel
+
+
+def _importierte_module(datei: Path) -> set[str]:
+    """Alle importierten Module einer Datei mit vollem Namen — relative aufgelöst
+    (``from ..ui import x`` in ``core/`` → ``trainingsapp.ui``), dazu
+    ``importlib.import_module("…")`` und ``__import__("…")`` mit festem Namen."""
     baum = ast.parse(datei.read_text(encoding="utf-8"), filename=str(datei))
-    wurzeln: set[str] = set()
+    paket = ["trainingsapp", *datei.relative_to(SRC).parts[:-1]]
+    module: set[str] = set()
     for knoten in ast.walk(baum):
         if isinstance(knoten, ast.Import):
-            wurzeln.update(alias.name.split(".")[0] for alias in knoten.names)
-        # level > 0 heißt relativer Import — der bleibt im Paket.
-        elif isinstance(knoten, ast.ImportFrom) and knoten.level == 0 and knoten.module:
-            wurzeln.add(knoten.module.split(".")[0])
-    return wurzeln
+            module.update(alias.name for alias in knoten.names)
+        elif isinstance(knoten, ast.ImportFrom):
+            if knoten.level == 0:
+                basis = knoten.module or ""
+            else:
+                oben = paket[: len(paket) - (knoten.level - 1)]
+                basis = ".".join([*oben, *([knoten.module] if knoten.module else [])])
+            if basis:
+                module.add(basis)
+                # ``from . import ui`` / ``from trainingsapp import ui`` nennt das Modul hinten
+                module.update(f"{basis}.{alias.name}" for alias in knoten.names)
+        elif isinstance(knoten, ast.Call) and knoten.args:
+            f = knoten.func
+            name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+            erstes = knoten.args[0]
+            if (
+                name in {"import_module", "__import__"}
+                and isinstance(erstes, ast.Constant)
+                and isinstance(erstes.value, str)
+            ):
+                module.add(erstes.value)
+    return module
+
+
+def _importierte_wurzeln(datei: Path) -> set[str]:
+    """Alle importierten Top-Level-Module einer Datei."""
+    return {_wurzel(m) for m in _importierte_module(datei)}
+
+
+def _app_pakete(datei: Path) -> set[str]:
+    """Welche Pakete der App (``core``, ``data``, ``devices``, ``ui``) die Datei importiert."""
+    return {
+        teile[1]
+        for m in _importierte_module(datei)
+        if (teile := m.split("."))[0] == "trainingsapp" and len(teile) > 1
+    }
 
 
 def _dateien(paket: str) -> list[Path]:
@@ -72,6 +124,41 @@ def test_paket_haelt_importregel_ein(paket: str) -> None:
         + "\n\nSiehe CONTRIBUTING.md — die Domäne muss ohne Oberfläche testbar "
         "bleiben, und scipy existiert auf Android/iOS nicht."
     )
+
+
+@pytest.mark.parametrize("paket", sorted(RICHTUNG))
+def test_abhaengigkeiten_zeigen_nur_nach_innen(paket: str) -> None:
+    """`core` kennt weder `data` noch `devices` noch `ui`, `data` und `devices` kennen
+    einander und `ui` nicht — auch nicht über einen relativen Import (N127)."""
+    tabu = RICHTUNG[paket]
+    verstoesse = [
+        f"{datei.relative_to(SRC)}: {', '.join(sorted(treffer))}"
+        for datei in _dateien(paket)
+        if (treffer := (_app_pakete(datei) & tabu))
+    ]
+    assert not verstoesse, f"{paket}/ darf {sorted(tabu)} nicht importieren:\n  " + "\n  ".join(
+        verstoesse
+    )
+
+
+def test_scan_findet_erweiterungen_relative_und_dynamische_importe(tmp_path, monkeypatch) -> None:
+    """Der Scan selbst: Flet-Erweiterung, relativer Import nach ui/, importlib mit Namen."""
+    import sys
+
+    monkeypatch.setattr(sys.modules[__name__], "SRC", tmp_path)
+    (tmp_path / "core").mkdir()
+    datei = tmp_path / "core" / "x.py"
+    datei.write_text(
+        "import flet_geolocator\n"
+        "from ..ui import state\n"
+        "from .. import devices\n"
+        "import importlib\n"
+        "importlib.import_module('scipy.signal')\n"
+        "__import__('flet')\n",
+        encoding="utf-8",
+    )
+    assert {"flet", "scipy"} <= _importierte_wurzeln(datei)
+    assert _app_pakete(datei) == {"ui", "devices"}
 
 
 def test_app_importiert_nie_scipy() -> None:

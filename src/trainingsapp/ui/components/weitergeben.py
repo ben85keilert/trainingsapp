@@ -16,6 +16,7 @@ from pathlib import Path
 import flet as ft
 
 from trainingsapp.config import datenverzeichnis
+from trainingsapp.ui import systemdialog
 
 
 async def weitergeben(page: ft.Page, name: str, daten: bytes, mime: str) -> None:
@@ -27,13 +28,17 @@ async def weitergeben(page: ft.Page, name: str, daten: bytes, mime: str) -> None
     meldung: str | None = None
     try:
         if page.web or (page.platform is not None and page.platform.is_mobile()):
-            await ft.Share().share_files(
-                [ft.ShareFile.from_bytes(daten, mime_type=mime, name=name)], subject=name
+            await systemdialog.mit(
+                ft.Share().share_files(
+                    [ft.ShareFile.from_bytes(daten, mime_type=mime, name=name)], subject=name
+                )
             )
         else:
             try:
-                ziel = await ft.FilePicker().save_file(
-                    dialog_title="Exportieren", file_name=name, src_bytes=daten
+                ziel = await systemdialog.mit(
+                    ft.FilePicker().save_file(
+                        dialog_title="Exportieren", file_name=name, src_bytes=daten
+                    )
                 )
             except Exception:
                 ordner = datenverzeichnis() / "Export"
@@ -58,12 +63,16 @@ async def datei_weitergeben(page: ft.Page, pfad: Path, name: str, mime: str) -> 
             await weitergeben(page, name, pfad.read_bytes(), mime)
             return
         if page.platform is not None and page.platform.is_mobile():
-            await ft.Share().share_files(
-                [ft.ShareFile(path=str(pfad), mime_type=mime, name=name)], subject=name
+            await systemdialog.mit(
+                ft.Share().share_files(
+                    [ft.ShareFile(path=str(pfad), mime_type=mime, name=name)], subject=name
+                )
             )
         else:
             try:
-                ziel = await ft.FilePicker().save_file(dialog_title="Speichern", file_name=name)
+                ziel = await systemdialog.mit(
+                    ft.FilePicker().save_file(dialog_title="Speichern", file_name=name)
+                )
             except Exception:
                 ordner = datenverzeichnis() / "Export"
                 ordner.mkdir(parents=True, exist_ok=True)

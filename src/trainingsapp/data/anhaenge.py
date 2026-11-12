@@ -35,7 +35,7 @@ from trainingsapp.core.anhaenge import (
     AnhangMitBezug,
     Qualitaet,
     Umfang,
-    jpeg_ohne_metadaten,
+    bild_ohne_metadaten,
     mp4_ortsboxen,
     video_max_lesen,
     zusammenfassung,
@@ -123,9 +123,10 @@ def mp4_ort_entfernen(pfad: Path) -> int:
 
 
 def jpeg_datei_ohne_metadaten(pfad: Path) -> bool:
-    """`core.anhaenge.jpeg_ohne_metadaten` auf eine Datei — ``True``, wenn etwas wegfiel."""
+    """`core.anhaenge.bild_ohne_metadaten` auf eine Datei (JPEG, auch PNG und GIF) — ``True``,
+    wenn etwas wegfiel. Lässt sich das Bild nicht ablaufen: `NichtBereinigbar`."""
     daten = pfad.read_bytes()
-    ohne = jpeg_ohne_metadaten(daten)
+    ohne = bild_ohne_metadaten(daten)
     if ohne == daten:
         return False
     _atomar_schreiben(pfad, ohne)

@@ -467,3 +467,124 @@ def test_neuaufbau_von_aussen_wartet_auf_ein_formular_mit_eingaben(umgebung) -> 
     assert seite.views[-1] is oben and name.value == "Brücke hoch"
     state.neu_zeichnen()  # die Person selbst (ein Knopf der Ansicht) baut weiter neu
     assert seite.views[-1] is not oben
+
+
+# -- Durchsicht 11.11.2026: „Speichern“ und „Abbrechen“ führen dorthin, woher man kam ---------
+
+
+def _ueberall(c, gesehen=None):
+    """Alle Controls unter ``c`` — über jedes Feld, auch ``actions`` und Blätter."""
+    import dataclasses
+
+    gesehen = set() if gesehen is None else gesehen
+    if not isinstance(c, ft.BaseControl) or id(c) in gesehen:
+        return
+    gesehen.add(id(c))
+    yield c
+    for feld in dataclasses.fields(c):
+        if feld.name.startswith("_") or feld.name in ("parent", "page"):
+            continue
+        wert = getattr(c, feld.name, None)
+        for k in wert if isinstance(wert, list | tuple) else [wert]:
+            yield from _ueberall(k, gesehen)
+
+
+def _formular_knopf(ansicht, speichern: bool):
+    """✕ bzw. „Speichern“ der Formular-Titelleiste (`components/formular.py`)."""
+    knoepfe = [a for a in ansicht.appbar.actions if isinstance(a, ft.IconButton | ft.TextButton)]
+    return knoepfe[-1] if speichern else knoepfe[-2]
+
+
+@pytest.mark.parametrize("speichern", [False, True])
+def test_uebung_bearbeiten_aus_der_einzeluebung_fuehrt_zur_info_zurueck(
+    umgebung, speichern
+) -> None:
+    """Einzelübung → Info → Stift → „Speichern“/„Abbrechen“: wieder die Info unter der
+    Einzelübung — nicht eine zweite Übungsseite `/uebung/<id>` darüber."""
+    seite, _ = umgebung()
+    u = seed_id("kniebeuge")
+    weg = [f"/training/{u}", f"/training/{u}/info", f"/uebung/{u}/bearbeiten"]
+    for route in weg:
+        seite.gehe(route)
+    assert seite.routen() == ["/", *weg]
+    asyncio.run(_formular_knopf(seite.views[-1], speichern).on_click())
+    assert seite.routen() == ["/", *weg[:2]]
+    seite.zurueck()
+    assert seite.routen() == ["/", weg[0]]
+
+
+def test_uebung_bearbeiten_aus_plan_info_und_kopie(umgebung) -> None:
+    """Aus der Übungsseite unter dem Plan ebenso; eine Kopie zeigt nach dem Speichern ihre
+    eigene Seite, nicht die des Originals darunter."""
+    from trainingsapp.core.models import Exercise
+
+    seite, state = umgebung()
+    plan = _plan(state)
+    item = plan.items[0]
+    info = f"/plan/{plan.id}/info/{item.id}"
+    for route in (f"/plan/{plan.id}", info, f"/uebung/{item.exercise_id}/bearbeiten"):
+        seite.gehe(route)
+    asyncio.run(_formular_knopf(seite.views[-1], True).on_click())
+    assert seite.routen() == ["/", f"/plan/{plan.id}", info]
+    kopie = Exercise(name="Kniebeuge (Kopie)")
+    state.uebungen.speichern(kopie)
+    seite.gehe("/")
+    seite.gehe(f"/uebung/{item.exercise_id}")
+    seite.gehe(f"/uebung/{kopie.id}/bearbeiten")
+    asyncio.run(_formular_knopf(seite.views[-1], True).on_click())
+    assert seite.routen() == ["/", f"/uebung/{item.exercise_id}", f"/uebung/{kopie.id}"]
+
+
+@pytest.mark.parametrize("speichern", [False, True])
+def test_timer_editor_fuehrt_dorthin_zurueck_woher_man_kam(umgebung, speichern) -> None:
+    """Der Editor öffnet auch direkt aus dem Uhr-Blatt der Einzelübung („Mit Abschnitten …“)
+    und aus „Alle Timer“ — „Übernehmen“/„Abbrechen“ führen dorthin, nicht auf die
+    Timer-Seite."""
+    seite, state = umgebung()
+    u = seed_id("kniebeuge")
+    einzel = f"/training/{u}"
+    seite.gehe(einzel)
+    seite.gehe(f"{einzel}/timer/uebung/{u}/bearbeiten/einmal")
+    assert seite.routen() == ["/", einzel, f"{einzel}/timer/uebung/{u}/bearbeiten/einmal"]
+    asyncio.run(_formular_knopf(seite.views[-1], speichern).on_click())
+    assert seite.routen() == ["/", einzel]
+    profil = state.timer_profile()[0]
+    alle = "/einstellungen/uhr/timer/alle"
+    weg = ["/einstellungen", "/einstellungen/uhr", alle]
+    seite.gehe("/")
+    for route in (*weg, f"/einstellungen/uhr/timer/bearbeiten/{profil.id}"):
+        seite.gehe(route)
+    asyncio.run(_formular_knopf(seite.views[-1], speichern).on_click())
+    assert seite.routen() == ["/", *weg]
+    # Über der Timer-Seite bleibt es, wie es war
+    seite.gehe("/")
+    seite.gehe("/timer")
+    seite.gehe(f"/timer/bearbeiten/{profil.id}")
+    asyncio.run(_formular_knopf(seite.views[-1], speichern).on_click())
+    assert seite.routen() == ["/", "/timer"]
+
+
+def test_nachtragen_uebung_ansehen_fuehrt_nicht_ins_leere(umgebung) -> None:
+    """„Übung ansehen“ im Varianten-Blatt des Nachtrags: bisher `/nachtragen/<übung>/info/…`,
+    eine Route, die niemand baut — jetzt die Übungsseite darüber, Zurück führt zum Nachtrag."""
+    seite, _ = umgebung()
+    u = seed_id("kniebeuge")
+    nachtrag = f"/nachtragen/{u}"
+    seite.gehe(nachtrag)
+    assert seite.routen() == ["/", nachtrag]
+    etikett = next(
+        c
+        for c in _ueberall(seite.views[-1])
+        if isinstance(c, ft.IconButton) and str(c.tooltip or "").startswith("Variante")
+    )
+    etikett.on_click()
+    blatt = seite.dialoge[-1]
+    ansehen = next(
+        c for c in _ueberall(blatt) if isinstance(c, ft.TextButton) and c.content == "Übung ansehen"
+    )
+    ansehen.on_click(None)
+    asyncio.run(blatt.on_dismiss(None))  # Flutter meldet: das Blatt ist zu
+    assert seite.route == f"/uebung/{u}"
+    assert seite.routen() == ["/", nachtrag, f"/uebung/{u}"]
+    seite.zurueck()
+    assert seite.routen() == ["/", nachtrag]

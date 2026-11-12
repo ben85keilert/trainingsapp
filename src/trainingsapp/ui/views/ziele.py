@@ -16,7 +16,7 @@ from datetime import date
 from typing import Any
 
 from trainingsapp.core import tagesfelder as tf
-from trainingsapp.core.models import Plan
+from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.ui.components import ziele as z
 from trainingsapp.ui.components.tagesfeld_blatt import tagesfeld_blatt
 from trainingsapp.ui.state import AppState
@@ -34,11 +34,20 @@ def _route(page: Any, pfad: str) -> Callable[[], Any]:
 
 
 def ueben_ziele(
-    state: AppState, uebung_id: str, plan_ids: Iterable[str], page: Any
+    state: AppState,
+    uebung_id: str,
+    plan_ids: Iterable[str],
+    page: Any,
+    uebung: Exercise | None = None,
 ) -> list[z.Ziel]:
     """„Üben“ je Plan, in dem die Übung heute noch steht (bei der Übung, wie „Weiter mit“),
-    dann die Standardübung — nichts für gelöschte oder archivierte Übungen."""
-    aktuell = state.uebungen.laden(uebung_id)
+    dann die Standardübung — nichts für gelöschte oder archivierte Übungen. ``uebung``: die
+    schon geladene Übung (eine Liste baut das je Zeile — nicht je Zeile neu lesen)."""
+    aktuell = (
+        uebung
+        if uebung is not None and uebung.deleted_at is None
+        else state.uebungen.laden(uebung_id)
+    )
     if aktuell is None or aktuell.archived:
         return []
     out: list[z.Ziel] = []
@@ -74,16 +83,20 @@ def ziele_fuer(
     strecke_id: str | None = None,
     danach: Callable[[], Any] | None = None,
     bearbeiten: bool = False,
+    uebung: Exercise | None = None,
 ) -> list[z.Ziel]:
     """Alle Wege zu dieser Übung, in fester Folge: Einträge · Üben … · Nachtragen · Verlauf ·
     Tag · Übungsseite (Strecke statt Einträge bei einem Training). ``hier``: Schlüssel
     der Ziele, auf denen man schon steht. ``danach``: läuft, wenn das Blatt „Einträge des
-    Tages“ zu ist (die Liste neu lesen)."""
+    Tages“ zu ist (die Liste neu lesen). ``uebung``: die schon geladene Übung — Katalog und
+    Heute bauen die Ziele je Zeile, sonst läse jede Zeile die Übung zweimal einzeln nach
+    (Durchsicht 11.11.2026: Katalog mit 300 Übungen 2 174 Abfragen)."""
     weg = set(hier)
     plan_ids = [p for p in plan_ids if p]
     basis = "" if tag is None or tag == state.heute() else f"/tag/{tag.isoformat()}"
     letzter_plan = plan_ids[-1] if plan_ids else None
-    uebung = state.uebungen.laden(uebung_id, mit_geloeschten=True)
+    if uebung is None:
+        uebung = state.uebungen.laden(uebung_id, mit_geloeschten=True)
     out: list[z.Ziel] = []
     if strecke_id is not None and z.STRECKE not in weg:
         out.append(z.Ziel(z.STRECKE, _route(page, f"/ausdauer/{strecke_id}")))
@@ -108,7 +121,7 @@ def ziele_fuer(
         route = nachtragen_route(basis, uebung_id, letzter_plan)
         out.append(z.Ziel(z.NACHTRAGEN, _route(page, route)))
     if z.UEBEN not in weg:
-        out.extend(ueben_ziele(state, uebung_id, plan_ids, page))
+        out.extend(ueben_ziele(state, uebung_id, plan_ids, page, uebung))
     if z.VERLAUF not in weg:
         out.append(z.Ziel(z.VERLAUF, _route(page, f"/verlauf/{uebung_id}")))
     if tag is not None and z.TAG not in weg:

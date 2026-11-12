@@ -1186,3 +1186,120 @@ async def test_teile_zusammenfuegen_ergibt_einen_strom(tmp_path) -> None:
         teile_zusammenfuegen([ganz.pfad, teil1.pfad])
     with pytest.raises(ValueError, match="überschneiden sich"):
         teile_zusammenfuegen([teil1.pfad, teil1.pfad])
+
+
+# -- Durchsicht 10.11.2026: H60, H61, H65, H89, H90 ------------------------------------------
+
+
+async def _aufnehmend(tmp_path, schlaege: int = 30) -> tuple[Messlauf, asyncio.Task]:
+    lauf = Messlauf(SimulatedSource(tempo=40.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    while lauf.aufnahme is None or len(lauf.aufnahme.beats) < schlaege:
+        await asyncio.sleep(0.01)
+    return lauf, task
+
+
+async def test_aufnahmestart_beginnt_die_gurt_warnung_neu(tmp_path) -> None:
+    """H61: Die Sperrfrist rechnet auf der Live-Achse, die mit der Aufnahme bei 0 beginnt —
+    ein Alarm von vorher (bei 29 min) hielte sonst bis 31 min jeden neuen zurück."""
+    lauf = Messlauf(SimulatedSource(tempo=40.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    wache = lauf.artefaktwache
+    assert wache.pruefen(0.2, 1740.0) is not None and wache.alarme == 1
+    lauf.aufnahme_starten()
+    assert lauf.artefaktwache is wache and lauf.warnung is None
+    assert wache.pruefen(0.2, 200.0) is not None
+    assert wache.alarme == 2  # der Zähler läuft weiter (Uhr-Kanal vergleicht ihn)
+
+
+async def test_backup_neben_fremder_messdatei_derselben_sekunde_bleibt_erhalten(tmp_path) -> None:
+    """H65: Liegt unter dem Namen des Backups schon eine **andere** Messung (zwei Aufnahmen
+    in derselben Startsekunde), ist das Backup nicht „schon gespeichert“ — es wird unter dem
+    nächsten freien Namen gesichert, die fremde Datei bleibt Byte für Byte."""
+    from hrv_core.aufnahme import backup_lesen
+
+    from trainingsapp.devices.messlauf import backup_wiederherstellen
+
+    await _abgestuerzt(tmp_path)
+    backup = next(tmp_path.rglob(".backup_*.json"))
+    rec, _ = backup_lesen(backup)
+    fremd = backup.parent / rec.dateiname()
+    doc = rec.to_dict()
+    doc["messungen"] = doc["messungen"][5:15]  # andere Schläge, derselbe Name
+    fremd.write_text(json.dumps(doc), encoding="utf-8")
+    vorher = fremd.read_bytes()
+
+    ergebnis = backup_wiederherstellen(backup)
+    assert ergebnis is not None and ergebnis.pfad != fremd
+    assert ergebnis.pfad.name == fremd.stem + "_1.json"
+    assert len(laden(ergebnis.pfad).beats) == len(rec.beats)
+    assert fremd.read_bytes() == vorher and not backup.exists()
+
+
+async def test_teilen_sichert_vorher_den_stand_von_jetzt(tmp_path, monkeypatch) -> None:
+    """H89: Scheitert das Schreiben von Teil 1, bleibt nur sein Backup — es muss den Stand
+    beim Teilen haben, nicht den von vor bis zu 15 s."""
+    from hrv_core.aufnahme import backup_lesen
+
+    lauf, task = await _aufnehmend(tmp_path)
+    lauf.notiz_hinzufuegen("kurz vor dem Teilen")
+    alt = lauf.aufnahme
+    assert alt is not None
+    n = len(alt.beats)
+
+    def voll(*_a, **_k):
+        raise OSError("Speicher voll")
+
+    monkeypatch.setattr(lauf, "_schreiben", voll)
+    with pytest.raises(OSError):
+        await lauf.aufnahme_teilen_async(tmp_path)
+    task.cancel()
+    assert lauf.aufnahme is not alt  # Teil 2 läuft trotzdem
+    backup = next(p for p in tmp_path.rglob(".backup_*.json") if alt.backup_name() == p.name)
+    rec, _ = backup_lesen(backup)
+    assert len(rec.beats) == n
+    assert [e["text"] for e in rec.ereignisse] == ["kurz vor dem Teilen"]
+
+
+async def test_zwei_zwischenstaende_zugleich_schreiben_nur_einen(tmp_path) -> None:
+    """H90: Der Schutz gegen den Doppeltipp liegt im Messlauf — zwei gleichzeitige Aufrufe
+    wählten im Thread sonst denselben freien Pfad."""
+    lauf, task = await _aufnehmend(tmp_path)
+    a, b = await asyncio.gather(
+        lauf.aufnahme_zwischenstand_async(tmp_path), lauf.aufnahme_zwischenstand_async(tmp_path)
+    )
+    assert (a is None) != (b is None)
+    assert len(lauf._zwischen) == 1 and len(list(tmp_path.rglob("*_zwischen*.json"))) == 1
+    # Danach geht wieder einer
+    dritter = await lauf.aufnahme_zwischenstand_async(tmp_path)
+    task.cancel()
+    assert dritter is not None and len(lauf._zwischen) == 2
+
+
+async def test_am_zwischenstand_verschobene_grenze_ersetzt_die_alte(tmp_path) -> None:
+    """H60: Wer am Zwischenstand eine Abschnittsgrenze verschiebt, hat in der ganzen Datei
+    **eine** Grenz-Notiz je Kennung — die verschobene; vorher standen beide darin, und
+    `grenzen_aus_notizen` nahm die alte. Gelesen werden die Zwischenstände in einem Thread."""
+    from trainingsapp.core import abschnitte
+
+    lauf, task = await _aufnehmend(tmp_path)
+    kennung = lauf.abschnitt_starten("Behandlung")
+    lauf.notiz_hinzufuegen("frei")
+    zwischen = await lauf.aufnahme_zwischenstand_async(tmp_path)
+    assert zwischen is not None and kennung is not None
+
+    doc = json.loads(zwischen.pfad.read_text(encoding="utf-8"))
+    grenze = next(e for e in doc["ereignisse"] if abschnitte.kennung_von(e) == kennung)
+    grenze["t_wall_s"] = round(float(grenze["t_wall_s"]) / 2, 2)  # nach vorn geschoben
+    grenze["beat_index"] = 2
+    zwischen.pfad.write_text(json.dumps(doc), encoding="utf-8")
+
+    ganz = await lauf.aufnahme_stoppen_async(tmp_path)
+    task.cancel()
+    assert ganz is not None and ganz.ersetzt == (zwischen.pfad,)
+    notizen = laden(ganz.pfad).ereignisse
+    grenzen = [e for e in notizen if abschnitte.kennung_von(e) == kennung]
+    assert len(grenzen) == 1 and grenzen[0]["beat_index"] == 2
+    assert [e["text"] for e in notizen].count("frei") == 1

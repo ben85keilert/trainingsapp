@@ -358,3 +358,15 @@ def test_vorlagen_in_gruppen_und_messwert_lesen() -> None:
     assert tf.teile_lesen(bd.spec)[2].optional
     with pytest.raises(ValueError):
         tf.teile_pruefen([tf.Teil("a", "x", 10, 5)])
+
+
+def test_zweite_korrektur_derselben_zeile_bleibt_ein_wert(con, profil, felder, werte) -> None:
+    """D19, nachgezogen 11.11.2026: Nennt die Korrektur eine schon überholte Zeile, gilt ihr
+    gültiger Stand — sonst stünden zwei gültige Werte am Tag (Tagessumme doppelt)."""
+    feld = _ibu(profil)
+    felder.speichern(feld)
+    w = werte.hinzufuegen(feld, TAG, _um(8), wert=1, variante="400")
+    werte.korrigieren(w.id, result=tf.ergebnis(2, "400"))
+    werte.korrigieren(w.id, result=tf.ergebnis(3, "400"))  # noch einmal die alte Zeile
+    (gueltig,) = werte.am_tag(profil.id, TAG)
+    assert gueltig.wert == 3

@@ -67,6 +67,9 @@ from trainingsapp.ui.components.srpe import srpe_zeile
 
 _log = logging.getLogger(__name__)
 
+#: Tempo der Strecke: Zeiten auf der Wanduhr der Datei (s) und m/s
+type Tempo = tuple[list[float], list[float]]
+
 
 @dataclass
 class HfKontext:
@@ -84,7 +87,9 @@ class HfKontext:
     #: Einen eigenen Abschnitt anlegen (Name, von, bis auf der Wanduhr) — Notizpaar + Sidecar
     abschnitt_anlegen: Callable[[str, float, float], None]
     #: Tempo (m/s) auf der Wanduhr der Datei, wenn eine Strecke dazugehört
-    tempo: Callable[[], tuple[list[float], list[float]] | None] = lambda: None
+    #: Tempo der Strecke: das Ergebnis — oder eine Funktion, die es aus der Datei liest und
+    #: im Thread läuft (der Aufruf selbst fragt nur die Datenbank, im Loop; H100)
+    tempo: Callable[[], Tempo | Callable[[], Tempo | None] | None] = lambda: None
     #: Abschnitte lassen sich anlegen (nicht bei reinem Puls ohne Herzuhr)
     abschnitte_moeglich: bool = True
     #: Die Atemlage der Aufnahme nach Regel F6 (B2b; `core.atem_auswertung.atemlage_aus`) —
@@ -144,17 +149,18 @@ class HfAuswertungSicht:
             atemlage=atemlage,
         )
 
-    def _tempo_lesen(self) -> tuple[list[float], list[float]] | None:
-        """Die Strecke zur Aufnahme — im Loop (Datenbank), nie im Thread."""
+    async def _tempo_lesen(self) -> Tempo | None:
+        """Die Strecke zur Aufnahme — die Datenbank im Loop, die Datei im Thread (H100)."""
         try:
-            return self.k.tempo()
+            t = self.k.tempo()
+            if callable(t):
+                t = await asyncio.to_thread(t)
+            return t
         except Exception:
             _log.exception("Tempo der Strecke nicht lesbar")
             return None
 
-    def _tempo_rechnen(
-        self, a: HfAuswertung, t: tuple[list[float], list[float]] | None
-    ) -> dict[str, Any]:
+    def _tempo_rechnen(self, a: HfAuswertung, t: Tempo | None) -> dict[str, Any]:
         """HF je Tempo und Entkopplung — nur mit Strecke und Reihe."""
         if t is None or a.reihe is None or a.reihe.n == 0 or not t[0]:
             return {}
@@ -208,7 +214,7 @@ class HfAuswertungSicht:
                     self.stand.cache_profil = a.profil_stand
                     self.stand.ungespeichert = False
             self.stand.auswertung = a
-            tempo = self._tempo_lesen()
+            tempo = await self._tempo_lesen()
             self.stand.tempo = await asyncio.to_thread(self._tempo_rechnen, a, tempo)
             self.stand.veraltet = False
         except Exception as fehler:

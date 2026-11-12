@@ -10,7 +10,7 @@ und fragt je nachdem, was darunter liegt:
 - **Paketindex** → „Als Quelle eintragen?“ mit dem Ort (Einstellungen → Updates →
   Quellen); eingetragen, geprüft, die Seite Updates geöffnet.
 - **Paketdatei** → die bekannte Rückfrage (`views.pakete.import_rueckfrage`) mit dem
-  Satz, dass die Adresse am Paket hinterlegt wird (Einstellungen → Übungspakete → ‹Name›)
+  Satz, dass die Adresse am Paket hinterlegt wird (Einstellungen → Pakete → ‹Name›)
   und die App dort nach einer neueren Version fragt. Nach dem Import ist der Link die
   Quelle des Pakets (`PaketRepo.quelle_setzen(…, "datei")`).
 
@@ -42,7 +42,7 @@ from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.state import AppState
 
 ORT_QUELLEN = "Einstellungen → Updates → Quellen"
-ORT_PAKETE = "Einstellungen → Übungspakete"
+ORT_PAKETE = "Einstellungen → Pakete"
 
 
 async def link_importieren(

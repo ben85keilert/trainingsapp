@@ -623,6 +623,8 @@ def trend(werte: Sequence[tuple[date, float]], heute: date, tage: int = 28) -> f
     >>> w = [(date(2026, 9, 10), 30.0), (date(2026, 10, 1), 40.0), (date(2026, 10, 15), 44.0)]
     >>> trend(w, date(2026, 10, 17)), trend(w[1:], date(2026, 10, 17))
     (0.4, None)
+    >>> trend([(date(2026, 9, 10), -4.0), (date(2026, 10, 15), -2.0)], date(2026, 10, 17))
+    0.5
     """
     grenze = heute - timedelta(days=tage)
     jetzt = [w for t, w in werte if grenze < t <= heute]
@@ -630,7 +632,9 @@ def trend(werte: Sequence[tuple[date, float]], heute: date, tage: int = 28) -> f
     if not jetzt or not vorher or sum(vorher) == 0:
         return None
     a, b = sum(jetzt) / len(jetzt), sum(vorher) / len(vorher)
-    return round((a - b) / b, 3)
+    if b == 0:
+        return None
+    return round((a - b) / abs(b), 3)  # auch bei negativen Skalen: gestiegen ist „mehr“
 
 
 # ---------------------------------------------------------------------------

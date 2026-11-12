@@ -420,6 +420,8 @@ def als_standard(item: PlanItem, uebung: Exercise) -> Exercise:
     [('reps', [10, 15, 20]), ('hold', [15, 30, 45, 60]), ('weight', [8])]
     >>> als_standard(PlanItem(timer={"uhr": False}), u0).uhr
     False
+    >>> als_standard(PlanItem(timer={"zaehlt": False}), u0).zeit_zaehlt
+    False
     >>> from trainingsapp.core.takt import AUS, VORLAGEN
     >>> u = als_standard(PlanItem(acc=SensorWahl(atmung=True), takt=VORLAGEN["box_4"]), u0)
     >>> u.beschleunigung.atmung, u.takt.name
@@ -457,6 +459,9 @@ def als_standard(item: PlanItem, uebung: Exercise) -> Exercise:
         regionen=list(uebung.regionen),
         timer=profile,
         uhr=uebung.uhr if wahl.uhr is None else wahl.uhr,
+        # „Zeit der Uhr zählt“ der Planübung wandert mit (N106, Ben 11.11.2026) —
+        # `vom_standard` nimmt es der Planübung, verloren ginge es sonst
+        zeit_zaehlt=uebung.zeit_zaehlt if wahl.zaehlt is None else wahl.zaehlt,
         beschleunigung=sensor_von(item, uebung),
         takt=takt_von(item, uebung),
     )
@@ -528,6 +533,8 @@ def uebernehmen_vorschau(
     ]
     if neu.uhr != uebung.uhr:
         aenderungen.append("Uhr an" if neu.uhr else "Uhr aus")
+    if neu.zeit_zaehlt != uebung.zeit_zaehlt:
+        aenderungen.append("Zeit der Uhr zählt" if neu.zeit_zaehlt else "Zeit der Uhr zählt nicht")
     if neu.timer[:1] != list(uebung.timer)[:1] and (erstes := profile_der_uebung(neu)):
         aenderungen.append(f"Timer „{erstes[0].name}“ wird Vorgabe")
     if sensor_eigen(item, uebung):

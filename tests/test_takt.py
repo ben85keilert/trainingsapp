@@ -591,3 +591,22 @@ def test_takt_pruefen_nennt_bild_unter_den_bekannten_schluesseln() -> None:
         "Phase 1: unbekannter Schlüssel „farbe“ — wird überlesen (bekannt: name, dauer_s, "
         "art, klang, bild)"
     ]
+
+
+def test_tempo_an_der_klemme_schreibt_kein_zweites_takt_ereignis() -> None:
+    """N65: Takt-Tempo × Regler ist auf 0,5–2,0 begrenzt. Ein Takt mit Tempo 2,0 ändert sich
+    mit dem Regler auf 2,0 nicht — dann steht auch kein zweites ``timer/takt`` in der
+    Zeitleiste; ein Zug, der wirkt, schreibt weiter eines."""
+    uhr = Uhr()
+    takt = VORLAGEN["atmung_4_6"].mit_tempo(2.0)
+    lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("Atmen", 120, takt=takt)]))
+    e = Einheitslauf(uhr=uhr, titel="Atmen")
+    e.hinzufuegen(TimerBaustein(lauf))
+    e.starten()
+    for dt, faktor in ((5, 2.0), (5, 1.5), (5, 0.5), (5, None)):
+        uhr.t += dt
+        e.takt()
+        if faktor is not None:
+            lauf.tempo_setzen(faktor)
+    takte = [(x.t_s, x.daten["tempo"]) for x in e.ereignisse if x.art == "takt"]
+    assert takte == [(0.0, 2.0), (15.0, 1.0)]  # 2,0 × 2,0 und 2,0 × 1,5 bleiben 2,0

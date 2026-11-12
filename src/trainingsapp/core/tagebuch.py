@@ -117,7 +117,8 @@ def sammeln(
     ID → Name ihrer Tags), ``sessions`` (mit ihrem ersten Eintrag), ``eintraege`` (mit ihrer
     Session), ``aufnahmen`` (Anhänge mit ihrem Eintrag — je Eintrag eine Notiz `AUFNAHME`),
     ``tageswerte`` mit ihren ``tagesfelder`` (Wertezeile an der ersten Notiz des Tags, Texte
-    als `TAGESFELD`). Leere Notizen fallen weg.
+    als `TAGESFELD`). Leere Notizen fallen weg; eine Notiz zum Tag ohne Text (nur Foto oder
+    Audio — ``tage`` mit ``mit_leeren`` gelesen) gibt ihrer Aufnahme die Tags mit (N90).
 
     >>> from datetime import UTC
     >>> from .anhaenge import Anhang
@@ -150,6 +151,9 @@ def sammeln(
     >>> [(x.art, x.text, x.exercise_id, x.anhang_ids, x.bezug_id)
     ...  for x in sammeln([], [], [], [c])]
     [('aufnahme', '1 Audioaufnahme', None, ('c',), 'n1')]
+    >>> leer = DayNote(id="n1", date=date(2026, 10, 17), text="", tag_ids=("t1",))
+    >>> [(x.art, x.tags) for x in sammeln([leer], [], [], [c], tag_namen={"t1": "Tagebuch"})]
+    [('aufnahme', ('Tagebuch',))]
     >>> from . import tagesfelder as tf
     >>> ibu = tf.Tagesfeld(id="ibu", name="Ibu", spec=tf.spec_bauen(tf.ANZAHL, varianten=["400"]))
     >>> ess = tf.Tagesfeld(id="ess", name="Ernährung", spec=tf.spec_bauen(tf.TEXT))
@@ -174,6 +178,10 @@ def sammeln(
     [('workout', 'Workout Beine', 'zäh', 'Anstrengung 6', 'x', 'p')]
     """
     namen = tag_namen or {}
+    tage = list(tage)
+    #: die Tags je Notiz zum Tag — auch der Notizen ohne Text (nur Foto/Audio, N90): ihre
+    #: Aufnahme trägt sie, damit der Filter im Abschnitt „Notizen“ sie findet
+    tags_je_notiz = {d.id: tuple(t for t in d.tag_ids if t in namen) for d in tage}
     ergebnis = [
         Notiz(
             d.date,
@@ -255,6 +263,8 @@ def sammeln(
                 erste.anhang.aufgenommen,
                 bezug_id=notiz_id,
                 anhang_ids=_reihenfolge(liste),
+                tag_ids=tags_je_notiz.get(notiz_id or "", ()),
+                tags=tuple(namen[t] for t in tags_je_notiz.get(notiz_id or "", ())),
             )
         )
     return ergebnis
@@ -264,7 +274,8 @@ def nur_tag(notizen: Iterable[Notiz], tag_ids: Iterable[str] = (), suche: str = 
     """Der Abschnitt „Notizen“ (Ben, 2.11.2026): nur die Notizen zum Tag und die Aufnahmen an
     ihnen. ``tag_ids`` filtert (ODER; `OHNE_TAG` = ohne Tag), ``suche`` verlangt jedes Wort
     im Text oder in einem Tag-Namen — ohne Groß und klein (P102: „möglichst clever“).
-    Aufnahmen bleiben bei ihrer Notiz, wenn die durch den Filter kommt.
+    Aufnahmen bleiben bei ihrer Notiz, wenn die durch den Filter kommt; die Aufnahme einer
+    Notiz ohne Text (nur Foto/Audio, N90) wird selbst gefiltert — nach ihren Tags.
 
     >>> a = Notiz(date(2026, 10, 17), TAG, "Kniebeuge schwer", bezug_id="n1",
     ...           tag_ids=("k",), tags=("Kraft",))
@@ -281,28 +292,42 @@ def nur_tag(notizen: Iterable[Notiz], tag_ids: Iterable[str] = (), suche: str = 
     ['Kniebeuge schwer', '1 Foto']
     >>> nur_tag([a, b, f, p], suche="Gemüse")
     []
+    >>> g = Notiz(date(2026, 10, 18), AUFNAHME, "1 Audioaufnahme", bezug_id="n3",
+    ...           anhang_ids=("y",), tag_ids=("k",), tags=("Kraft",))
+    >>> h = Notiz(date(2026, 10, 19), AUFNAHME, "1 Foto", bezug_id="n4", anhang_ids=("z",))
+    >>> [n.text for n in nur_tag([b, g, h], ["k"])]
+    ['1 Audioaufnahme']
+    >>> [n.text for n in nur_tag([b, g, h], suche="kraft")]
+    ['1 Audioaufnahme']
+    >>> [n.text for n in nur_tag([b, g, h], [OHNE_TAG])]
+    ['müde', '1 Foto']
     """
     gewollt = set(tag_ids)
     woerter = [w.casefold() for w in suche.split()]
     alle = list(notizen)
     bleibt: set[str | None] = set()
     ergebnis: list[Notiz] = []
-    for n in alle:
-        if n.art != TAG:
-            continue
+
+    def passt(n: Notiz, text: str) -> bool:
         if gewollt and not (set(n.tag_ids) & gewollt or (OHNE_TAG in gewollt and not n.tag_ids)):
-            continue
-        heuhaufen = " ".join((n.text, *n.tags)).casefold()
-        if any(w not in heuhaufen for w in woerter):
-            continue
-        ergebnis.append(n)
-        bleibt.add(n.bezug_id)
+            return False
+        heuhaufen = " ".join((text, *n.tags)).casefold()
+        return all(w in heuhaufen for w in woerter)
+
+    mit_text = {n.bezug_id for n in alle if n.art == TAG}
     for n in alle:
-        if (
-            n.art == AUFNAHME
-            and not n.exercise_id
-            and (not (gewollt or woerter) or n.bezug_id in bleibt)
-        ):
+        if n.art == TAG and passt(n, n.text):
+            ergebnis.append(n)
+            bleibt.add(n.bezug_id)
+    for n in alle:
+        if n.art != AUFNAHME or n.exercise_id:
+            continue
+        if n.bezug_id in mit_text:
+            if n.bezug_id in bleibt:
+                ergebnis.append(n)
+        # die Notiz hat keinen Text: ihre Aufnahme trägt die Tags (N90) — gesucht wird nur
+        # in den Tag-Namen, „1 Foto“ ist kein Text der Person
+        elif passt(n, ""):
             ergebnis.append(n)
     return ergebnis
 

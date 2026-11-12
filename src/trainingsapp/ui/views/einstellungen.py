@@ -1,218 +1,241 @@
-"""Einstellungen — Route `/einstellungen`.
+"""Einstellungen — Route `/einstellungen`: nur noch das Menü (Ben, 11.11.2026).
 
-Vorn das aktive Profil wählen; anlegen, umbenennen und löschen in einer eigenen
-Ansicht (`/einstellungen/profile`). Die Tagesfelder des Profils
-(`/einstellungen/tagesfelder`, `views/tagesfelder.py`). Dazu die eigene Einteilung der Übungen
-(`/einstellungen/tags`: Typen und Regionen), der Paketmanager
-(`/einstellungen/pakete`: Übungspakete importieren, exportieren, entfernen), wie
-sie im Plan aussehen (`ui.state.PLAN_DARSTELLUNGEN`), Farbprofil und Hell/Dunkel
-des Profils (`einstellungen_darstellung`), der Weg zu den Einstellungen der
-HRV-Messung (`/einstellungen/hrv`), zum Timer, zum GPS-Vorabtest
-(`/einstellungen/gps-test`), Hilfe, Update-Prüfung und Edition.
+Bis 11.11.2026 lagen Profilwahl, Farbprofil, Geräte-Backup, lose Schalter und ein Dutzend
+Verweise untereinander auf dieser einen Seite — „sehr unübersichtlich“. Jetzt zeigt sie
+Menüzeilen (Symbol, Titel, **eine** Zeile mit dem Wichtigsten, Pfeil) in fünf Gruppen; alles
+Einstellbare liegt eine Ebene tiefer:
 
-Die Zeile „Updates“ führt zu `ui/views/updates.py`: App-Release (GitHub),
-Paketquellen, Neuigkeiten und die Schalter dazu (Ben, 16.10.2026).
+====================  ==============================  ===================================
+Gruppe                Zeile                           Seite
+====================  ==============================  ===================================
+Person                Profil                          `/einstellungen/profile`
+..                    Darstellung                     `/einstellungen/darstellung`
+Üben                  Übungen                         `/einstellungen/uebungen`
+..                    Timer und Takt                  `/einstellungen/uhr`
+..                    Tagesfelder                     `/einstellungen/tagesfelder`
+..                    Notiz-Tags                      `/einstellungen/notiz-tags`
+Messen                Herzfrequenz                    `/einstellungen/herzfrequenz`
+..                    HRV-Messung                     `/einstellungen/hrv`
+..                    Training und GPS                `/einstellungen/training`
+Inhalte und Daten     Pakete                          `/einstellungen/pakete`
+..                    Updates (nur Solo)              `/einstellungen/updates`
+..                    Anhänge                         `/einstellungen/anhaenge`
+..                    Daten und Sicherung             `/einstellungen/daten`
+App                   Hilfe und Über                  `/einstellungen/hilfe`
+====================  ==============================  ===================================
 
-Eine Sperre per PIN gibt es nur in der Praxis-Edition
-(`ist_aktiv("profil_sperre")`): Dort teilen sich mehrere Personen ein Gerät,
-und der Hinweis „Profilwechsel ist durch PIN geschützt" erscheint. In der
-Solo-Edition steht dazu nichts — es gibt nichts zu verbergen, was der
-Gerätebesitzer nicht ohnehin sieht.
+Die neuen Seiten (Übungen, Timer und Takt, Daten und Sicherung, Hilfe und Über) stehen in
+`einstellungen_seiten.py`, die Darstellung in `einstellungen_darstellung.py`. `MENUE` ist
+die Liste der Zeilen — `tests/test_ui_einstellungen.py` prüft, dass jede Seite gebaut wird
+und jede frühere Einstellung über sie erreichbar ist.
+
+Die Seiten der Einstellungen ersetzen einander im Stapel nicht (`navigation.geschwister`):
+Zurück führt dorthin, woher man kam.
 """
 
 from __future__ import annotations
 
-import contextlib
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import flet as ft
 
-from trainingsapp.config import app_version, edition, ist_aktiv
+from trainingsapp.config import app_version, ist_aktiv
 from trainingsapp.core.anhaenge import groesse_text
-from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
-from trainingsapp.core.sicherung import Sicherung
-from trainingsapp.core.timer import schnellzeiten_text
-from trainingsapp.ui.components.hilfe import hilfe_oeffner
-from trainingsapp.ui.components.karte import hinweis, karte, titel
+from trainingsapp.core.darstellung import HELLIGKEITEN
+from trainingsapp.core.eintraege import OFFEN_WAHL
+from trainingsapp.ui.components.karte import karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.views.einstellungen_darstellung import darstellung_karte
 from trainingsapp.ui.views.timer import timer_knopf
 
 
-def _messung_laeuft(state: AppState) -> bool:
-    """Läuft gerade eine HRV-Aufnahme oder ein Ausdauertraining?"""
-    messlauf = state.messlauf
-    if messlauf is not None and messlauf.aufnahme is not None:
-        return True
-    ausdauer = state.ausdauer
-    return ausdauer is not None and not ausdauer.fertig
+@dataclass(frozen=True)
+class Zeile:
+    """Eine Menüzeile: wohin sie führt und was in ihrer einen Zeile Untertitel steht."""
+
+    gruppe: str
+    titel: str
+    symbol: ft.IconData
+    route: str
+    untertitel: Callable[[AppState], str]
+    #: Funktionsschalter (`config.ist_aktiv`) — einer genügt; leer = immer
+    schalter: tuple[str, ...] = ()
+
+    def sichtbar(self) -> bool:
+        return not self.schalter or any(ist_aktiv(s) for s in self.schalter)
+
+
+def _profil(state: AppState) -> str:
+    anzahl = len(state.profile.alle())
+    return f"{state.profil.name} · " + ("1 Profil" if anzahl == 1 else f"{anzahl} Profile")
+
+
+def _darstellung(state: AppState) -> str:
+    d = state.darstellung()
+    verlauf = " · Verlauf" if d.verlauf and d.farben().dunkel.verlauf is not None else ""
+    return f"{d.farben().name} · {HELLIGKEITEN[d.helligkeit]}{verlauf}"
+
+
+def _uebungen(state: AppState) -> str:
+    offen = OFFEN_WAHL.get(state.eintrag_offen_min(), "")
+    offen = offen.replace(" ohne Satz", "") if "ohne Satz" in offen else "bis „Abschließen“"
+    return (
+        f"Eintrag offen: {offen} · Fokus {'an' if state.fokus_auto() else 'aus'} · "
+        f"{len(state.tags.namen('typ'))} Typen, {len(state.tags.namen('region'))} Regionen"
+    )
+
+
+def _uhr(state: AppState) -> str:
+    return f"Zuletzt „{state.timer_profil().anzeigename}“ · Signale · Schnellzeiten"
+
+
+def _tagesfelder(state: AppState) -> str:
+    felder = state.tagesfelder.alle(state.profil.id)
+    aktiv = sum(1 for f in felder if f.aktiv)
+    aus = f" · {len(felder) - aktiv} aus" if len(felder) > aktiv else ""
+    return f"Unter Heute → „Zum Tag“ · {aktiv} aktiv{aus}"
+
+
+def _notiz_tags(state: AppState) -> str:
+    tags = state.notiz_tags.alle(state.profil.id)
+    mehr = f" · +{len(tags) - 4}" if len(tags) > 4 else ""
+    return " · ".join(t.name for t in tags[:4]) + mehr
+
+
+def _herzfrequenz(state: AppState) -> str:
+    hf = state.hf_profil()
+    if not hf.vollstaendig:
+        return "Ruhe-HF und HFmax fehlen · Bereiche · Zielbereich"
+    geschaetzt = " (geschätzt)" if hf.hfmax_geschaetzt else ""
+    return f"Ruhe {hf.ruhe_bpm:.0f} · HFmax {hf.hfmax_bpm:.0f}{geschaetzt} · Bereiche"
+
+
+def _hrv(state: AppState) -> str:
+    e = state.hrv_einstellungen()
+    reiter = "" if e.messung_anzeigen else " · Reiter „Messung“ aus"
+    return f"{len(e.kacheln)} Kacheln · Kurven · Korrektur · Diagnose{reiter}"
+
+
+def _training(state: AppState) -> str:
+    return "Strecke einfärben · Tempo und Pausen · Spalten · GPS-Test"
+
+
+def _pakete(state: AppState) -> str:
+    anzahl = len(state.pakete.alle())
+    return ("1 Paket" if anzahl == 1 else f"{anzahl} Pakete") + " · importieren, exportieren"
+
+
+def _updates(state: AppState) -> str:
+    return state.updates_label() or (
+        "App und Pakete · beim Start geprüft"
+        if state.update_pruefung()
+        else "App und Pakete · Prüfung beim Start aus"
+    )
+
+
+def _anhaenge(state: AppState) -> str:
+    umfang = state.anhaenge.gesamt(state.profil.id)
+    return f"{umfang.text} · {groesse_text(umfang.bytes)} · Qualität, Aufräumen"
+
+
+def _daten(state: AppState) -> str:
+    backup = (
+        f"Geräte-Backup {'an' if state.sicherung().an else 'aus'} · "
+        if ist_aktiv("geraete_sicherung")
+        else ""
+    )
+    return f"{backup}Papierkorb · Archiv"
+
+
+def _hilfe(state: AppState) -> str:
+    version, build = app_version()
+    return f"So wird eingegeben · Version {version}" + (
+        f" (Build {build})" if build is not None else ""
+    )
+
+
+PERSON = "Person"
+UEBEN = "Üben"
+MESSEN = "Messen"
+INHALTE = "Inhalte und Daten"
+APP = "App"
+
+#: Das Menü in seiner Reihenfolge: erst wer, dann was man täglich tut, dann die Messung,
+#: dann Inhalte und Daten, zuletzt die App selbst
+MENUE: tuple[Zeile, ...] = (
+    Zeile(PERSON, "Profil", ft.Icons.PERSON_OUTLINE, "/einstellungen/profile", _profil),
+    Zeile(
+        PERSON,
+        "Darstellung",
+        ft.Icons.PALETTE_OUTLINED,
+        "/einstellungen/darstellung",
+        _darstellung,
+    ),
+    Zeile(UEBEN, "Übungen", ft.Icons.FITNESS_CENTER, "/einstellungen/uebungen", _uebungen),
+    Zeile(UEBEN, "Timer und Takt", ft.Icons.TIMER_OUTLINED, "/einstellungen/uhr", _uhr),
+    Zeile(UEBEN, "Tagesfelder", ft.Icons.LABEL_OUTLINE, "/einstellungen/tagesfelder", _tagesfelder),
+    Zeile(UEBEN, "Notiz-Tags", ft.Icons.SELL_OUTLINED, "/einstellungen/notiz-tags", _notiz_tags),
+    Zeile(
+        MESSEN,
+        "Herzfrequenz",
+        ft.Icons.FAVORITE_BORDER,
+        "/einstellungen/herzfrequenz",
+        _herzfrequenz,
+    ),
+    Zeile(MESSEN, "HRV-Messung", ft.Icons.MONITOR_HEART_OUTLINED, "/einstellungen/hrv", _hrv),
+    Zeile(
+        MESSEN, "Training und GPS", ft.Icons.DIRECTIONS_RUN, "/einstellungen/training", _training
+    ),
+    Zeile(INHALTE, "Pakete", ft.Icons.INVENTORY_2_OUTLINED, "/einstellungen/pakete", _pakete),
+    Zeile(
+        INHALTE,
+        "Updates",
+        ft.Icons.SYSTEM_UPDATE,
+        "/einstellungen/updates",
+        _updates,
+        schalter=("update_pruefung", "paket_quellen"),
+    ),
+    Zeile(INHALTE, "Anhänge", ft.Icons.ATTACH_FILE, "/einstellungen/anhaenge", _anhaenge),
+    Zeile(INHALTE, "Daten und Sicherung", ft.Icons.BACKUP_OUTLINED, "/einstellungen/daten", _daten),
+    Zeile(APP, "Hilfe und Über", ft.Icons.HELP_OUTLINE, "/einstellungen/hilfe", _hilfe),
+)
+
+
+def menuezeile(
+    page: ft.Page,
+    titel_text: str,
+    untertitel: str,
+    symbol: ft.IconData,
+    route: str,
+) -> ft.ListTile:
+    """Eine Zeile, die auf eine Seite führt — auch für die Verweise in den Unterseiten."""
+
+    async def oeffnen() -> None:
+        await page.push_route(route)
+
+    return ft.ListTile(
+        leading=ft.Icon(symbol),
+        title=ft.Text(titel_text),
+        subtitle=ft.Text(untertitel, size=12, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+        if untertitel
+        else None,
+        trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+        on_click=oeffnen,
+        content_padding=ft.Padding.only(left=0, right=0),
+        dense=True,
+        data=route,  # wohin die Zeile führt — für Tests und zum Wiederfinden
+    )
 
 
 def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.View:
-    profil_liste = ft.Column(spacing=0)
-
-    def wechsler(profil_id: str) -> Callable[[], None]:
-        def handler() -> None:
-            vorher = state.profil
-            state.profil_wechseln(profil_id)
-            if _messung_laeuft(state):
-                # Messlauf und Ausdauerlauf haben sich ihr Startprofil gemerkt
-                page.show_dialog(
-                    ft.SnackBar(ft.Text(f"Die laufende Messung bleibt bei „{vorher.name}“."))
-                )
-            zeichnen()
-            page.update()
-            state.neu_zeichnen()  # jedes Profil bringt sein Farbprofil mit
-
-        return handler
-
-    def zeichnen() -> None:
-        profil_liste.controls = [
-            ft.ListTile(
-                leading=ft.Icon(
-                    ft.Icons.RADIO_BUTTON_CHECKED
-                    if p.id == state.profil.id
-                    else ft.Icons.RADIO_BUTTON_UNCHECKED
-                ),
-                title=ft.Text(p.name),
-                subtitle=ft.Text(f"Jahrgang {p.birth_year}", size=12) if p.birth_year else None,
-                on_click=wechsler(p.id),
-                content_padding=ft.Padding.only(left=0, right=0),
+    gruppen: dict[str, list[ft.Control]] = {}
+    for zeile in MENUE:
+        if zeile.sichtbar():
+            gruppen.setdefault(zeile.gruppe, []).append(
+                menuezeile(page, zeile.titel, zeile.untertitel(state), zeile.symbol, zeile.route)
             )
-            for p in state.profile.alle()
-        ]
-
-    def fokus_auto_setzen(e: ft.Event[ft.Switch]) -> None:
-        state.fokus_auto_setzen(bool(e.control.value))
-
-    def offen_setzen(e: ft.Event[ft.Dropdown]) -> None:
-        state.eintrag_offen_min_setzen(int(e.control.value or OFFEN_MIN_VORGABE))
-
-    def takt_vibration_setzen(e: ft.Event[ft.Switch]) -> None:
-        state.takt_vibration_setzen(bool(e.control.value))
-
-    def oeffner(route: str) -> Callable[[], object]:
-        async def handler() -> None:
-            await page.push_route(route)
-
-        return handler
-
-    zeichnen()
-
-    # -- Updates (`ui/views/updates.py`): App-Release, Paketquellen, Neuigkeiten -----------
-    version, build = app_version()
-    version_text = f"Version {version}" + (f" (Build {build})" if build is not None else "")
-    update_text = state.updates_label() or (
-        "App und Übungspakete · beim Start geprüft"
-        if state.update_pruefung()
-        else "App und Übungspakete · Prüfung beim Start aus"
-    )
-    update_zeilen = (
-        [
-            ft.ListTile(
-                leading=ft.Icon(ft.Icons.SYSTEM_UPDATE),
-                title=ft.Text("Updates"),
-                subtitle=ft.Text(update_text, size=12),
-                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-                on_click=oeffner("/einstellungen/updates"),
-                content_padding=ft.Padding.only(left=0, right=0),
-            )
-        ]
-        if ist_aktiv("update_pruefung") or ist_aktiv("paket_quellen")
-        else []
-    )
-
-    # -- Geräte-Backup (`core/sicherung.py`): Vorgabe aus, hier einschaltbar (S4) ---------
-    def sicherung_schalter(ev: ft.Event[ft.Switch]) -> None:
-        alt = state.sicherung()
-        state.sicherung_setzen(Sicherung(an=bool(ev.control.value), strecken=alt.strecken))
-        state.neu_zeichnen()  # der Strecken-Schalter erscheint oder verschwindet
-
-    def strecken_schalter(ev: ft.Event[ft.Switch]) -> None:
-        state.sicherung_setzen(Sicherung(an=True, strecken=bool(ev.control.value)))
-
-    sicherung = state.sicherung()
-    sicherung_karte = (
-        [
-            karte(
-                titel("Geräte-Backup"),
-                ft.Switch(
-                    label="Mit dem Gerät sichern",
-                    value=sicherung.an,
-                    on_change=sicherung_schalter,
-                ),
-                *(
-                    [
-                        ft.Switch(
-                            label="GPS-Strecken einschließen",
-                            value=sicherung.strecken,
-                            on_change=strecken_schalter,
-                        )
-                    ]
-                    if sicherung.an
-                    else []
-                ),
-                hinweis(
-                    "Aus (Vorgabe): Nichts aus der App geht ins Backup des Geräts — nach "
-                    "Gerätewechsel oder Neuinstallation ist alles weg, was du nicht exportiert "
-                    "hast. An: Datenbank und Messungen gehen in das Backup deines "
-                    "Google-Kontos (mit der Gerätesperre verschlüsselt, höchstens 25 MB) und "
-                    "kommen auf dem nächsten Gerät zurück. GPS-Strecken nur, wenn du sie "
-                    "ausdrücklich einschließt. Anhänge (Fotos, Videos, Audio) und Dateien aus "
-                    "Paketen gehen nie mit — sie sind zu groß; Pakete lassen sich neu laden."
-                ),
-            )
-        ]
-        if ist_aktiv("geraete_sicherung")
-        else []
-    )
-
-    # Nur die Praxis-Edition sperrt den Profilwechsel per PIN (Modul-Docstring)
-    sperre = (
-        [hinweis("Profilwechsel ist durch PIN geschützt.")] if ist_aktiv("profil_sperre") else []
-    )
-    e = state.hrv_einstellungen()
-    tag_text = f"{len(state.tags.namen('typ'))} Typen · {len(state.tags.namen('region'))} Regionen"
-    pakete = len(state.pakete.alle())
-    paket_text = "1 Paket installiert" if pakete == 1 else f"{pakete} Pakete installiert"
-    umfang = state.anhaenge.gesamt(state.profil.id)
-    anhang_text = f"{umfang.text} · {groesse_text(umfang.bytes)}"
-    felder = state.tagesfelder.alle(state.profil.id)
-    aktiv = sum(1 for f in felder if f.aktiv)
-    felder_text = f"{aktiv} aktiv" + (
-        f" · {len(felder) - aktiv} aus" if len(felder) > aktiv else ""
-    )
-    notiz_tags = state.notiz_tags.alle(state.profil.id)
-    notiz_tag_text = " · ".join(t.name for t in notiz_tags[:4]) + (
-        f" · +{len(notiz_tags) - 4}" if len(notiz_tags) > 4 else ""
-    )
-    hrv_text = f"{len(e.kacheln)} Kacheln · Reiter „Messung“ " + (
-        "sichtbar" if e.messung_anzeigen else "ausgeblendet"
-    )
-    hf = state.hf_profil()
-    hf_text = (
-        f"Ruhe {hf.ruhe_bpm:.0f} · HFmax {hf.hfmax_bpm:.0f}"
-        + (" (geschätzt)" if hf.hfmax_geschaetzt else "")
-        if hf.vollstaendig
-        else "Ruhe-HF und HFmax fehlen"
-    )
-
-    def schnellzeiten_setzen(e: ft.Event[ft.TextField]) -> None:
-        zeiten = state.schnellzeiten_setzen(e.control.value or "")
-        e.control.value = schnellzeiten_text(zeiten)
-        with contextlib.suppress(Exception):
-            e.control.update()
-
-    schnellzeiten_feld = ft.TextField(
-        label="Schnellzeiten",
-        value=schnellzeiten_text(state.schnellzeiten()),
-        hint_text="30 s, 1 min, 2 min, 5 min, 10 min, 15 min",
-        dense=True,
-        on_blur=schnellzeiten_setzen,
-        on_submit=schnellzeiten_setzen,
-    )
 
     ansicht = ft.View(
         route="/einstellungen",
@@ -224,246 +247,16 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
         controls=[
             sicher(
                 ft.Column(
-                    spacing=14,
+                    spacing=12,
                     controls=[
-                        karte(
-                            titel("Profil"),
-                            hinweis("Beim Start wird das zuletzt aktive Profil geladen."),
-                            profil_liste,
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.MANAGE_ACCOUNTS_OUTLINED),
-                                title=ft.Text("Profile verwalten"),
-                                subtitle=ft.Text("Anlegen, umbenennen, löschen", size=12),
-                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-                                on_click=oeffner("/einstellungen/profile"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                            *sperre,
-                        ),
-                        karte(
-                            titel("Tag"),
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.LABEL_OUTLINE),
-                                title=ft.Text("Tagesfelder"),
-                                subtitle=ft.Text(
-                                    "Schmerz, Trinken, Einnahmen, Themen — unter Heute → "
-                                    f"„Zum Tag“ · {felder_text}",
-                                    size=12,
-                                ),
-                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-                                on_click=oeffner("/einstellungen/tagesfelder"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.SELL_OUTLINED),
-                                title=ft.Text("Notiz-Tags"),
-                                subtitle=ft.Text(
-                                    "Merkmale der Notizen zum Tag: anlegen, umbenennen, "
-                                    f"ausschalten, löschen · {notiz_tag_text}",
-                                    size=12,
-                                ),
-                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-                                on_click=oeffner("/einstellungen/notiz-tags"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                        ),
-                        karte(
-                            titel("Übungen"),
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.SELL_OUTLINED),
-                                title=ft.Text("Typen und Regionen"),
-                                subtitle=ft.Text(
-                                    f"Eigene Einteilung: anlegen, umbenennen, löschen · {tag_text}",
-                                    size=12,
-                                ),
-                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-                                on_click=oeffner("/einstellungen/tags"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.INVENTORY_2_OUTLINED),
-                                title=ft.Text("Paketmanager"),
-                                subtitle=ft.Text(
-                                    f"Übungspakete importieren, exportieren, entfernen · "
-                                    f"{paket_text}",
-                                    size=12,
-                                ),
-                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-                                on_click=oeffner("/einstellungen/pakete"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.ATTACH_FILE),
-                                title=ft.Text("Anhänge"),
-                                subtitle=ft.Text(
-                                    f"Fotos und Videos an Einträgen: Qualität, Speicher, "
-                                    f"Aufräumen · {anhang_text}",
-                                    size=12,
-                                ),
-                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-                                on_click=oeffner("/einstellungen/anhaenge"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                            ft.Dropdown(
-                                label="Eintrag bleibt offen",
-                                value=str(state.eintrag_offen_min()),
-                                options=[
-                                    ft.DropdownOption(key=str(minuten), text=text)
-                                    for minuten, text in OFFEN_WAHL.items()
-                                ],
-                                on_select=offen_setzen,
-                                expand=True,
-                            ),
-                            hinweis(
-                                "Sätze, Skala und Notiz gehen in den offenen Eintrag der Übung. "
-                                "Nach dieser Zeit ohne neuen Satz gilt er als abgeschlossen — "
-                                "der nächste Wert beginnt einen neuen Eintrag."
-                            ),
-                            hinweis(
-                                "Die Uhr steht als erste Zeile der Karte „Eintragen“ jeder "
-                                "Übung. Ob und wie ihre Zeit zählt, steht an der Übung (Übung "
-                                "bearbeiten → Uhr: Uhr an/aus, „zählt“, „Zählt als“)."
-                            ),
-                            ft.Switch(
-                                label="▶ öffnet den Fokus",
-                                value=state.fokus_auto(),
-                                on_change=fokus_auto_setzen,
-                            ),
-                            hinweis(
-                                "Der Fokus ist die Trainingsansicht zur laufenden Uhr: große "
-                                "Zeit, Takt, Bild der Bewegung, Herzfrequenz, Eintragen. Aus "
-                                "heißt: Die Uhr bleibt in der Übung, „Fokus“ daneben öffnet ihn "
-                                "bei Bedarf. Derselbe Schalter steht rechts neben „Gemacht“."
-                            ),
-                            ft.Switch(
-                                label="Vibration am Phasenwechsel",
-                                value=state.takt_vibration(),
-                                on_change=takt_vibration_setzen,
-                            ),
-                            hinweis(
-                                "Läuft ein Takt (Atmung, Bewegung), vibriert das Handy kurz zu "
-                                "jeder neuen Phase — zusätzlich zum Klang. Die Vibration des "
-                                "Timers selbst steht unter Timer → Signale."
-                            ),
-                        ),
-                        darstellung_karte(page, state),
-                        karte(
-                            titel("Messung und Werkzeuge"),
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.FAVORITE_BORDER),
-                                title=ft.Text("Herzfrequenz"),
-                                subtitle=ft.Text(
-                                    "Ruhe-HF, HFmax, Schwellen mit Herkunft · Bereiche · "
-                                    f"Sicht · {hf_text}",
-                                    size=12,
-                                ),
-                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-                                on_click=oeffner("/einstellungen/herzfrequenz"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.MONITOR_HEART_OUTLINED),
-                                title=ft.Text("HRV-Messung"),
-                                subtitle=ft.Text(
-                                    f"Kacheln, Kurven, Analyse, Korrektur · {hrv_text}", size=12
-                                ),
-                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-                                on_click=oeffner("/einstellungen/hrv"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.TIMER_OUTLINED),
-                                title=ft.Text("Timer"),
-                                subtitle=ft.Text(
-                                    "Stoppuhr, Zeit, Vorlagen, Signale · zuletzt "
-                                    f"„{state.timer_profil().anzeigename}“",
-                                    size=12,
-                                ),
-                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-                                on_click=oeffner("/einstellungen/timer"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                            # Alle Timer an einem Ort (Ben, 8.11.2026, `docs/plan_uhr_fokus.md` §5)
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.APPS),
-                                title=ft.Text("Alle Timer"),
-                                subtitle=ft.Text(
-                                    "Vorlagen, Timer der Übungen und der Pläne — bearbeiten, "
-                                    "kopieren, löschen",
-                                    size=12,
-                                ),
-                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-                                on_click=oeffner("/einstellungen/timer/alle"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                            schnellzeiten_feld,
-                            hinweis(
-                                "Die Chips, wenn du eine Zeit stellst — Sekunden oder Minuten, "
-                                "durch Komma getrennt (z. B. 30 s, 1 min, 2, 5, 10)."
-                            ),
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.DIRECTIONS_RUN),
-                                title=ft.Text("Training"),
-                                subtitle=ft.Text(
-                                    "Strecke einfärben, Tempo mit Pausen, Spalten je Kilometer",
-                                    size=12,
-                                ),
-                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-                                on_click=oeffner("/einstellungen/training"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.SATELLITE_ALT),
-                                title=ft.Text("GPS-Test"),
-                                subtitle=ft.Text(
-                                    "Vorabversion: Strecke und Akku prüfen — für das GPS-Training",
-                                    size=12,
-                                ),
-                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-                                on_click=oeffner("/einstellungen/gps-test"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                        ),
-                        *sicherung_karte,
-                        karte(
-                            titel("App"),
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.HELP_OUTLINE),
-                                title=ft.Text("Notation — so wird eingegeben"),
-                                subtitle=ft.Text("3x15, 30, 15/15/20, +20, 1:30", size=12),
-                                on_click=hilfe_oeffner(page),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.HELP_OUTLINE),
-                                title=ft.Text("Varianten und Pakete"),
-                                subtitle=ft.Text(
-                                    "Eine Kachel für Wandsitz 45° und 90° · woher Übungen kommen",
-                                    size=12,
-                                ),
-                                on_click=hilfe_oeffner(page, "uebungen"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                            ft.ListTile(
-                                leading=ft.Icon(ft.Icons.HELP_OUTLINE),
-                                title=ft.Text("Atemfrequenz und Atemübung"),
-                                subtitle=ft.Text(
-                                    "Was „langsame Schwingung unter 8/min“ heißt", size=12
-                                ),
-                                on_click=hilfe_oeffner(page, "atmung"),
-                                content_padding=ft.Padding.only(left=0, right=0),
-                            ),
-                            *update_zeilen,
-                            hinweis(f"Edition {edition().value} · {version_text}"),
-                        ),
+                        karte(titel(name), *zeilen, abstand=0) for name, zeilen in gruppen.items()
                     ],
                 ),
                 expand=False,
             )
         ],
     )
-    # Eine Farbwahl baut alles neu — die Position bleibt, statt nach oben zu springen
     return scroll_merken(page, state, "/einstellungen", ansicht)
 
 
-__all__ = ["einstellungen"]
+__all__ = ["MENUE", "Zeile", "einstellungen", "menuezeile"]

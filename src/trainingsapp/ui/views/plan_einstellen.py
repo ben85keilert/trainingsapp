@@ -1303,6 +1303,12 @@ def plan_einstellen(
         def uebernehmen() -> None:
             state.uebungen.speichern(als_standard(jetzt, uebung))
             state.plaene.item_speichern(vom_standard(uebung, jetzt))
+            if ablauf_stand["a"] != ablauf_anfang:
+                # Auf dieser Seite geänderte Wege gehen mit — der Verlust ist nicht gewollt
+                # (N106, Ben 11.11.2026); gespeichert wie in `sichern`
+                from trainingsapp.ui.views.ablauf import ablauf_speichern
+
+                ablauf_speichern(state, plan.id, ablauf_stand["a"])
             uebernommen.danach(
                 lambda: page.show_dialog(
                     ft.SnackBar(ft.Text(f"In „{uebung.name}“ übernommen — gilt in allen Plänen"))

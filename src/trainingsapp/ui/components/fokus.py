@@ -505,7 +505,7 @@ class Fokus:
         e = self._einst
         if e is None or not getattr(e, "alarm_an", False):
             return
-        from trainingsapp.core.hf_ziel import Zielton
+        from trainingsapp.core.hf_ziel import Zielton, messung_kennung
 
         zielton = getattr(self.state, "hf_zielton", None)
         if zielton is None:
@@ -517,8 +517,7 @@ class Fokus:
         # Stumm gilt je Messung (wie `ui.hf_live.HfLive.stumm`): „stumm bis Messende“ aus
         # einer früheren Messung schwiege hier sonst für immer (H101)
         lauf = getattr(self.state, "messlauf", None)
-        aufnahme = getattr(lauf, "aufnahme", None)
-        kennung = id(aufnahme) if aufnahme is not None else id(lauf)
+        kennung = messung_kennung(lauf)
         still = stumm is not None and hasattr(stumm, "gilt") and stumm.gilt(jetzt, kennung)
         klang = zielton.faellig(hf, e, jetzt, stumm=still)
         if klang is None:

@@ -85,6 +85,8 @@ def _lauf(profil, rr_ms: int, anzahl: int) -> Messlauf:
     lauf.status = DeviceStatus(verbindung=Verbindung.VERBUNDEN)
     for i in range(anzahl):
         lauf.live.hinzufuegen(float(i), rr_ms, 70 + i % 5)
+    # wie `Messlauf.laufen` es mitzählt (`nur_puls` sieht nicht mehr den ganzen Puffer durch)
+    lauf._live_pakete, lauf._live_rr = anzahl, rr_ms > 0 and anzahl > 0
     return lauf
 
 

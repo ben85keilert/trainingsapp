@@ -286,3 +286,26 @@ kommt unter die Zeit und fixiert ebenfalls beim Scrollen.“
 - **Das „i“:** im Fokus der Übung in der Titelleiste neben „Uhr einstellen“, im Workout nur noch
   das der Titelleiste (das zweite im Kopf der Übung fiel weg).
 
+
+### 9.5 Eine Übung für sich üben: eigene Anordnung (11.11.2026)
+
+Ben: „Eine einzeln geübte Übung hat ein ziemlich hässliches Layout … Entwirf ein neues Layout
+für eine einzeln trainierte Übung, im Stil von Fokus, aber übersichtlich, um Werte einzutragen
+und die Übung zu verwalten. Das Intensivieren einer Übung läuft in der Einzelübung selbst. Dort
+wird gesammelt … HRV braucht es dort nicht.“
+
+`/training/<übung>` (`plan_view(einzel=True)`) nimmt nicht mehr den Block des Plans, sondern
+`components/einzel_seite.py` (`views/plan.einzel_block`) — dieselben Teile und Handler
+(`uebungs_teile`), anders gestellt:
+
+- **Fest oben:** Bild · Name (bis zwei Zeilen) · Art; rechts, über dem ▶, der Schalter „▶ öffnet
+  den Fokus“ (im Plan weiter rechts in der Zeile von „Gemacht“). Darunter die Uhr-Zeile
+  `Uhr ▾ · Zeit · Takt · ▶` und die Zählzeile. Die Titelleiste sagt nur „Üben“.
+- **Ausführung** (getönt, wie im Plan) · **Eintragen** (Mengen, wohin der nächste Tipp geht,
+  darunter über die ganze Breite „Wie geplant · …“ und „Gemacht“/„Abschließen“) · **Heute
+  geleistet** — unter der Eingabe, damit sie beim Sammeln stehen bleibt.
+- **Verwalten** in einer Zeile: Notiz · Variante · Material · Uhr · Verlauf · Info. Kein Stift:
+  „Übung bearbeiten“ bleibt hinter der Übungsseite (P79). Unten der Satz „Ohne Plan — …“.
+- Keine HRV-Kacheln oder Kurven. Der Block im Plan und im Nachtrag ist unverändert.
+
+Tests: `tests/test_ui_einzel_seite.py`.

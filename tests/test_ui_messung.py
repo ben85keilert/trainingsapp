@@ -2285,3 +2285,26 @@ async def test_sichtwechsel_knopf_rutscht_nach_oben_rechts_und_merkt_die_lage(da
     schalter.value = False
     schalter.on_change(_ereignis(False))
     assert state.ansicht().y_bereich("rr") is None and von.disabled and von.value == "300"
+
+
+def test_linie_im_fenster_gleicht_dem_vollen_durchlauf() -> None:
+    """H95: Der Ausschnitt per `bisect` liefert dieselben Punkte und Nähte wie der Durchlauf
+    über alle Punkte — auch mit Nähten vor, in und hinter dem Fenster und mit Werten
+    außerhalb des Wertebereichs."""
+    import random
+
+    from trainingsapp.ui.views.messung_detail import _aufsteigend, _linie, _linie_im_fenster
+
+    zufall = random.Random(7)
+    zeiten, t = [], 0.0
+    for _ in range(600):
+        t += zufall.choice([0.0, 0.4, 0.9, 1.3])  # auch gleiche Zeiten
+        zeiten.append(round(t, 3))
+    werte = [zufall.choice([200.0, 700.0, 850.0, 1000.0, 2600.0]) for _ in zeiten]
+    naehte = sorted(zufall.sample(range(len(zeiten)), 40))
+    assert _aufsteigend(zeiten) and not _aufsteigend([0.0, 2.0, 1.0])
+    for _ in range(200):
+        x_von = zufall.uniform(-5.0, t)
+        x_bis = x_von + zufall.uniform(0.0, 120.0)
+        ganz = _linie(zip(zeiten, werte, strict=True), naehte, 300.0, 2000.0, x_von, x_bis)
+        assert _linie_im_fenster(zeiten, werte, naehte, x_von, x_bis, 300.0, 2000.0) == ganz

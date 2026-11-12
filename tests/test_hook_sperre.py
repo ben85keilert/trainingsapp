@@ -31,6 +31,29 @@ def baum(tmp_path: Path) -> str:
 
 
 GESPERRT = [
+    # N126, Ben 11.11.2026: Wegwerf-Befehle
+    "git reset --hard",
+    "git reset --hard HEAD~1",
+    "git clean -fd",
+    "git clean -xdf",
+    "git checkout -- .",
+    "git checkout HEAD -- src",
+    "git restore .",
+    "git restore --staged --worktree src/",
+    # N126: Schreibweisen, die früher durchgingen
+    "if true; then git stash; fi",
+    "for d in a b; do git -C $d stash; done",
+    "{ git stash; }",
+    "! git stash",
+    "bash -lc 'git add -A'",
+    "bash -ic 'ruff format .'",
+    "git commit -m x .",
+    "git commit -m x src/",
+    "git commit -m x -- src",
+    "git add src/*",
+    "git add $(git ls-files -m)",
+    "ruff format $(git ls-files '*.py')",
+    "git pull --rebase --autostash",
     "git stash",
     "git stash push -m x",
     "git stash pop",
@@ -70,6 +93,14 @@ GESPERRT = [
 ]
 
 ERLAUBT = [
+    "git reset HEAD~1",
+    "git reset --soft HEAD~1",
+    "git clean -nd",
+    "git checkout -b neu",
+    "git checkout main",
+    "git checkout -- src/a.py",
+    "git restore src/a.py",
+    "git restore --staged src/a.py",
     "git status",
     "git stash list",
     "git stash show -p",

@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import json
 import sqlite3
+import weakref
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -35,6 +36,7 @@ from trainingsapp.config import (
 )
 from trainingsapp.core.anhaenge import ZEITRAUM_VORGABE as ANHAENGE_ZEITRAUM_VORGABE
 from trainingsapp.core.darstellung import Darstellung, darstellung_lesen, darstellung_schreiben
+from trainingsapp.core.einheit import Zustand
 from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
 from trainingsapp.core.hf_einstellungen import HfEinstellungen
 from trainingsapp.core.hf_einstellungen import einstellungen_lesen as hf_lesen
@@ -199,6 +201,27 @@ class UpdateStand:
         return d
 
 
+#: Die Zustände dieses Prozesses mit ihrer Datenbank, bis `AppState.schliessen` — jede
+#: Flet-Sitzung ruft `AppState.starten` (Web: ein zweiter Tab), und der zweite Start darf die
+#: Einheiten, die im ersten gerade laufen, nicht für abgebrochen halten (D28)
+_SITZUNGEN: list[tuple[str, weakref.ReferenceType[AppState]]] = []
+
+
+def _laufende_einheiten(datenbank: str) -> set[str]:
+    """Die Einheiten (IDs), die andere Zustände dieses Prozesses auf derselben Datenbank
+    vorbereitet haben oder laufen lassen — beendete zählen nicht."""
+    ids: set[str] = set()
+    for pfad, ref in list(_SITZUNGEN):
+        state = ref()
+        if state is None:
+            _SITZUNGEN.remove((pfad, ref))
+            continue
+        e = state.einheit
+        if pfad == datenbank and e is not None and e.zustand is not Zustand.BEENDET:
+            ids.add(str(e.id))
+    return ids
+
+
 @dataclass
 class AppState:
     """Alles, was die Ansichten gemeinsam brauchen."""
@@ -321,6 +344,9 @@ class AppState:
     #: (Item-ID), die gerade gezeigt wird — nur für diese Sitzung; überlebt `neu_zeichnen`
     #: (Start der Uhr, Takt der Einheit)
     plan_gezeigt: dict[str, str] = field(default_factory=dict)
+    #: Für welchen Workout-Schritt Takt und Zählen schon eingerichtet sind — (Einheit, Schritt,
+    #: Durchlauf); `ui.plan_ablauf.schritt_einrichten` (N62)
+    workout_eingerichtet: tuple[Any, ...] | None = None
     #: „Weiter“ auf „Heute“ (Ben, 18.10.2026): die Planübung, die der Plan beim nächsten
     #: Öffnen zeigt — einmal
     plan_ziel: str | None = None
@@ -587,7 +613,9 @@ class AppState:
         Alles, was beim Start passieren muss, an einer Stelle — und ohne
         Oberfläche aufrufbar.
         """
-        con = oeffnen(db_pfad if db_pfad is not None else datenbankpfad())
+        pfad = db_pfad if db_pfad is not None else datenbankpfad()
+        datenbank = str(pfad) if str(pfad) == ":memory:" else str(Path(pfad).resolve())
+        con = oeffnen(pfad)
         # Dateien aus Paketen (U3) neben der Datenbank — im Betrieb `paketmedienverzeichnis()`;
         # mit eigener Datenbank (Tests, Werkzeug) nie im echten Datenverzeichnis
         ablage = Paketablage(
@@ -624,7 +652,8 @@ class AppState:
             backups = []
         einheiten = EinheitRepo(con)
         with contextlib.suppress(sqlite3.Error):
-            einheiten.abgebrochene_schliessen()  # Prozess-Tod in einer Einheit
+            # Prozess-Tod in einer Einheit — nicht, was eine andere Sitzung gerade laufen lässt
+            einheiten.abgebrochene_schliessen(ausser=_laufende_einheiten(datenbank))
         pakete = PaketRepo(con, ablage)
         vorgabe = einstellungen.lesen(SettingRepo.PAKET_UPDATES, AUTO)
         pakete.update_vorgabe = vorgabe if vorgabe in UPDATE_MODI else AUTO
@@ -632,7 +661,7 @@ class AppState:
             pakete.aufraeumen()
             # Klartext eines privaten Pakets, falls die App mitten im Import endete (U7)
             klartext_aufraeumen(importverzeichnis())
-        return cls(
+        state = cls(
             con=con,
             uebungen=ExerciseRepo(con),
             profile=profile,
@@ -664,6 +693,9 @@ class AppState:
             paketfehler=paketfehler,
             papierkorb_offen=offen,
         )
+        if datenbank != ":memory:":
+            _SITZUNGEN.append((datenbank, weakref.ref(state)))
+        return state
 
     @staticmethod
     def _papierkorb_aufraeumen(con: sqlite3.Connection, einstellungen: SettingRepo) -> int:
@@ -695,6 +727,7 @@ class AppState:
         return profil
 
     def schliessen(self) -> None:
+        _SITZUNGEN[:] = [(p, r) for p, r in _SITZUNGEN if r() is not None and r() is not self]
         self.con.close()
 
     # -- Profile -------------------------------------------------------------
@@ -1142,7 +1175,7 @@ class AppState:
         self.einstellungen.setzen(SettingRepo.TAKT_VIBRATION, "1" if an else "0")
 
     def schnellzeiten(self) -> tuple[int, ...]:
-        """Die Chips unter den Rädern beim Stellen einer Zeit (Einstellungen → Timer)."""
+        """Die Chips unter den Rädern beim Stellen einer Zeit (Einstellungen → Timer und Takt)."""
         return schnellzeiten_lesen(self.einstellungen.lesen(SettingRepo.SCHNELLZEITEN))
 
     def schnellzeiten_setzen(self, text: str) -> tuple[int, ...]:

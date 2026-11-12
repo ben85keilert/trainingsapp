@@ -48,6 +48,7 @@ from trainingsapp.core.anhaenge import (
     Anhang,
     Qualitaet,
     Ziel,
+    bild_ohne_metadaten,
     blitz_text,
     blitz_weiter,
     countdown_text,
@@ -61,7 +62,7 @@ from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.models import jetzt
 from trainingsapp.core.timer import COUNTDOWN
 from trainingsapp.data.anhaenge import qualitaet_lesen, video_max_s
-from trainingsapp.ui import paketdatei
+from trainingsapp.ui import paketdatei, systemdialog
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.zurueck import zurueck_ziel
 from trainingsapp.ui.state import AppState
@@ -435,11 +436,13 @@ class _Aufnahme:
         """Nur am Rechner: ein Bild oder Video von der Platte — unverkleinert, zum Prüfen."""
         endungen = ["jpg", "jpeg"] if self.art == BILD else ["mp4"]
         try:
-            dateien = await ft.FilePicker().pick_files(
-                dialog_title="Foto wählen" if self.art == BILD else "Video wählen",
-                file_type=ft.FilePickerFileType.CUSTOM,
-                allowed_extensions=endungen,
-                with_data=False,
+            dateien = await systemdialog.mit(
+                ft.FilePicker().pick_files(
+                    dialog_title="Foto wählen" if self.art == BILD else "Video wählen",
+                    file_type=ft.FilePickerFileType.CUSTOM,
+                    allowed_extensions=endungen,
+                    with_data=False,
+                )
             )
         except Exception as fehler:
             self.melden(f"Dateiauswahl: {fehler}")
@@ -449,7 +452,16 @@ class _Aufnahme:
         from pathlib import Path
 
         pfad = Path(dateien[0].path)
-        self.daten = await asyncio.to_thread(pfad.read_bytes)
+        try:
+            daten = await asyncio.to_thread(pfad.read_bytes)
+            if self.art == BILD:
+                # Die Datei kommt an Kamera und Erweiterung vorbei — das Netz darunter gilt
+                # auch hier (N117): Exif, XMP und alles hinter dem Bildende fallen weg
+                daten = bild_ohne_metadaten(daten)
+        except (NichtBereinigbar, OSError) as fehler:
+            self.melden(f"Nicht lesbar: {fehler}")
+            return
+        self.daten = daten
         if self.art == VIDEO:
             self.frontbild = None  # kein Frontbild ohne Kamera — die Kachel zeigt „fehlt“
             self.dauer_s = None
@@ -526,7 +538,7 @@ class _Aufnahme:
                 # Nur die Bytes im Thread — die SQLite-Verbindung gehört dem Event-Loop
                 rel = await asyncio.to_thread(repo.schreiben, daten)
                 repo.setzen(bild_von, rel)
-            except (OSError, sqlite3.Error) as fehler:
+            except (NichtBereinigbar, OSError, sqlite3.Error) as fehler:
                 self.melden(f"Nicht gespeichert: {fehler}")
                 return
             self.daten = None

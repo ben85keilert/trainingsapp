@@ -83,6 +83,16 @@ HELL: dict[str, str] = {
 #: Die Linienfarben der Kurve einer Übung, in dieser Reihenfolge (wiederholt ab der siebten)
 REIHEN: tuple[str, ...] = ("reihe_1", "reihe_2", "reihe_3", "reihe_4", "reihe_5", "reihe_6")
 
+#: Paletten, deren Primärfarbe einer Reihenfarbe zu nahe käme (Ben, 11.11.2026: Sand,
+#: Bernstein, Koralle): Die erste Linie ist die Primärfarbe — neben warmem Gold oder Koralle
+#: fiele Orange nicht mehr auseinander, dort tritt Türkis an seine Stelle. Palette →
+#: (dunkel, hell); geprüft in ``tests/test_darstellung.py``.
+JE_PALETTE: dict[str, tuple[dict[str, str], dict[str, str]]] = {
+    "sand": ({"reihe_2": "#26A69A"}, {"reihe_2": "#1E857B"}),
+    "bernstein": ({"reihe_2": "#26A69A"}, {"reihe_2": "#1E857B"}),
+    "koralle": ({"reihe_2": "#26A69A"}, {"reihe_2": "#1E857B"}),
+}
+
 FARBEN: dict[str, str] = dict(DUNKEL)
 
 #: Farbskalen für die Strecke auf der Karte (langsam → schnell bzw. niedrig → hoch;
@@ -102,16 +112,19 @@ SKALEN_NAMEN: dict[str, str] = {"tempo": "Tempo", "viridis": "Viridis", "glut": 
 PAUSE_FARBE = ft.Colors.GREY_500
 
 
-def helligkeit_setzen(hell: bool) -> None:
-    """Füllt `FARBEN` für hellen oder dunklen Grund."""
+def helligkeit_setzen(hell: bool, palette: str | None = None) -> None:
+    """Füllt `FARBEN` für hellen oder dunklen Grund — mit den Abweichungen der Palette."""
     FARBEN.clear()
     FARBEN.update(HELL if hell else DUNKEL)
+    if palette in JE_PALETTE:
+        FARBEN.update(JE_PALETTE[palette][1 if hell else 0])
 
 
 __all__ = [
     "DUNKEL",
     "FARBEN",
     "HELL",
+    "JE_PALETTE",
     "PAUSE_FARBE",
     "REIHEN",
     "SKALEN_NAMEN",

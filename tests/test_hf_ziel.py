@@ -56,6 +56,7 @@ def test_zielton_zwei_klaenge_tonfolge_und_stumm() -> None:
 def test_stumm_fuer_eine_zeit_oder_bis_messende() -> None:
     s = Stumm(bis=300.0, messung=1)
     assert s.gilt(299.0, 1) and not s.gilt(300.0, 1)
+    assert s.gilt(299.0, 2)  # H102: eine Zeit hängt nicht an der Messung (Aufnahmestart)
     ende = Stumm(bis=BIS_MESSENDE, messung=1)
     assert ende.gilt(1e9, 1) and not ende.gilt(0.0, 2)  # eine andere Messung: Ton wieder da
     assert math.isinf(ende.bis) and ende.text(0.0) == "stumm bis Messende"

@@ -48,7 +48,7 @@ from trainingsapp.data.anhaenge import (
     mp4_ort_entfernen,
     qualitaet_lesen,
 )
-from trainingsapp.ui import paketdatei
+from trainingsapp.ui import paketdatei, systemdialog
 from trainingsapp.ui.components.anhang_reihe import bild_laden
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.zurueck import zurueck_ziel
@@ -57,6 +57,25 @@ from trainingsapp.ui.views.anhang_aufnahme import ziel_name
 
 #: Routenteil
 HOCHLADEN = "hochladen"
+
+
+#: Einstellung: der Pfad der Kopie, die die Fotoauswahl gerade angelegt hat — sie trägt den
+#: Ort noch. Reißt der Ablauf ab (Android beendet die App mitten im Verkleinern), räumt
+#: `reste_raeumen` sie beim nächsten Start weg (N132)
+QUELLE_GEMERKT = "hochladen_quelle"
+
+
+def reste_raeumen(einstellungen: Any) -> bool:
+    """Beim Start: die Kopie aus der Fotoauswahl löschen, die ein abgerissener Ablauf liegen
+    ließ (`QUELLE_GEMERKT`) — ``True``, wenn eine gemerkt war."""
+    pfad = einstellungen.lesen(QUELLE_GEMERKT, "") or ""
+    if not pfad:
+        return False
+    with contextlib.suppress(OSError):
+        Path(pfad).unlink(missing_ok=True)
+    if not Path(pfad).exists():  # sonst beim nächsten Start noch einmal
+        einstellungen.setzen(QUELLE_GEMERKT, "")
+    return True
 
 
 def hochladen_route(basis: str, ziel: Ziel | str) -> str:
@@ -129,7 +148,7 @@ class _Hochladen:
         self.status.value = "Fotoauswahl ist offen …"
         self.zeichnen()
         try:
-            gewaehlt = await dienst.waehlen()
+            gewaehlt = await systemdialog.mit(dienst.waehlen())
         except Exception as fehler:
             self.melden(f"Auswahl: {fehler}")
             return
@@ -137,6 +156,7 @@ class _Hochladen:
             await self.zurueck()
             return
         self.quelle = Path(str(gewaehlt["pfad"]))
+        self.state.einstellungen.setzen(QUELLE_GEMERKT, str(self.quelle))
         self.vorher = int(gewaehlt.get("bytes") or 0)
         self.art = _art(gewaehlt)
         if self.art is None:
@@ -198,7 +218,7 @@ class _Hochladen:
         try:
             # Netz darunter: Exif und Ortsboxen, auch wenn die Erweiterung sie weglässt
             await asyncio.to_thread(self.ort_entfernen)
-        except OSError as fehler:
+        except (NichtBereinigbar, OSError) as fehler:
             self.ergebnis_loeschen()
             self.melden(f"Nicht lesbar: {fehler}")
             return
@@ -282,7 +302,7 @@ class _Hochladen:
                 # Verschieben im Thread, die Zeile im Event-Loop (die Verbindung gehört ihm)
                 rel = await asyncio.to_thread(repo.uebernehmen, self.ziel)
                 repo.setzen(bild_von, rel)
-            except (OSError, sqlite3.Error) as fehler:
+            except (NichtBereinigbar, OSError, sqlite3.Error) as fehler:
                 self.melden(f"Nicht gespeichert: {fehler}")
                 return
             self.fertig = False
@@ -340,6 +360,9 @@ class _Hochladen:
         if self.quelle is not None:
             with contextlib.suppress(OSError):
                 self.quelle.unlink(missing_ok=True)
+            if not self.quelle.exists():
+                with contextlib.suppress(sqlite3.Error):
+                    self.state.einstellungen.setzen(QUELLE_GEMERKT, "")
             self.quelle = None
 
     def ergebnis_loeschen(self) -> None:

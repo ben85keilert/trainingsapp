@@ -16,6 +16,7 @@ Messwerten ist in der Solo-Edition gesperrt (`docs/recht/00_zweckbestimmung.md`)
 
 from __future__ import annotations
 
+import weakref
 from collections.abc import Sequence
 from typing import Any, Final
 
@@ -51,6 +52,30 @@ def wanduhr(rec: Recording, korr: Korrigiert) -> np.ndarray:
     return out
 
 
+#: Die Felder der zuletzt gefragten Messung (`_felder`) — eine Messung, schwach gehalten
+_FELDER: list[tuple[weakref.ReferenceType[Recording], Korrigiert, int, int, tuple[Any, ...]]] = []
+
+
+def _felder(rec: Recording, korr: Korrigiert) -> tuple[Any, ...]:
+    """Wanduhr je korrigiertem Wert, RR, Wanduhr je rohem Schlag und Flags als Felder —
+    **einmal je Messung** statt bei jedem Aufruf von `werte_zwischen` (H87: je Kilometer und je
+    Intervall liefen sonst Python-Schleifen über alle Schläge). Gemerkt ist nur die zuletzt
+    gefragte Messung; eine läuft weiter (Zwischenstand): Die Zahl der Schläge gehört dazu."""
+    for ref, k, n, m, felder in list(_FELDER):
+        if ref() is rec and k is korr and n == len(rec.beats) and m == len(korr.rr_ms):
+            return felder
+    felder = (
+        wanduhr(rec, korr),
+        np.asarray(korr.rr_ms, dtype=float),
+        np.array(
+            [b.t_wall_s if b.t_wall_s is not None else np.nan for b in rec.beats], dtype=float
+        ),
+        np.array(korr.flag, dtype=object),
+    )
+    _FELDER[:] = [(weakref.ref(rec), korr, len(rec.beats), len(korr.rr_ms), felder)]
+    return felder
+
+
 def werte_zwischen(
     rec: Recording,
     korr: Korrigiert,
@@ -75,14 +100,9 @@ def werte_zwischen(
     >>> round(w["mean_bpm"]), w["n"], w["artefakt_anteil"], 0.3 < w["dfa_alpha1"] < 0.8
     (75, 400, 0.0, True)
     """
-    wand = wanduhr(rec, korr)
-    rr = np.asarray(korr.rr_ms, dtype=float)
+    wand, rr, roh_wand, flags = _felder(rec, korr)
     im = (wand >= von_s) & (wand <= bis_s)
-    roh_wand = np.array(
-        [b.t_wall_s if b.t_wall_s is not None else np.nan for b in rec.beats], dtype=float
-    )
     n_roh = int(((roh_wand >= von_s) & (roh_wand <= bis_s)).sum())
-    flags = np.array(korr.flag, dtype=object)
     werte = rr[im]
     gut = werte[(werte >= RR_MIN_MS) & (werte <= RR_MAX_MS)]
     n_orig = int((flags[im] == "orig").sum())

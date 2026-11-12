@@ -672,6 +672,11 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
         dialog: ft.AlertDialog
         lauf = state.messlauf
         laufend = [lauf.mitschnitt.pfad] if lauf is not None and lauf.mitschnitt is not None else []
+        # Auch der Mitschnitt einer laufenden Geräteprobe bleibt (H107) — er würde sonst
+        # unter dem Schreiber gelöscht
+        probe = getattr(state, "geraeteprobe", None)
+        if probe is not None and probe.laeuft and probe.schreiber is not None:
+            laufend.append(probe.schreiber.pfad)
 
         def loeschen() -> None:
             n = dg.alle_loeschen(config.datenverzeichnis(), ausser=laufend)

@@ -40,7 +40,7 @@ from trainingsapp.ui.views.messung_detail import messung_detail_view  # noqa: E4
 from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten  # noqa: E402
 from trainingsapp.ui.views.uebung_timer import uebung_timer_view  # noqa: E402
 
-GIF = b"GIF89a" + b"\x00" * 40
+GIF = b"GIF89a" + bytes([1, 0, 1, 0, 0, 0, 0]) + b"," + bytes(9) + b"\x02\x02\x44\x01\x00;"
 
 
 @pytest.fixture

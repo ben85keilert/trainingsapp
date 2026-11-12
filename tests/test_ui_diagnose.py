@@ -373,3 +373,41 @@ async def test_geraeteprobe_ansicht_verbindet_startet_und_zeigt_den_punkt(page, 
     assert any("still gesessen" in t for t in texte(neu))
     for aufgabe in page.aufgaben:
         aufgabe.cancel()
+
+
+async def test_geraeteprobe_beenden_raeumt_auch_nach_einem_fehler_auf(page, state) -> None:
+    """H108: Scheitert das Speichern beim Beenden, bleibt die Probe nicht am `AppState`
+    hängen (roter Punkt), und ein Fehler beim Start steht in der Ansicht."""
+    from test_geraeteprobe import Attrappe
+    from trainingsapp.ui.views.geraeteprobe import geraeteprobe_view
+
+    state.ble_transport = Attrappe()
+    state.probe_ziel = ("AA:BB:CC:DD:EE:FF", "Gurt X 12345678")
+    ansicht = geraeteprobe_view(page, state)
+    await asyncio.gather(*page.aufgaben)
+    probe = state.geraeteprobe
+    start = next(c for c in alle(ansicht) if isinstance(c, ft.FilledButton))
+
+    async def voll(*_a, **_k):
+        raise OSError("Speicher voll")
+
+    echt_starten = probe.starten
+    probe.starten = voll
+    await start.on_click()
+    assert any("nicht gestartet" in t for t in texte(ansicht)) and not probe.laeuft
+    probe.starten = echt_starten
+    await start.on_click()
+    assert probe.laeuft and len(page.overlay) == 1
+
+    probe.beenden = voll
+    stopp = next(
+        c for c in alle(ansicht) if isinstance(c, ft.FilledButton) and c.content == "Stopp"
+    )
+    stopp.on_click()
+    dialog = page.dialoge[-1] if hasattr(page, "dialoge") else None
+    assert dialog is not None
+    beenden = next(c for c in dialog.actions if isinstance(c, ft.FilledButton))
+    await beenden.on_click()
+    assert state.geraeteprobe is None and page.overlay == []
+    for aufgabe in page.aufgaben:
+        aufgabe.cancel()

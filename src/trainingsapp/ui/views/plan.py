@@ -65,7 +65,11 @@ Umlauf an den Enden; nach „Gemacht“ bleibt der Block stehen — das Tempo be
 der nächste Pfeil ist nur betont. Welche Übung gezeigt wird, merkt `AppState.plan_gezeigt`
 je Plan für die Sitzung (überlebt `neu_zeichnen`); `AppState.plan_ziel` („Weiter mit …“ auf
 „Heute“, Ziele, Laufleiste) hat einmal Vorrang, sonst gilt die erste heute offene Übung.
-Einzelübung (`einzel`) und Nachtrag haben nur einen Block, ohne Pfeile.
+Einzelübung (`einzel`) und Nachtrag haben nur einen Block, ohne Pfeile. **Die Einzelübung
+(`/training/<übung>`) hat seit 11.11.2026 eine eigene Anordnung** im Stil des Fokus
+(`components/einzel_seite.py`, `einzel_block`): Kopf und Uhr-Zeile fest oben, darunter
+Ausführung · Eintragen · Heute geleistet · Verwalten — dieselben Bausteine und Handler wie
+der Block, nur anders gestellt.
 
 Ein Eintrag (Gemacht, Chip, Zahlenfeld) baut nur den Block in der bestehenden Liste neu
 (`auffrischen`) — so bleibt die Scrollposition. Kommt man aus einem Formular zurück, stellt
@@ -87,6 +91,7 @@ import flet as ft
 from trainingsapp.core import ablauf as ab
 from trainingsapp.core import eintraege as offene
 from trainingsapp.core import varianten as var
+from trainingsapp.core.material import material_von
 from trainingsapp.core.models import (
     Exercise,
     Plan,
@@ -133,11 +138,11 @@ from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
 from trainingsapp.core.zaehlen import ENDE_ABGEHAKT
 from trainingsapp.ui import marken, uebung_lauf
 from trainingsapp.ui import plan_ablauf as plan_ablauf_ui
-from trainingsapp.ui.components import zaehl_stand
+from trainingsapp.ui.components import einzel_seite, zaehl_stand
 from trainingsapp.ui.components.dialoge import Nachher, obersten_schliessen, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
-from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.material import material_knopf
+from trainingsapp.ui.components.layout import ohne_auto_update, sicher
+from trainingsapp.ui.components.material import material_blatt, material_knopf
 from trainingsapp.ui.components.modus_wahl import LISTE, modus_wahl
 from trainingsapp.ui.components.neu_laden import herkunft, neu_laden_blatt
 from trainingsapp.ui.components.plan_reiter import plan_reiter
@@ -163,6 +168,19 @@ from trainingsapp.ui.views.uebung_timer import uebung_timer_route
 ECKEN = ft.RoundedRectangleBorder(radius=12)
 #: Das Segment „…“ einer Ausprägung: einen eigenen Wert eingeben (52°)
 _EIGEN = "…eigen"
+
+
+@dataclass
+class _UebTeile:
+    """Die Teile einer Übung beim Üben (`plan_view.uebungs_teile`)."""
+
+    st: offene.Stand
+    #: „Gemacht“ bzw. „Abschließen“
+    abhaken: ft.Control
+    #: „Wie geplant · 3x12“ — ``None`` ohne Ziel oder solange der Sensor zählt
+    geplant: ft.Control | None
+    uhr: UhrTeile
+    zaehl: ft.Control | None
 
 
 @dataclass
@@ -210,6 +228,8 @@ LEISTUNGEN_TIPP = "Alle Einträge von heute ansehen, korrigieren oder löschen"
 #: Ein Tipp auf einen geschlossenen Eintrag (`eintrag_blatt`)
 EINTRAG_TIPP = "Wieder öffnen, bearbeiten oder löschen"
 #: Statt der Mengenzeile, solange der Sensor in dieses Feld zählt (P122)
+#: Titelleiste der Einzelübung — der Name der Übung steht darunter im festen Kopf
+EINZEL_TITEL = "Üben"
 SENSOR_ZAEHLT = "Der Sensor zählt — korrigieren mit −1/+1"
 #: Ein Tipp auf einen offenen Eintrag mit anderer Ausführung: sie wählen
 WAEHLEN_TIPP = "Diese Ausführung wählen — die nächsten Tipps gehen hierhin"
@@ -410,6 +430,14 @@ def plan_view(
     # wie die Kapitel eines Kurses (Ben, 9.11.2026, P167/P168); Gesperrtes steht nur im
     # Gesamtplan-Blatt, mit Schloss und „frei nach …“
     ueben = not bearbeiten and nachtrag is None and not einzel
+    #: Eine Übung für sich üben: eigene Anordnung (`components/einzel_seite.py`) — der
+    #: Nachtrag einer Übung ohne Plan behält den Block
+    einzeln = einzel and nachtrag is None and not bearbeiten
+    #: Kopf, Uhr-Zeile und Zählzeile der Einzelübung — fest über der Liste (`einzel_block`)
+    einzel_kopf = ft.Container(
+        padding=ft.Padding.only(left=einzel_seite.RAND, right=einzel_seite.RAND, top=8, bottom=8),
+        visible=False,
+    )
     sperre = plan_ablauf_ui.gesperrt(state, plan) if ueben else {}
     frei_items = [it for it in plan.items if it.id not in sperre]
     # Welche Übung der Block zeigt (7.11.2026): das einmalige Ziel („Weiter mit …“), sonst die
@@ -1006,7 +1034,26 @@ def plan_view(
 
         return handler
 
+    #: Der getippte, noch nicht gespeicherte Planname — die Systemtaste Zurück mit Fokus im
+    #: Feld löst kein ``on_blur`` aus, das die Ansicht noch erreicht (N108): Der Routenaufbau
+    #: und der Weg in den Hintergrund speichern ihn über `AppState.vor_dem_verlassen`
+    name_getippt: dict[str, str] = {}
+    name_schluessel = f"planname:{plan.id}"
+
+    def name_sichern() -> None:
+        name = name_getippt.pop("name", "").strip()
+        if name and name != plan.name:
+            state.plaene.umbenennen(plan.id, name)
+
+    def name_geaendert(e: ft.Event[ft.TextField]) -> None:
+        ohne_auto_update()  # nur merken — kein Vergleich der ganzen Seite je Buchstabe
+        name_getippt["name"] = e.control.value or ""
+        state.vor_dem_verlassen[name_schluessel] = name_sichern
+
     def umbenennen(e: ft.Event[ft.TextField]) -> None:
+        name_getippt.clear()
+        if state.vor_dem_verlassen.get(name_schluessel) == name_sichern:
+            del state.vor_dem_verlassen[name_schluessel]
         name = (e.control.value or "").strip()
         if name and name != plan.name:
             state.plaene.umbenennen(plan.id, name)
@@ -2026,6 +2073,10 @@ def plan_view(
     def info_route(item: PlanItem) -> str:
         """Die Übungsseite unter dem Plan — beim Üben wie beim Bearbeiten (Ben, 22.10.2026, P79:
         das i führt überall dorthin); Zurück führt wieder hierher."""
+        if nachtrag is not None:
+            # Unter „Nachtragen“ gibt es keine Route `…/info` — der Tipp führte ins Leere
+            # (Durchsicht 11.11.2026); die Übungsseite legt sich darüber, Zurück führt hierher
+            return f"/uebung/{item.exercise_id}"
         return f"{route}/info" if einzel else f"{route}/info/{item.id}"
 
     def notiz_knopf(item: PlanItem) -> ft.Control:
@@ -2086,6 +2137,18 @@ def plan_view(
             def sichern() -> None:
                 text = (feld.value or "").strip()
                 if text or heutig is not None:
+                    # Der Eintrag, dessen Notiz der Dialog zeigt, bekommt sie auch — selbst
+                    # wenn er sich inzwischen geschlossen hat (Dialog lange offen, Timer):
+                    # sonst stünde der alte Text zweimal da, im alten und in einem neuen (N109)
+                    gezeigt = (
+                        state.sitzungen.eintrag_aktuell(heutig.id) if heutig is not None else None
+                    )
+                    if gezeigt is not None and not eigener_eintrag(item):
+                        state.sitzungen.eintrag_korrigieren(
+                            gezeigt.id, dict(gezeigt.result), note=text
+                        )
+                        nachher.danach(gespeichert)
+                        return
                     session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
                     neu = eigener_eintrag(item)
                     eigenen_gemerkt(item, neu)
@@ -2131,6 +2194,172 @@ def plan_view(
 
         return handler
 
+    def uebungs_teile(item: PlanItem, uebung: Exercise, ziel: str) -> _UebTeile:
+        """Was eine Übung zum Üben braucht — Stand, die Knöpfe zum Abhaken, Uhr und Zählzeile.
+        Der Block des Plans und die Einzelübung (`einzel_block`) stellen dieselben Teile nur
+        verschieden."""
+        st = stand_fuer(item, uebung)
+        # „Abschließen“ fixiert den markierten Eintrag; ohne markierten heißt der Knopf
+        # „Gemacht“ und legt einen fertigen an (Ben, 19.10.2026, Skizzen A1–A3)
+        # Gefüllt sind nur Knöpfe, die Werte schreiben (Skizze C1): „Wie geplant“ und die
+        # „+“-Knöpfe; „Abschließen“/„Gemacht“ stehen umrandet daneben
+        # Ein markierter Eintrag, der nichts hat außer dem Stempel (keine Menge, keine
+        # Notiz), heißt weiter „Gemacht“ — der Knopf schließt ihn, statt einen zweiten
+        # Stempel anzulegen (Ben, 28.10.2026)
+        abhaken = (
+            _umrandet(
+                "Gemacht" if nur_stempel(st.ziel) else "Abschließen",
+                ft.Icons.CHECK,
+                abschliesser(item),
+            )
+            if st.zustand == offene.MARKIERT
+            else _umrandet("Gemacht", ft.Icons.CHECK, erlediger(item))
+        )
+        # Zählt der Sensor die Wiederholungen, hakte „Wie geplant“ mit seiner Zahl ab, nicht
+        # mit dem Ziel (P122) — der Knopf versprach etwas anderes; „Gemacht“ und „Fertig“
+        # der Zählzeile tun dasselbe und sagen es
+        zaehlt = zaehl_stand.zaehl_teil(
+            state, item.exercise_id, None if einzel else item.id, nur_aktiv=True
+        )
+        geplant = (
+            _knopf(f"Wie geplant · {ziel}", ft.Icons.FLAG, ziel_erlediger(item), betont=True)
+            if ziel and not (zaehlt is not None and zaehlt.wdh and nachtrag is None)
+            else None
+        )
+        # Stoppuhr und Timer (Ben, 18.10.2026): als Knöpfe zwischen „Gemacht“ und „Notiz“
+        # oder als erste Zeile unter „Eintragen“ (27.10.2026) — und, solange sie läuft,
+        # ihre Anzeige, auch im zugeklappten Block
+        aus_katalog = katalog[item.exercise_id]
+        planuebung = None if einzel else item
+        uhr = (
+            uhr_teile(
+                page,
+                state,
+                uebung=aus_katalog,
+                plan=None if einzel else plan,
+                item=planuebung,
+                timer_oeffnen=oeffner(uebung_timer_route(route, aus_katalog, planuebung)),
+                basis=route,
+            )
+            # Die Zeile steht immer — „Uhr aus“ heißt „Ohne Uhr“, ▶ öffnet dann nur den
+            # Fokus (P146, `docs/plan_uhr_fokus.md` §2)
+            if nachtrag is None
+            else UhrTeile()
+        )
+        # Wiederholungen zählen (Ben, 4.11.2026): direkt unter der Zeile der Uhr. Zeigt
+        # die Karte die laufende Uhr und zählt der Sensor in ihrer Einheit, steht die Zahl
+        # dort — die Zählzeile wiederholt sie nicht
+        # (`laufende` nennt auch einen Zähllauf ohne Uhr — die Uhr läuft nur mit Timer)
+        einheit = laufende(state, aus_katalog, planuebung) if uhr.zeile is not None else None
+        uhr_laeuft = einheit is not None and einheit.timer is not None
+        zaehl = zaehl_zeile(
+            page,
+            state,
+            uebung=aus_katalog,
+            plan=None if einzel else plan,
+            item=planuebung,
+            nachtrag=nachtrag,
+            neben_uhr=uhr_laeuft,
+        )
+        return _UebTeile(st, abhaken, geplant, uhr, zaehl)
+
+    def einzel_verwalten(
+        item: PlanItem, uebung: Exercise, st: offene.Stand
+    ) -> list[einzel_seite.Verwalten]:
+        """Die Zeile „Verwalten“ der Einzelübung: Notiz · Variante · Material · Uhr · Verlauf ·
+        Info. „Übung bearbeiten“ erreicht man über „Info“ → Stift (P79: nie ein Schritt)."""
+        felder = [
+            einzel_seite.Verwalten(
+                ft.Icons.EDIT_NOTE_OUTLINED,
+                "Notiz",
+                "Ein Satz ins Tagebuch — am offenen Eintrag",
+                notiz_fragen(item),
+            )
+        ]
+        if varianten_an(item):
+            gesetzt = var.von(st.ziel.result) if st.ziel is not None else ""
+            felder.append(
+                einzel_seite.Verwalten(
+                    ft.Icons.SELL if gesetzt else ft.Icons.SELL_OUTLINED,
+                    "Variante",
+                    f"Variante: {gesetzt}" if gesetzt else "Variante",
+                    variante_blatt_oeffner(item),
+                    betont=bool(gesetzt),
+                )
+            )
+        # Material (U2, F6): Anweisungen, Videos — hält die Uhr an, solange das Blatt offen ist
+        material = material_von(uebung, item)
+        if not material.leer:
+            felder.append(
+                einzel_seite.Verwalten(
+                    ft.Icons.MENU_BOOK_OUTLINED,
+                    "Material",
+                    f"Material: {material.kurztext()} — die Uhr steht, solange du es ansiehst",
+                    lambda: page.show_dialog(material_blatt(page, state, uebung, item, material)),
+                    kennung="material",
+                )
+            )
+        felder += [
+            einzel_seite.Verwalten(
+                ft.Icons.TIMER_OUTLINED, "Uhr", "Uhr einstellen", uhr_blatt_oeffner(uebung, item)
+            ),
+            einzel_seite.Verwalten(
+                ft.Icons.SHOW_CHART,
+                "Verlauf",
+                "Im Verlauf ansehen",
+                oeffner(f"/verlauf/{uebung.id}"),
+            ),
+            einzel_seite.Verwalten(
+                ft.Icons.INFO_OUTLINE,
+                "Info",
+                "Übung ansehen — Beschreibung, Medien, Bearbeiten",
+                oeffner(info_route(item)),
+            ),
+        ]
+        return felder
+
+    def einzel_block(item: PlanItem, uebung: Exercise, ziel: str) -> ft.Control:
+        """Die Einzelübung (Ben, 11.11.2026, `components/einzel_seite.py`): Kopf und Uhr fest
+        oben (`einzel_kopf`), in der Liste Ausführung · Eintragen · Heute geleistet ·
+        Verwalten. Dieselben Teile und Handler wie der Block — nur anders gestellt."""
+        t = uebungs_teile(item, uebung, ziel)
+        untertitel = "  ·  ".join(
+            x for x in (", ".join(uebung.typen), ", ".join(uebung.regionen)) if x
+        )
+        # Der Schalter „▶ öffnet den Fokus“ steht über dem ▶ der Uhr-Zeile (P145)
+        rechts = [fokus_schalter()] if t.uhr.zeile is not None else []
+        einzel_kopf.content = einzel_seite.fester_kopf(
+            einzel_seite.kopf(
+                uebungsbild(state, uebung.icon_key, uebung.image_path, groesse=32, opacity=0.85),
+                uebung.name,
+                untertitel,
+                rechts,
+            ),
+            [z for z in (t.uhr.zeile, t.zaehl) if z is not None],
+        )
+        einzel_kopf.visible = True
+        mengen_teile = parameter_abschnitte(item, uebung)
+        ausfuehrung = ausfuehrung_abschnitt(item, uebung, t.st, None)
+        karten: list[ft.Control] = []
+        if ausfuehrung is not None:
+            karten.append(einzel_seite.bereich(ausfuehrung, einzel_seite.AUSFUEHRUNG))
+        karten.append(
+            einzel_seite.eintragen_karte(
+                "EINTRAGEN",
+                [bauen() for _, _, bauen in mengen_teile],
+                # Wohin der nächste Wert geht — nur, wo es Werte gibt
+                ziel_hinweis(item, uebung, t.st)
+                if mengen_teile or ausfuehrung is not None
+                else None,
+                einzel_seite.aktionszeile(
+                    [*([t.geplant] if t.geplant is not None else []), t.abhaken, *t.uhr.knoepfe]
+                ),
+            )
+        )
+        karten.append(einzel_seite.bereich(geleistet_tafel(uebung, item, t.st), einzel_seite.HEUTE))
+        karten.append(einzel_seite.verwalten_zeile(einzel_verwalten(item, uebung, t.st)))
+        return einzel_seite.spalte(karten)
+
     def block(index: int, item: PlanItem) -> ft.Control:
         # Kein ``key`` an den Blöcken (Ben, 17.10.2026): `auffrischen` setzt neue Blöcke in
         # dieselbe Liste; Flet 1.0 gleicht gleiche Schlüssel verschiedener Objekte wie im
@@ -2145,6 +2374,8 @@ def plan_view(
         uebung = uebung_fuer(item)
         n = item.id in fertig_ids
         ziel = ziel_text(uebung, ziel_von(item, uebung))
+        if einzeln:
+            return einzel_block(item, uebung, ziel)
         # Beim Nachtragen steht die Übung schon im Kopf der Seite (Skizze G1)
         inhalt: list[ft.Control] = [kopfzeile(uebung, item)] if nachtrag is None else []
 
@@ -2219,63 +2450,20 @@ def plan_view(
                 )
             )
         else:
-            st = stand_fuer(item, uebung)
-            # „Abschließen“ fixiert den markierten Eintrag; ohne markierten heißt der Knopf
-            # „Gemacht“ und legt einen fertigen an (Ben, 19.10.2026, Skizzen A1–A3)
-            # Gefüllt sind nur Knöpfe, die Werte schreiben (Skizze C1): „Wie geplant“ und die
-            # „+“-Knöpfe; „Abschließen“/„Gemacht“ stehen umrandet daneben
-            # Ein markierter Eintrag, der nichts hat außer dem Stempel (keine Menge, keine
-            # Notiz), heißt weiter „Gemacht“ — der Knopf schließt ihn, statt einen zweiten
-            # Stempel anzulegen (Ben, 28.10.2026)
+            t = uebungs_teile(item, uebung, ziel)
+            st = t.st
             knoepfe: list[ft.Control] = [
-                _umrandet(
-                    "Gemacht" if nur_stempel(st.ziel) else "Abschließen",
-                    ft.Icons.CHECK,
-                    abschliesser(item),
-                )
-                if st.zustand == offene.MARKIERT
-                else _umrandet("Gemacht", ft.Icons.CHECK, erlediger(item))
+                t.abhaken,
+                *([t.geplant] if t.geplant is not None else []),
+                *t.uhr.knoepfe,
+                notiz_knopf(item),
             ]
-            # Zählt der Sensor die Wiederholungen, hakte „Wie geplant“ mit seiner Zahl ab, nicht
-            # mit dem Ziel (P122) — der Knopf versprach etwas anderes; „Gemacht“ und „Fertig“
-            # der Zählzeile tun dasselbe und sagen es
-            zaehlt = zaehl_stand.zaehl_teil(
-                state, item.exercise_id, None if einzel else item.id, nur_aktiv=True
-            )
-            if ziel and not (zaehlt is not None and zaehlt.wdh and nachtrag is None):
-                knoepfe.append(
-                    _knopf(
-                        f"Wie geplant · {ziel}", ft.Icons.FLAG, ziel_erlediger(item), betont=True
-                    )
-                )
-            # Stoppuhr und Timer (Ben, 18.10.2026): als Knöpfe zwischen „Gemacht“ und „Notiz“
-            # oder als erste Zeile unter „Eintragen“ (27.10.2026) — und, solange sie läuft,
-            # ihre Anzeige, auch im zugeklappten Block
-            aus_katalog = katalog[item.exercise_id]
-            planuebung = None if einzel else item
-            uhr = (
-                uhr_teile(
-                    page,
-                    state,
-                    uebung=aus_katalog,
-                    plan=None if einzel else plan,
-                    item=planuebung,
-                    timer_oeffnen=oeffner(uebung_timer_route(route, aus_katalog, planuebung)),
-                    basis=route,
-                )
-                # Die Zeile steht immer — „Uhr aus“ heißt „Ohne Uhr“, ▶ öffnet dann nur den
-                # Fokus (P146, `docs/plan_uhr_fokus.md` §2)
-                if nachtrag is None
-                else UhrTeile()
-            )
-            knoepfe.extend(uhr.knoepfe)
-            knoepfe.append(notiz_knopf(item))
             if varianten_an(item):
                 knoepfe.append(etikett_knopf(item, st))
             inhalt.append(geleistet_tafel(uebung, item, st))
             # Ganz rechts in der Zeile von Gemacht · Notiz · Variante: ob ▶ in den Fokus wechselt
             # (Ben, 8.11.2026 — derselbe Schalter wie in den Einstellungen, P145)
-            rechts = [fokus_schalter()] if uhr.zeile is not None else []
+            rechts = [fokus_schalter()] if t.uhr.zeile is not None else []
             inhalt.append(
                 ft.Row(
                     spacing=4,
@@ -2286,22 +2474,7 @@ def plan_view(
                     ],
                 )
             )
-            # Wiederholungen zählen (Ben, 4.11.2026): direkt unter der Zeile der Uhr. Zeigt
-            # die Karte die laufende Uhr und zählt der Sensor in ihrer Einheit, steht die Zahl
-            # dort — die Zählzeile wiederholt sie nicht
-            # (`laufende` nennt auch einen Zähllauf ohne Uhr — die Uhr läuft nur mit Timer)
-            einheit = laufende(state, aus_katalog, planuebung) if uhr.zeile is not None else None
-            uhr_laeuft = einheit is not None and einheit.timer is not None
-            zaehl = zaehl_zeile(
-                page,
-                state,
-                uebung=aus_katalog,
-                plan=None if einzel else plan,
-                item=planuebung,
-                nachtrag=nachtrag,
-                neben_uhr=uhr_laeuft,
-            )
-            oben = [z for z in (uhr.zeile, zaehl) if z is not None]
+            oben = [z for z in (t.uhr.zeile, t.zaehl) if z is not None]
             inhalt.extend(eingabe_bereich(item, uebung, st, oben))
 
         return ft.Container(
@@ -2569,7 +2742,12 @@ def plan_view(
             # Reiter Plan · Uhren (· Ablauf) — immer da, nicht nur in den Unteransichten (Ben,
             # 8.11.2026: „Geht man zurück, sind die Reiter weg“)
             plan_reiter(page, route, "", ablauf_an=plan.ablauf.an),
-            ft.TextField(label="Name des Plans", value=plan.name, on_blur=umbenennen),
+            ft.TextField(
+                label="Name des Plans",
+                value=plan.name,
+                on_change=name_geaendert,
+                on_blur=umbenennen,
+            ),
             *herkunft_zeile(),
             ft.Switch(
                 label="Aktiv — erscheint auf „Heute“" if plan.aktiv else "Deaktiviert",
@@ -2595,13 +2773,8 @@ def plan_view(
     elif nachtrag is not None:
         kopf = list(nachtrag.kopf)
     elif einzel:
-        kopf = [
-            ft.Text(
-                "Ohne Plan — der Eintrag erscheint auf „Heute“ unter „Ohne Plan“.",
-                size=13,
-                opacity=0.7,
-            )
-        ]
+        # Der Satz „Ohne Plan — …“ steht unter den Karten (`einzel_seite.spalte`)
+        kopf = []
     else:
         # Kein Kopf mehr (Ben, 7.11.2026): „2/6“ in der Mitte der Pfeile öffnet den
         # Gesamtplan, die Legende der Knöpfe steht im „?“ oben (`hilfe.PLAN_MD`)
@@ -2713,7 +2886,14 @@ def plan_view(
     ansicht = ft.View(
         route=route,
         appbar=ft.AppBar(
-            title=ft.Text(nachtrag.titel if nachtrag is not None else plan.name),
+            title=ft.Text(
+                nachtrag.titel
+                if nachtrag is not None
+                # Der Name steht im festen Kopf, ungekürzt (`einzel_block`)
+                else EINZEL_TITEL
+                if einzeln
+                else plan.name
+            ),
             actions=aktionen,
         ),
         padding=0,
@@ -2722,7 +2902,13 @@ def plan_view(
                 ft.Column(
                     expand=True,
                     spacing=0,
-                    controls=[workout_hinweis(), uebmodus_zeile(), pfeile_halter, liste],
+                    controls=[
+                        workout_hinweis(),
+                        uebmodus_zeile(),
+                        pfeile_halter,
+                        einzel_kopf,
+                        liste,
+                    ],
                 )
             )
         ],

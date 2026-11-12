@@ -339,7 +339,13 @@ def test_grosses_paket_geht_ueber_eine_datei_und_wird_geraeumt(tmp_path) -> None
 
     # Fehler lassen nichts liegen: Prüfsumme, andere Version, nicht erreichbar
     with pytest.raises(QuellenFehler, match="Prüfsumme"):
+        paket_laden(eintrag, lambda _u: bytes([daten[0] ^ 1]) + daten[1:], arbeit=arbeit)
+    # Mehr, als der Index ankündigt, wird gar nicht erst zu Ende geladen (S27)
+    with pytest.raises(QuellenFehler, match="zu groß"):
         paket_laden(eintrag, lambda _u: daten + b"x", arbeit=arbeit)
+    # … ohne Größe im Index gilt nur die Obergrenze: dann entscheidet die Prüfsumme
+    with pytest.raises(QuellenFehler, match="Prüfsumme"):
+        paket_laden(replace(eintrag, bytes=0), lambda _u: daten + b"x", arbeit=arbeit)
     with pytest.raises(QuellenFehler, match="andere Version"):
         paket_laden(replace(eintrag, version=3), lambda _u: daten, arbeit=arbeit)
 

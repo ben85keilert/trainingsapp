@@ -428,3 +428,62 @@ def test_workout_zeilen_fuers_tagebuch_und_kopie_der_felder(repo) -> None:
     # Alles zurückgenommen: nicht mehr im Tagebuch
     r.workout_eintragen("e-1", result={"srpe": None, "skala:Schmerz": None}, note="")
     assert r.workout_zeilen(profil) == []
+
+
+# ---------------------------------------------------------------------------
+# Durchsicht 10.11.2026: N67 (plan/kante je Plan), H79 (mit_hrv), D28 (ausser)
+# ---------------------------------------------------------------------------
+
+
+def test_kanten_und_tore_sehen_nur_den_eigenen_plan(repo) -> None:
+    """N67: Die Abfrage grenzt auf den Plan ein (``json_extract``) — das Ergebnis ist dasselbe
+    wie mit dem Filter in Python: fremde Pläne, andere Profile und ``pflicht_offen`` zählen
+    nicht."""
+    r, profil = repo
+    fremd = Subject(name="Anna")
+    SubjectRepo(r.con).speichern(fremd)
+
+    def kante(plan: str, von: str, nach: str, **mehr: object) -> Ereignis:
+        return Ereignis(1.0, "plan", "kante", "", {"plan": plan, "von": von, "nach": nach, **mehr})
+
+    r.einheit_beginnen("e-1", profil, T0, "Workout")
+    r.ereignisse_schreiben(
+        "e-1",
+        [
+            (0, kante("p-1", "a", "b")),
+            (1, kante("p-1", "b", "c", pflicht_offen=True)),
+            (2, kante("p-2", "x", "y")),
+            (3, Ereignis(2.0, "plan", "kante", "")),  # ohne Daten: zählt nirgends
+        ],
+    )
+    r.einheit_beginnen("e-2", profil, T0 + timedelta(days=1), "Workout")
+    r.ereignisse_schreiben("e-2", [(0, kante("p-1", "a", "b"))])
+    r.einheit_beginnen("e-3", fremd.id, T0, "Workout")
+    r.ereignisse_schreiben("e-3", [(0, kante("p-1", "c", "d"))])
+
+    assert r.kanten_gezaehlt(profil, "p-1") == {("a", "b"): 2, ("b", "c"): 1}
+    assert r.kanten_gezaehlt(profil, "p-2") == {("x", "y"): 1}
+    assert r.kanten_gezaehlt(profil, "p-3") == {}
+    assert r.tore_offen(profil, "p-1") == {"a"}
+    assert r.tore_offen(profil, "p-2", seit=T0 + timedelta(hours=1)) == set()
+    assert r.tore_offen(fremd.id, "p-1") == {"c"}
+
+
+def test_mit_hrv_in_einer_abfrage(repo) -> None:
+    """H79: Welche Einheiten eine HRV-Aufnahme mit Datei hatten — für die Liste der Trainings."""
+    r, profil = repo
+    for n, (art, datei) in enumerate([("hrv", "2026/a.json"), ("hrv", ""), ("gps", "s.jsonl")]):
+        r.einheit_beginnen(f"e-{n}", profil, T0, "Lauf")
+        r.beteiligung(f"e-{n}", Beteiligung(art, Rolle.MITSTARTEN, datei=datei))
+    assert r.mit_hrv(["e-0", "e-1", "e-2", "e-0", "fehlt"]) == {"e-0"}
+    assert r.mit_hrv([]) == set()
+    assert r.mit_hrv([f"e-{n}" for n in range(1200)]) == {"e-0"}
+
+
+def test_abgebrochene_schliessen_laesst_laufende_einer_anderen_sitzung(repo) -> None:
+    """D28: Was in diesem Prozess gerade läuft, ist offen, aber nicht abgebrochen."""
+    r, profil = repo
+    r.einheit_beginnen("e-1", profil, T0, "Lauf")
+    r.einheit_beginnen("e-2", profil, T0, "Workout")
+    assert r.abgebrochene_schliessen(ausser={"e-2"}) == ["e-1"]
+    assert r.offene() == ["e-2"]

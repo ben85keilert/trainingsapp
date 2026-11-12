@@ -32,7 +32,7 @@ from trainingsapp.core.result_spec import FieldSpec, FieldType
 from trainingsapp.core.standards import mit_plan_spec
 from trainingsapp.core.timer import dauer_text
 from trainingsapp.core.timer_eintrag import eingaben as person_eingaben
-from trainingsapp.core.uebung_timer import ausfuehrungsfelder, takt_der_uebung
+from trainingsapp.core.uebung_timer import ausfuehrungsfelder
 from trainingsapp.devices.einheit import Einheitslauf
 from trainingsapp.devices.plan_ablauf import (
     FERTIG,
@@ -44,7 +44,7 @@ from trainingsapp.devices.plan_ablauf import (
     PlanAblaufBaustein,
 )
 from trainingsapp.ui import einheit as einheit_ui
-from trainingsapp.ui import plan_ablauf, uebung_lauf
+from trainingsapp.ui import plan_ablauf
 from trainingsapp.ui.components import fokus_eintragen as fe
 from trainingsapp.ui.components import links, zaehl_stand
 from trainingsapp.ui.components.ablaufbild import ablaufbild, abspielen
@@ -56,7 +56,6 @@ from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.modus_wahl import WORKOUT, modus_wahl
 from trainingsapp.ui.components.srpe import workout_srpe_zeile
-from trainingsapp.ui.components.takt_blatt import takt_anbringen
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uhr import schluessel as uhr_schluessel
 from trainingsapp.ui.plan_ablauf import GRUENDE
@@ -164,36 +163,10 @@ def workout_view(
         wahl["hrv_beenden"] = bool(e.control.selected) and e.control.selected[0] == "beenden"
 
     def takt_je_schritt(e: Any, teil: PlanAblaufBaustein) -> None:
-        """P99: Je Schritt kommt der Takt der Planübung (für jetzt > Planübung > Plan > Übung)
-        an den Timer, „Takt zählt“ tritt als Zähl-Teil an (`takt_zaehlen_anbringen`), und hat
-        das Gerät einen Beschleunigungssensor und die Planübung ihn an, zählt er
-        (`zaehlen_starten`) — alles einmal je Schritt, wie beim Übungs-Timer; das Zählen endet
-        mit dem Schritt (`ZaehlBaustein.im_plan`)."""
-        # Je Durchlauf neu (Schleifen: dieselbe Übung noch einmal) — der Verlauf zählt mit
-        marke = (e.id, teil.k, len(teil.verlauf))
-        if (
-            stand["takt_fuer"] == marke
-            or teil.timer is None
-            or teil.phase not in (UEBUNG, UEBERZEIT)
-        ):
-            return
-        stand["takt_fuer"] = marke
-        s = teil.schritt
-        u = katalog.get(s.uebung_id)
-        if u is None:
-            return
-        item = state.plaene.item_laden(s.item_id)
-        with contextlib.suppress(Exception):
-            takt_anbringen(
-                state, teil.timer.lauf, uhr_schluessel(u, item), takt_der_uebung(u, item, plan)
-            )
-        with contextlib.suppress(Exception):  # der Zähler darf das Workout nie aufhalten
-            uebung_lauf.takt_zaehlen_anbringen(page, state, e, u, item)
-        if zaehl_stand.geraet_kann_zaehlen(state.messlauf) and zaehl_stand.zaehlen_an(u, item):
-            with contextlib.suppress(Exception):
-                uebung_lauf.zaehlen_starten(
-                    page, state, uebung_lauf.kontext_fuer(u, plan, item), uebung=u, item=item
-                )
+        """Takt, „Takt zählt“ und Sensor des Schritts — eingerichtet wird in
+        `plan_ablauf.schritt_einrichten`, das auch der Beobachter der Einheit ruft: Es hängt
+        nicht mehr daran, dass diese Ansicht offen ist (N62)."""
+        plan_ablauf.schritt_einrichten(page, state, e)
 
     def starten(fort: ab.Fortsetzung | None = None) -> None:
         """Los — ``fort``: dort weiter, wo das Workout heute vorzeitig endete (P166)."""
@@ -1491,13 +1464,15 @@ def workout_view(
                 wdh_jetzt(teil) is None,
             )
         einheit_id = state.plan_ablaeufe.get(plan.id)
-        fertig = (
-            plan_ablauf.ergebnis_der_einheit(state, einheit_id)
-            if einheit_id and not wahl["noch_einmal"]
-            else None
-        )
-        if fertig is not None:
-            return ("danach", einheit_id)
+        if einheit_id and not wahl["noch_einmal"]:
+            # Eine beendete Einheit bleibt beendet: nur fragen, bis sie es ist — sonst läse
+            # jeder Takt des Beobachters Kopf und Zeitleiste aus der Datenbank (N76)
+            if stand.get("beendet") != einheit_id and (
+                plan_ablauf.ergebnis_der_einheit(state, einheit_id) is not None
+            ):
+                stand["beendet"] = einheit_id
+            if stand.get("beendet") == einheit_id:
+                return ("danach", einheit_id)
         return (
             "vorher",
             uebergang_fuer(state, plan),

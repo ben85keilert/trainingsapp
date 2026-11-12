@@ -23,13 +23,19 @@ from trainingsapp.ui.components.bewegungsbild import Bildfolge, bewegung_im_foku
 from trainingsapp.ui.state import FOKUS_HF, AppState  # noqa: E402
 from trainingsapp.ui.views.uebung_timer import uebung_timer_view  # noqa: E402
 
-#: Ein „PNG“ mit Kopf für 4 quadratische Bilder (1024 × 256) — mehr braucht die App nicht
+#: Ein kleines PNG mit Kopf für 4 quadratische Bilder (1024 × 256)
 STREIFEN = (
     b"\x89PNG\r\n\x1a\n"
     + b"\x00\x00\x00\rIHDR"
     + (1024).to_bytes(4, "big")
     + (256).to_bytes(4, "big")
     + b"\x08\x06\x00\x00\x00"
+    + bytes(4)
+    # gültig abgeschlossen: die Ablage lehnt ab, was sich nicht ablaufen lässt (D29)
+    + b"\x00\x00\x00\x02IDAT\x78\x9c"
+    + bytes(4)
+    + b"\x00\x00\x00\x00IEND"
+    + bytes(4)
 )
 
 
@@ -197,7 +203,7 @@ def test_fokus_knopf_an_der_laufenden_uhr_und_einstellung(tmp_path, monkeypatch)
         UebungKontext,
     )
     from trainingsapp.ui.components.uhr import _laufend
-    from trainingsapp.ui.views.einstellungen import einstellungen
+    from trainingsapp.ui.views.einstellungen_seiten import einstellungen_uebungen
 
     monkeypatch.setenv("TRAININGSAPP_DATA_DIR", str(tmp_path))
     state = AppState.starten(tmp_path / "app.db")
@@ -225,7 +231,7 @@ def test_fokus_knopf_an_der_laufenden_uhr_und_einstellung(tmp_path, monkeypatch)
         )
         # Die Einstellung: Vorgabe an (P145, 8.11.2026), der Schalter stellt sie
         assert state.fokus_auto() is True
-        ansicht = einstellungen(page, state, SimpleNamespace())
+        ansicht = einstellungen_uebungen(page, state)  # Einstellungen → Übungen
         schalter = next(
             x
             for x in _alle(ansicht)

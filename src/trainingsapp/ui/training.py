@@ -24,10 +24,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import math
 import os
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -68,10 +69,12 @@ from trainingsapp.core.strecke import (
     GEHEN,
     SPORT_NAMEN,
     SPORTARTEN,
+    STILLSTAND_S,
     Punkt,
     StreckenRechner,
     rechnen,
 )
+from trainingsapp.data.db import transaktion
 from trainingsapp.data.seed import seed_id
 from trainingsapp.data.strecken import (
     StreckenSchreiber,
@@ -318,10 +321,11 @@ def training_kuerzen(state: Any, strecke: Strecke, bis_s: float, *, lauf: Any = 
     aus der Aufzeichnung rauszunehmen. Wichtig dabei ist vor allem das korrekte Setzen der
     Notizen in der HRV-Messung.“ Der Reihe nach:
 
-    1. **Streckendatei**: nur noch die Ortungen bis zum neuen Ende (atomar neu geschrieben,
-       Kopf bleibt) — die entfernten Ortungen sind weg (GPS-Daten, nie geteilt, kein Backup).
+    1. **Streckendatei**: nur noch die Ortungen bis zum neuen Ende (daneben neu geschrieben,
+       Kopf bleibt; getauscht wird atomar, sobald Zeile und Tagebuch stehen — H78) — die
+       entfernten Ortungen sind weg (GPS-Daten, nie geteilt, kein Backup).
     2. **Zeile** ``strecke``: Ende, Dauer, Bewegungszeit, Strecke und Höhe neu aus den
-       verbliebenen Ortungen (`core.strecke.rechnen`).
+       verbliebenen Ortungen (`core.strecke.rechnen`, Auto-Pause nach der Einstellung).
     3. **Tagebucheintrag**: eine Korrektur (`eintrag_korrigieren`, der alte bleibt in der
        Kette) mit neuer Dauer und Strecke, Ende wie die Zeile.
     4. **HRV-Messung** (`core.nachlauf`): „‹Einheit›: Ende“ rückt auf das neue Ende, km-Notizen
@@ -330,11 +334,66 @@ def training_kuerzen(state: Any, strecke: Strecke, bis_s: float, *, lauf: Any = 
        mit „Ganze Messung“ aufzuheben). Läuft sie noch (``lauf``), rückt die Notiz in der
        laufenden Aufnahme — Sidecar und Datei folgen beim Speichern.
 
-    Die Zeitleiste der Einheit bleibt, wie sie war: Sie dokumentiert, was geschah.
+    Die Zeitleiste der Einheit bleibt, wie sie war: Sie dokumentiert, was geschah. Scheitert
+    Schritt 4, bleibt die Strecke gekürzt; die Meldung nennt den Fehler (`Gekuerzt.hrv`).
+    In der Oberfläche: `training_kuerzen_async` (Dateien im Thread).
 
     Raises:
         ValueError: ohne Datei, zu kurz, oder es gäbe nichts zu kürzen.
     """
+    schnitt = _kuerzen_dateien(strecke, bis_s, _stillstand_s(state))
+    _kuerzen_eintragen(state, strecke, schnitt)
+    try:
+        auftrag = _hrv_auftrag(state, strecke, schnitt.bis_t, lauf)
+        hrv = (
+            auftrag if isinstance(auftrag, str) else _hrv_fertig(state, auftrag, auftrag.dateien())
+        )
+    except Exception as fehler:  # die Strecke ist gekürzt — das sagen, nicht „Nicht gekürzt“
+        hrv = f"HRV-Notizen nicht verschoben: {fehler}"
+    return Gekuerzt(strecke, schnitt.entfernt_s, hrv)
+
+
+async def training_kuerzen_async(
+    state: Any, strecke: Strecke, bis_s: float, *, lauf: Any = None
+) -> Gekuerzt:
+    """Wie `training_kuerzen`, aber Dateien und Rechnen laufen in einem Thread (H78:
+    Streckendatei lesen und schreiben, Messdatei laden — bei 4 h Sekunden); die Datenbank und
+    die laufende Aufnahme bleiben im Loop (sqlite-Verbindungen gehören ihrem Thread, H39)."""
+    stillstand_s = _stillstand_s(state)
+    schnitt = await asyncio.to_thread(_kuerzen_dateien, strecke, bis_s, stillstand_s)
+    _kuerzen_eintragen(state, strecke, schnitt)
+    try:
+        auftrag = _hrv_auftrag(state, strecke, schnitt.bis_t, lauf)
+        if isinstance(auftrag, str):
+            hrv = auftrag
+        else:
+            hrv = _hrv_fertig(state, auftrag, await asyncio.to_thread(auftrag.dateien))
+    except Exception as fehler:
+        hrv = f"HRV-Notizen nicht verschoben: {fehler}"
+    return Gekuerzt(strecke, schnitt.entfernt_s, hrv)
+
+
+def _stillstand_s(state: Any) -> float:
+    """Auto-Pause wie live und in der Auswertung: nach der Einstellung (H81) — vorher rechneten
+    Kürzen und Nachtragen immer mit, und die Bewegungszeit der Zeile sprang."""
+    return STILLSTAND_S if state.training_einstellungen().auto_pause else math.inf
+
+
+@dataclass(frozen=True, slots=True)
+class _Schnitt:
+    """Was `_kuerzen_dateien` vorbereitet hat."""
+
+    pfad: Path
+    #: die gekürzte Datei daneben — sie ersetzt ``pfad`` erst, wenn die Datenbank es weiß
+    neu: Path
+    bis_t: float
+    entfernt_s: float
+    rechner: StreckenRechner
+
+
+def _kuerzen_dateien(strecke: Strecke, bis_s: float, stillstand_s: float) -> _Schnitt:
+    """Lesen, prüfen, die gekürzte Datei **daneben** schreiben, rechnen — ohne Datenbank
+    (darf in einen Thread). Die Streckendatei selbst bleibt noch, wie sie ist."""
     if not strecke.file_path:
         raise ValueError("Dieses Training hat keine Ortungen.")
     pfad = streckenverzeichnis() / strecke.file_path
@@ -349,40 +408,95 @@ def training_kuerzen(state: Any, strecke: Strecke, bis_s: float, *, lauf: Any = 
         raise ValueError("So bliebe keine Strecke übrig.")
     if neu[-1].t >= punkte[-1].t:
         raise ValueError("Das Ende liegt schon dort — nichts zu kürzen.")
-    entfernt = punkte[-1].t - neu[-1].t
-    # 1. Datei
     kopf = kopf_lesen(pfad)
     tmp = pfad.with_name(pfad.name + ".neu")
     with StreckenSchreiber(tmp, kopf=kopf) as schreiber:
         for p in neu:
             schreiber.schreiben(p)
-    os.replace(tmp, pfad)
-    # 2. Zeile
-    r = rechnen(neu, strecke.sportart)
+    r = rechnen(neu, strecke.sportart, stillstand_s=stillstand_s)
+    return _Schnitt(pfad, tmp, bis_t, punkte[-1].t - neu[-1].t, r)
+
+
+def _kuerzen_eintragen(state: Any, strecke: Strecke, schnitt: _Schnitt) -> None:
+    """Zeile und Tagebuch in **einer** Transaktion, dann erst die Datei tauschen (H78):
+    Scheitert die Datenbank, ist nichts gekürzt — die Streckendatei ist noch die alte, und
+    ``strecke`` bleibt unverändert."""
+    r, entfernt = schnitt.rechner, schnitt.entfernt_s
     ende_alt = strecke.ended_at or strecke.started_at + timedelta(seconds=strecke.dauer_s)
-    strecke.ended_at = ende_alt - timedelta(seconds=entfernt)
-    strecke.dauer_s = max(strecke.dauer_s - entfernt, r.dauer_s, 0.0)
-    strecke.bewegt_s = min(r.bewegt_s, strecke.dauer_s)
-    strecke.distanz_m = r.distanz_m
-    strecke.hoehe_auf_m, strecke.hoehe_ab_m = r.hoehe_auf_m, r.hoehe_ab_m
-    # 3. Tagebuch
-    if strecke.session_entry_id and (
-        alt := state.sitzungen.eintrag_laden(strecke.session_entry_id)
+    dauer_s = max(strecke.dauer_s - entfernt, r.dauer_s, 0.0)
+    neu = replace(
+        strecke,
+        ended_at=ende_alt - timedelta(seconds=entfernt),
+        dauer_s=dauer_s,
+        bewegt_s=min(r.bewegt_s, dauer_s),
+        distanz_m=r.distanz_m,
+        hoehe_auf_m=r.hoehe_auf_m,
+        hoehe_ab_m=r.hoehe_ab_m,
+    )
+    try:
+        with transaktion(state.con):
+            if neu.session_entry_id and (
+                alt := state.sitzungen.eintrag_laden(neu.session_entry_id)
+            ):
+                ergebnis = {k: v for k, v in alt.result.items() if k != "distance"}
+                ergebnis["duration"] = round(neu.dauer_s)
+                if neu.distanz_m >= 10:
+                    ergebnis["distance"] = round(neu.distanz_m)
+                korrektur = state.sitzungen.eintrag_korrigieren(
+                    alt.id, ergebnis, ended_at=neu.ended_at
+                )
+                neu.session_entry_id = korrektur.id
+            state.strecken.kuerzen(neu)
+    except Exception:
+        with contextlib.suppress(OSError):
+            schnitt.neu.unlink()
+        raise
+    os.replace(schnitt.neu, schnitt.pfad)
+    for feld in (
+        "ended_at",
+        "dauer_s",
+        "bewegt_s",
+        "distanz_m",
+        "hoehe_auf_m",
+        "hoehe_ab_m",
+        "session_entry_id",
     ):
-        ergebnis = {k: v for k, v in alt.result.items() if k != "distance"}
-        ergebnis["duration"] = round(strecke.dauer_s)
-        if strecke.distanz_m >= 10:
-            ergebnis["distance"] = round(strecke.distanz_m)
-        korrektur = state.sitzungen.eintrag_korrigieren(alt.id, ergebnis, ended_at=strecke.ended_at)
-        strecke.session_entry_id = korrektur.id
-    state.strecken.kuerzen(strecke)
-    # 4. HRV
-    hrv = _hrv_kuerzen(state, strecke, bis_t, lauf)
-    return Gekuerzt(strecke, entfernt, hrv)
+        setattr(strecke, feld, getattr(neu, feld))
 
 
-def _hrv_kuerzen(state: Any, strecke: Strecke, bis_t: float, lauf: Any) -> str:
-    """Notizen und Abschnitte der HRV-Messung auf das neue Ende — siehe `training_kuerzen`."""
+@dataclass(frozen=True, slots=True)
+class _HrvAuftrag:
+    """Was an den Dateien der HRV-Messung zu tun ist — ohne Datenbank (`dateien`)."""
+
+    pfad: Path
+    wand: float
+    einheit_id: str | None
+    aufnahme_id: str | None
+    mit_training: bool
+
+    def dateien(self) -> tuple[str, bool]:
+        """Messdatei laden, Notizen kürzen und zurückschreiben, Sidecar — ``(sha1,
+        zugeschnitten)``. Nur Dateien: darf in einen Thread."""
+        rec = laden(self.pfad)
+        neu = ereignisse_kuerzen(
+            rec.ereignisse,
+            bis_wand=self.wand,
+            beats=rec.beats,
+            start_utc=rec.start_utc,
+            einheit_id=self.einheit_id,
+        )
+        sha1 = metadaten_schreiben(self.pfad, ereignisse=neu)
+        eigene = {k for e in neu if (k := eigene_abschnitte.kennung_von(e)) is not None}
+        zugeschnitten = sidecar_kuerzen(
+            self.pfad, rec, self.wand, zuschneiden=self.mit_training, eigener=lambda k: k in eigene
+        )
+        return sha1, bool(zugeschnitten)
+
+
+def _hrv_auftrag(state: Any, strecke: Strecke, bis_t: float, lauf: Any) -> str | _HrvAuftrag:
+    """Notizen und Abschnitte der HRV-Messung auf das neue Ende — siehe `training_kuerzen`.
+    Was im Loop geht (Datenbank, laufende Aufnahme), geschieht hier und kommt als Text der
+    Meldung zurück; bleibt Arbeit an den Dateien, kommt sie als Auftrag."""
     bezug = hrv_bezug(state, strecke)
     if bezug is None:
         return ""
@@ -405,23 +519,21 @@ def _hrv_kuerzen(state: Any, strecke: Strecke, bis_t: float, lauf: Any) -> str:
         return "Notiz „Ende“ in der laufenden Messung verschoben" if getroffen else ""
     if not bezug.pfad.exists():
         return ""
-    rec = laden(bezug.pfad)
-    neu = ereignisse_kuerzen(
-        rec.ereignisse,
-        bis_wand=wand,
-        beats=rec.beats,
-        start_utc=rec.start_utc,
-        einheit_id=einheit_id,
+    return _HrvAuftrag(
+        bezug.pfad,
+        wand,
+        einheit_id,
+        bezug.aufnahme.id if bezug.aufnahme is not None else None,
+        strecke.hrv_recording_id is not None,
     )
-    sha1 = metadaten_schreiben(bezug.pfad, ereignisse=neu)
-    if bezug.aufnahme is not None:
-        state.hrv.sha1_setzen(bezug.aufnahme.id, sha1)
-    eigene = {k for e in neu if (k := eigene_abschnitte.kennung_von(e)) is not None}
-    mit_training = strecke.hrv_recording_id is not None
-    zugeschnitten = sidecar_kuerzen(
-        bezug.pfad, rec, wand, zuschneiden=mit_training, eigener=lambda k: k in eigene
-    )
-    if zugeschnitten and mit_training:
+
+
+def _hrv_fertig(state: Any, auftrag: _HrvAuftrag, ergebnis: tuple[str, bool]) -> str:
+    """Nach `_HrvAuftrag.dateien`: die neue Prüfsumme in die Zeile (Loop), der Text."""
+    sha1, zugeschnitten = ergebnis
+    if auftrag.aufnahme_id is not None:
+        state.hrv.sha1_setzen(auftrag.aufnahme_id, sha1)
+    if zugeschnitten and auftrag.mit_training:
         return "HRV-Notizen verschoben, Auswertung dort zugeschnitten"
     return "HRV-Notizen verschoben"
 
@@ -464,7 +576,7 @@ def verwaiste_uebernehmen(state: Any, pfad: Path) -> Strecke | None:
     if state.einheiten is not None:
         with contextlib.suppress(Exception):
             einheit_id = next((eid for eid, _ in state.einheiten.zur_datei("gps", datei)), None)
-    r = rechnen(punkte, sportart)
+    r = rechnen(punkte, sportart, stillstand_s=_stillstand_s(state))
     strecke = training_eintragen(
         state,
         subject_id=subject_id,
@@ -904,6 +1016,7 @@ __all__ = [
     "strecken_punkte",
     "training_eintragen",
     "training_kuerzen",
+    "training_kuerzen_async",
     "uebung_fuer",
     "verwaiste_uebernehmen",
     "zeitleiste_und_versatz",

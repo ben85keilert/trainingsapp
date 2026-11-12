@@ -306,3 +306,25 @@ async def test_ein_laufender_timer_macht_keinen_platz(umgebung) -> None:
     einheit_ui.alle_beenden(state)
     await _sekunden(state, uhr, gurt, 1)
     await _bis_einheit_weg(state)
+
+
+async def test_strom_endet_in_der_aufnahme_stopp_bleibt_erreichbar(umgebung) -> None:
+    """H93: Endet der Strom mitten in der Aufnahme (Ausnahme, Ende einer Wiedergabe), bleibt
+    der Reiter bei der Messung mit „Stopp & speichern“ — vorher zeigte er „Gerät verbinden“,
+    und ein neues Verbinden ersetzte den Messlauf samt der ungespeicherten Aufnahme."""
+    from dataclasses import replace
+
+    from trainingsapp.devices.base import Verbindung
+
+    state, uhr, gurt, lauf = umgebung
+    seite = _seite()
+    await _knopf(messung(seite, state), "Aufnahme starten").on_click()
+    await _sekunden(state, uhr, gurt, 20)
+    lauf.status = replace(lauf.status, verbindung=Verbindung.GETRENNT)  # `laufen` endete
+    ansicht = messung(seite, state)
+    assert "Gerät verbinden" not in _texte(ansicht)
+    await _knopf(ansicht, "Stopp & speichern").on_click()
+    await _sekunden(state, uhr, gurt, 1)
+    await _bis_einheit_weg(state)
+    assert lauf.aufnahme is None and len(state.hrv.alle(state.profil.id)) == 1
+    assert "Gerät verbinden" in _texte(messung(seite, state))

@@ -300,6 +300,9 @@ def training_laeuft(state: AppState) -> bool:
     return _training(state) is not None
 
 
+#: Ab so vielen Bytes liest und rechnet die Auswertung die Streckendatei in einem Thread
+#: (H80) — etwa eine halbe Stunde Ortungen; darunter gleich beim Aufbau
+STRECKE_IM_THREAD = 250_000
 #: Die Auswertung des laufenden Trainings: ``/ausdauer/unterwegs`` (A21, Ben 10.11.2026)
 UNTERWEGS = "unterwegs"
 
@@ -1305,21 +1308,33 @@ def ausdauer_detail_view(
     Auswertung ihren jüngsten Zwischenstand (`hrv_bezug`) und bietet an, einen zu speichern."""
     route = f"/ausdauer/{strecke.id}"
     punkte: list[Punkt] = []
-    if strecke.file_path:
-        pfad = streckenverzeichnis() / strecke.file_path
-        if pfad.exists():
-            punkte = jsonl_lesen(pfad)
+    r: StreckenRechner | None = None
+    strecken_pfad = streckenverzeichnis() / strecke.file_path if strecke.file_path else None
+    if strecken_pfad is not None and not strecken_pfad.exists():
+        strecken_pfad = None
     einst_box: dict[str, TrainingEinstellungen] = {"e": state.training_einstellungen()}
-    r = (
-        rechnen(
-            punkte,
-            strecke.sportart,
-            stillstand_s=STILLSTAND_S if einst_box["e"].auto_pause else math.inf,
-        )
-        if punkte
-        else None
-    )
+    stillstand_s = STILLSTAND_S if einst_box["e"].auto_pause else math.inf
+
+    def strecke_lesen() -> tuple[list[Punkt], StreckenRechner | None]:
+        """Die Ortungen und ihr Rechner — nur Datei und Rechnen, darf in einen Thread."""
+        if strecken_pfad is None:
+            return [], None
+        gelesen = jsonl_lesen(strecken_pfad)
+        if not gelesen:
+            return [], None
+        return gelesen, rechnen(gelesen, strecke.sportart, stillstand_s=stillstand_s)
+
     bezug = hrv_bezug(state, strecke)
+    # Eine lange Strecke liest und rechnet ein Thread (H80: 5 h sind am Handy spürbar) —
+    # zusammen mit der Messdatei, wenn es eine gibt; eine kurze ohne Messung gleich hier
+    hrv_da = bezug is not None and bezug.pfad.exists()
+    try:
+        lang = strecken_pfad is not None and strecken_pfad.stat().st_size > STRECKE_IM_THREAD
+    except OSError:
+        lang = False
+    im_thread = hrv_da or lang
+    if not im_thread:
+        punkte, r = strecke_lesen()
     vorgabe = state.korrekturregeln()  # Datenbank: im Loop, nicht im Thread (H39)
     #: Die HRV-Aufnahme, sobald gelesen — `fuellen` setzt sie, `gpx_export` liest sie
     geladen: list[tuple[Recording, Korrigiert] | None] = [None]
@@ -1373,14 +1388,30 @@ def ausdauer_detail_view(
         )
         page.show_dialog(dialog)
 
+    schere = ft.IconButton(
+        ft.Icons.CONTENT_CUT,
+        tooltip="Ende kürzen",
+        visible=(bool(punkte) or (im_thread and strecken_pfad is not None)) and not unterwegs,
+    )
+
     async def hrv_oeffnen() -> None:
         if eintrag is not None:
             await page.push_route(f"/messung/{eintrag.id}")
 
-    def ende_kuerzen() -> None:
+    gpx_knopf = ft.IconButton(
+        ft.Icons.IOS_SHARE,
+        tooltip="GPX exportieren",
+        on_click=gpx_export,
+        disabled=not punkte and not (im_thread and strecken_pfad is not None),
+    )
+
+    async def ende_kuerzen() -> None:
         """„Ende kürzen“ (Ben, 28.10.2026): dasselbe Blatt wie beim Speichern — hier immer,
-        vorgeschlagen ist die letzte Bewegung."""
-        n = nachlauf_der_strecke(strecke, mindestens_s=0.0)
+        vorgeschlagen ist die letzte Bewegung. Lesen und Rechnen im Thread (H80)."""
+        try:
+            n = await asyncio.to_thread(nachlauf_der_strecke, strecke, mindestens_s=0.0)
+        except (OSError, ValueError):
+            n = None
         if n is None:
             page.show_dialog(
                 ft.SnackBar(ft.Text("Keine Bewegung in der Aufzeichnung — nichts zu kürzen."))
@@ -1477,18 +1508,8 @@ def ausdauer_detail_view(
                     visible=unterwegs,
                     data="unterwegs_neu",
                 ),
-                ft.IconButton(
-                    ft.Icons.IOS_SHARE,
-                    tooltip="GPX exportieren",
-                    on_click=gpx_export,
-                    disabled=not punkte,
-                ),
-                ft.IconButton(
-                    ft.Icons.CONTENT_CUT,
-                    tooltip="Ende kürzen",
-                    on_click=lambda: ende_kuerzen(),
-                    visible=bool(punkte) and not unterwegs,
-                ),
+                gpx_knopf,
+                schere,
                 ft.IconButton(
                     ft.Icons.SCIENCE_OUTLINED,
                     tooltip="Für die Auswertung exportieren (ohne Ort)",
@@ -1692,36 +1713,52 @@ def ausdauer_detail_view(
             )
         inhalt.controls = teile
 
-    if bezug is None or not bezug.pfad.exists():
+    schere.on_click = ende_kuerzen
+    if not im_thread:
         fuellen(None)  # keine Messdatei zu lesen (auch: die Messung läuft noch) — sofort
     else:
-        # Messdatei und Sidecar liest ein Thread (H39); danach füllt sich die Ansicht,
-        # sofern sie noch die aktuelle ist (wie der Ticker oben, H35)
+        # Messdatei und Sidecar liest ein Thread (H39), eine lange Strecke mit (H80); danach
+        # füllt sich die Ansicht, sofern sie noch die aktuelle ist (wie der Ticker oben, H35)
         ansicht_nummer = state.route_nummer
         inhalt.controls = [
             ft.Row(
                 spacing=10,
                 controls=[
                     ft.ProgressRing(width=20, height=20, stroke_width=2),
-                    ft.Text("HRV-Aufnahme wird gelesen …", opacity=0.7),
+                    ft.Text(
+                        "HRV-Aufnahme wird gelesen …" if hrv_da else "Strecke wird gelesen …",
+                        opacity=0.7,
+                    ),
                 ],
             )
         ]
 
-        def laden_und_rechnen() -> tuple[Recording, Korrigiert] | None:
-            geladen_ = hrv_laden(bezug, vorgabe)
+        def laden_und_rechnen() -> tuple[
+            list[Punkt], StreckenRechner | None, tuple[Recording, Korrigiert] | None, str | None
+        ]:
+            gelesen, rechner = strecke_lesen()
+            try:
+                geladen_ = hrv_laden(bezug, vorgabe) if hrv_da else None
+            except (OSError, ValueError) as f:  # die Strecke zeigt sich trotzdem
+                return gelesen, rechner, None, str(f)
             with contextlib.suppress(Exception):  # Vorrechnen ist nur Vorarbeit
-                hrv_vorrechnen(geladen_, r.splits_mit_rest() if r is not None else [], bezug, ekg)
-            return geladen_
+                hrv_vorrechnen(
+                    geladen_, rechner.splits_mit_rest() if rechner is not None else [], bezug, ekg
+                )
+            return gelesen, rechner, geladen_, None
 
         async def laden_async() -> None:
+            nonlocal punkte, r
             fehler: str | None = None
+            hrv: tuple[Recording, Korrigiert] | None = None
             try:
-                hrv = await asyncio.to_thread(laden_und_rechnen)
+                punkte, r, hrv, fehler = await asyncio.to_thread(laden_und_rechnen)
             except (OSError, ValueError) as f:
-                hrv, fehler = None, str(f)
+                fehler = str(f)
             if state.route_nummer != ansicht_nummer:
                 return  # die Ansicht ist schon verlassen
+            gpx_knopf.disabled = not punkte
+            schere.visible = bool(punkte) and not unterwegs
             fuellen(hrv, fehler)
             with contextlib.suppress(Exception):
                 page.update()
@@ -1745,15 +1782,21 @@ def strecken_zeilen(page: ft.Page, state: AppState) -> list[ft.Control]:
         return handler
 
     zeilen: list[ft.Control] = []
-    for s in state.strecken.alle(state.profil.id):
+    strecken = state.strecken.alle(state.profil.id)
+    # „mit HRV“ über die Einheit: eine Abfrage für alle Zeilen statt `hrv_bezug` je Zeile (H79)
+    hrv_einheiten: set[str] = set()
+    if getattr(state, "einheiten", None) is not None:
+        with contextlib.suppress(Exception):
+            hrv_einheiten = state.einheiten.mit_hrv(
+                [s.einheit_id for s in strecken if s.einheit_id and not s.hrv_recording_id]
+            )
+    for s in strecken:
         lokal = s.started_at.astimezone()
         teile = [SPORT_NAMEN.get(s.sportart, s.sportart)]
         if s.file_path:
             teile.append(km_text(s.distanz_m))
         teile.append(zeit_text(s.dauer_s))
-        mit_hrv = bool(s.hrv_recording_id) or (
-            bool(s.einheit_id) and hrv_bezug(state, s) is not None
-        )
+        mit_hrv = bool(s.hrv_recording_id) or s.einheit_id in hrv_einheiten
         # Tipp = Auswertung; Zielsymbol oder Gedrückthalten: Auswertung · Tag (28.10.2026)
         from trainingsapp.data.hf_profil import RechenAusnahmeRepo
         from trainingsapp.ui import ziele_liste

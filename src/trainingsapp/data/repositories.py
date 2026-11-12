@@ -17,6 +17,7 @@ Konventionen:
 from __future__ import annotations
 
 import contextlib
+import copy
 import hashlib
 import json
 import sqlite3
@@ -284,14 +285,16 @@ class ExerciseRepo:
             "SELECT * FROM exercise WHERE deleted_at IS NOT NULL AND purged_at IS NULL "
             "ORDER BY deleted_at DESC"
         )
-        return [self._zeile(r) for r in zeilen]
+        bibliothek = _Bibliothek(self.con)
+        return [self._zeile(r, bibliothek) for r in zeilen.fetchall()]
 
     def archivierte(self) -> list[Exercise]:
         zeilen = self.con.execute(
             "SELECT * FROM exercise WHERE archived = 1 AND deleted_at IS NULL "
             "ORDER BY name COLLATE NOCASE"
         )
-        return [self._zeile(r) for r in zeilen]
+        bibliothek = _Bibliothek(self.con)
+        return [self._zeile(r, bibliothek) for r in zeilen.fetchall()]
 
     def hat_eintraege(self, uebung_id: str) -> bool:
         """Gibt es Einträge im Verlauf? Dann fragt die App vor dem endgültigen Löschen."""
@@ -407,7 +410,10 @@ class ExerciseRepo:
             sql += _MIT_TYP
             params.append(kategorie)
         zeilen = self.con.execute(sql + " ORDER BY name COLLATE NOCASE", params)
-        return self._mit_tags(self._mit_medien([self._zeile(r) for r in zeilen]))
+        bibliothek = _Bibliothek(self.con)
+        return self._mit_tags(
+            self._mit_medien([self._zeile(r, bibliothek) for r in zeilen.fetchall()])
+        )
 
     def suchen(self, text: str, kategorie: str | None = None) -> list[Exercise]:
         """Volltextsuche über Name und Beschreibung, Namenstreffer zuerst.
@@ -430,7 +436,10 @@ class ExerciseRepo:
             sql += _MIT_TYP
             params.append(kategorie)
         zeilen = self.con.execute(sql + " ORDER BY rang, name COLLATE NOCASE", params)
-        return self._mit_tags(self._mit_medien([self._zeile(r) for r in zeilen]))
+        bibliothek = _Bibliothek(self.con)
+        return self._mit_tags(
+            self._mit_medien([self._zeile(r, bibliothek) for r in zeilen.fetchall()])
+        )
 
     def kategorien(self) -> list[str]:
         """Alle Typ-Tags, die an mindestens einer aktiven Übung hängen."""
@@ -510,7 +519,7 @@ class ExerciseRepo:
             u.media = nach_uebung.get(u.id, [])
         return uebungen
 
-    def _zeile(self, r: sqlite3.Row) -> Exercise:
+    def _zeile(self, r: sqlite3.Row, bibliothek: _Bibliothek | None = None) -> Exercise:
         return Exercise(
             id=r["id"],
             name=r["name"],
@@ -528,7 +537,7 @@ class ExerciseRepo:
             updated_at=datetime.fromisoformat(r["updated_at"]),
             deleted_at=datetime.fromisoformat(r["deleted_at"]) if r["deleted_at"] else None,
             package_id=r["package_id"],
-            timer=_timer_lesen(self.con, r["timer_json"], []),
+            timer=_timer_lesen(self.con, r["timer_json"], [], bibliothek),
             uhr=bool(r["clock_on"]),
             zaehlt_als=r["clock_counts_as"] or "",
             zeit_zaehlt=bool(r["clock_counts"]),
@@ -647,13 +656,35 @@ def _spec_lesen(text: str | None) -> ResultSpec:
         return ResultSpec()
 
 
-def _timer_lesen(con: sqlite3.Connection, text: str | None, vorgabe: Any) -> Any:
+class _Bibliothek:
+    """Die Timer-Bibliothek für **einen** Aufruf, der viele Zeilen liest (`alle`, `_mit_items`):
+    höchstens einmal gelesen, und erst beim ersten Verweis (D24 — vorher je Zeile mit Verweis
+    die ganze Bibliothek). Nie über einen Aufruf hinaus aufheben: Sie veraltet."""
+
+    def __init__(self, con: sqlite3.Connection) -> None:
+        self.con = con
+        self._roh: dict[str, dict[str, Any]] | None = None
+
+    def roh(self) -> dict[str, dict[str, Any]]:
+        if self._roh is None:
+            self._roh = TimerRepo(self.con).roh()
+        return self._roh
+
+
+def _timer_lesen(
+    con: sqlite3.Connection, text: str | None, vorgabe: Any, bibliothek: _Bibliothek | None = None
+) -> Any:
     """Timer-JSON von Übung, Plan oder Planübung — Verweise in die Bibliothek (``{"ref": …}``,
     Migration 052) werden das Profil mit dem Vermerk ``bibliothek`` (`verweise_aufloesen`). Die
-    Bibliothek wird nur gelesen, wenn der Text einen Verweis enthält."""
+    Bibliothek wird nur gelesen, wenn der Text einen Verweis enthält — mit ``bibliothek`` je
+    Aufruf des Repos nur einmal."""
     wert = _json_lesen(text, vorgabe)
     if text and '"ref"' in text:
-        wert = verweise_aufloesen(wert, TimerRepo(con).roh())
+        if bibliothek is None:
+            wert = verweise_aufloesen(wert, TimerRepo(con).roh())
+        else:
+            # eigene Kopie je Zeile: die einmal gelesene Bibliothek teilt sonst ihre Listen
+            wert = copy.deepcopy(verweise_aufloesen(wert, bibliothek.roh()))
         if wert is None:
             return vorgabe
     return wert
@@ -1137,6 +1168,37 @@ class PlanRepo:
             self._beruehrt(plan_id)
         return item
 
+    def _eigene_timer_retten(self, *, item_id: str = "", plan_id: str = "") -> None:
+        """Bevor Planübungen verschwinden: ihre eigenen Timer („nur hier“) in die Bibliothek
+        legen (Ben, 11.11.2026, N71: „Ein für einen Plan erstellter Timer sollte weiter
+        existieren und als Bibliothekseintrag vorhanden sein“)."""
+        from trainingsapp.core.timer import TimerProfil, standard_profile
+
+        eigene: list[TimerProfil] = []
+        if item_id:
+            zeilen = self.con.execute("SELECT timer_json FROM plan_item WHERE id = ?", (item_id,))
+        else:
+            zeilen = self.con.execute(
+                "SELECT timer_json FROM plan_item WHERE plan_id = ?", (plan_id,)
+            )
+        for r in zeilen.fetchall():
+            d = _json_lesen(r["timer_json"], {})
+            roh = d.get("eigen") if isinstance(d, dict) else None
+            if isinstance(roh, dict) and "ref" not in roh:
+                profil = TimerProfil.aus_dict(roh)
+                if profil is not None:
+                    eigene.append(profil)
+        if not eigene:
+            return
+        bibliothek = TimerRepo(self.con)
+        vorhanden = bibliothek.roh()
+        if not vorhanden:  # die zwei Beispiel-Vorlagen werden dabei eigene Zeilen
+            bibliothek.setzen(standard_profile())
+            vorhanden = bibliothek.roh()
+        for profil in eigene:
+            if profil.id not in vorhanden:
+                bibliothek.speichern(profil)
+
     def uebung_entfernen(self, item_id: str) -> None:
         """Hart löschen — mit den Kanten des Ablaufs von und zu ihr (Migration 044)."""
         zeile = self.con.execute(
@@ -1145,6 +1207,7 @@ class PlanRepo:
         if zeile is None:
             return
         self._folgt_merken(zeile["plan_id"])
+        self._eigene_timer_retten(item_id=item_id)
         with transaktion(self.con):
             self.con.execute("DELETE FROM plan_item WHERE id = ?", (item_id,))
             ablauf = self.ablauf_laden(zeile["plan_id"])
@@ -1274,13 +1337,15 @@ class PlanRepo:
     def loeschen(self, plan_id: str) -> None:
         """In den Papierkorb: Sitzungen zeigen weiter auf den Plan, er taucht nur nicht auf."""
         self.con.execute(
-            "UPDATE plan SET deleted_at = ?, updated_at = ? WHERE id = ? AND purged_at IS NULL",
+            "UPDATE plan SET deleted_at = ?, updated_at = ?, revision = revision + 1 "
+            "WHERE id = ? AND purged_at IS NULL",
             (jetzt().isoformat(), jetzt().isoformat(), plan_id),
         )
 
     def aus_papierkorb(self, plan_id: str) -> None:
         self.con.execute(
-            "UPDATE plan SET deleted_at = NULL, updated_at = ? WHERE id = ? AND purged_at IS NULL",
+            "UPDATE plan SET deleted_at = NULL, updated_at = ?, revision = revision + 1 "
+            "WHERE id = ? AND purged_at IS NULL",
             (jetzt().isoformat(), plan_id),
         )
 
@@ -1292,11 +1357,15 @@ class PlanRepo:
             sql += " AND (subject_id = ? OR subject_id IS NULL)"
             params.append(subject_id)
         zeilen = self.con.execute(sql + " ORDER BY deleted_at DESC", params)
-        return self._mit_items([self._zeile(r) for r in zeilen])
+        bibliothek = _Bibliothek(self.con)
+        return self._mit_items(
+            [self._zeile(r, bibliothek) for r in zeilen.fetchall()], bibliothek=bibliothek
+        )
 
     def endgueltig_loeschen(self, plan_id: str) -> None:
         """Ein Plan hält keine Einträge — die Sitzungen behalten seinen Namen (Grabstein)."""
         stempel = jetzt().isoformat()
+        self._eigene_timer_retten(plan_id=plan_id)
         with transaktion(self.con):
             self.con.execute("DELETE FROM plan_item WHERE plan_id = ?", (plan_id,))
             self.con.execute(
@@ -1370,7 +1439,10 @@ class PlanRepo:
             sql += " AND subject_id = ?"
             args.append(subject_id)
         zeilen = self.con.execute(sql + " ORDER BY created_at", args)
-        return self._mit_items([self._zeile(r) for r in zeilen])
+        bibliothek = _Bibliothek(self.con)
+        return self._mit_items(
+            [self._zeile(r, bibliothek) for r in zeilen.fetchall()], bibliothek=bibliothek
+        )
 
     def zeile_bekannt(self, plan_id: str) -> bool:
         """Gibt es die Zeile — auch gelöscht oder endgültig gelöscht (Grabstein)?"""
@@ -1391,7 +1463,10 @@ class PlanRepo:
             + " ORDER BY created_at",
             (subject_id,),
         )
-        return self._mit_items([self._zeile(r) for r in zeilen])
+        bibliothek = _Bibliothek(self.con)
+        return self._mit_items(
+            [self._zeile(r, bibliothek) for r in zeilen.fetchall()], bibliothek=bibliothek
+        )
 
     def timer_setzen(self, item_id: str, timer: dict[str, Any]) -> None:
         """Die Timer-Wahl einer Planübung (`core.uebung_timer.TimerWahl.als_dict`)."""
@@ -1614,9 +1689,15 @@ class PlanRepo:
             ),
         )
 
-    def _mit_items(self, plaene: list[Plan], verborgene: bool = False) -> list[Plan]:
+    def _mit_items(
+        self,
+        plaene: list[Plan],
+        verborgene: bool = False,
+        bibliothek: _Bibliothek | None = None,
+    ) -> list[Plan]:
         if not plaene:
             return plaene
+        bibliothek = bibliothek or _Bibliothek(self.con)  # einmal für alle Planübungen (D24)
         ids = [p.id for p in plaene]
         platzhalter = ",".join("?" * len(ids))
         nach_plan: dict[str, list[PlanItem]] = defaultdict(list)
@@ -1634,15 +1715,15 @@ class PlanRepo:
             f"WHERE pi.plan_id IN ({platzhalter}) {bedingung}"
             "ORDER BY pi.plan_id, pi.sort_order",
             ids,
-        ):
-            nach_plan[r["plan_id"]].append(self._item_zeile(r))
+        ).fetchall():
+            nach_plan[r["plan_id"]].append(self._item_zeile(r, bibliothek))
         for p in plaene:
             p.items = nach_plan.get(p.id, [])
             # Workout = Ablauf (Ben, 10.11.2026): ohne eigenen Ablauf folgt er der Liste
             p.ablauf = fuer_plan(p.ablauf, p.workout, [(it.id, it.bedingung) for it in p.items])
         return plaene
 
-    def _item_zeile(self, r: sqlite3.Row) -> PlanItem:
+    def _item_zeile(self, r: sqlite3.Row, bibliothek: _Bibliothek | None = None) -> PlanItem:
         return PlanItem(
             id=r["id"],
             plan_id=r["plan_id"],
@@ -1653,7 +1734,7 @@ class PlanRepo:
             input_mode=r["input_mode"],
             quick=json.loads(r["quick_json"]),
             felder=_felder_lesen(r["fields_json"]),
-            timer=_timer_lesen(self.con, r["timer_json"], {}),
+            timer=_timer_lesen(self.con, r["timer_json"], {}, bibliothek),
             acc=_sensor_lesen(r["acc_json"]),
             takt=_takt_lesen(r["takt_json"]),
             bedingung=Bedingung.aus_dict(_tabelle_lesen(r["bedingung_json"])),
@@ -1662,7 +1743,7 @@ class PlanRepo:
             media=[m for roh in _json_lesen(r["media_json"], []) if (m := medium_aus_dict(roh))],
         )
 
-    def _zeile(self, r: sqlite3.Row) -> Plan:
+    def _zeile(self, r: sqlite3.Row, bibliothek: _Bibliothek | None = None) -> Plan:
         return Plan(
             id=r["id"],
             name=r["name"],
@@ -1673,7 +1754,7 @@ class PlanRepo:
             aktiv=bool(r["active"]),
             wochentage=json.loads(r["weekdays_json"]),
             kurs_kapitel_id=r["course_chapter_id"],
-            timer=_timer_lesen(self.con, r["timer_json"], {}) or None,
+            timer=_timer_lesen(self.con, r["timer_json"], {}, bibliothek) or None,
             weiter_automatisch=bool(r["auto_next"]),
             pause_ohne_timer=bool(r["pause_no_timer"]),
             workout=bool(r["workout"]),
@@ -1705,6 +1786,12 @@ _GUELTIGE = """
     WHERE e.deleted_at IS NULL AND s.deleted_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM session_entry n WHERE n.replaces_entry_id = e.id)
 """
+
+#: Dasselbe für Abfragen mit Zeitgrenze oder „die jüngsten zuerst“: ``CROSS JOIN`` legt die
+#: Reihenfolge fest — erst der Eintrag über `idx_entry_zeit`, dann seine Session. Ohne
+#: Statistik ging SQLite sonst über alle Sessions des Profils und las jeden Eintrag (Durchsicht
+#: 11.11.2026, gemessen an 10 000 Einträgen: Einträge eines Tages 13 ms → 0,07 ms).
+_GUELTIGE_ZEIT = _GUELTIGE.replace("    JOIN session s", "    CROSS JOIN session s")
 
 
 class SessionRepo:
@@ -2478,8 +2565,12 @@ class SessionRepo:
         bleibt als Grabstein für die Synchronisation (`deleted_at`).
         """
         stempel = jetzt().isoformat()
+        # Vom gültigen Stand aus: Nennt ``eintrag_id`` eine überholte Zeile (ein Blatt hält die
+        # Zeile vom Öffnen, inzwischen kam ein Satz dazu), bliebe sonst der Nachfolger stehen
+        # und der Eintrag sichtbar (Durchsicht 11.11.2026)
+        gueltig = self.eintrag_aktuell(eintrag_id)
         with transaktion(self.con):
-            aktuell: str | None = eintrag_id
+            aktuell: str | None = gueltig.id if gueltig is not None else eintrag_id
             while aktuell is not None:
                 r = self.con.execute(
                     "SELECT replaces_entry_id FROM session_entry WHERE id = ?", (aktuell,)
@@ -2509,7 +2600,7 @@ class SessionRepo:
         """Alle gültigen Einträge eines lokalen Tages, zeitlich sortiert, mit ihrer Session."""
         von, bis = tagesgrenzen(tag)
         zeilen = self.con.execute(
-            f"{_GUELTIGE} AND s.subject_id = ? AND e.started_at >= ? AND e.started_at < ? "
+            f"{_GUELTIGE_ZEIT} AND s.subject_id = ? AND e.started_at >= ? AND e.started_at < ? "
             "ORDER BY e.started_at, e.rowid",
             (subject_id, von.isoformat(), bis.isoformat()),
         ).fetchall()
@@ -2610,7 +2701,8 @@ class SessionRepo:
         return [
             self._zeile(r)
             for r in self.con.execute(
-                f"{_GUELTIGE} AND s.subject_id = ? AND e.started_at >= ? AND e.started_at <= ? "
+                f"{_GUELTIGE_ZEIT} AND s.subject_id = ? "
+                "AND e.started_at >= ? AND e.started_at <= ? "
                 "ORDER BY e.started_at, e.rowid",
                 (subject_id, iso_utc(von), iso_utc(bis)),
             )
@@ -2654,7 +2746,7 @@ class SessionRepo:
             r["exercise_id"]: r["n"]
             for r in self.con.execute(
                 "SELECT exercise_id, COUNT(*) AS n FROM ("
-                + _GUELTIGE
+                + _GUELTIGE_ZEIT
                 + " AND s.subject_id = ? AND e.started_at >= ? AND e.started_at < ?) "
                 "GROUP BY exercise_id",
                 (subject_id, von.isoformat(), bis.isoformat()),
@@ -2675,7 +2767,8 @@ class SessionRepo:
         (Ben, 18.10.2026: „zuletzt gemacht“ mit den Werten von damals)."""
         ergebnis: dict[str, SessionEntry] = {}
         for r in self.con.execute(
-            f"{_GUELTIGE} AND s.subject_id = ? ORDER BY e.started_at DESC, e.rowid DESC LIMIT 500",
+            f"{_GUELTIGE_ZEIT} AND s.subject_id = ? "
+            "ORDER BY e.started_at DESC, e.rowid DESC LIMIT 500",
             (subject_id,),
         ):
             if r["exercise_id"] not in ergebnis:
@@ -2690,7 +2783,11 @@ class SessionRepo:
         """Für den Kalender: je lokalem Tag die Anzahl Einträge (inklusive `bis`)."""
         start, _ = tagesgrenzen(von)
         _, ende = tagesgrenzen(bis)
-        sql = f"{_GUELTIGE} AND s.subject_id = ? AND e.started_at >= ? AND e.started_at < ?"
+        # nur die Zeit — nicht die ganze Zeile samt Spec-Kopie und Ergebnis
+        sql = (
+            _GUELTIGE_ZEIT.replace("SELECT e.*", "SELECT e.started_at")
+            + " AND s.subject_id = ? AND e.started_at >= ? AND e.started_at < ?"
+        )
         params: list[object] = [subject_id, start.isoformat(), ende.isoformat()]
         if exercise_id is not None:
             sql += " AND e.exercise_id = ?"
@@ -3237,7 +3334,7 @@ class HrvRepo:
 
 
 class TagRepo:
-    """Typen und Regionen verwalten — Einstellungen → Typen und Regionen (Migration 013).
+    """Typen und Regionen verwalten — Einstellungen → Übungen → Typen und Regionen (013).
 
     Ein Tag lebt in der Tabelle ``tag``, auch wenn ihn gerade keine Übung trägt.
     Neue stehen oben (``sort`` absteigend), die übrigen alphabetisch. Löschen

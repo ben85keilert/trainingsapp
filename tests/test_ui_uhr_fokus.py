@@ -460,3 +460,27 @@ async def test_fuer_jetzt_mit_abschnitten(umgebung) -> None:
     profile = profile_der_uebung(state.uebungen.laden(u.id))
     neu = next(p for p in profile if p.name == "L-R für jetzt")
     assert len(neu.abschnitte) == 2 and state.uhr_wahl[item.id] == neu.id
+
+
+async def test_eigener_timer_der_planuebung_bleibt_in_der_bibliothek(umgebung) -> None:
+    """N71 (Ben, 11.11.2026): Wählt man unter „In Plan“ eine andere Zeile, verschwände der
+    eigene Timer der Planübung — er bleibt als Eintrag der Bibliothek."""
+    from trainingsapp.ui.components.uhr_blatt import uhr_blatt
+
+    state, _, _ = umgebung
+    u = _seitstuetz(state)
+    plan = _plan(state, u)
+    item = plan.items[0]
+    eigen = TimerProfil(id="nur-hier", name="Nur hier", abschnitte=[Abschnitt("H", 20)])
+    state.plaene.timer_setzen(item.id, TimerWahl("", eigen).als_dict())
+    plan = state.plaene.laden(plan.id)
+    item = plan.items[0]
+    assert "nur-hier" not in [p.id for p in state.timer_profile()]
+    blatt = uhr_blatt(Seite(), state, uebung=u, plan=plan, item=item, basis=f"/plan/{plan.id}")
+    zeile = next(
+        x for x in _alle(blatt) if isinstance(x, ft.Container) and x.data == ("uhr", "seiten")
+    )
+    next(x for x in _alle(zeile) if isinstance(x, ft.IconButton)).on_click()
+    _knopf(blatt, "Übernehmen").on_click()
+    assert TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer).eigen is None
+    assert "nur-hier" in [p.id for p in state.timer_profile()]

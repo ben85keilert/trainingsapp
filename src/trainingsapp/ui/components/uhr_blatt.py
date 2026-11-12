@@ -288,6 +288,11 @@ def uhr_blatt(
                 neu = TimerWahl(wahl, None, uhr=an, zaehlt=zaehlt_neu)
             if im_editor and wahl != OHNE_UHR and alt.uhr is False:
                 neu.uhr = None  # ein Timer gewählt: die Uhr folgt wieder der Übung
+            if alt.eigen is not None and neu.eigen is None and not alt.eigen.bibliothek:
+                # Der eigene Timer dieser Planübung verschwände mit der neuen Wahl. Er bleibt
+                # als Eintrag der Bibliothek (Ben, 11.11.2026, N71): „Ein für einen Plan
+                # erstellter Timer sollte weiter existieren“ — wählbar unter „Alle“.
+                state.timer_in_bibliothek(alt.eigen)
             if wahl_setzen is not None:
                 wahl_setzen(neu)
             else:

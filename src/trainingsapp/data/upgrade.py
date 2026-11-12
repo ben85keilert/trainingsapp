@@ -99,6 +99,23 @@ def datenformat_aktualisieren(con: sqlite3.Connection) -> int:
     return geaendert
 
 
+def _spec_oder_nichts(text: object) -> ResultSpec | None:
+    """Die Spezifikation einer Spalte; Kaputtes (auch ein unbekannter Feldtyp) ist ``None`` —
+    aus demselben Grund wie bei `_json_oder_nichts`.
+
+    >>> unbekannt = '{"fields": [{"key": "x", "type": "gibtsnicht", "label": "X"}]}'
+    >>> _spec_oder_nichts("{kaputt") is None, _spec_oder_nichts(unbekannt) is None
+    (True, True)
+    """
+    roh = _json_oder_nichts(text)
+    if not isinstance(roh, dict):
+        return None
+    try:
+        return ResultSpec.from_dict(roh)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
 def _json_oder_nichts(text: object) -> object:
     """JSON einer Spalte lesen; Kaputtes und Leeres sind ``None``.
 
@@ -186,8 +203,8 @@ def _schritt_5_zeitstempel_utc(con: sqlite3.Connection) -> int:
 def _schritt_2_satzfeld(con: sqlite3.Connection) -> int:
     geaendert = 0
     for r in con.execute("SELECT id, result_spec_json, category FROM exercise").fetchall():
-        spec = ResultSpec.from_dict(json.loads(r["result_spec_json"]))
-        if ist_altes_satzformat(spec):
+        spec = _spec_oder_nichts(r["result_spec_json"])
+        if spec is not None and ist_altes_satzformat(spec):
             con.execute(
                 "UPDATE exercise SET result_spec_json = ? WHERE id = ?",
                 (json.dumps(modernisieren(spec).to_dict(), ensure_ascii=False), r["id"]),
@@ -274,8 +291,10 @@ def _schritt_3_kopien_reparieren(con: sqlite3.Connection) -> int:
         """
     ).fetchall()
     for r in zeilen:
-        werte = json.loads(r["result_json"])
-        kopie = ResultSpec.from_dict(json.loads(r["spec_snapshot_json"]))
+        werte = _json_oder_nichts(r["result_json"])
+        kopie = _spec_oder_nichts(r["spec_snapshot_json"])
+        if not isinstance(werte, dict) or kopie is None:
+            continue  # unlesbar: bleibt, wie es ist — der Start darf daran nicht scheitern
         unpassend = [
             key
             for key, wert in werte.items()

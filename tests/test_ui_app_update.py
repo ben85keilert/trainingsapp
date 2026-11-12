@@ -4,6 +4,7 @@ Automatik; Ben, 9.11.2026). Nur mit flet — die Erweiterung ist eine Attrappe."
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -424,6 +425,16 @@ def test_hinweis_ausschalten(state, seite, geladen) -> None:
     assert geladen == []
 
 
+@pytest.fixture(autouse=True)
+def _kein_systemdialog(monkeypatch) -> None:
+    """Der Zähler der Systemdialoge lebt im Prozess (N131): Ein Test davor, der Teilen oder
+    die Dateiauswahl benutzt hat, darf hier keine Nachfrist hinterlassen."""
+    from trainingsapp.ui import systemdialog
+
+    monkeypatch.setattr(systemdialog, "_zuletzt", float("-inf"))
+    monkeypatch.setattr(systemdialog, "_offen", 0)
+
+
 def _vorbereitet(state: Zustand, seite: Seite) -> UpdateLauf:
     asyncio.run(app_update.automatisch(seite, _mit_release(state)))
     assert state.app_update.phase == VORBEREITET
@@ -444,6 +455,23 @@ def test_kein_wecker_waehrend_etwas_laeuft(state, seite, geladen, monkeypatch) -
     )
     asyncio.run(app_update.lebenszyklus(seite, state, False))
     assert state.installieren.wecker == []
+
+
+def test_kein_wecker_solange_ein_systemdialog_offen_ist(state, seite, geladen, monkeypatch) -> None:
+    """N131: Dateiauswahl, Fotoauswahl und Teilen-Blatt zählen für Android als „verlassen“ —
+    die Automatik stellt dann keinen Wecker, auch nicht kurz nach der Rückkehr."""
+    from trainingsapp.ui import systemdialog
+
+    _vorbereitet(state, seite)
+
+    async def in_der_auswahl() -> None:
+        await app_update.lebenszyklus(seite, state, False)
+
+    asyncio.run(systemdialog.mit(in_der_auswahl()))
+    assert state.installieren.wecker == []
+    asyncio.run(app_update.lebenszyklus(seite, state, False))  # Nachfrist
+    assert state.installieren.wecker == []
+    assert not systemdialog.ist_offen(jetzt=time.monotonic() + systemdialog.NACHFRIST_S + 1)
 
 
 def test_kein_wecker_mit_offenem_formular(state, geladen) -> None:
@@ -517,6 +545,59 @@ def test_android_lehnt_ab_von_selbst_wird_ausgelassen(state, seite, geladen) -> 
     lauf = _vorbereitet(state, seite)
     app_update.ergebnis(state, 3, "INSTALL_FAILED_ABORTED")
     assert lauf.phase == GELADEN and state.auslassen == RELEASE.tag
+
+
+class _Einstellungen:
+    def __init__(self) -> None:
+        self.werte: dict[str, str] = {}
+
+    def lesen(self, key: str, vorgabe: str | None = None) -> str | None:
+        return self.werte.get(key, vorgabe)
+
+    def setzen(self, key: str, value: str) -> None:
+        self.werte[key] = value
+
+
+def test_wecker_ohne_ergebnis_gibt_die_automatik_auf(state, seite, geladen) -> None:
+    """N125: Scheitert das Update im Hintergrund, während die App nicht lebt, kommt kein
+    Ergebnis an. Nach `VERSUCHE_MAX` gestellten Weckern, nach denen beim nächsten Start noch
+    die alte Version läuft, lädt die Automatik nicht wieder — und die Karte sagt es."""
+    state.einstellungen = _Einstellungen()
+    for start in range(app_update.VERSUCHE_MAX):
+        state.app_update = None  # neuer Start der App
+        _vorbereitet(state, seite)
+        asyncio.run(app_update.lebenszyklus(seite, state, False))  # Wecker, dann Prozess-Tod
+        assert len(geladen) == start + 1 and state.auslassen == ""
+    state.app_update = None
+    asyncio.run(app_update.automatisch(seite, state))
+    assert len(geladen) == app_update.VERSUCHE_MAX and state.auslassen == RELEASE.tag
+    lauf = state.app_update
+    assert lauf.phase == BEREIT and "nicht von selbst installiert" in lauf.meldung
+    asyncio.run(app_update.automatisch(seite, state))  # und danach gar nicht mehr
+    assert len(geladen) == app_update.VERSUCHE_MAX
+
+
+def test_zurueck_vor_dem_wecker_zaehlt_nicht(state, seite, geladen) -> None:
+    state.einstellungen = _Einstellungen()
+    lauf = _vorbereitet(state, seite)
+    for _ in range(5):
+        asyncio.run(app_update.lebenszyklus(seite, state, False))
+        assert app_update._versuche(state, RELEASE.tag) == 1
+        asyncio.run(app_update.lebenszyklus(seite, state, True))
+        assert app_update._versuche(state, RELEASE.tag) == 0
+    assert lauf.phase == VORBEREITET and state.auslassen == ""
+
+
+def test_sitzung_weg_beim_zurueckkommen_heisst_gescheitert(state, seite, geladen) -> None:
+    """N125: Der Wecker hat die Sitzung abgeschickt, die alte Version läuft noch und kein
+    Ergebnis kam — beim Zurückkommen steht es in der Karte, das Release wird ausgelassen."""
+    state.einstellungen = _Einstellungen()
+    lauf = _vorbereitet(state, seite)
+    asyncio.run(app_update.lebenszyklus(seite, state, False))
+    state.installieren.vorbereitet = -1  # abgeschickt, ohne dass `ergebnis` lief
+    asyncio.run(app_update.lebenszyklus(seite, state, True))
+    assert lauf.phase == GELADEN and "nicht von selbst installiert" in lauf.meldung
+    assert state.auslassen == RELEASE.tag and not lauf.automatisch
 
 
 def test_einstellungen_im_app_state(tmp_path) -> None:

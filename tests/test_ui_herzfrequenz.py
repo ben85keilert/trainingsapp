@@ -5,7 +5,7 @@ Profilwerte eintragen, Bereichsmodell, Sicht merken. Ohne Fenster."""
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -360,7 +360,21 @@ def test_ruhepuls_aus_dem_tagesfeld_steht_in_der_liste_und_ist_entfernbar(daten)
         if isinstance(c, ft.IconButton) and c.tooltip == "Tageswert entfernen"
     ]
     assert len(muell) == 1
+    seite = _seite()
+    ansicht = einstellungen_herzfrequenz(seite, state)
+    muell = [
+        c
+        for c in _alle(ansicht)
+        if isinstance(c, ft.IconButton) and c.tooltip == "Tageswert entfernen"
+    ]
     muell[0].on_click()
+    # N114: erst die Rückfrage — ein Tageswert lässt sich nicht zurückholen
+    (frage,) = seite.aufrufe
+    assert isinstance(frage, ft.AlertDialog) and frage.title.value == "Tageswert entfernen?"
+    assert len(state.tageswerte.am_tag(state.profil.id, state.heute())) == 1
+    frage.open = True
+    frage.actions[1].on_click()
+    asyncio.run(frage.on_dismiss(None))
     assert state.tageswerte.am_tag(state.profil.id, state.heute()) == []
     assert state.hf_profil().ruhe is None
 
@@ -589,3 +603,59 @@ async def test_knoepfe_der_hf_sicht_bleiben_ueber_die_takte_dieselben(daten) -> 
         assert _knopf(ansicht, "Sprechen wird schwer") is not None
     finally:
         await _ende(lauf, task)
+
+
+def test_eintrag_entfernen_mit_rueckgaengig_und_kein_datum_in_der_zukunft(daten) -> None:
+    """N114: Ein Eintrag mit Datum in der Zukunft (Tippfehler im Jahr) wird nicht angenommen;
+    „Eintrag entfernen“ zeigt eine Meldung mit „Rückgängig“."""
+    state, _ = daten
+    seite = _seite()
+    ansicht = einstellungen_herzfrequenz(seite, state)
+    wert = next(
+        c for c in _alle(ansicht) if isinstance(c, ft.TextField) and c.label == "Wert (bpm)"
+    )
+    datum = next(c for c in _alle(ansicht) if isinstance(c, ft.TextField) and c.label == "Datum")
+    wert.value = "58"
+    datum.value = f"{state.heute() + timedelta(days=365):%d.%m.%Y}"
+    _knopf(ansicht, "Eintragen").on_click()
+    assert datum.error and state.profilwerte.alle(state.profil.id, "ruhe_hf") == []
+    datum.value = f"{state.heute():%d.%m.%Y}"
+    _knopf(ansicht, "Eintragen").on_click()
+    assert len(state.profilwerte.alle(state.profil.id, "ruhe_hf")) == 1
+    ansicht = einstellungen_herzfrequenz(seite, state)
+    muell = next(
+        c
+        for c in _alle(ansicht)
+        if isinstance(c, ft.IconButton) and c.tooltip == "Eintrag entfernen"
+    )
+    seite.aufrufe.clear()
+    muell.on_click()
+    assert state.profilwerte.alle(state.profil.id, "ruhe_hf") == []
+    (meldung,) = seite.aufrufe
+    assert isinstance(meldung, ft.SnackBar) and meldung.action.label == "Rückgängig"
+    meldung.action.on_click()
+    assert len(state.profilwerte.alle(state.profil.id, "ruhe_hf")) == 1
+
+
+def test_feld_verlassen_ohne_aenderung_baut_die_seite_nicht_neu(daten) -> None:
+    """N113: Jahrgang und Bereichsnamen bloß zu verlassen ersetzt die Controls der Seite
+    nicht — in anderen Karten Getipptes bliebe sonst nicht stehen."""
+    state, _ = daten
+    e = state.hf_einstellungen()
+    e.modell = "eigen"  # die Namen der Bereiche gibt es nur bei eigenen Grenzen
+    state.hf_einstellungen_setzen(e)
+    ansicht = einstellungen_herzfrequenz(_seite(), state)
+
+    def felder() -> list:
+        return [c for c in _alle(ansicht) if isinstance(c, ft.TextField)]
+
+    vorher = felder()
+    jahrgang = next(c for c in vorher if c.label == "Jahrgang")
+    namen = next(c for c in vorher if c.label == "Namen der Bereiche (mit Komma)")
+    jahrgang.on_blur(None)
+    namen.on_blur(None)
+    assert [id(c) for c in felder()] == [id(c) for c in vorher]
+    jahrgang.value = "1986"
+    jahrgang.on_blur(None)
+    assert state.profil.birth_year == 1986
+    assert [id(c) for c in felder()] != [id(c) for c in vorher]  # geändert: neu gebaut

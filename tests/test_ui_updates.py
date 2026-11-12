@@ -9,6 +9,7 @@ import pytest
 
 ft = pytest.importorskip("flet")
 
+from trainingsapp.core.anhaenge import Ziel  # noqa: E402
 from trainingsapp.core.pakete import Paket, paket_lesen  # noqa: E402
 from trainingsapp.core.paketquelle import IndexEintrag, PaketUpdate, Pruefung  # noqa: E402
 from trainingsapp.data.repositories import SettingRepo  # noqa: E402
@@ -359,3 +360,87 @@ def test_fuer_alle_pakete_und_neue(page, state) -> None:
     state.pakete.update_modus_setzen(neu.paket.id, "manuell")
     state.pakete.importieren(neu)
     assert state.pakete.laden(neu.paket.id).update_modus == "manuell"
+
+
+def test_zip_ohne_groesse_nie_von_selbst_und_stufe_je_pruefsumme(state, monkeypatch) -> None:
+    """S27: „Nichts über 20 MB von selbst“ hing am freiwilligen Feld ``bytes`` — ein Paket mit
+    Dateien ohne Angabe wird nur vorgemerkt. Und ein Update, das auf Antwort wartet, wird
+    nicht bei jeder Prüfung erneut geladen, nur um seine Stufe noch einmal zu bestimmen."""
+    inhalt = paket_lesen(qigong(1))
+    state.pakete.importieren(inhalt)
+    pid = inhalt.paket.id
+    monkeypatch.setattr(updates, "neuestes_release", lambda: None)
+    state.paketquellen_setzen(["https://x/i"])
+    geladen: list[str] = []
+
+    def anbieten(eintrag: IndexEintrag, roh: dict) -> None:
+        jetzt = state.pakete.laden(pid)  # vorher laden: im Thread kein SQLite
+        monkeypatch.setattr(
+            updates,
+            "pruefen",
+            lambda q, i, laden=None: Pruefung(updates=[PaketUpdate(eintrag, jetzt)]),
+        )
+
+        def laden(e, laden=None, **_):
+            geladen.append(e.url)
+            return paket_lesen(roh)
+
+        monkeypatch.setattr(updates, "paket_laden", laden)
+
+    # Modus „Alle“, ZIP ohne ``bytes``: vorgemerkt, nicht geladen
+    ohne = IndexEintrag(pid, "Qigong", 2, "https://x/q2.zip", "a" * 64, 0, "https://x/i")
+    anbieten(ohne, qigong(2))
+    stand = asyncio.run(updates.pruefung_ausfuehren(state))
+    assert geladen == [] and stand.eingespielt == []
+    assert state.pakete.laden(pid).verfuegbar == 2
+    # … eine JSON ohne Angabe bleibt klein genug (höchstens `MAX_PAKET_BYTES`)
+    assert updates._von_selbst_laden(IndexEintrag(pid, "Q", 2, "https://x/q.json", "", 0, "q"))
+    assert updates._von_selbst_laden(IndexEintrag(pid, "Q", 2, "https://x/q.zip", "", 9_000, "q"))
+    assert not updates._von_selbst_laden(
+        IndexEintrag(pid, "Q", 2, "https://x/q.zip", "", 30_000_000, "q")
+    )
+
+    # Ein großes Update (Lotus fällt weg) fragt nach: einmal geladen, dann gemerkt
+    gross = {
+        "paket": {"name": "Qigong", "version": 3},
+        "exercises": [
+            {"key": "baum", "name": "Baum", "description": "Knie weich.", "spec": "halten"}
+        ],
+    }
+    eintrag = IndexEintrag(pid, "Qigong", 3, "https://x/q3.json", "b" * 64, 500, "https://x/i")
+    anbieten(eintrag, gross)
+    stand = asyncio.run(updates.pruefung_ausfuehren(state))
+    assert geladen == ["https://x/q3.json"] and stand.stufen[pid].stufe == "gross"
+    stand = asyncio.run(updates.pruefung_ausfuehren(state))  # der nächste Start
+    assert geladen == ["https://x/q3.json"], "dieselbe Datei wird nicht noch einmal geladen"
+    assert stand.stufen[pid].stufe == "gross" and stand.stufen[pid].gruende == [
+        "„Lotus v1“ fällt weg"
+    ]
+    assert [u.eintrag.version for u in stand.pruefung.updates] == [3]
+    # Eine andere Datei (neue Prüfsumme) wird wieder geladen
+    anbieten(
+        IndexEintrag(pid, "Qigong", 4, "https://x/q4.json", "c" * 64, 500, "https://x/i"), gross
+    )
+    asyncio.run(updates.pruefung_ausfuehren(state))
+    assert geladen == ["https://x/q3.json", "https://x/q4.json"]
+
+
+def test_liegengebliebene_kopie_der_fotoauswahl_wird_beim_start_geraeumt(state, tmp_path) -> None:
+    """N132: Die Kopie aus der Fotoauswahl trägt den Ort noch. Reißt der Ablauf zwischen
+    Wählen und Verkleinern ab, räumt der nächste Start sie weg."""
+    from trainingsapp.ui.views.anhang_hochladen import QUELLE_GEMERKT, _Hochladen, reste_raeumen
+
+    assert not reste_raeumen(state.einstellungen)
+    kopie = tmp_path / "cache" / "image_picker_1.jpg"
+    kopie.parent.mkdir()
+    kopie.write_bytes(b"\xff\xd8 mit Ort")
+    state.einstellungen.setzen(QUELLE_GEMERKT, str(kopie))  # gemerkt, dann Prozess-Tod
+    assert reste_raeumen(state.einstellungen) and not kopie.exists()
+    assert state.einstellungen.lesen(QUELLE_GEMERKT, "") == ""
+    # Im gewöhnlichen Ablauf nimmt `quelle_loeschen` Datei und Merker zusammen weg
+    kopie.write_bytes(b"\xff\xd8 mit Ort")
+    seite = _Hochladen(SimpleNamespace(), state, Ziel.fuer_uebung("u1"))
+    seite.quelle = kopie
+    state.einstellungen.setzen(QUELLE_GEMERKT, str(kopie))
+    seite.quelle_loeschen()
+    assert not kopie.exists() and state.einstellungen.lesen(QUELLE_GEMERKT, "") == ""

@@ -29,12 +29,12 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from trainingsapp.core.anhaenge import jpeg_ohne_metadaten
+from trainingsapp.core.anhaenge import bild_ohne_metadaten
 from trainingsapp.core.bewegungsbild import ORDNER as ORDNER_BEWEGUNG
 from trainingsapp.core.bewegungsbild import TITEL as TITEL_BEWEGUNG
 from trainingsapp.core.models import new_id
 
-from .anhaenge import _atomar_schreiben, _verschieben
+from .anhaenge import _atomar_schreiben, _verschieben, jpeg_datei_ohne_metadaten
 
 #: Unterordner der Medien für die Ablage
 ORDNER = "Symbole"
@@ -128,12 +128,13 @@ class UebungsbildRepo:
         ]
 
     def schreiben(self, daten: bytes, uebung_id: str | None = None) -> str:
-        """Ein JPEG (Bytes, etwa aus der Kamera — ohne Metadaten gespeichert), ein PNG (oder
-        beim Bild der Bewegung ein GIF) in die Ablage; wahlweise gleich an eine Übung. Zurück
-        kommt der relative Pfad."""
+        """Ein JPEG (Bytes, etwa aus der Kamera), ein PNG (oder beim Bild der Bewegung ein GIF)
+        in die Ablage — **ohne Metadaten** (`core.anhaenge.bild_ohne_metadaten`, D29: auch PNG
+        und GIF; was sich nicht ablaufen lässt, wirft `NichtBereinigbar` und wird nicht
+        gespeichert); wahlweise gleich an eine Übung. Zurück kommt der relative Pfad."""
         endung = self._endung(daten=daten)
         rel = self._neuer_pfad(endung)
-        _atomar_schreiben(self.datei(rel), daten if endung != "jpg" else jpeg_ohne_metadaten(daten))
+        _atomar_schreiben(self.datei(rel), bild_ohne_metadaten(daten))
         if uebung_id is not None:
             self.setzen(uebung_id, rel)
         return rel
@@ -142,6 +143,7 @@ class UebungsbildRepo:
         """Eine fertige JPEG-Datei (Hochladen, schon verkleinert und ohne Ort) in die Ablage
         verschieben; wahlweise gleich an eine Übung."""
         rel = self._neuer_pfad(self._endung(datei=datei))
+        jpeg_datei_ohne_metadaten(datei)  # Netz darunter, auch für PNG und GIF (D29)
         _verschieben(datei, self.datei(rel))
         if uebung_id is not None:
             self.setzen(uebung_id, rel)

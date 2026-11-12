@@ -4,13 +4,20 @@ Ben, 14.10.2026: „Das Systemschwarz ist einfach, aber auch sehr langweilig.“
 Gewählt wurden vier Paletten (Petrol als Vorgabe, Nachtblau, Violett,
 OLED-Schwarz), ein Schalter für den Verlauf und Hell/Dunkel/System. Die Wahl
 gilt **je Profil** — teilen sich mehrere Personen ein Gerät, sieht man am
-Hintergrund, wer gerade dran ist.
+Hintergrund, wer gerade dran ist. Am 11.11.2026 kamen drei warme dazu: Sand,
+Bernstein und Koralle.
 
 Eine Palette ist reine Farbdaten: eine Grundfarbe, aus der Material die
 Akzente ableitet, und sechs eigene Flächenstufen je Modus, die das abgeleitete
 Fast-Schwarz ersetzen. Weil die App ihre Flächen über Material-Rollen färbt
 (``SURFACE_CONTAINER_LOW`` …), färbt das die ganze App, ohne dass eine Ansicht
 etwas davon weiß. ``ui/theme.py`` baut daraus das Flet-Thema.
+
+Die warmen Paletten bringen zusätzlich ihre **Akzente** mit (`Akzente`): Aus
+Gelb oder Koralle leitet Material gedämpfte Töne ab, und was es ableitet, lässt
+sich hier nicht nachrechnen. Feste Paare (Primär und der Text darauf, Container
+und der Text darauf) sind prüfbar — Gelb als Fläche trägt dunklen Text, als
+Schrift auf hellem Grund wird es zu dunklem Bernstein.
 
 Dieses Modul importiert kein ``flet``; die Kontrastrechnung hier prüft
 ``tests/test_darstellung.py`` für jede Palette.
@@ -51,20 +58,59 @@ class Flaechen:
 
 
 @dataclass(frozen=True)
+class Akzente:
+    """Die Akzentfarben eines Modus als feste Paare — ``on_…`` ist die Schrift auf der Fläche.
+
+    Die Namen sind die Material-Rollen (``ft.ColorScheme``). ``primary`` und ``tertiary``
+    stehen auch als Schrift, Symbol und Kurve auf den Flächen — darum sind sie im Hellen
+    dunkel und im Dunkeln hell.
+    """
+
+    primary: str
+    on_primary: str
+    primary_container: str
+    on_primary_container: str
+    secondary_container: str
+    on_secondary_container: str
+    tertiary: str
+    on_tertiary: str
+    on_surface: str
+    on_surface_variant: str
+
+    def paare(self) -> dict[str, tuple[str, str]]:
+        """Schrift und Fläche, die zusammen lesbar sein müssen (Name → (Schrift, Fläche))."""
+        return {
+            "primary": (self.on_primary, self.primary),
+            "primary_container": (self.on_primary_container, self.primary_container),
+            "secondary_container": (self.on_secondary_container, self.secondary_container),
+            "tertiary": (self.on_tertiary, self.tertiary),
+        }
+
+
+@dataclass(frozen=True)
 class Palette:
-    """Ein Farbprofil. ``hell=None``: im hellen Modus leitet Material alles ab."""
+    """Ein Farbprofil. ``hell=None``: im hellen Modus leitet Material alles ab;
+    ohne Akzente leitet Material sie aus ``saat`` ab."""
 
     key: str
     name: str
     saat: str
     dunkel: Flaechen
     hell: Flaechen | None
+    akzente_dunkel: Akzente | None = None
+    akzente_hell: Akzente | None = None
+
+    def akzente(self, dunkel: bool) -> Akzente | None:
+        return self.akzente_dunkel if dunkel else self.akzente_hell
 
 
 PETROL = "petrol"
 NACHTBLAU = "nachtblau"
 VIOLETT = "violett"
 OLED = "oled"
+SAND = "sand"
+BERNSTEIN = "bernstein"
+KORALLE = "koralle"
 
 PALETTEN: dict[str, Palette] = {
     PETROL: Palette(
@@ -102,6 +148,48 @@ PALETTEN: dict[str, Palette] = {
         "#2E7D6E",
         Flaechen("#000000", "#000000", "#0B0F0E", "#101513", "#171D1B", "#202826", "#2A3330"),
         None,
+    ),
+    # Warme Paletten (Ben, 11.11.2026). Jede Fläche bleibt im Dunkeln so dunkel und im
+    # Hellen so hell wie bei den kühlen — die Kurvenfarben (`ui/farben.py`) sind darauf
+    # abgestimmt.
+    SAND: Palette(
+        SAND,
+        "Sand",
+        "#A6814C",
+        Flaechen("#100D09", "#17130D", "#1E1911", "#231E15", "#2C261B", "#373023", "#40382A",
+                 ("#44351D", "#17130D")),
+        Flaechen("#FFFFFF", "#FAF6EF", "#F4EEE3", "#F0E9DC", "#EBE3D4", "#E6DDCC", "#FDFBF7",
+                 ("#EEDFC4", "#FAF6EF")),
+        Akzente("#E3C28F", "#3F2D0B", "#5A431C", "#FFDEA9", "#51442F", "#F1E0C5",
+                "#9FD1C0", "#04372B", "#ECE1D2", "#D2C5B1"),
+        Akzente("#765626", "#FFFFFF", "#F6DFB8", "#2A1C05", "#EDDFC8", "#241A0A",
+                "#2B6656", "#FFFFFF", "#1F1B14", "#4E4537"),
+    ),
+    BERNSTEIN: Palette(
+        BERNSTEIN,
+        "Bernstein",
+        "#E0A100",
+        Flaechen("#110D04", "#191407", "#201A0B", "#261F0E", "#2F2713", "#3B3119", "#453A1F",
+                 ("#493705", "#191407")),
+        Flaechen("#FFFFFF", "#FFF9EA", "#FBF2DC", "#F8EDD2", "#F4E7C7", "#F0E1BB", "#FFFCF4",
+                 ("#FFE7A3", "#FFF9EA")),
+        Akzente("#F6C344", "#3F2E00", "#5C4300", "#FFDF9C", "#54451C", "#F7E2AE",
+                "#A9C7F5", "#0B305F", "#EDE2CC", "#D1C5A8"),
+        Akzente("#775600", "#FFFFFF", "#FFDD82", "#261A00", "#F7E2A9", "#241A04",
+                "#3B5F94", "#FFFFFF", "#1F1B10", "#4D4632"),
+    ),
+    KORALLE: Palette(
+        KORALLE,
+        "Koralle",
+        "#D9705F",
+        Flaechen("#120B0A", "#1B1110", "#231715", "#291B19", "#332321", "#402D2A", "#4A3532",
+                 ("#51251F", "#1B1110")),
+        Flaechen("#FFFFFF", "#FDF6F4", "#FAEEEB", "#F7E8E4", "#F3E1DC", "#EFDAD4", "#FFFBFA",
+                 ("#FBD9D1", "#FDF6F4")),
+        Akzente("#FFB4A6", "#5C150C", "#7E2B20", "#FFDAD3", "#5A3F3A", "#FCDCD5",
+                "#8FD8B4", "#00382A", "#F1DFDB", "#D8C2BD"),
+        Akzente("#9C3D2F", "#FFFFFF", "#FFDAD3", "#3B0906", "#F8DED8", "#2C1512",
+                "#256B4B", "#FFFFFF", "#221918", "#534340"),
     ),
 }  # fmt: skip
 
@@ -182,15 +270,19 @@ def kontrast(a: str, b: str) -> float:
 
 
 __all__ = [
+    "BERNSTEIN",
     "DUNKEL",
     "HELL",
     "HELLIGKEITEN",
+    "KORALLE",
     "NACHTBLAU",
     "OLED",
     "PALETTEN",
     "PETROL",
+    "SAND",
     "SYSTEM",
     "VIOLETT",
+    "Akzente",
     "Darstellung",
     "Flaechen",
     "Palette",

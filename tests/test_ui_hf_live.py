@@ -66,3 +66,42 @@ def test_abgeschlossene_erholungen_werden_einmal_gerechnet(monkeypatch) -> None:
     )
     hl.fruehere_erholungen()
     assert gerechnet[-1] == 100.0  # eine andere Aufnahme rechnet neu
+
+
+def test_stumm_fuer_eine_zeit_ueberlebt_den_aufnahmestart() -> None:
+    """H102: „Stumm 5 min“, vor dem Aufnahmestart gesetzt, endet nicht mit dem Start — nur
+    „bis Messende“ hängt an der Messung."""
+    from trainingsapp.core.hf_ziel import BIS_MESSENDE
+
+    hl, lauf, state = _hf_live()
+    lauf.aufnahme = None
+    lauf.start_mono = 5.0
+    hl.stumm_setzen(300.0)
+    lauf.aufnahme = SimpleNamespace(start_mono=9.0, beats=[], ereignisse=[])  # Aufnahme startet
+    assert hl.stumm() is not None
+    hl.stumm_setzen(BIS_MESSENDE)
+    assert hl.stumm() is not None
+    lauf.aufnahme = SimpleNamespace(start_mono=77.0, beats=[], ereignisse=[])  # nächste Messung
+    assert hl.stumm() is None and state.hf_stumm is None
+
+
+def test_fruehere_erholung_vor_dem_live_puffer_kommt_aus_der_aufnahme() -> None:
+    """H104: Liegt die Marke weiter zurück als der Live-Puffer, rechnet die Erholung aus den
+    Schlägen der Aufnahme — vorher stand „HF – · HRR60 –“ in der Liste."""
+    from hrv_core.recording import Beat
+
+    hl, lauf, _state = _hf_live()
+    lauf.t = 5000.0  # der Puffer (1800 s) reicht bis 3200 s zurück
+    marke = {"art": "erholung", "kontext": "dauer", "haltung": "steht"}
+    beats, t = [], 0.0
+    while t < 400.0:  # bis 100 s Puls 150, danach fällt er auf 100
+        hf = 150.0 if t < 100.0 else max(100.0, 150.0 - (t - 100.0) * 0.8)
+        rr = round(60000.0 / hf)
+        t += rr / 1000.0
+        beats.append(Beat(t_s=round(t, 3), rr_ms=rr, hf_bpm=round(hf), t_wall_s=round(t, 3)))
+    lauf.aufnahme = SimpleNamespace(
+        start_mono=1.0, beats=beats, ereignisse=[{"t": 100.0, "marke": marke}]
+    )
+    (erholung,) = hl.fruehere_erholungen()
+    assert erholung.hf_ende is not None and 145.0 < erholung.hf_ende < 152.0
+    assert erholung.hrr[60] is not None and 40.0 < erholung.hrr[60] < 55.0

@@ -1,4 +1,5 @@
-"""Einstellungen → Timer → „Alle“ (Ben, 8.11.2026, `docs/plan_uhr_fokus.md` §5, Skizze F5):
+"""Einstellungen → Timer und Takt → „Alle Timer“ (Ben, 8.11.2026,
+`docs/plan_uhr_fokus.md` §5, Skizze F5):
 alle Timer an einem Ort — „Letztendlich entwickelt man sich eine Handvoll Timer, das muss leicht
 editierbar sein“.
 

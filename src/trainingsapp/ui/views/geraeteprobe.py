@@ -126,7 +126,8 @@ def geraeteprobe_view(page: ft.Page, state: AppState) -> ft.View:
         zeichnen()
 
     async def verbinden() -> None:
-        if probe is None or ziel is None:
+        # Jeder Neuaufbau der Ansicht käme sonst mit einem weiteren Aufbau dazu (H108)
+        if probe is None or ziel is None or probe.verbindet:
             return
         kopf.value = f"Verbinde mit {ziel[1] or ziel[0]} …"
         zeichnen()
@@ -141,7 +142,13 @@ def geraeteprobe_view(page: ft.Page, state: AppState) -> ft.View:
     async def starten() -> None:
         if probe is None:
             return
-        await probe.starten()
+        try:
+            await probe.starten()
+        except Exception as e:  # Speicher voll, Ordner nicht anzulegen (H108)
+            kopf.value = f"Rohmitschnitt nicht gestartet: {e}"
+            diagnose_punkt.aktualisieren(page, state)
+            zeichnen()
+            return
         diagnose_punkt.aktualisieren(page, state)
         alles_neu()
         page.run_task(takt)
@@ -174,16 +181,22 @@ def geraeteprobe_view(page: ft.Page, state: AppState) -> ft.View:
             schliessen(dialog)
             if probe is None:
                 return
-            await probe.beenden(
-                {
-                    "hersteller": hersteller.value or "",
-                    "was": was.value or "",
-                    "vergleich": vergleich.value or "",
-                }
-            )
+            meldung = "Geräteprobe gespeichert."
+            try:
+                await probe.beenden(
+                    {
+                        "hersteller": hersteller.value or "",
+                        "was": was.value or "",
+                        "vergleich": vergleich.value or "",
+                    }
+                )
+            except Exception as e:
+                # Formular nicht zu schreiben (Speicher voll, H108): Die Probe ist trotzdem
+                # zu Ende — sonst blieben sie und der rote Punkt stehen
+                meldung = f"Geräteprobe beendet, aber nicht vollständig gespeichert: {e}"
             state.geraeteprobe = None
             diagnose_punkt.aktualisieren(page, state)
-            page.show_dialog(ft.SnackBar(ft.Text("Geräteprobe gespeichert.")))
+            page.show_dialog(ft.SnackBar(ft.Text(meldung)))
             state.neu_zeichnen()
 
         dialog = ft.AlertDialog(

@@ -56,6 +56,64 @@ def hf_je_schlag(rr_ms: float, hf_bpm: float) -> float | None:
     return None
 
 
+def hf_mittel(schlaege: Sequence[tuple[float, float, bool]]) -> float | None:
+    """Mittlere Herzfrequenz aus ``(rr_ms, hf_bpm, ungültig)`` je Schlag — „HF jetzt“ über die
+    letzten Sekunden. Ein markierter Schlag zählt mit der Geräte-HF, nie mit seinem RR; None
+    ohne einen brauchbaren Wert.
+
+    >>> hf_mittel([(1000, 0, False), (500, 0, False)])
+    90.0
+    >>> hf_mittel([(1000, 70, True), (0, 80, False)]), hf_mittel([(1000, 0, True)]), hf_mittel([])
+    (75.0, None, None)
+    """
+    werte = [
+        w
+        for rr, hf, ungueltig in schlaege
+        if (w := hf_je_schlag(0.0 if ungueltig else rr, hf)) is not None
+    ]
+    return sum(werte) / len(werte) if werte else None
+
+
+#: Halbe Breite des Mittels, aus dem ein Erholungswert kommt (s, `hz.hrr_erholung`: 5-s-Mittel)
+ERHOLUNG_HALB_S: Final[float] = 2.5
+
+
+def erholung_rest(fenster: Sequence[int], t0_s: float, jetzt_s: float) -> dict[int, float]:
+    """Je Erholungsfenster die Sekunden, bis sein Wert steht: Er steht erst, wenn das Mittel
+    um ``t0 + Fenster`` ganz vorliegt (`ERHOLUNG_HALB_S`) — 0 = steht.
+
+    >>> erholung_rest([30, 60], 100.0, 140.0)
+    {30: 0.0, 60: 22.5}
+    """
+    return {f: max(0.0, t0_s + f + ERHOLUNG_HALB_S - jetzt_s) for f in fenster}
+
+
+def reihe_aus_beats(beats: Sequence[Beat], von_s: float, bis_s: float) -> hz.HfReihe:
+    """Die HF im Sekundenraster aus den Schlägen der **Aufnahme** zwischen ``von_s`` und
+    ``bis_s`` (Wanduhr der Aufnahme = Live-Achse) — für Stellen, die der Live-Puffer nicht
+    mehr hält (H104). Ohne Artefaktmarken: die Aufnahme trägt Rohwerte, unplausible RR
+    lässt `hz.hf_reihe` selbst weg.
+
+    >>> b = [Beat(t_s=float(i), rr_ms=1000, hf_bpm=60, t_wall_s=float(i)) for i in range(1, 30)]
+    >>> r = reihe_aus_beats(b, 10.0, 15.0)
+    >>> r.t.tolist()[0], r.t.tolist()[-1], set(r.hf.tolist())
+    (10.0, 15.0, {60.0})
+    >>> reihe_aus_beats(b, 100.0, 110.0).hf.tolist()        # ohne Schläge keine Werte
+    [nan, nan]
+    """
+    im = sorted(
+        (
+            (float(b.t_wall_s), b.rr_ms, b.hf_bpm)
+            for b in beats
+            if b.t_wall_s is not None and von_s <= b.t_wall_s <= bis_s
+        ),
+        key=lambda z: z[0],
+    )
+    if not im:
+        return hz.hf_reihe([], [], anfang=von_s, ende=von_s + 1.0)
+    return hz.hf_reihe([z[0] for z in im], [z[1] for z in im], [z[2] for z in im])
+
+
 @dataclass
 class HfAkkumulator:
     """Zählt abgeschlossene Sekunden eines Bezugs in Bereiche und summiert die Last.
@@ -277,10 +335,14 @@ __all__ = [
     "BEZUG_AUFNAHME",
     "BEZUG_FENSTER",
     "BEZUG_NAMEN",
+    "ERHOLUNG_HALB_S",
     "FENSTER_S",
     "HfAkkumulator",
     "LiveHf",
     "akkumulator_fuer",
+    "erholung_rest",
     "fenster_zusammenfassung",
     "hf_je_schlag",
+    "hf_mittel",
+    "reihe_aus_beats",
 ]

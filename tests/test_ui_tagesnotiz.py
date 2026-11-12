@@ -497,3 +497,47 @@ def test_tagesansicht_eines_anderen_tags(page, state) -> None:
     notiz = _oeffnen(ansicht, "gestern")
     assert notiz.feld.value == "gestern" and notiz.tag == gestern and notiz.id == n.id
     assert notiz._anhang_wege()[0][2] == f"{basis}/anhang/aufnehmen/notiz/{n.id}/foto"
+
+
+async def test_andere_karte_antippen_beendet_den_offenen_editor(page, state, monkeypatch) -> None:
+    """N98: Während Notiz A geschrieben wird, Karte B antippen — A hört auf (gespeichert),
+    und weder A's Nachfrist noch ein spätes „Fertig“ von A klappt B wieder zu."""
+    monkeypatch.setattr(ne, "NACHFRIST_S", 0.0)
+    state.tagesnotizen.anlegen(state.profil.id, state.heute(), "erste")
+    state.tagesnotizen.anlegen(state.profil.id, state.heute(), "zweite")
+    ansicht = tagesansicht(page, state, state.heute(), mit_datum=False)
+    a = _oeffnen(ansicht, "erste")
+    a.feld.on_focus(None)
+    _tippen(a, "erste, länger")
+    a.feld.on_tap_outside(None)  # der Finger setzt auf Karte B auf: A's Nachfrist beginnt
+    zeit = a._daneben_um
+    b = _oeffnen(ansicht, "zweite")
+    assert b is not a and not a.schreibt and a._daneben_um is None
+    assert a.sichern_schluessel not in state.vor_dem_verlassen
+    assert sorted(_gespeichert(state)) == ["erste, länger", "zweite"]
+    b.feld.on_focus(None)
+    await a._nach_daneben(zeit)  # die Nachfrist läuft ins Leere
+    assert _notiz(_feld(ansicht)) is b and b.schreibt
+    await a.fertig()  # der kurze Tipp hatte „Fertig“ schon losgeschickt: B bleibt offen
+    assert _notiz(_feld(ansicht)) is b and b.schreibt
+    assert state.schreiben_beenden == b.fertig
+    await b.fertig()
+    assert _felder(ansicht) == []
+
+
+def test_speichern_vor_dem_verlassen_protokolliert_fehler(state, caplog) -> None:
+    """N101: Scheitert das Speichern vor dem Neubau, steht es im Protokoll — und die übrigen
+    Schreibenden werden trotzdem gespeichert."""
+    from trainingsapp.ui.app import schreibende_sichern
+
+    gesichert: list[str] = []
+
+    def kaputt() -> None:
+        raise OSError("Platte voll")
+
+    state.vor_dem_verlassen["notiz:a"] = kaputt
+    state.vor_dem_verlassen["notiz:b"] = lambda: gesichert.append("b")
+    with caplog.at_level("ERROR"):
+        schreibende_sichern(state)
+    assert gesichert == ["b"]
+    assert "notiz:a" in caplog.text and "Platte voll" in caplog.text

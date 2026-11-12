@@ -228,7 +228,7 @@ def uhr_teile(
         return handler
 
     def fokus_oeffnen() -> None:
-        """Einstellungen → „Fokus beim Start der Uhr öffnen“ (7.11.2026): die Trainingsansicht
+        """Einstellungen → Übungen → „▶ öffnet den Fokus“ (7.11.2026): die Trainingsansicht
         zur laufenden Uhr — der Timer dieser Übung, der bei laufender Uhr das „Während“ zeigt.
         Kein Zwang: aus heißt, die Uhr bleibt in der Übung."""
         if not state.fokus_auto() or not hasattr(page, "run_task"):

@@ -6,7 +6,8 @@ man könnte einfach einen Rohmitschnitt machen, den man dann hinterher ausgeben 
 1. `verbinden` — Verbindung, Dienste samt Merkmalen und Eigenschaften (`dienste`);
 2. `starten` — Ordner ``Diagnose/<ts>_<gerät>/``, Mitschnitt ``mitschnitt.jsonl``
    (``mitschnitt-v1``), jedes lesbare Merkmal **einmal** lesen (nie Seriennummer und
-   Systemkennung, `hrv_core.geraete.gatt.NIE_LESEN`), jedes mit Benachrichtigung oder Anzeige
+   Systemkennung, `hrv_core.geraete.gatt.NIE_LESEN`; nie die Dienste „User Data“ und
+   „Generic Access“, `DIENSTE_NIE_LESEN`), jedes mit Benachrichtigung oder Anzeige
    abonnieren. **Nie wird auf das Gerät geschrieben** (wie ``hrv-core/scripts/ble_erkundung.py``);
 3. `marke` — „jetzt bewegt“, „jetzt still“ oder eine freie Marke;
 4. `beenden` — Formular (Hersteller und Modell, was getan, Vergleichswert) und Zusammenfassung
@@ -37,16 +38,20 @@ from hrv_core import mitschnitt as mt
 from hrv_core.geraete import gatt
 
 from ..config import app_version
-from ..core.diagnose import DIAGNOSE_ORDNER
+from ..core.diagnose import DIAGNOSE_ORDNER, PROBE_DATEI
 from .gatt import BleTransport
 from .mitschnitt import MitschnittTransport
 
 #: Datei mit Formular, Dienste-Abbild und Zusammenfassung neben dem Mitschnitt
-PROBE_DATEI = "probe.json"
 PROBE_FORMAT = "geraeteprobe-v1"
 #: Fristen (s)
 TIMEOUT_VERBINDEN_S = 20.0
 TIMEOUT_GATT_S = 5.0
+#: Dienste, deren Merkmale die Probe **nie liest** (S32): „User Data“ (0x181C — Vorname,
+#: Geburtsdatum, Gewicht …) und „Generic Access“ (0x1800 — der Gerätename, oft mit dem Namen
+#: der Person). Die Werte stünden sonst im Mitschnitt, und `hrv_core.deid.mitschnitt_zeilen`
+#: nimmt beim Teilen nur 0x2A00/0x2A25/0x2A23 heraus. Abonniert wird dort auch nichts.
+DIENSTE_NIE_LESEN: frozenset[str] = frozenset({gatt.uuid16(0x181C), gatt.uuid16(0x1800)})
 #: Phasen für die Marken der Probe
 PHASEN = ("bewegt", "still")
 
@@ -81,6 +86,8 @@ class Geraeteprobe:
         self.name = ""
         self.mtu = 0
         self.verbunden = False
+        #: Ein Verbindungsaufbau läuft — die Ansicht startet solange keinen zweiten (H108)
+        self.verbindet = False
         self.getrennt_grund: str | None = None
         #: Dienste mit Merkmalen: uuid, name, merkmale (uuid, name, eigenschaften)
         self.dienste: list[dict[str, Any]] = []
@@ -100,6 +107,13 @@ class Geraeteprobe:
 
     async def verbinden(self, device_id: str, name: str = "") -> list[dict[str, Any]]:
         """Verbinden und die Dienste auflisten — noch ohne Mitschnitt."""
+        self.verbindet = True
+        try:
+            return await self._verbinden(device_id, name)
+        finally:
+            self.verbindet = False
+
+    async def _verbinden(self, device_id: str, name: str) -> list[dict[str, Any]]:
         self.device_id, self.name = device_id, name or device_id
 
         def trennung(grund: str | None) -> None:
@@ -157,6 +171,8 @@ class Geraeteprobe:
         self.schreiber.kontext("diagnose_start", phase="probe")
         self.seit = self._uhr()
         for d in self.dienste:
+            if str(d["uuid"]).lower() in DIENSTE_NIE_LESEN:
+                continue  # Angaben zur Person — weder lesen noch abonnieren
             for m in d["merkmale"]:
                 uuid = m["uuid"].lower()
                 if "lesen" in m["eigenschaften"] and uuid not in gatt.NIE_LESEN:
@@ -206,9 +222,13 @@ class Geraeteprobe:
         """Formular und Zusammenfassung schreiben, Mitschnitt schließen, trennen."""
         ordner, schreiber = self.ordner, self.schreiber
         if schreiber is not None:
-            schreiber.kontext("diagnose_ende", phase="probe")
+            # Scheitert das Schreiben (Speicher voll, H108), endet die Probe trotzdem: der
+            # Schreiber hängt ab, und `laeuft` wird falsch
+            with contextlib.suppress(Exception):
+                schreiber.kontext("diagnose_ende", phase="probe")
             self.transport.abhaengen()
-            schreiber.schliessen()
+            with contextlib.suppress(Exception):
+                schreiber.schliessen()
             self.schreiber = None
         with contextlib.suppress(Exception):
             await asyncio.wait_for(self.transport.disconnect(self.device_id), TIMEOUT_GATT_S)

@@ -270,8 +270,11 @@ class EinheitRepo:
             return alt
         # Die Kopie der Felder: Anstrengung, die Skalen des Workouts von jetzt (``felder``) und
         # die, zu denen schon ein Wert steht — so bleibt lesbar, was einmal erfasst wurde
-        namen = [*felder, *(f.label for f in alt.spec.fields if f.key in werte)]
-        neu = WorkoutWerte(einheit_id, werte, text, workout_spec(namen), new_id(), jetzt())
+        # (ohne Obergrenze: vier Skalen am Workout und eine entfernte mit Wert sind fünf, N75)
+        namen = [*felder, *(n for _, n in replace(alt, result=werte).skalen_mit_wert())]
+        neu = WorkoutWerte(
+            einheit_id, werte, text, workout_spec(namen, kopie=True), new_id(), jetzt()
+        )
         with transaktion(self.con):
             self.con.execute(
                 "INSERT INTO workout_entry (id, einheit_id, result_json, spec_snapshot_json, "
@@ -298,9 +301,11 @@ class EinheitRepo:
             )
         ]
 
-    def abgebrochene_schliessen(self) -> list[str]:
-        """Offene Einheiten beim Start beenden — Ende ist ihr letztes Ereignis."""
-        ids = self.offene()
+    def abgebrochene_schliessen(self, ausser: Collection[str] = ()) -> list[str]:
+        """Offene Einheiten beim Start beenden — Ende ist ihr letztes Ereignis. ``ausser``:
+        Einheiten, die in diesem Prozess gerade laufen (eine zweite Sitzung auf derselben
+        Datenbank, D28) — sie sind offen, aber nicht abgebrochen."""
+        ids = [i for i in self.offene() if i not in ausser]
         for einheit_id in ids:
             kopf = self.laden(einheit_id)
             if kopf is None:
@@ -326,8 +331,8 @@ class EinheitRepo:
         for r in self.con.execute(
             "SELECT x.daten_json FROM einheit_ereignis x JOIN einheit e ON e.id = x.einheit_id "
             "WHERE e.subject_id = ? AND e.deleted_at IS NULL AND x.quelle = 'plan' "
-            "AND x.art = 'kante'",
-            (subject_id,),
+            "AND x.art = 'kante' AND json_extract(x.daten_json, '$.plan') = ?",
+            (subject_id, plan_id),
         ):
             d = json.loads(r["daten_json"] or "{}")
             if d.get("plan") == plan_id and d.get("von") and d.get("nach"):
@@ -341,9 +346,9 @@ class EinheitRepo:
         sql = (
             "SELECT x.daten_json FROM einheit_ereignis x JOIN einheit e ON e.id = x.einheit_id "
             "WHERE e.subject_id = ? AND e.deleted_at IS NULL AND x.quelle = 'plan' "
-            "AND x.art = 'kante'"
+            "AND x.art = 'kante' AND json_extract(x.daten_json, '$.plan') = ?"
         )
-        werte: list[str] = [subject_id]
+        werte: list[str] = [subject_id, plan_id]
         if seit is not None:
             sql += " AND e.started_at >= ?"
             werte.append(iso_utc(seit))
@@ -376,6 +381,24 @@ class EinheitRepo:
             )
         ]
 
+    def mit_hrv(self, einheit_ids: Collection[str]) -> set[str]:
+        """Welche dieser Einheiten eine HRV-Aufnahme mit Datei hatten — eine Abfrage für die
+        ganze Liste der Trainings (H79; je Zeile fragte sie sonst `ui.training.hrv_bezug`)."""
+        ids = list(dict.fromkeys(einheit_ids))
+        out: set[str] = set()
+        for k in range(0, len(ids), 500):
+            teil = ids[k : k + 500]
+            platzhalter = ",".join("?" * len(teil))
+            out.update(
+                r["einheit_id"]
+                for r in self.con.execute(
+                    "SELECT DISTINCT einheit_id FROM einheit_baustein "
+                    f"WHERE art = 'hrv' AND datei != '' AND einheit_id IN ({platzhalter})",
+                    teil,
+                )
+            )
+        return out
+
     def zur_datei(self, art: str, datei: str) -> list[tuple[str, Beteiligung]]:
         """Alle Einheiten, an denen eine Datei teilnahm — eine HRV-Aufnahme kann über
         mehrere laufen. ``(einheit_id, Beteiligung)``, älteste zuerst."""
@@ -401,7 +424,10 @@ class EinheitRepo:
             r["eintrag"]
             for r in self.con.execute(
                 "SELECT json_extract(daten_json, '$.eintrag') AS eintrag FROM einheit_ereignis "
-                "WHERE quelle = 'person' AND art = 'eintrag' "
+                # „+“ nimmt Quelle und Art aus der Indexwahl: gesucht wird über den Eintrag
+                # (`idx_einheit_ereignis_eintrag`, Migration 056), nicht über alle person/-Zeilen
+                "WHERE json_extract(daten_json, '$.eintrag') IS NOT NULL "
+                "AND +quelle = 'person' AND +art = 'eintrag' "
                 f"AND json_extract(daten_json, '$.eintrag') IN ({platzhalter})",
                 ids,
             )
@@ -419,9 +445,11 @@ class EinheitRepo:
         for r in self.con.execute(
             "SELECT json_extract(x.daten_json, '$.eintrag') AS eintrag, b.datei AS datei, "
             "COUNT(*) AS n FROM einheit_ereignis x "
-            "JOIN einheit_baustein b ON b.einheit_id = x.einheit_id AND b.art = 'hrv' "
-            "JOIN einheit e ON e.id = x.einheit_id AND e.deleted_at IS NULL "
-            "WHERE x.quelle = 'person' AND b.datei != '' "
+            # CROSS JOIN: erst die wenigen Ereignisse zum Eintrag, dann ihre Einheit
+            "CROSS JOIN einheit_baustein b ON b.einheit_id = x.einheit_id AND b.art = 'hrv' "
+            "CROSS JOIN einheit e ON e.id = x.einheit_id AND e.deleted_at IS NULL "
+            "WHERE json_extract(x.daten_json, '$.eintrag') IS NOT NULL "
+            "AND +x.quelle = 'person' AND b.datei != '' "
             f"AND json_extract(x.daten_json, '$.eintrag') IN ({platzhalter}) "
             "GROUP BY eintrag, b.datei ORDER BY n DESC",
             ids,

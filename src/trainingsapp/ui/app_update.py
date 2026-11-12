@@ -26,7 +26,11 @@ eine Sitzung, ohne sie abzuschicken (Phase „vorbereitet“). Geht die App in d
 Vordergrunddienst läuft. Kommt man vorher zurück, nimmt `lebenszyklus` ihn zurück. Nie mit
 offenem Formular (`formular_offen`) oder während etwas läuft. Nach dem Update meldet die
 Erweiterung „aktualisiert, antippen zum Öffnen“. Scheitert ein Release von selbst, lässt die
-Automatik es aus (`AppState.app_update_auslassen`); von Hand geht es weiter.
+Automatik es aus (`AppState.app_update_auslassen`); von Hand geht es weiter. Scheitert es
+**im Hintergrund**, während die App nicht lebt, kommt kein Ergebnis an (N125) — darum zählt
+die App die gestellten Wecker je Release (`_versuche`): Ist die Sitzung beim Zurückkommen
+weg oder steht nach `VERSUCHE_MAX` Weckern noch die alte Version da, lässt die Automatik das
+Release aus und die Karte „App“ sagt es.
 
 Der Stand (`UpdateLauf`) hängt an `AppState.app_update` und überlebt so den Neuaufbau der
 Seite. Die Seite meldet sich mit `AppState.app_update_beobachter` an (`app_bereich`).
@@ -55,6 +59,7 @@ from trainingsapp.core.update import (
     apk_laden,
     installer_text,
 )
+from trainingsapp.ui import systemdialog
 from trainingsapp.ui.components.dialoge import schliessen
 from trainingsapp.ui.components.karte import hinweis
 from trainingsapp.ui.laufend import laufendes
@@ -73,6 +78,12 @@ FERTIG = "fertig"
 #: So lange muss die App unbenutzt sein, bevor sie sich von selbst aktualisiert (s) — die
 #: Texte sagen „eine Minute“. Android schickt den Wecker etwas später, nie früher.
 WARTEN_S = 60
+
+#: Nach so vielen gestellten Weckern ohne Ergebnis gibt die Automatik ein Release auf (N125)
+VERSUCHE_MAX = 2
+#: Einstellung: ``<Tag>|<Zahl>`` — gestellte Wecker für dieses Release, von denen nie ein
+#: Ergebnis kam (die App lebte nicht mehr, als Android installierte oder ablehnte)
+_K_VERSUCHE = "app_update_versuche"
 
 #: So oft zeigt die Seite den Fortschritt beim Laden (s)
 _TAKT_S = 0.3
@@ -95,6 +106,31 @@ class UpdateLauf:
     abbrechen: bool = False
     #: Von der Automatik begonnen — scheitert es, lässt sie das Release künftig aus
     automatisch: bool = False
+    #: Der Wecker dieses Laufs steht in der Zählung der Versuche (`_versuche`)
+    gezaehlt: bool = False
+
+
+def _versuche(state: Any, tag: str) -> int:
+    """Gestellte Wecker für das Release ``tag``, von denen kein Ergebnis kam."""
+    einstellungen = getattr(state, "einstellungen", None)
+    if einstellungen is None:
+        return 0
+    wer, _, zahl = (einstellungen.lesen(_K_VERSUCHE, "") or "").partition("|")
+    return int(zahl) if wer == tag and zahl.isdigit() else 0
+
+
+def _versuche_setzen(state: Any, tag: str, zahl: int) -> None:
+    einstellungen = getattr(state, "einstellungen", None)
+    if einstellungen is not None:
+        einstellungen.setzen(_K_VERSUCHE, f"{tag}|{max(zahl, 0)}")
+
+
+def _nicht_von_selbst(release: Release) -> str:
+    return (
+        f"Version {release.version} hat sich nicht von selbst installiert (etwa weil der "
+        "Speicher voll war). Die App versucht es für diese Version nicht noch einmal von "
+        "selbst — von Hand geht es hier weiter, dann nennt Android den Grund."
+    )
 
 
 def lauf_fuer(state: Any, release: Release) -> UpdateLauf:
@@ -313,6 +349,12 @@ async def automatisch(page: Any, state: Any) -> None:
     lauf = lauf_fuer(state, stand.app)
     if lauf.phase not in (BEREIT, FEHLER):  # unterwegs, oder es wartet auf eine Hand
         return
+    if _versuche(state, stand.app.tag) >= VERSUCHE_MAX:
+        # Der Wecker war gestellt, die alte Version läuft noch, und kein Ergebnis kam an
+        # (N125): nicht bei jedem Start wieder laden und eine Sitzung schreiben
+        state.app_update_auslassen_setzen(stand.app.tag)
+        _setzen(state, lauf, BEREIT, _nicht_von_selbst(stand.app))
+        return
     try:
         geraet = dict(await dienst.stand())
     except Exception:
@@ -377,8 +419,15 @@ async def beim_verlassen(page: Any, state: Any) -> None:
         return
     if not state.app_update_auto() or laufendes(state) or formular_offen(page):
         return
+    if systemdialog.ist_offen():
+        # Dateiauswahl, Fotoauswahl, Teilen: die App ist nicht wirklich verlassen (N131)
+        return
+    gestellt = False
     with contextlib.suppress(Exception):
-        await dienst.spaeter(WARTEN_S)
+        gestellt = bool(await dienst.spaeter(WARTEN_S))
+    if gestellt and not lauf.gezaehlt:
+        lauf.gezaehlt = True
+        _versuche_setzen(state, lauf.release.tag, _versuche(state, lauf.release.tag) + 1)
 
 
 async def lebenszyklus(page: Any, state: Any, vorn: bool) -> None:
@@ -392,7 +441,29 @@ async def lebenszyklus(page: Any, state: Any, vorn: bool) -> None:
         if lauf.phase == VORBEREITET:
             with contextlib.suppress(Exception):
                 await state.installieren.nicht_spaeter()
+            await _wecker_abrechnen(state, lauf)
         await weiter_nach_erlauben(state)
+
+
+async def _wecker_abrechnen(state: Any, lauf: UpdateLauf) -> None:
+    """Zurück in der App mit einem vorbereiteten Update: Steht die Sitzung noch, kam der
+    Wecker nicht dran — der Versuch zählt nicht. Ist sie weg, hat der Wecker sie abgeschickt
+    und die alte Version läuft trotzdem (N125: das Ergebnis erreichte die App nicht): das
+    Release auslassen und es in der Karte „App“ sagen."""
+    try:
+        sitzung = int(dict(await state.installieren.stand()).get("vorbereitet", -1))
+    except Exception:
+        return
+    if lauf.phase != VORBEREITET:  # inzwischen kam doch ein Ergebnis
+        return
+    if sitzung >= 0:
+        if lauf.gezaehlt:
+            lauf.gezaehlt = False
+            _versuche_setzen(state, lauf.release.tag, _versuche(state, lauf.release.tag) - 1)
+        return
+    state.app_update_auslassen_setzen(lauf.release.tag)
+    lauf.automatisch = False
+    _setzen(state, lauf, GELADEN, _nicht_von_selbst(lauf.release))
 
 
 async def automatik_umschalten(page: Any, state: Any, an: bool) -> None:

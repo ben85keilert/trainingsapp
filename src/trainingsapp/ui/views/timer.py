@@ -96,7 +96,7 @@ from trainingsapp.ui.components.timer_stellen import (
     ueberall_oder_hier,
 )
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
-from trainingsapp.ui.components.zurueck import zurueck_speichert
+from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.timer_bibliothek import kopie, kopie_name, stellen_von
 from trainingsapp.ui.timer_takt import ticker_starten, toene_laden, ton_spielen, wach_setzen
@@ -1307,6 +1307,13 @@ def timer_bearbeiten_view(
         gespeichert["name"] = neu.anzeigename
         return None
 
+    def rueckweg() -> str:
+        """Wohin „Speichern“, „Abbrechen“ und „Löschen“ führen: zur Ansicht darunter, wie Zurück
+        (`zurueck_speichert`) — der Editor öffnet auch direkt aus dem Uhr-Blatt einer Übung, aus
+        „Mit Abschnitten …“ und aus „Alle Timer“; `Profilziel.zurueck` führte von dort auf die
+        Timer-Seite statt dorthin, wo man war (Durchsicht 11.11.2026). Ohne Stapel das Ziel."""
+        return zurueck_ziel(page, ansicht) if ansicht in page.views else ziel.zurueck
+
     def als_profil_fragen(_e: Any = None) -> None:
         """„Als Vorlage speichern“ bzw. „Als Timer der Übung speichern“ (für jetzt, G2): erst
         hier braucht es einen Namen — nur dieser Knopf speichert."""
@@ -1329,7 +1336,7 @@ def timer_bearbeiten_view(
             nachher_profil.danach(
                 lambda: page.show_dialog(ft.SnackBar(ft.Text(f"„{profil_name}“ gespeichert")))
             )
-            nachher_profil.danach(lambda: page.push_route(ziel.zurueck))
+            nachher_profil.danach(lambda: page.push_route(rueckweg()))
             schliessen(dialog)
 
         dialog: ft.AlertDialog = ft.AlertDialog(
@@ -1355,14 +1362,14 @@ def timer_bearbeiten_view(
             return
         meldung = "Übernommen" if ziel.ohne_name else f"„{gespeichert['name']}“ gespeichert"
         page.show_dialog(ft.SnackBar(ft.Text(meldung)))
-        await page.push_route(ziel.zurueck)
+        await page.push_route(rueckweg())
 
     nachher = Nachher()  # Routenwechsel erst, wenn der Dialog zu ist (`components/dialoge.py`)
 
     def loeschen() -> None:
         if ziel.loeschen is not None:
             ziel.loeschen(profil)
-        nachher.danach(lambda: page.push_route(ziel.zurueck))
+        nachher.danach(lambda: page.push_route(rueckweg()))
         page.pop_dialog()
         page.show_dialog(ft.SnackBar(ft.Text(f"„{profil.name}“ gelöscht")))
 
@@ -1400,7 +1407,7 @@ def timer_bearbeiten_view(
         )
 
     async def abbrechen() -> None:
-        await page.push_route(ziel.zurueck)
+        await page.push_route(rueckweg())
 
     anfang = editor.stand()
     if ziel.als_profil is not None and ziel.ohne_name:

@@ -47,6 +47,7 @@ from trainingsapp.core.hf_profil import (
 )
 from trainingsapp.core.hrv_einstellungen import SICHT_HF, SICHT_HRV
 from trainingsapp.data.hf_profil import RechenAusnahmeRepo
+from trainingsapp.ui.components.dialoge import loeschen_rueckfrage, meldung
 from trainingsapp.ui.components.hf_sicht import alarm_zeilen, stufenfarbe
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte, titel
 from trainingsapp.ui.components.layout import sicher
@@ -182,6 +183,10 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
 
         def jahrgang_sichern(_e: object = None) -> None:
             text = (jahrgang.value or "").strip()
+            # Unverändert (bloß das Feld verlassen): nichts speichern, nichts neu bauen —
+            # der Neubau ersetzte die Felder der anderen Karten samt Getipptem (N113)
+            if text == (str(p.birth_year) if p.birth_year else "") and not jahrgang.error:
+                return
             if not text:
                 p.birth_year = None
             else:
@@ -356,6 +361,13 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
                 with contextlib.suppress(Exception):
                     datum.update()
                 return
+            if tag > state.heute():
+                # Tippfehler im Jahr: Ein Eintrag von morgen gälte in seiner Quelle als der
+                # jüngste (N114)
+                datum.error = "liegt in der Zukunft"
+                with contextlib.suppress(Exception):
+                    datum.update()
+                return
             q = str(quelle.value or quellen[0])
             state.profilwerte.hinzufuegen(
                 Profilwert(
@@ -418,12 +430,31 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
         neu_zeichnen()
 
     def entfernen(wert_id: str) -> None:
+        """Das kleine Symbol neben der Stecknadel — nie ohne Rückweg (N114): ein Eintrag
+        mit „Rückgängig“, ein Tageswert (er lässt sich nicht zurückholen) nach Rückfrage."""
         if wert_id.startswith("tagesfeld:"):
-            state.tageswerte.loeschen(wert_id.removeprefix("tagesfeld:"))
-            melden("Tageswert „Ruhepuls“ entfernt.")
-        else:
-            state.profilwerte.loeschen(wert_id)
-            melden("Eintrag entfernt.")
+
+            def weg() -> None:
+                state.tageswerte.loeschen(wert_id.removeprefix("tagesfeld:"))
+                melden("Tageswert „Ruhepuls“ entfernt.")
+                neu_zeichnen()
+
+            page.show_dialog(
+                loeschen_rueckfrage(
+                    "Tageswert entfernen?",
+                    "Der Wert steht im Tagesfeld „Ruhepuls“ und wird auch dort gelöscht.",
+                    weg,
+                    knopf="Entfernen",
+                )
+            )
+            return
+
+        def zurueckholen() -> None:
+            state.profilwerte.rueckgaengig(wert_id)
+            neu_zeichnen()
+
+        state.profilwerte.loeschen(wert_id)
+        page.show_dialog(meldung("Eintrag entfernt.", zurueckholen))
         neu_zeichnen()
 
     # -- Bereiche -------------------------------------------------------------------
@@ -572,7 +603,10 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
         )
 
         def namen_sichern(_e: object = None) -> None:
-            e.namen = [n.strip()[:40] for n in (namen.value or "").split(",") if n.strip()]
+            neue = [n.strip()[:40] for n in (namen.value or "").split(",") if n.strip()]
+            if neue == list(e.namen):  # nur verlassen: kein Neubau (N113)
+                return
+            e.namen = neue
             state.hf_einstellungen_setzen(e)
             neu_zeichnen()
 

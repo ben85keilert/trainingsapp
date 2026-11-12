@@ -1,4 +1,5 @@
-"""Einstellungen → Training: Karte einfärben, Tempo mit Pausen, Spalten, Kurve, Auto-Pause.
+"""Einstellungen → Training und GPS: Karte einfärben, Tempo mit Pausen, Spalten, Kurve,
+Auto-Pause — und der Weg zum GPS-Test (bis 11.11.2026 eine Zeile der Hauptseite).
 
 Ben, 26.10.2026 (P81, ``docs/plan_strecken_ansicht.md`` §5). Gerätelokal
 (`core.training_einstellungen`), gilt live und in der Auswertung. Keine Zonen, keine
@@ -26,6 +27,7 @@ from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.farben import SKALEN_NAMEN, TEMPO_SKALEN
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.einstellungen import menuezeile
 
 FAERBUNG_TEXT = {
     FAERBUNG_TEMPO: "Tempo",
@@ -110,7 +112,7 @@ def einstellungen_training(page: Any, state: AppState) -> ft.View:
 
     return ft.View(
         route="/einstellungen/training",
-        appbar=ft.AppBar(title=ft.Text("Training")),
+        appbar=ft.AppBar(title=ft.Text("Training und GPS")),
         scroll=ft.ScrollMode.AUTO,
         padding=12,
         controls=[
@@ -156,6 +158,17 @@ def einstellungen_training(page: Any, state: AppState) -> ft.View:
                         karte(
                             titel("Kurve „Herzfrequenz und Tempo“"),
                             wahl("kurve_x", "Achse", KURVE_TEXT),
+                        ),
+                        karte(
+                            titel("GPS"),
+                            menuezeile(
+                                page,
+                                "GPS-Test",
+                                "Vorabversion: Strecke und Akku prüfen",
+                                ft.Icons.SATELLITE_ALT,
+                                "/einstellungen/gps-test",
+                            ),
+                            abstand=0,
                         ),
                     ],
                 ),

@@ -756,6 +756,8 @@ def wechsel(alt: Lage | None, neu: Lage | None) -> list[TaktEreignis]:
     [('runde', 1), ('runde', 2), ('runde', 3), ('phase', 4)]
     >>> [e.art for e in wechsel(lage(t, 5.0), None)]
     ['ende']
+    >>> [(e.art, e.runde) for e in wechsel(lage(t, 25.0), lage(t, 0.5))]  # zurückgesprungen
+    [('phase', 1)]
     >>> b = replace(t, runden=1)
     >>> [e.art for e in wechsel(lage(b, 9.0), lage(b, 11.0))], wechsel(lage(b, 11), lage(b, 12))
     (['runde', 'ende'], [])
@@ -769,6 +771,10 @@ def wechsel(alt: Lage | None, neu: Lage | None) -> list[TaktEreignis]:
     if alt.fertig and neu.fertig:
         return []
     aus: list[TaktEreignis] = []
+    if neu.runde < alt.runde and not neu.fertig:
+        # Zurückgesprungen (◀ im Timer): keine Runde wurde voll — „Takt zählt“ bekäme sonst
+        # eine Wiederholung für die abgebrochene (Durchsicht 11.11.2026)
+        return [TaktEreignis(PHASE, neu.index, neu.runde, neu.phase)]
     if neu.runde != alt.runde or neu.fertig:
         # Jede volle Runde einzeln — auch die, über die ein stockender Ticker hinwegsprang
         # (Neuaufbau, Tiefschlaf): „Takt zählt“ verlöre sonst Wiederholungen (N49)

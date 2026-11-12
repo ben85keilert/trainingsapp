@@ -30,6 +30,8 @@ from trainingsapp.core.zaehlen import mit_vorzeichen
 
 #: Ordner der Rohmitschnitte ohne Messung (unbekannte Geräte, Stufe 6) im Datenverzeichnis
 DIAGNOSE_ORDNER: Final[str] = "Diagnose"
+#: Formular und Zusammenfassung einer Geräteprobe, neben ihrem Mitschnitt (`devices.erkundung`)
+PROBE_DATEI: Final[str] = "probe.json"
 #: Herzfrequenz-Dienst (0x180D)
 HR_DIENST: Final[str] = "0000180d-0000-1000-8000-00805f9b34fb"
 #: Ab so viel Speicher weisen die Einstellungen auf die Ablage hin (P114)
@@ -512,8 +514,11 @@ def ablage(basis: Path) -> tuple[int, int]:
 
 
 def alle_loeschen(basis: Path, *, ausser: Iterable[Path] = ()) -> int:
-    """Alle Mitschnitte löschen — die Messungen bleiben. ``ausser``: etwa der laufende.
-    Gibt die Zahl der gelöschten Dateien zurück."""
+    """Alle Mitschnitte löschen — die Messungen bleiben. ``ausser``: etwa der laufende
+    (Messung **und** Geräteprobe). Von einer Geräteprobe geht auch der Rest mit (H107): das
+    Formular (`PROBE_DATEI` — Gerätename, eigener Text) und der Ordner; ohne Mitschnitt wären
+    sie in der App weder zu sehen noch zu löschen. Gibt die Zahl der gelöschten Mitschnitte
+    zurück."""
     schonen = {Path(p).resolve() for p in ausser}
     n = 0
     for p in mitschnitte(basis):
@@ -522,6 +527,15 @@ def alle_loeschen(basis: Path, *, ausser: Iterable[Path] = ()) -> int:
         with contextlib.suppress(OSError):
             p.unlink()
             n += 1
+    proben = Path(basis) / DIAGNOSE_ORDNER
+    if proben.is_dir():
+        for ordner in proben.iterdir():
+            # Was noch einen Mitschnitt hat (geschont oder nicht löschbar), bleibt ganz
+            if not ordner.is_dir() or (ordner / mt.DATEINAME).exists():
+                continue
+            with contextlib.suppress(OSError):
+                (ordner / PROBE_DATEI).unlink(missing_ok=True)
+                ordner.rmdir()  # nur, wenn nichts Fremdes darin liegt
     return n
 
 
@@ -598,6 +612,7 @@ __all__ = [
     "HR_DIENST",
     "LAUT_PROFIL",
     "NUR_ROH",
+    "PROBE_DATEI",
     "WDH",
     "MarkenKontext",
     "MarkenZaehler",

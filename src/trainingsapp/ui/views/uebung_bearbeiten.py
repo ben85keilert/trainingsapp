@@ -87,7 +87,7 @@ from trainingsapp.core.zaehlen import (
     knopf_text,
     vorlagen_angebot,
 )
-from trainingsapp.ui import paketdatei
+from trainingsapp.ui import paketdatei, systemdialog
 from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
 from trainingsapp.ui.components.bewegungsbild import bewegungsbild_blatt
 from trainingsapp.ui.components.chips_wahl import chips_zeile
@@ -104,7 +104,7 @@ from trainingsapp.ui.components.takt_blatt import takt_blatt, takt_zeile
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.varianten import plakette
 from trainingsapp.ui.components.varianten import symbol as varianten_symbol
-from trainingsapp.ui.components.zurueck import zurueck_speichert
+from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route, kamera_moeglich
 from trainingsapp.ui.views.anhang_hochladen import hochladen_route
@@ -219,8 +219,10 @@ def uebung_bearbeiten(
             )
             return
         try:
-            dateien = await ft.FilePicker().pick_files(
-                dialog_title="Bild als Symbol", allowed_extensions=["jpg", "jpeg", "png"]
+            dateien = await systemdialog.mit(
+                ft.FilePicker().pick_files(
+                    dialog_title="Bild als Symbol", allowed_extensions=["jpg", "jpeg", "png"]
+                )
             )
         except Exception as fehler:
             page.show_dialog(ft.SnackBar(ft.Text(f"Auswahl: {fehler}")))
@@ -230,7 +232,7 @@ def uebung_bearbeiten(
             return
         try:
             rel = state.uebungsbilder.schreiben(Path(pfad).read_bytes())
-        except OSError as fehler:
+        except (NichtBereinigbar, OSError) as fehler:
             page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
             return
         gewaehlt_setzen(bild_stand["key"], rel)
@@ -277,8 +279,11 @@ def uebung_bearbeiten(
             )
             return
         try:
-            dateien = await ft.FilePicker().pick_files(
-                dialog_title="Bild der Bewegung", allowed_extensions=["jpg", "jpeg", "png", "gif"]
+            dateien = await systemdialog.mit(
+                ft.FilePicker().pick_files(
+                    dialog_title="Bild der Bewegung",
+                    allowed_extensions=["jpg", "jpeg", "png", "gif"],
+                )
             )
         except Exception as fehler:
             page.show_dialog(ft.SnackBar(ft.Text(f"Auswahl: {fehler}")))
@@ -288,7 +293,7 @@ def uebung_bearbeiten(
             return
         try:
             rel = state.bewegungsbilder.schreiben(Path(pfad).read_bytes())
-        except OSError as fehler:
+        except (NichtBereinigbar, OSError) as fehler:
             page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
             return
         bewegung_setzen(rel)
@@ -1613,8 +1618,12 @@ def uebung_bearbeiten(
                 key, list((alt or vorlage_feld).quick)
             )  # Skala, Ja/Nein, Freitext: wie sie sind
             label = (namen[key].value or "").strip() or parameter_name(vorlage_feld)
+            # Was der Editor nicht anbietet, bleibt, wie die Übung es hat (N107): Einheit,
+            # Grenzen, Schrittweite und Pflicht einer Paketübung — nur bei gleicher Art, ein
+            # Altbestand mit anderem Typ unter dem Schlüssel bekommt die Vorlage
+            basis = alt if alt is not None and alt.type == vorlage_feld.type else vorlage_feld
             feld = replace(
-                vorlage_feld,
+                basis,
                 label=label,
                 quick=chips_sortiert(chips),
                 default=alt.default if alt is not None else vorlage_feld.default,
@@ -1754,13 +1763,27 @@ def uebung_bearbeiten(
             await page.push_route(basis)
             return
         page.show_dialog(ft.SnackBar(ft.Text("Gespeichert")))
-        await page.push_route(f"/uebung/{gespeichert['id']}")
+        await page.push_route(woher() or f"/uebung/{gespeichert['id']}")
+
+    def woher() -> str | None:
+        """Die Ansicht, aus der man ins Formular kam — die Übungsseite unter einem Plan oder
+        der Einzelübung (`…/info`), der Timer der Übung: „Speichern“ und „Abbrechen“ führen
+        dorthin wie Zurück, statt eine zweite Übungsseite darüberzulegen (Durchsicht
+        11.11.2026). ``None``: die Übungsseite `/uebung/<id>` — bei einer neuen Übung, einer
+        Kopie (darunter liegt die Seite des Originals) und ohne Stapel."""
+        if uebung is None or ansicht not in page.views:
+            return None
+        ziel = zurueck_ziel(page, ansicht)
+        teile = [t for t in ziel.split("/") if t]
+        if not teile or (teile[0] == "uebung" and teile[1:2] != [uebung.id]):
+            return None
+        return ziel
 
     async def abbrechen() -> None:
         if im_plan:
             await page.push_route(f"{basis}/hinzufuegen")
             return
-        await page.push_route("/" if uebung is None else f"/uebung/{uebung.id}")
+        await page.push_route("/" if uebung is None else woher() or f"/uebung/{uebung.id}")
 
     def abschnitt(text: str, rechts: ft.Control | None = None) -> ft.Control:
         return ft.Row(

@@ -605,3 +605,57 @@ def test_plan_mit_ablauf_auf_heute_fortsetzen_statt_noch_offen(page, state) -> N
     assert "Fortsetzen bei 2 · Wandsitz" in texte and "Noch offen:" not in texte
     asyncio.run(_knopf(unterwegs, "Fortsetzen").on_click())
     assert page.routen[-1] == f"/plan/{plan.id}" and plan.id not in state.plan_als_plan
+
+
+def test_heute_ueber_mitternacht_nimmt_den_neuen_tag(page, state) -> None:
+    """N102: „Heute“ wurde gestern gebaut — nach Mitternacht zeigen Kopf und Blätter den
+    neuen Tag, sobald die Spalte auffrischt, nicht erst nach einem Routenwechsel."""
+    from trainingsapp.ui.views.tag import tag_lang
+
+    gebaut_am = state.heute()
+    morgen = gebaut_am + timedelta(days=1)
+    state.tagesnotizen.anlegen(state.profil.id, gebaut_am, "von gestern")
+    ansicht = tagesansicht(page, state, gebaut_am)
+    assert tag_lang(gebaut_am) in _texte(ansicht)
+    state.heute = lambda: morgen  # Mitternacht ist vorbei
+    _knopf(ansicht, "Notiz").on_click()  # irgendein Tipp frischt die Spalte auf
+    texte = _texte(ansicht)
+    assert tag_lang(morgen) in texte and tag_lang(gebaut_am) not in texte
+    assert "von gestern" not in texte
+
+
+def test_planname_und_notizdialog_speichern_am_richtigen_ort(page, state) -> None:
+    """N108: Der getippte Planname ist vor dem Verlassen gespeichert, auch ohne ``on_blur``
+    (Systemtaste Zurück mit Fokus im Feld). N109: Schließt sich der Eintrag, während der
+    Notizdialog offen ist, landet die Notiz trotzdem in ihm — nicht doppelt in einem neuen."""
+    from trainingsapp.core.models import jetzt
+    from trainingsapp.ui.app import schreibende_sichern
+    from trainingsapp.ui.views.plan import plan_view
+
+    plan = _plan(state, "kniebeuge")
+    ansicht = plan_view(page, state, plan, bearbeiten=True)
+    # der Kopf des Editors ist die Kopfzeile der ziehbaren Liste
+    kopf = next(x for x in _alle(ansicht) if isinstance(x, ft.ReorderableListView)).header
+    name = _feld(kopf, "Name des Plans")
+    name.value = "Beine lang"
+    name.on_change(SimpleNamespace(control=name))
+    schreibende_sichern(state)  # wie der Routenaufbau und der Weg in den Hintergrund
+    assert state.plaene.laden(plan.id).name == "Beine lang"
+    name.on_blur(SimpleNamespace(control=name))
+    assert not [k for k in state.vor_dem_verlassen if k.startswith("planname:")]
+
+    uebung = state.uebungen.laden(seed_id("kniebeuge"))
+    session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
+    alt = state.sitzungen.eintrag_notiz_setzen(session, uebung, "Knie eng", state.heute())
+    ansicht = plan_view(page, state, state.plaene.laden(plan.id))
+    page.dialoge.clear()
+    _knopf(ansicht, "Notiz").on_click()
+    dialog = page.dialoge[-1]
+    assert isinstance(dialog, ft.AlertDialog) and dialog.content.value == "Knie eng"
+    # Inzwischen schließt sich der Eintrag (Timer, oder die Frist „bleibt offen“ ist um)
+    state.sitzungen.eintrag_korrigieren(alt.id, dict(alt.result), ended_at=jetzt())
+    dialog.content.value = "Knie eng, rechts besser"
+    dialog.open = True
+    _knopf(dialog, "Speichern").on_click()
+    notizen = [e.note for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
+    assert notizen == ["Knie eng, rechts besser"]

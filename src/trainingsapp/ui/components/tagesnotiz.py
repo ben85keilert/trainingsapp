@@ -418,7 +418,8 @@ class Tagesnotizen:
                 notiz,
                 basis=self.basis,
                 tags=self._angebot(notiz),
-                danach=self._geschlossen,
+                # sagt, **wessen** Editor meldet — ein abgelöster schließt den neuen nicht (N98)
+                danach=lambda: self._geschlossen(notiz.id),
             )
         return e
 
@@ -433,7 +434,9 @@ class Tagesnotizen:
         return self.editor(notiz) if notiz is not None else None
 
     def oeffnen(self, notiz: DayNote) -> None:
-        """Eine Karte wurde angetippt: ihr Editor, mit Fokus."""
+        """Eine Karte wurde angetippt: ihr Editor, mit Fokus. Der bisher offene hört vorher
+        auf (N98) — sonst klappte seine Nachfrist die neue Karte wieder zu."""
+        self._offenen_ablegen(notiz.id)
         self.offen = notiz.id
         self.editor(notiz).fokus = True
         self._neu_zeichnen()
@@ -448,17 +451,34 @@ class Tagesnotizen:
     def neu_ohne_zeichnen(self) -> Tagesnotiz:
         """Wie `neu`, ohne die Ansicht neu zu bauen (beim Aufbau selbst)."""
         notiz = DayNote(subject_id=self.profil_id, date=self.tag)
+        self._offenen_ablegen(notiz.id)
         self.notizen.append(notiz)
         self.offen = notiz.id
         return self.editor(notiz)
 
-    def _geschlossen(self) -> None:
-        """Fertig oder Abbrechen im offenen Editor: zur Karte — oder weg, wenn leer."""
+    def _offenen_ablegen(self, neue_id: str) -> None:
+        """Den bisher offenen Editor beenden, bevor ein anderer aufgeht: gespeichert, ohne
+        Neubau — eine leere neue Notiz verschwindet wie bei „Fertig“."""
+        if self.offen is None or self.offen == neue_id:
+            return
+        e = self.editoren.get(self.offen)
+        if e is not None:
+            e.ablegen()
+        self._leere_entfernen(self.offen)
+
+    def _leere_entfernen(self, notiz_id: str) -> None:
+        e = self.editoren.get(notiz_id)
+        if e is not None and not e.vorhanden:
+            self.notizen = [n for n in self.notizen if n.id != notiz_id]
+            del self.editoren[notiz_id]
+
+    def _geschlossen(self, notiz_id: str | None = None) -> None:
+        """Fertig oder Abbrechen im offenen Editor: zur Karte — oder weg, wenn leer. Meldet
+        ein Editor, während ein **anderer** offen ist (``notiz_id``), bleibt der offen (N98)."""
+        if notiz_id is not None and self.offen is not None and notiz_id != self.offen:
+            return
         if self.offen is not None:
-            e = self.editoren.get(self.offen)
-            if e is not None and not e.vorhanden:
-                self.notizen = [n for n in self.notizen if n.id != self.offen]
-                del self.editoren[self.offen]
+            self._leere_entfernen(self.offen)
         self.offen = None
         self.laden()
         self._neu_zeichnen()

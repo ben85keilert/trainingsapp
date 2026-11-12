@@ -24,8 +24,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import json
 import sqlite3
 from collections.abc import Callable
+from typing import Any
 
 import flet as ft
 
@@ -38,11 +40,12 @@ from trainingsapp.core.paketquelle import (
     Pruefung,
     QuellenFehler,
     gebundene_quelle,
+    ist_zip,
     paket_laden,
     pruefen,
     url_pruefen,
 )
-from trainingsapp.core.paketstufe import MITTEL, STUFE_TEXT, automatisch, stufen_text
+from trainingsapp.core.paketstufe import MITTEL, STUFE_TEXT, Stufe, automatisch, stufen_text
 from trainingsapp.core.paketversion import MANUELL, UPDATE_MODI, version_text
 from trainingsapp.core.update import UpdateFehler, ist_neuer, neuestes_release
 from trainingsapp.data.repositories import SettingRepo
@@ -65,6 +68,35 @@ ROUTE = "/einstellungen/updates"
 #: Größere Pakete (mit Videos, U3) lädt die App nicht von selbst — sie bleiben vorgemerkt, mit
 #: Größe, bis man selbst lädt (Ben, 9.11.2026: „Quelle zeigt die Größe vorher“)
 GROSS_VON_SELBST = 20_000_000
+
+
+#: Einstellung (JSON): je Paket die Stufe des Updates, das auf Antwort wartet, mit der
+#: Prüfsumme seiner Datei — solange die Quelle dieselbe Datei nennt, wird sie nicht bei jedem
+#: Start neu geladen, nur um die Stufe noch einmal zu bestimmen (S27)
+STUFEN_GEMERKT = "paket_update_stufen"
+
+
+def _stufen_gemerkt(state: AppState) -> dict[str, dict[str, Any]]:
+    try:
+        roh = json.loads(state.einstellungen.lesen(STUFEN_GEMERKT, "") or "{}")
+    except ValueError:
+        return {}
+    if not isinstance(roh, dict):
+        return {}
+    return {
+        str(k): v
+        for k, v in roh.items()
+        if isinstance(v, dict) and v.get("stufe") in STUFE_TEXT and isinstance(v.get("sha256"), str)
+    }
+
+
+def _von_selbst_laden(eintrag: IndexEintrag) -> bool:
+    """Darf die Prüfung diese Datei von selbst laden? Nichts über `GROSS_VON_SELBST` — und ein
+    Paket mit Dateien (ZIP, bis 300 MB) nur, wenn der Index seine Größe nennt: ``bytes`` ist
+    dort freiwillig, ohne Angabe stünde 0 und die Grenze griffe nie (S27)."""
+    if eintrag.bytes > GROSS_VON_SELBST:
+        return False
+    return eintrag.bytes > 0 or not ist_zip(eintrag.url)
 
 
 def _lader(eintrag: IndexEintrag, code: str | None) -> Callable[[], Paketinhalt]:
@@ -125,12 +157,29 @@ async def pruefung_ausfuehren(state: AppState, *, gross: bool = False) -> Update
         ei = u.eintrag
         state.pakete.verfuegbar_setzen(ei.id, ei.version or 0, ei.url, ei.sha256, ei.neuigkeiten)
     offen: list = []
+    gemerkt = _stufen_gemerkt(state)
+    merken: dict[str, dict[str, Any]] = {}
     for u in ergebnis.updates:
         # Die Stufe kommt aus dem Unterschied, nicht aus der Nummer (U6, F8 c): „Alle“ spielt
         # kleine und mittlere ein, große fragen; „Kleine“ nur kleine; „Manuell“ nichts.
         # Geladen wird nur, was von selbst kommen könnte — und nichts über 20 MB
         modus = u.installiert.update_modus
-        if modus == MANUELL or u.eintrag.bytes > GROSS_VON_SELBST:
+        if modus == MANUELL or not _von_selbst_laden(u.eintrag):
+            offen.append(u)
+            continue
+        alt = gemerkt.get(u.eintrag.id)
+        if (
+            alt is not None
+            and u.eintrag.sha256
+            and alt["sha256"] == u.eintrag.sha256
+            and not automatisch(modus, alt["stufe"])
+        ):
+            # Dieselbe Datei wie bei der letzten Prüfung, und sie wartet auf Antwort: nicht
+            # noch einmal laden
+            stand.stufen[u.eintrag.id] = Stufe(
+                alt["stufe"], [str(g) for g in alt.get("gruende") or []]
+            )
+            merken[u.eintrag.id] = alt
             offen.append(u)
             continue
         try:
@@ -144,6 +193,12 @@ async def pruefung_ausfuehren(state: AppState, *, gross: bool = False) -> Update
             if stufe is not None:
                 stand.stufen[u.eintrag.id] = stufe
             if not automatisch(modus, stufe.stufe if stufe is not None else MITTEL):
+                if stufe is not None and u.eintrag.sha256:
+                    merken[u.eintrag.id] = {
+                        "sha256": u.eintrag.sha256,
+                        "stufe": stufe.stufe,
+                        "gruende": stufe.gruende[:20],
+                    }
                 offen.append(u)
                 continue
             try:
@@ -159,6 +214,8 @@ async def pruefung_ausfuehren(state: AppState, *, gross: bool = False) -> Update
             stand.eingespielt.append((u.eintrag.id, u.eintrag.name, u.eintrag.version))
         finally:
             inhalt.raeumen()  # die geladene Datei — eingespielt oder nicht
+    if merken != gemerkt:
+        state.einstellungen.setzen(STUFEN_GEMERKT, json.dumps(merken, ensure_ascii=False))
     ergebnis.updates = offen
     state.updates = stand
     state.entfallene = state.pakete.entfallene_offen()

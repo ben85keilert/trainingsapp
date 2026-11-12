@@ -541,11 +541,11 @@ def test_welle_passt_in_die_flaeche(g: int) -> None:
 
 
 def test_einstellung_vibration_und_vollbild_soll(state) -> None:
-    from trainingsapp.ui.views.einstellungen import einstellungen
+    from trainingsapp.ui.views.einstellungen_seiten import einstellungen_uhr
     from trainingsapp.ui.views.live_vollbild import takt_kopf_text
 
     page = Seite()
-    ansicht = einstellungen(page, state, SimpleNamespace())
+    ansicht = einstellungen_uhr(page, state)  # Einstellungen → Timer und Takt
     schalter = next(
         x
         for x in _alle(ansicht)

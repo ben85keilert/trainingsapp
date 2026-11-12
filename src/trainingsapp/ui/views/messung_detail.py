@@ -19,7 +19,7 @@ ganze Messung.
 Spektrum, Poincaré und DFA gelten für das **Analysefenster**: die ganze
 Messung (Vorgabe), einen Abschnitt oder ein Band fester Länge, das man in der
 Rohkurve greift und schiebt. Gerechnet wird beim Loslassen, nach einer kurzen
-Latenz (Einstellungen → Erweitert), falls noch eine Bewegung nachkommt
+Latenz (Einstellungen → HRV-Messung → Erweitert), falls noch eine Bewegung nachkommt
 (`docs/plan_analyse_leistung.md`).
 
 Aufbau wie live: Kacheln (Werte der ganzen Messung, korrigiert), Hauptkurve,
@@ -54,7 +54,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -173,7 +173,7 @@ from trainingsapp.ui.components.korrektur_blatt import (
     regler_knopf,
 )
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
-from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.layout import ohne_auto_update, sicher
 from trainingsapp.ui.components.notizen import (
     Notizfeld,
     senkrechte,
@@ -280,6 +280,36 @@ def _linie(
         offen = False
         punkte.append((t, r))
     return punkte, idx
+
+
+def _aufsteigend(zeiten: Sequence[float]) -> bool:
+    """Steigen die Zeiten nie ab? Nur dann lässt sich ein Fenster per `bisect` finden."""
+    z = np.asarray(zeiten, dtype=float)
+    return bool(z.size < 2 or np.all(z[1:] >= z[:-1]))
+
+
+def _linie_im_fenster(
+    zeiten: Sequence[float],
+    werte: Sequence[float],
+    naht_vor: Iterable[int],
+    x_von: float,
+    x_bis: float,
+    unten: float = 0.0,
+    oben: float = float("inf"),
+) -> tuple[list[tuple[float, float]], list[int]]:
+    """Wie `_linie`, aber nur über die Punkte im Zeitfenster (H95): bei **aufsteigenden**
+    ``zeiten`` findet `bisect` den Ausschnitt, statt je Wischbild alle Punkte einer langen
+    Messung zu durchlaufen (24 h: 108 000). Das Ergebnis ist dasselbe — eine Naht vor dem
+    Fenster zählte auch dort nicht, weil vor ihr kein sichtbarer Punkt liegt."""
+    von, bis = bisect_left(zeiten, x_von), bisect_right(zeiten, x_bis)
+    return _linie(
+        ((float(zeiten[i]), float(werte[i])) for i in range(von, bis)),
+        [int(i) - von for i in naht_vor if von <= i < bis],
+        unten,
+        oben,
+        x_von,
+        x_bis,
+    )
 
 
 def _verworfen_text(rec_verworfen: tuple[int, int] | None) -> Sequence[str]:
@@ -1223,8 +1253,8 @@ def _aufbauen(
         return z.merken("reihe", rechnen)
 
     def hf_geraet() -> list[tuple[float, float]]:
-        beats = z.basis.rec.beats
-        return [(x, float(b.hf_bpm)) for x, b in zip(z.achse, beats, strict=True) if b.hf_bpm]
+        # Einmal je Stand gebaut (`_Zustand._stand_uebernehmen`), nicht je Wischbild (H95)
+        return z.puls_punkte
 
     def zeiten_korr() -> list[float]:
         """Zeit je korrigiertem Wert — einmal je Auswahl, nicht bei jedem Neuzeichnen."""
@@ -1248,6 +1278,10 @@ def _aufbauen(
         ft.Icons.ADS_CLICK, "Ablesen: Werte an einer Stelle", lambda: ablesen_umschalten()
     )
 
+    def roh_xy() -> tuple[list[float], list[float], bool]:
+        xs = [float(t) for t, _ in z.roh_punkte]
+        return xs, [float(r) for _, r in z.roh_punkte], _aufsteigend(xs)
+
     def roh_reihen(x_von: float, x_bis: float) -> list[Reihe]:
         """Das Tachogramm im Ausschnitt: Rohwerte grau, korrigiert farbig, auffällige rot."""
         korr = z.korrigiert()
@@ -1262,13 +1296,25 @@ def _aufbauen(
         ]
         # Grau reißt nur an Messlücken ab; farbig auch an Nähten und Ausschlüssen —
         # dort gibt es keine Schlag-zu-Schlag-Differenz.
-        sichtbar, sichtbar_naehte = _linie(
-            z.roh_punkte, z.roh_naehte, ROH_MIN_MS, ROH_MAX_MS, x_von, x_bis
-        )
+        # Nur der Ausschnitt (H95): bei aufsteigenden Zeiten per `bisect`, sonst wie bisher
+        roh_x, roh_y, roh_ok = z.merken("roh_xy", roh_xy)
+        if roh_ok:
+            sichtbar, sichtbar_naehte = _linie_im_fenster(
+                roh_x, roh_y, z.roh_naehte, x_von, x_bis, ROH_MIN_MS, ROH_MAX_MS
+            )
+        else:
+            sichtbar, sichtbar_naehte = _linie(
+                z.roh_punkte, z.roh_naehte, ROH_MIN_MS, ROH_MAX_MS, x_von, x_bis
+            )
         zeiten = zeiten_korr()
-        korr_linie, korr_naehte = _linie(
-            zip(zeiten, korr.rr_ms, strict=True), korr.breaks, x_von=x_von, x_bis=x_bis
-        )
+        if z.merken("korr_aufsteigend", lambda: _aufsteigend(zeiten)):
+            korr_linie, korr_naehte = _linie_im_fenster(
+                zeiten, korr.rr_ms, korr.breaks, x_von, x_bis
+            )
+        else:
+            korr_linie, korr_naehte = _linie(
+                zip(zeiten, korr.rr_ms, strict=True), korr.breaks, x_von=x_von, x_bis=x_bis
+            )
         return [
             Reihe(sichtbar, farbe=ft.Colors.OUTLINE, breite=1, naehte=sichtbar_naehte, skala=False),
             Reihe(korr_linie, farbe=ft.Colors.PRIMARY, naehte=korr_naehte),
@@ -3696,8 +3742,10 @@ def _aufbauen(
         zusatz_sichern()
         zeichnen()
 
-    def tempo_der_strecke() -> tuple[list[float], list[float]] | None:
-        """Tempo (m/s) auf der Wanduhr der Datei, wenn ein Training dazugehört."""
+    def tempo_der_strecke() -> Callable[[], tuple[list[float], list[float]] | None] | None:
+        """Tempo (m/s) auf der Wanduhr der Datei, wenn ein Training dazugehört. Die Datenbank
+        fragt dieser Aufruf im Loop; die Streckendatei liest und rechnet erst die Funktion,
+        die er zurückgibt — sie läuft im Thread (H100)."""
         from trainingsapp.core.forschung import tempo_reihe
         from trainingsapp.ui.training import hrv_bezug, strecken_punkte
 
@@ -3707,20 +3755,24 @@ def _aufbauen(
         bezug = hrv_bezug(state, strecke)
         if bezug is None:
             return None
-        punkte = strecken_punkte(strecke)
-        if not punkte:
-            return None
-        # Die Reihe läuft ab der ersten Ortung (wie in `views.ausdauer`); mit Versatz 0 auf
-        # UTC-Sekunden hätte sie ein Fenster je 5 s seit 1970 — Hunderte Millionen (Speicher!)
-        t0 = min(p.t for p in punkte)
-        ts: list[float] = []
-        vs: list[float] = []
-        for t_s, v in tempo_reihe(punkte, -t0):
-            w = bezug.ortung_zu_wand(t0 + t_s, rec.start_utc)
-            if w is not None and v is not None:
-                ts.append(w)
-                vs.append(float(v))
-        return (ts, vs) if ts else None
+
+        def aus_der_datei() -> tuple[list[float], list[float]] | None:
+            punkte = strecken_punkte(strecke)
+            if not punkte:
+                return None
+            # Die Reihe läuft ab der ersten Ortung (wie in `views.ausdauer`); mit Versatz 0
+            # auf UTC-Sekunden hätte sie ein Fenster je 5 s seit 1970 — Hunderte Millionen
+            t0 = min(p.t for p in punkte)
+            ts: list[float] = []
+            vs: list[float] = []
+            for t_s, v in tempo_reihe(punkte, -t0):
+                w = bezug.ortung_zu_wand(t0 + t_s, rec.start_utc)
+                if w is not None and v is not None:
+                    ts.append(w)
+                    vs.append(float(v))
+            return (ts, vs) if ts else None
+
+        return aus_der_datei
 
     # -- EKG-Rohsignal (Beiwerk ``_ecg.json``, Ben 30.10.2026) --------------------------
     # Nur ansehen, nicht rechnen: kurze Ausschnitte mit eigener µV-Skala, weil das Signal
@@ -4156,6 +4208,7 @@ def _aufbauen(
             fab.update()
 
     def bei_scroll(e: ft.OnScrollEvent) -> None:
+        ohne_auto_update()  # V1: sonst vergleicht Flet je Scroll-Ereignis die ganze Seite
         scroll_jetzt["px"] = float(getattr(e, "pixels", 0.0) or 0.0)
         scroll_lage[sicht["wert"]] = scroll_jetzt["px"]
         if fab.visible != fab_sichtbar():

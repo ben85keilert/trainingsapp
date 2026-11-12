@@ -15,6 +15,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.ui.components.layout import ohne_auto_update
 from trainingsapp.ui.state import AppState
 
 #: Die Scroll-Ereignisse, die sagen: Der Finger zieht (nicht Ende, nicht Richtungswechsel)
@@ -29,6 +30,9 @@ def scroll_merken(page: ft.Page, state: AppState, schluessel: str, flaeche: Any)
     flaeche.scroll_interval = 150
 
     def gescrollt(e: ft.OnScrollEvent) -> None:
+        # Kommt beim Scrollen alle 150 ms (H94): Flet vergliche danach die ganze Seite —
+        # wer hier etwas zeigt (Beobachter, Notizeditor), aktualisiert selbst
+        ohne_auto_update()
         state.scroll_offsets[schluessel] = e.pixels
         beobachter = state.scroll_beobachter.get(schluessel)
         if beobachter is not None:
@@ -55,4 +59,4 @@ def scroll_merken(page: ft.Page, state: AppState, schluessel: str, flaeche: Any)
     return flaeche
 
 
-__all__ = ["scroll_merken"]
+__all__ = ["SCROLLT", "scroll_merken"]

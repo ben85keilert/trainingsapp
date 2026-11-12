@@ -68,6 +68,7 @@ from trainingsapp.core.paketstufe import GROSS, KEINE, STUFE_TEXT, stufen_text
 from trainingsapp.core.paketversion import MODUS_TEXT, UPDATE_MODI, version_text
 from trainingsapp.core.privat import code_text
 from trainingsapp.data.pakete import ARCHIV, KATALOG, PAPIERKORB, Status, Uebungsstand, Vorschau
+from trainingsapp.ui import systemdialog
 from trainingsapp.ui.components.code_dialog import code_dialog
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
@@ -420,9 +421,11 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
         try:
             # Nur im Browser die Bytes — sonst den Pfad: eine ZIP mit Videos (U3) gehört nicht
             # ganz über die Leitung
-            dateien = await ft.FilePicker().pick_files(
-                dialog_title="Übungspaket wählen (.json, .zip, .toml)",
-                with_data=bool(getattr(page, "web", False)),
+            dateien = await systemdialog.mit(
+                ft.FilePicker().pick_files(
+                    dialog_title="Übungspaket wählen (.json, .zip, .toml)",
+                    with_data=bool(getattr(page, "web", False)),
+                )
             )
         except Exception as fehler:  # am Rechner fehlt etwa zenity
             melden(f"Dateiauswahl nicht möglich: {fehler}")

@@ -186,3 +186,35 @@ def test_updates_label_zeigt_jeden_stand_einmal(state) -> None:
         Paket(id="p1", name="Dehnung", version=1),
     )
     assert state.updates_label() == "Updates verfügbar: 1 Paket"  # höhere Version: wieder da
+
+
+def test_zweite_sitzung_beendet_die_laufende_einheit_der_ersten_nicht(tmp_path) -> None:
+    """D28: `AppState.starten` läuft je Flet-Sitzung (Web: zweiter Tab). Die Einheit, die in
+    der ersten gerade läuft, ist offen, aber nicht abgebrochen; nach einem echten Neustart
+    (die erste Sitzung ist zu) wird sie wie bisher beendet."""
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from trainingsapp.core.einheit import Zustand
+
+    pfad = tmp_path / "app.db"
+    erste = AppState.starten(pfad)
+    erste.einheiten.einheit_beginnen(
+        "e-1", erste.profil.id, datetime(2026, 11, 10, 8, 0, tzinfo=UTC), "Lauf"
+    )
+    erste.einheit = SimpleNamespace(id="e-1", zustand=Zustand.LAEUFT)
+    zweite = AppState.starten(pfad)
+    assert zweite.einheiten.offene() == ["e-1"]
+    zweite.schliessen()
+    erste.einheit = SimpleNamespace(id="e-1", zustand=Zustand.BEENDET)  # zählt nicht mehr
+    dritte = AppState.starten(pfad)
+    assert dritte.einheiten.offene() == []
+    dritte.schliessen()
+    erste.einheiten.einheit_beginnen(
+        "e-2", erste.profil.id, datetime(2026, 11, 10, 9, 0, tzinfo=UTC), "Lauf"
+    )
+    erste.einheit = SimpleNamespace(id="e-2", zustand=Zustand.LAEUFT)
+    erste.schliessen()  # Prozess-Ende
+    neu = AppState.starten(pfad)
+    assert neu.einheiten.offene() == []
+    neu.schliessen()

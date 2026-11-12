@@ -143,7 +143,7 @@ def test_migration_038_takt(tmp_path) -> None:
         (jetzt, jetzt),
     )
     con.commit()
-    assert migrieren(con) == 55
+    assert migrieren(con) == 57
     zeile = con.execute("SELECT takt_json FROM exercise WHERE id = 'u'").fetchone()
     assert zeile["takt_json"] == "{}"
     uebung = ExerciseRepo(con).laden("u")
@@ -1127,7 +1127,7 @@ def test_migration_028_planuebung_folgt(tmp_path) -> None:
             (f"i{nr}", nr, ziel, felder),
         )
     con.commit()
-    assert migrieren(con) == 55
+    assert migrieren(con) == 57
     zeilen = {
         r["id"]: (r["target_json"], r["fields_json"])
         for r in con.execute("SELECT id, target_json, fields_json FROM plan_item")
@@ -1182,7 +1182,7 @@ def test_migration_037_beschleunigung(tmp_path) -> None:
         )
     con.commit()
 
-    assert migrieren(con) == 55
+    assert migrieren(con) == 57
     zeile = con.execute("SELECT acc_json FROM exercise WHERE id = 'u'").fetchone()
     assert zeile["acc_json"] == "{}"
     uebung = ExerciseRepo(con).laden("u")
@@ -2062,7 +2062,7 @@ def test_migration_030_uebernimmt_vergebene_titel(tmp_path) -> None:
             )
         )
     con.commit()
-    assert migrieren(con) == 55
+    assert migrieren(con) == 57
     liste = hrv.titel_liste(ich.id)
     assert [t.name for t in liste] == ["Abends", "Morgens"]
     assert liste[1].zuletzt == datetime(2026, 10, 2, tzinfo=UTC)
@@ -2170,3 +2170,45 @@ def test_zeitleiste_ueberspringt_unbekannte_ereignisse(con) -> None:
         {"t_s": 3.0, "quelle": "person", "art": "eintrag", "text": "c", "daten_json": "{kaputt"},
     ]
     assert [x.text for x in _ereignisse_aus(zeilen)] == ["a"]
+
+
+def test_eigener_timer_einer_planuebung_ueberlebt_ihr_entfernen(con) -> None:
+    """N71 (Ben, 11.11.2026): Wird die Planübung entfernt oder der Plan endgültig gelöscht,
+    liegt ihr eigener Timer danach in der Bibliothek — neben den Beispiel-Vorlagen."""
+    from trainingsapp.core.timer import Abschnitt, TimerProfil
+    from trainingsapp.core.uebung_timer import TimerWahl
+    from trainingsapp.data.repositories import TimerRepo
+
+    timer, uebungen, plaene = TimerRepo(con), ExerciseRepo(con), PlanRepo(con)
+    a, b = Exercise(name="A"), Exercise(name="B")
+    for u in (a, b):
+        uebungen.speichern(u)
+    plan = Plan(name="Eigen")
+    plan.items = [PlanItem(exercise_id=u.id) for u in (a, b)]
+    plaene.speichern(plan)
+    for n, item in enumerate(plan.items):
+        eigen = TimerProfil(
+            id=f"nur-hier-{n}", name=f"Nur hier {n}", abschnitte=[Abschnitt("H", 20)]
+        )
+        plaene.timer_setzen(item.id, TimerWahl("", eigen).als_dict())
+    assert not timer.roh()
+
+    plaene.uebung_entfernen(plan.items[0].id)
+    assert "nur-hier-0" in timer.roh() and len(timer.roh()) > 1  # samt Vorlagen
+    plaene.endgueltig_loeschen(plan.id)
+    assert "nur-hier-1" in timer.roh()
+
+
+def test_loeschen_folgt_dem_gueltigen_stand(welt) -> None:
+    """Durchsicht 11.11.2026: Wer eine überholte Zeile nennt (ein Blatt hält die Zeile vom
+    Öffnen), meint den Eintrag — Löschen nimmt auch den Nachfolger mit."""
+    from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+
+    con, repo, _ich, sitzung = welt
+    u = Exercise(name="A", result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
+    ExerciseRepo(con).speichern(u)
+    alt = repo.eintrag_anlegen(sitzung, u, {"reps": [10]})
+    neu = repo.eintrag_korrigieren(alt.id, {"reps": [10, 12]})
+    repo.eintrag_loeschen(alt.id)  # die Zeile von vorhin
+    assert repo.eintrag_laden(neu.id) is None
+    assert repo.eintraege(sitzung.id) == []

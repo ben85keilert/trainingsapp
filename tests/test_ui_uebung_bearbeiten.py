@@ -18,7 +18,8 @@ from trainingsapp.ui.components.notizeditor import Textnotiz  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten  # noqa: E402
 
-JPEG = b"\xff\xd8\xff\xe0" + b"0" * 200
+#: Ein kleines, gültiges JPEG — die Ablage lehnt ab, was sich nicht ablaufen lässt
+JPEG = b"\xff\xd8\xff\xe0\x00\x06JFIF\xff\xda\x00\x02" + b"0" * 200 + b"\xff\xd9"
 
 
 @pytest.fixture

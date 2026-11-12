@@ -87,3 +87,24 @@ def test_wand_und_achse_live_und_nachtraeglich() -> None:
     assert x_aus_wand(nach, 30.5) == 30.5 and wand_aus_x(nach, 30.5) == 30.5
     # Vor dem ersten Schlag: beide Uhren laufen ab 0 gleich
     assert x_aus_wand(nach, 0.4) == 0.4
+
+
+def test_uhr_lesen_in_der_nacht_der_zeitumstellung(monkeypatch) -> None:
+    """N97: Eine Uhrzeit nach dem Wechsel zählt mit dem Versatz, der dann gilt — Start
+    25.10.2026 01:30 MESZ, „03:30“ (MEZ) liegt drei Stunden später, nicht zwei."""
+    import time
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("ohne tzset (Windows) lässt sich die Zone nicht umstellen")
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    try:
+        start = datetime(2026, 10, 24, 23, 30, tzinfo=UTC)  # 01:30 MESZ
+        assert uhr_lesen("03:30", start) == 3 * 3600.0
+        assert uhr_lesen("01:45", start) == 900.0
+        # über Mitternacht in die Umstellung: 23:00 MESZ am Vortag, „03:30“ ist 5,5 h später
+        abend = datetime(2026, 10, 24, 21, 0, tzinfo=UTC)
+        assert uhr_lesen("03:30", abend) == 5.5 * 3600.0
+    finally:
+        monkeypatch.undo()
+        time.tzset()

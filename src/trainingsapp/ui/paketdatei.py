@@ -18,6 +18,7 @@ import flet as ft
 from trainingsapp.core.anhaenge import Ziel
 from trainingsapp.core.models import Media
 from trainingsapp.core.paketmedien import ENDUNGEN, medium_fuer
+from trainingsapp.ui import systemdialog
 
 
 async def ablegen(state: Any, quelle: Path | bytes, endung: str) -> str:
@@ -45,10 +46,12 @@ def anhaengen(state: Any, ziel: Ziel, medium: Media) -> bool:
 async def datei_waehlen(page: Any) -> Path | None:
     """Eine Datei fürs Paket wählen (Bild, Video, Ton, PDF) — ihr Pfad oder ``None``."""
     try:
-        dateien = await ft.FilePicker().pick_files(
-            dialog_title="Datei fürs Paket (Bild, Video, Ton, PDF)",
-            file_type=ft.FilePickerFileType.CUSTOM,
-            allowed_extensions=sorted(ENDUNGEN),
+        dateien = await systemdialog.mit(
+            ft.FilePicker().pick_files(
+                dialog_title="Datei fürs Paket (Bild, Video, Ton, PDF)",
+                file_type=ft.FilePickerFileType.CUSTOM,
+                allowed_extensions=sorted(ENDUNGEN),
+            )
         )
     except Exception as fehler:  # am Rechner fehlt etwa zenity
         page.show_dialog(ft.SnackBar(ft.Text(f"Dateiauswahl nicht möglich: {fehler}")))

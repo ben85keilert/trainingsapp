@@ -113,11 +113,14 @@ def test_uebungen_mit_trend_und_filter(state) -> None:
     assert texte.index("Wadenheben") < texte.index("Liegestützen")  # zuletzt gemacht zuerst
     assert "+20 %" in texte and "24" in texte
     assert "1×" in texte and "diese Woche" in texte  # nur abgehakt: wie oft
-    chips = [x for x in _alle(verlauf(Seite(), state)) if isinstance(x, ft.Chip)]
-    mobil = next(c for c in chips if c.label.value == "Mobilität")
-    mobil.on_select()
+    # Filter wie im Katalog (Ben, 12.11.2026) — das Blatt prüft `test_ui_uebungsfilter.py`
+    state.verlauf_filter.typen.add("Mobilität")
     texte = _texte(verlauf(Seite(), state))
     assert "Wadenheben" in texte and "Liegestützen" not in texte
+    state.verlauf_filter.leeren()
+    state.verlauf_suche = "liege"
+    texte = _texte(verlauf(Seite(), state))
+    assert "Liegestützen" in texte and "Wadenheben" not in texte
 
 
 def test_uebung_kurve_und_ergebnisse(state) -> None:

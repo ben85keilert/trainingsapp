@@ -321,14 +321,11 @@ def test_nachtragen_ohne_plan_und_zurueck_schliesst(page, state) -> None:
     kasten = next(
         x
         for x in _alle(ansicht)
-        if isinstance(x, ft.Container)
-        and isinstance(x.padding, ft.Padding)
-        and x.padding.left == 70
-        and x.visible
+        if isinstance(x, ft.Container) and x.data == "eigener_wert" and x.visible
     )
     saetze, wert = [f for f in _alle(kasten) if isinstance(f, ft.TextField)][:2]
     saetze.value, wert.value = "3", "12"
-    _klick(next(x for x in _alle(kasten) if isinstance(x, ft.OutlinedButton)))
+    _klick(next(x for x in _alle(kasten) if isinstance(x, ft.TextButton)))
 
     assert _zurueck(page, ansicht, basis) == [False]  # Zurück schließt und geht selbst
     assert page.routen == [basis]

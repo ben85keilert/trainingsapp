@@ -1208,7 +1208,7 @@ async def test_im_diagnosemodus_sind_saetze_mal_wert_zwei_saetze(umgebung, monke
     felder = [f for f in _alle(ansicht) if isinstance(f, ft.TextField)]
     i = next(i for i, f in enumerate(felder) if f.label == "Sätze")
     felder[i].value, felder[i + 1].value = "2", "6"  # Sätze × Wert
-    (eintragen,) = [k for k in _knoepfe(ansicht, "Eintragen") if isinstance(k, ft.OutlinedButton)]
+    (eintragen,) = [k for k in _knoepfe(ansicht, "Eintragen") if isinstance(k, ft.TextButton)]
     eintragen.on_click()
     assert [s.von_hand for s in z.saetze] == [True, True, False]  # vorher: [True, False]
     await _sekunden(state, uhr, gurt, 10)

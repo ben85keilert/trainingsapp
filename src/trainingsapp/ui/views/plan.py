@@ -298,18 +298,33 @@ def _zahlfeld(
     """
     return ft.TextField(
         width=breite,
-        height=48,
+        height=44,
         dense=True,
         value=wert,
         label=label or None,
         # klein und mit wenig Rand — sonst bricht „Sätze“ im schmalen Feld um
         label_style=ft.TextStyle(size=12),
-        content_padding=ft.Padding.symmetric(horizontal=8, vertical=12),
+        content_padding=ft.Padding.symmetric(horizontal=8, vertical=10),
         hint_text=hinweis or None,
         keyboard_type=ft.KeyboardType.DATETIME if zeit else ft.KeyboardType.NUMBER,
         text_align=ft.TextAlign.CENTER,
         border=ft.OutlineInputBorder(border_radius=12),
     )
+
+
+#: ``data`` des Kastens mit dem eigenen Wert (Sätze × Wert) unter den Chips einer Menge
+EIGENER_WERT = "eigener_wert"
+
+
+def _mit_linien(zeilen: list[ft.Control]) -> list[ft.Control]:
+    """Die Mengen der Karte „Eintragen“, dezent getrennt: zwischen zweien eine feine Linie
+    (Ben, 12.11.2026: „Die Bereiche brauchen mehr Trennung, aber dezent“)."""
+    mit: list[ft.Control] = []
+    for zeile in zeilen:
+        if mit:
+            mit.append(ft.Divider(height=1, thickness=1, color=ft.Colors.OUTLINE_VARIANT))
+        mit.append(zeile)
+    return mit
 
 
 def _zeigen(control: ft.Control) -> None:
@@ -1101,9 +1116,7 @@ def plan_view(
     # die Knöpfe; dann, abgesetzt unter „EINTRAGEN“, je Parameter ein umrandeter
     # Abschnitt mit Überschrift — man sieht, wo etwas anfängt und aufhört.
 
-    def geleistet_tafel(
-        uebung: Exercise, item: PlanItem, st: offene.Stand, *, neueste_zuerst: bool = False
-    ) -> ft.Control:
+    def geleistet_tafel(uebung: Exercise, item: PlanItem, st: offene.Stand) -> ft.Control:
         """Was heute schon da ist — **Einträge statt Bündel** (Ben, 19.10.2026, Skizze A1).
 
         Jeder Eintrag eine Zeile: Zeit, Ausprägung, die Werte groß, die Notiz kursiv. Der
@@ -1112,16 +1125,15 @@ def plan_view(
         einen geschlossenen Eintrag bietet „Wieder öffnen“ (`eintrag_blatt`), auf den offenen
         das Leistungen-Blatt. Das „i“ erklärt die Regel (`OFFEN_ERKLAERUNG`).
 
-        ``neueste_zuerst`` (Einzelübung, Ben 12.11.2026, P190): der jüngste Eintrag oben —
-        im Plan bleibt die Reihenfolge des Tages.
+        Der jüngste Eintrag steht oben (Ben, 12.11.2026, P190) — im Plan wie in der
+        Einzelübung („Plan an Einzelübung angleichen“).
         """
         eigene = sorted(
             (e for e in tages_eintraege if e.exercise_id == uebung.id),
             key=lambda e: (e.started_at is None, e.started_at),
         )
-        if neueste_zuerst:
-            mit_zeit = [e for e in eigene if e.started_at is not None]
-            eigene = [*reversed(mit_zeit), *(e for e in eigene if e.started_at is None)]
+        mit_zeit = [e for e in eigene if e.started_at is not None]
+        eigene = [*reversed(mit_zeit), *(e for e in eigene if e.started_at is None)]
         aufnahme = marken.aufnahme_laeuft(state)
         inhalt: list[ft.Control] = [
             eintrag_zeile(e, uebung, item, st, e.id in vom_timer, aufnahme) for e in eigene
@@ -1888,7 +1900,8 @@ def plan_view(
         frei_box = ft.Container(
             content=frei,
             visible=schluessel not in frei_zu,
-            padding=ft.Padding.only(left=70),
+            alignment=ft.Alignment.CENTER_RIGHT,
+            data=EIGENER_WERT,
         )
         if frei is not None:
 
@@ -1898,8 +1911,8 @@ def plan_view(
                 _zeigen(frei_box)
 
             mehr.append(
-                ft.OutlinedButton(
-                    content=ft.Text("…", size=15, weight=ft.FontWeight.W_700),
+                ft.TextButton(
+                    content=ft.Text("…", size=16, weight=ft.FontWeight.W_700),
                     width=44,
                     height=44,
                     tooltip=(
@@ -1907,36 +1920,31 @@ def plan_view(
                         if liste
                         else "Eigener Wert ein-/ausblenden"
                     ),
-                    style=ft.ButtonStyle(
-                        shape=ft.RoundedRectangleBorder(radius=22),
-                        side=ft.BorderSide(2, ft.Colors.PRIMARY),
-                        padding=ft.Padding.all(0),
-                    ),
+                    style=ft.ButtonStyle(padding=ft.Padding.all(0)),
                     on_click=umschalten,
                 )
             )
-        teile: list[ft.Control]
-        if len(knoepfe) <= 3:
-            teile = [
-                ft.Row(
-                    spacing=6,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[name, *(zeilen_knopf(t, h) for t, h in knoepfe), *mehr],
-                )
-            ]
-        else:
-            teile = [
-                ft.Row(
-                    spacing=6,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[ft.Container(expand=True, content=name), *mehr],
-                ),
-                ft.ResponsiveRow(
-                    spacing=6,
-                    run_spacing=6,
-                    controls=[zeilen_knopf(t, h, col=4) for t, h in knoepfe],
-                ),
-            ]
+        # Ben, 12.11.2026 (Skizze „Eintragen 1 · Linien“): Name und „…“ in einer Kopfzeile, die
+        # Chips darunter immer über die ganze Breite in gleich breiten Spalten (höchstens vier
+        # je Reihe), der eigene Wert klein und rechts — im Plan wie in der Einzelübung
+        kopfzeile = ft.Row(
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Text(kurzname(feld), size=13, weight=ft.FontWeight.W_700),
+                ft.Text(zusatz, size=11, opacity=0.6, expand=True),
+                *mehr,
+            ],
+        )
+        spalten = {1: 6, 2: 6, 3: 4}.get(len(knoepfe), 3)
+        teile: list[ft.Control] = [
+            kopfzeile,
+            ft.ResponsiveRow(
+                spacing=6,
+                run_spacing=6,
+                controls=[zeilen_knopf(t, h, col=spalten) for t, h in knoepfe],
+            ),
+        ]
         if frei is not None:
             teile.append(frei_box)
         return ft.Column(spacing=6, controls=teile)
@@ -1980,18 +1988,15 @@ def plan_view(
             handler = wert_erlediger(item, feld, wert)
             felder = [wert]
         wert.on_submit = lambda _: handler()
-        eintragen_knopf = ft.OutlinedButton(
+        # Klein und ohne Rahmen: Die Chips sind der schnelle Weg, das hier der seltene
+        eintragen_knopf = ft.TextButton(
             content=ft.Row(
                 tight=True,
-                spacing=6,
-                controls=[ft.Icon(ft.Icons.ADD, size=18), ft.Text("Eintragen")],
+                spacing=4,
+                controls=[ft.Icon(ft.Icons.ADD, size=16), ft.Text("Eintragen", size=13)],
             ),
-            height=48,
-            style=ft.ButtonStyle(
-                shape=ft.RoundedRectangleBorder(radius=24),
-                side=ft.BorderSide(2, ft.Colors.PRIMARY),
-                padding=ft.Padding.symmetric(horizontal=14),
-            ),
+            height=44,
+            style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=8)),
             on_click=handler,
         )
         return ft.Row(
@@ -2061,7 +2066,7 @@ def plan_view(
             bereich.append(ausfuehrung)
         if teile:
             # Eine Karte für alle Mengen, je Feld eine Zeile (P70 = Skizze E2)
-            zeilen = [bauen() for _, _, bauen in teile]
+            zeilen = _mit_linien([bauen() for _, _, bauen in teile])
             zeilen[0:0] = oben
             bereich.append(eintragen_karte(zeilen, ziel_hinweis(item, uebung, st)))
         else:  # nur Ausführung (Skala & Co.): wohin der nächste Wert geht
@@ -2357,7 +2362,7 @@ def plan_view(
         karten.append(
             einzel_seite.eintragen_karte(
                 "EINTRAGEN",
-                [bauen() for _, _, bauen in mengen_teile],
+                _mit_linien([bauen() for _, _, bauen in mengen_teile]),
                 # Wohin der nächste Wert geht — nur, wo es Werte gibt
                 ziel_hinweis(item, uebung, t.st)
                 if mengen_teile or ausfuehrung is not None
@@ -2367,11 +2372,7 @@ def plan_view(
                 ),
             )
         )
-        karten.append(
-            einzel_seite.bereich(
-                geleistet_tafel(uebung, item, t.st, neueste_zuerst=True), einzel_seite.HEUTE
-            )
-        )
+        karten.append(einzel_seite.bereich(geleistet_tafel(uebung, item, t.st), einzel_seite.HEUTE))
         return einzel_seite.spalte(karten)
 
     def block(index: int, item: PlanItem) -> ft.Control:

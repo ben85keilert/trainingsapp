@@ -88,23 +88,27 @@ def test_eine_karte_je_menge_eine_zeile(page, state) -> None:
     mehr = [
         x
         for x in _alle(ansicht)
-        if isinstance(x, ft.OutlinedButton)
+        if isinstance(x, ft.TextButton)
         and isinstance(x.content, ft.Text)
         and x.content.value == "…"
     ]
     assert len(mehr) == 2
-    # Haltezeit hat vier Chips: Sie stehen zu dritt in einer eigenen Reihe
-    reihe = next(x for x in _alle(ansicht) if isinstance(x, ft.ResponsiveRow))
-    assert [k.col for k in reihe.controls] == [4, 4, 4, 4]
+    # Die Chips stehen je Menge über die ganze Breite, gleich breit — drei zu dritt, vier zu
+    # viert (Ben, 12.11.2026, Skizze „Eintragen 1 · Linien“)
+    reihen = [
+        [k.col for k in x.controls]
+        for x in _alle(ansicht)
+        if isinstance(x, ft.ResponsiveRow)
+        and all(isinstance(k, ft.FilledButton) for k in x.controls)
+    ]
+    assert reihen == [[4, 4, 4], [3, 3, 3, 3]]
+    # … und zwischen den Mengen steht eine feine Linie
+    assert sum(isinstance(x, ft.Divider) for x in _alle(ansicht)) >= 1
 
     # Sätze × Wert steht gleich da — der Kasten ist unter den Knöpfen eingerückt;
     # „…“ klappt ihn zu und wieder auf
     kasten = next(
-        x
-        for x in _alle(ansicht)
-        if isinstance(x, ft.Container)
-        and isinstance(x.padding, ft.Padding)
-        and x.padding.left == 70
+        x for x in _alle(ansicht) if isinstance(x, ft.Container) and x.data == "eigener_wert"
     )
     assert kasten.visible
     mehr[0].on_click()
@@ -114,7 +118,7 @@ def test_eine_karte_je_menge_eine_zeile(page, state) -> None:
     felder = [f for f in _alle(kasten) if isinstance(f, ft.TextField)]
     felder[0].value, felder[1].value = "3", "12"
     knopf = next(
-        x for x in _alle(kasten) if isinstance(x, ft.OutlinedButton) and "Eintragen" in _texte(x)
+        x for x in _alle(kasten) if isinstance(x, ft.TextButton) and "Eintragen" in _texte(x)
     )
     _klick(knopf)
     assert [e.result["reps"] for e in _eintraege(state)] == [[12.0, 12.0, 12.0]]

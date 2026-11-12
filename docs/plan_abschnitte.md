@@ -128,3 +128,33 @@ fehlten in der Notizliste.
   die Grenz-Notizen der Person stehen darin (`messung_detail._ist_leistung`).
 - Seit 28.10.2026 steht das Live-Abschnittsfeld auch quer: `components/live_abschnitte.LiveAbschnitte`
   ist ein Objekt für Live-Karte (Klappfeld) und Live-Vollbild (Seitenleiste neben den Notizen).
+
+## 7. Notizen und Abschnitte gekoppelt (Ben, 12.11.2026)
+
+Ben: „Am besten sind Abschnitte und Notizen direkt aneinander gekoppelt. Abschnitte sind
+keine separate Information, sondern ergeben sich aus den Notizen … Das Edit der Abschnitte
+muss schnell nachträglich möglich sein. Auch die Erstellung eines Abschnittes mit zwei
+Zeiten, um z. B. Belastungen, die im Kalender rückverfolgbar sind.“ Die Ketten (Timer,
+Übung, km) bleiben.
+
+- **Der Text ist der Eingang** (`core.abschnitte.marken_aus_text`): Eine getippte Notiz
+  „X: Start“ bekommt beim Speichern die Start-Marke, „X: Ende“ schließt den zuletzt
+  begonnenen offenen Abschnitt X. Ein Ende ohne Start bleibt eine Notiz; ein Start ohne
+  Ende reicht bis zum Ende der Messung (live: läuft). Wer „X: Start“ in „Y: Start“ ändert,
+  benennt um. Live in `Messlauf.ereignisse_setzen`, in der Aufzeichnung in
+  `notizen_speichern` und einmalig beim Öffnen (`_laden`).
+- **Die Aufzeichnung folgt den Notizen sofort** (`core.abschnitte.abgleichen`,
+  `messung_detail.abschnitte_nachziehen`): Nach jeder Notizänderung nehmen die Abschnitte
+  Name und Grenzen aus ihren Paaren, das Sidecar wird geschrieben. Vorher galt das erst
+  nach dem nächsten Öffnen, und der Editor setzte eine verschobene Notiz zurück.
+- **Blatt „Abschnitt“** (`ui/components/abschnitt_blatt.py`): Name, Von, Bis als Dauer oder
+  Uhrzeit, ±10 s / ±1 min, Kopf · Endteil, Löschen. Live: „+“ neben „Abschnitt: Start“
+  trägt nach (`Messlauf.abschnitt_setzen`), der Stift an der Zeile ändert einen eigenen
+  Abschnitt (auch einen laufenden — „Bis“ leer = läuft weiter), Löschen mit „Rückgängig“.
+  Aufzeichnung: Menü → „Mit zwei Zeiten …“ und die Uhr an der Zeile; der Editor in der
+  Kurve bleibt.
+- **Nicht gebaut:** Abschnitte eines Ablaufs (Timer, Übung) live ändern — sie entstehen
+  erst beim Speichern als Sidecar-Segmente. „Aus Notizen …“ bleibt (macht beliebige
+  Notizen zu einer Kette).
+- Offen: P192 (Schlüsselwort für die Kette, Marke bei geändertem Text), Gerätetest T127.
+

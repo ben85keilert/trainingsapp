@@ -73,7 +73,7 @@ from hrv_core.ausschnitte import (
 )
 from hrv_core.constants import malik_threshold
 from hrv_core.ekg import EkgSammler, ekg_journal_pfad, ekg_pfad
-from hrv_core.ereignisse import Zeitbezug, anker_aus_wand, notiz
+from hrv_core.ereignisse import Zeitbezug, anker_aus_wand, notiz, sortiert
 from hrv_core.live import LiveFenster
 from hrv_core.ppi import messluecken
 from hrv_core.recording import (
@@ -988,10 +988,14 @@ class Messlauf:
     def ereignisse_setzen(self, liste: list[dict]) -> None:
         """Notizen ersetzen: in der Aufnahme landen sie mit Backup und Messdatei, ohne
         Aufnahme warten sie auf den Start (`aufnahme_starten`)."""
+        # Getippte Grenzen („Behandlung: Start“ / „… Ende“) bekommen hier ihre Marke —
+        # so ist jede gespeicherte Notizliste zugleich der Stand der eigenen Abschnitte
+        # (Ben, 12.11.2026; `core.abschnitte.marken_aus_text`)
+        liste = eigene_abschnitte.marken_aus_text(liste, self.notiz_zeitbezug().x)
         if self.aufnahme is not None:
-            self.aufnahme.ereignisse = list(liste)
+            self.aufnahme.ereignisse = liste
         else:
-            self._vorab = list(liste)
+            self._vorab = liste
 
     def notiz_hinzufuegen(
         self,
@@ -1186,6 +1190,47 @@ class Messlauf:
             eigene_abschnitte.ende_text(name), marke=eigene_abschnitte.ende_marke(kennung, name)
         )
         return True
+
+    def abschnitt_setzen(
+        self,
+        kennung: str | None,
+        name: str,
+        von_s: float,
+        bis_s: float | None,
+        *,
+        kopf_s: float = 0.0,
+        endteil_s: float = 0.0,
+    ) -> str | None:
+        """Einen eigenen Abschnitt nachträglich anlegen (``kennung=None``) oder ändern:
+        Name, Grenzen auf der Live-Achse, Kopf und Endteil (Ben, 12.11.2026). Das Paar
+        Grenz-Notizen rückt mit. ``bis_s=None``: Er läuft noch — nur die Start-Notiz.
+        Die Grenzen bleiben in der Aufnahme (Anfang … jetzt). Ohne Aufnahme ``None``."""
+        if self.aufnahme is None:
+            return None
+        zb = self.notiz_zeitbezug()
+        anfang, jetzt = float(zb.wand_versatz or 0.0), self.jetzt_s()
+        von = min(max(von_s, anfang), jetzt)
+        bis = jetzt if bis_s is None else min(max(bis_s, von), jetzt)
+        a = Abschnitt(
+            name.strip() or "Abschnitt",
+            von,
+            bis,
+            id=kennung or eigene_abschnitte.neue_kennung(),
+            kopf_s=kopf_s,
+            endteil_s=endteil_s,
+        )
+        liste = eigene_abschnitte.notizen_aktualisieren(
+            self.aufnahme.ereignisse, a, zb, laeuft=bis_s is None
+        )
+        self.aufnahme.ereignisse = sortiert(liste, self.aufnahme.beats)
+        return a.id
+
+    def abschnitt_loeschen(self, kennung: str) -> list[dict]:
+        """Einen eigenen Abschnitt löschen — sein Paar Grenz-Notizen geht mit. Gibt die
+        Notizen von vorher zurück (für „Rückgängig“: `ereignisse_setzen`)."""
+        vorher = self.ereignisse()
+        self.ereignisse_setzen(eigene_abschnitte.notizen_entfernen(vorher, kennung))
+        return vorher
 
     def abschnitte(self) -> list[Abschnitt]:
         """Die Abschnitte der laufenden Aufnahme auf der Live-Achse: die der Abläufe aus

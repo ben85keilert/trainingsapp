@@ -2,7 +2,10 @@
 
 Ein Objekt für beide Orte: „Abschnitt: Start“ / „‹Name› · Ende“, die Chip-Zeile (Ganze
 Messung · je Abschnitt — ein Chip rückt das Fenster auf den Abschnitt), die Liste mit dem
-laufenden Abschnitt, der im Sekundentakt mitzählt. Hochkant steht es als Klappfeld unter
+laufenden Abschnitt, der im Sekundentakt mitzählt. Seit 12.11.2026 lässt sich ein eigener
+Abschnitt auch live **nachtragen und ändern**: „+“ neben dem Startknopf und der Stift an der
+Zeile öffnen das Blatt mit Name und zwei Zeiten (`components.abschnitt_blatt`); Abschnitte
+eines Ablaufs (Timer, Übung) bleiben live, wie sie sind. Hochkant steht es als Klappfeld unter
 der Hauptkurve (`views/messung.py`), quer als Seitenleiste neben der Kurve
 (`views/live_vollbild.py`, Ben, 28.10.2026: „so wie für die Notizen braucht es auch den
 Abschnitte-Editor im Querformat“). Vertrag: `docs/plan_abschnitte.md`.
@@ -15,8 +18,14 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import abschnitte as eigene_abschnitte
 from trainingsapp.core.laufend import minuten
+from trainingsapp.ui.components.abschnitt_blatt import abschnitt_blatt
 from trainingsapp.ui.components.abschnitte import Abschnittsfeld, abschnitt_chip, name_dialog
+from trainingsapp.ui.components.dialoge import meldung
+
+#: So weit vor jetzt beginnt der Vorschlag für einen nachgetragenen Abschnitt (s)
+NACHTRAG_VORGABE_S = 300.0
 
 _uhr = minuten
 
@@ -57,12 +66,17 @@ class LiveAbschnitte:
         self.laufzeit: dict[str, ft.Text] = {}
         self.start_knopf = ft.TextButton("Abschnitt: Start", icon=ft.Icons.PLAY_ARROW)
         self.start_knopf.on_click = lambda _=None: self.knopf()
+        self.nachtrag_knopf = ft.IconButton(
+            ft.Icons.ADD,
+            tooltip="Abschnitt nachtragen (zwei Zeiten)",
+            on_click=lambda _=None: self.nachtragen(),
+        )
         self.feld = Abschnittsfeld(
             offen=state.abschnitte_offen if offen is None else offen,
             offen_merken=(lambda o: setattr(state, "abschnitte_offen", o))
             if offen is None
             else (lambda _o: None),
-            knoepfe=[self.start_knopf],
+            knoepfe=[self.start_knopf, self.nachtrag_knopf],
             zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
         )
 
@@ -103,6 +117,61 @@ class LiveAbschnitte:
             )
         )
 
+    # -- Nachtragen und Ändern (Ben, 12.11.2026) ---------------------------------------
+
+    def _blatt(self, a: Any | None, laeuft: bool) -> None:
+        lauf, state, page = self.lauf, self.state, self.page
+        zb = lauf.notiz_zeitbezug()
+        anfang = float(zb.wand_versatz or 0.0)
+        jetzt = lauf.jetzt_s()
+
+        def sichern(
+            name: str, von: float, bis: float | None, kopf_s: float, endteil_s: float
+        ) -> None:
+            lauf.abschnitt_setzen(
+                a.id if a is not None else None, name, von, bis, kopf_s=kopf_s, endteil_s=endteil_s
+            )
+            self._zeichnen_und_melden()
+
+        def loeschen() -> None:
+            assert a is not None
+            vorher = lauf.abschnitt_loeschen(a.id)
+            if self.stand["gebunden"] == a.id:
+                self.stand["gebunden"] = None
+            self._zeichnen_und_melden()
+
+            def zurueck() -> None:
+                lauf.ereignisse_setzen(vorher)
+                self._zeichnen_und_melden()
+
+            page.show_dialog(meldung(f"„{a.name}“ gelöscht", zurueck))
+
+        page.show_dialog(
+            abschnitt_blatt(
+                page,
+                zeitbezug=zb,
+                live=True,
+                grenzen=lambda: (anfang, lauf.jetzt_s()),
+                name=a.name if a is not None else f"Abschnitt {len(lauf.abschnitte()) + 1}",
+                von=a.von_s if a is not None else max(anfang, jetzt - NACHTRAG_VORGABE_S),
+                bis=None if laeuft else (a.bis_s if a is not None else jetzt),
+                kopf_s=a.kopf_s if a is not None else 0.0,
+                endteil_s=a.endteil_s if a is not None else 0.0,
+                neu=a is None,
+                uhr=state.hrv_einstellungen().achse_uhrzeit,
+                vorschlaege=[t.name for t in state.hrv.titel_liste(state.profil.id)],
+                sichern=sichern,
+                loeschen=loeschen if a is not None else None,
+            )
+        )
+
+    def nachtragen(self) -> None:
+        """„+“: ein Abschnitt mit zwei Zeiten, die schon vorbei sind."""
+        if self.lauf.aufnahme is None:
+            self.page.show_dialog(ft.SnackBar(ft.Text("Erst die Aufnahme starten.")))
+            return
+        self._blatt(None, False)
+
     def binden(self, a: Any) -> None:
         """Ein Chip rückt das Fenster auf den Abschnitt (Breite = Dauer, mindestens 1 min);
         „Ganze Messung“ zeigt den ganzen Puffer. Ein laufender folgt der Gegenwart."""
@@ -128,10 +197,26 @@ class LiveAbschnitte:
     def _binder(self, a: Any) -> Callable[[], None]:
         return lambda: self.binden(a)
 
-    def _zeile(self, a: Any, laeuft: bool) -> ft.Control:
+    def _zeile(self, a: Any, laeuft: bool, eigener: bool) -> ft.Control:
         zeit = ft.Text(self.zeit_text(a, laeuft), size=12, opacity=0.75)
         if laeuft:
             self.laufzeit[a.id] = zeit
+        stift: list[ft.Control] = (
+            [
+                ft.Container(  # kein IconButton: der bräuchte 48 px, die Zeile hat 44
+                    width=40,
+                    height=40,
+                    border_radius=20,
+                    ink=True,
+                    alignment=ft.Alignment.CENTER,
+                    tooltip="Abschnitt ändern",
+                    on_click=lambda _=None: self._blatt(a, laeuft),
+                    content=ft.Icon(ft.Icons.EDIT_OUTLINED, size=18),
+                )
+            ]
+            if eigener
+            else []
+        )
         return ft.Container(
             height=44,
             padding=ft.Padding.only(top=2, bottom=2),
@@ -150,6 +235,7 @@ class LiveAbschnitte:
                             zeit,
                         ],
                     ),
+                    *stift,
                 ],
             ),
         )
@@ -184,6 +270,7 @@ class LiveAbschnitte:
             start_knopf.content = "Abschnitt: Start"
             start_knopf.icon = ft.Icons.PLAY_ARROW
         start_knopf.disabled = lauf.aufnahme is None
+        self.nachtrag_knopf.disabled = lauf.aufnahme is None
         gebunden = self.stand["gebunden"]
         chips: list[ft.Control] = [
             abschnitt_chip(None, gewaehlt=gebunden is None, on_click=self._binder(None)),
@@ -192,12 +279,14 @@ class LiveAbschnitte:
                 for a in teile
             ],
         ]
-        zeilen = [self._zeile(a, a.id == laufend_id) for a in teile]
+        eigene = set(eigene_abschnitte.kennungen(lauf.ereignisse()))
+        zeilen = [self._zeile(a, a.id == laufend_id, a.id in eigene) for a in teile]
         if not teile:
             zeilen = [
                 ft.Text(
-                    "Noch keine Abschnitte — „Abschnitt: Start“ setzt die Grenze bei jetzt, "
-                    "der Timer seine Abschnitte von selbst."
+                    "Noch keine Abschnitte — „Abschnitt: Start“ setzt die Grenze bei jetzt, „+“ "
+                    "trägt einen mit zwei Zeiten nach, Notizen „Name: Start“ und „Name: Ende“ "
+                    "ergeben einen, der Timer setzt seine von selbst."
                     if lauf.aufnahme is not None
                     else "Abschnitte gibt es in der Aufnahme.",
                     size=12,

@@ -201,12 +201,40 @@ def x_aus_wand(zb: Zeitbezug, t_wall_s: float) -> float | None:
     return zb.x(anker_aus_wand(zb.beats(), float(t_wall_s)))
 
 
+def stelle_text(zb: Zeitbezug, x: float, *, live: bool, modus: str = DAUER) -> str:
+    """Die Stelle ``x`` der Kurve, wie man sie eintippt: Dauer („2:15“ — live seit
+    Aufnahmestart, nachträglich auf der Achse) oder Uhrzeit („14:03:05“).
+
+    >>> live = Zeitbezug(lambda: [], None, wand_versatz=5.0)
+    >>> stelle_text(live, 140.0, live=True), stelle_lesen(live, "2:15", live=True)
+    ('2:15', 140.0)
+    >>> stelle_lesen(live, "abc", live=True) is None
+    True
+    """
+    if modus == UHR and zb.start_utc is not None:
+        return uhr_text(zb.start_utc, wand_aus_x(zb, x))
+    return dauer_text(wand_aus_x(zb, x) if live else x)
+
+
+def stelle_lesen(zb: Zeitbezug, text: str, *, live: bool, modus: str = DAUER) -> float | None:
+    """Umkehrung von `stelle_text` — ``None``, wenn der Text sich nicht lesen lässt."""
+    if modus == UHR and zb.start_utc is not None:
+        wand = uhr_lesen(text, zb.start_utc, einstellig=True)
+        return None if wand is None else x_aus_wand(zb, wand)
+    dauer = dauer_lesen(text)
+    if dauer is None:
+        return None
+    return x_aus_wand(zb, dauer) if live else dauer
+
+
 __all__ = [
     "DAUER",
     "UHR",
     "breite_lesen",
     "dauer_lesen",
     "dauer_text",
+    "stelle_lesen",
+    "stelle_text",
     "tagessekunden",
     "uhr_lesen",
     "uhr_text",

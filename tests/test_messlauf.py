@@ -1303,3 +1303,54 @@ async def test_am_zwischenstand_verschobene_grenze_ersetzt_die_alte(tmp_path) ->
     grenzen = [e for e in notizen if abschnitte.kennung_von(e) == kennung]
     assert len(grenzen) == 1 and grenzen[0]["beat_index"] == 2
     assert [e["text"] for e in notizen].count("frei") == 1
+
+
+async def test_getippte_grenzen_und_nachgetragener_abschnitt(tmp_path) -> None:
+    """Ben, 12.11.2026: Notizen „X: Start“ / „X: Ende“ ergeben live einen Abschnitt, auch
+    getippt; ein Abschnitt lässt sich mit zwei Zeiten nachtragen, ändern und löschen — das
+    Paar Grenz-Notizen ist der Abschnitt."""
+    from hrv_core.ausschnitte import zusatz_lesen
+    from hrv_core.ereignisse import notiz
+
+    lauf, task = await _laufend(tmp_path)
+    await _bis(lauf, 40)
+    zb = lauf.notiz_zeitbezug()
+    anfang = float(zb.wand_versatz or 0.0)
+    getippt = [
+        notiz("Behandlung: Start", zb.anker(anfang + 5), zb.start_utc),
+        notiz("zwischendurch", zb.anker(anfang + 10), zb.start_utc),
+        notiz("behandlung: ende", zb.anker(anfang + 25), zb.start_utc),
+        notiz("Ruhe: Ende", zb.anker(anfang + 30), zb.start_utc),  # ohne Start: bleibt Notiz
+    ]
+    lauf.ereignisse_setzen(getippt)
+    (a,) = lauf.abschnitte()
+    assert (a.name, a.von_s - anfang, a.bis_s - anfang) == pytest.approx(("Behandlung", 5, 25))
+    assert ["marke" in e for e in lauf.ereignisse()] == [True, False, True, False]
+    assert lauf.offener_abschnitt() is None
+    # Nachtragen mit zwei Zeiten, dann ändern
+    kennung = lauf.abschnitt_setzen(None, "Belastung", anfang + 28, anfang + 38, kopf_s=5)
+    assert kennung is not None
+    assert [(b.name, round(b.von_s - anfang)) for b in lauf.abschnitte()] == [
+        ("Behandlung", 5),
+        ("Belastung", 28),
+    ]
+    assert lauf.abschnitt_setzen(kennung, "Treppe", anfang + 27, anfang + 39) == kennung
+    texte = [e["text"] for e in lauf.ereignisse()]
+    assert "Treppe: Start" in texte and "Treppe: Ende" in texte and "Belastung: Start" not in texte
+    # Den Text der Start-Notiz ändern benennt um
+    liste = lauf.ereignisse()
+    liste[0] = dict(liste[0], text="Rücken: Start")
+    lauf.ereignisse_setzen(liste)
+    assert [b.name for b in lauf.abschnitte()] == ["Rücken", "Treppe"]
+    assert "Rücken: Ende" in [e["text"] for e in lauf.ereignisse()]
+    # Löschen nimmt das Paar mit; die Notizen von vorher holen ihn zurück
+    vorher = lauf.abschnitt_loeschen(kennung)
+    assert [b.name for b in lauf.abschnitte()] == ["Rücken"]
+    lauf.ereignisse_setzen(vorher)
+    assert [b.name for b in lauf.abschnitte()] == ["Rücken", "Treppe"]
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert ergebnis is not None
+    _, teile = zusatz_lesen(ergebnis.pfad, float)
+    assert [t.name for t in teile] == ["Rücken", "Treppe"]

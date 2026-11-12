@@ -2308,3 +2308,161 @@ def test_linie_im_fenster_gleicht_dem_vollen_durchlauf() -> None:
         x_bis = x_von + zufall.uniform(0.0, 120.0)
         ganz = _linie(zip(zeiten, werte, strict=True), naehte, 300.0, 2000.0, x_von, x_bis)
         assert _linie_im_fenster(zeiten, werte, naehte, x_von, x_bis, 300.0, 2000.0) == ganz
+
+
+def _feld(wurzel, label: str) -> ft.TextField:
+    return next(
+        c for c in _alle_controls(wurzel) if isinstance(c, ft.TextField) and c.label == label
+    )
+
+
+async def test_live_abschnitt_nachtragen_aendern_loeschen(daten) -> None:
+    """Live (Ben, 12.11.2026): „+“ trägt einen Abschnitt mit zwei Zeiten nach, der Stift an
+    der Zeile ändert ihn, „Löschen“ nimmt ihn mit „Rückgängig“ weg."""
+    state, tmp_path = daten
+    lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    state.messlauf = lauf
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 40:
+        await asyncio.sleep(0.01)
+    seite = _seite()
+    ansicht = messung(seite, state)
+    plus = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.IconButton) and (c.tooltip or "").startswith("Abschnitt nachtragen")
+    )
+    plus.on_click()
+    blatt = seite.aufrufe[-1]
+    assert isinstance(blatt, ft.BottomSheet) and "Neuer Abschnitt" in _baum_texte(blatt)
+    _feld(blatt, "Name").value = "Treppe"
+    _feld(blatt, "Von").value = "0:05"
+    _feld(blatt, "Bis").value = "0:03"
+    _knopf(blatt, "Speichern").on_click()
+    assert "Das Ende liegt vor dem Anfang." in _baum_texte(blatt) and lauf.abschnitte() == []
+    _feld(blatt, "Bis").value = "0:25"
+    _knopf(blatt, "Speichern").on_click()
+    await blatt.on_dismiss(None)
+    anfang = float(lauf.notiz_zeitbezug().wand_versatz or 0.0)
+    (a,) = lauf.abschnitte()
+    assert (a.name, a.von_s - anfang, a.bis_s - anfang) == ("Treppe", 5.0, 25.0)
+    texte = _baum_texte(ansicht)
+    assert "ABSCHNITTE · 1" in texte and "Treppe: Start" in texte and "Treppe: Ende" in texte
+    # Der Stift öffnet ihn wieder: umbenennen und das Ende verschieben
+    stift = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.Container) and c.tooltip == "Abschnitt ändern"
+    )
+    stift.on_click()
+    blatt = seite.aufrufe[-1]
+    assert _feld(blatt, "Von").value == "0:05" and _feld(blatt, "Bis").value == "0:25"
+    _feld(blatt, "Name").value = "Stufen"
+    next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.OutlinedButton) and c.content == "+10 s"
+    ).on_click()  # der erste gehört zu „Von“
+    _knopf(blatt, "Speichern").on_click()
+    await blatt.on_dismiss(None)
+    (a,) = lauf.abschnitte()
+    assert (a.name, a.von_s - anfang, a.bis_s - anfang) == ("Stufen", 15.0, 25.0)
+    assert "Stufen: Start" in _baum_texte(ansicht)
+    # Löschen aus dem Blatt, „Rückgängig“ holt ihn zurück
+    next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.Container) and c.tooltip == "Abschnitt ändern"
+    ).on_click()
+    blatt = seite.aufrufe[-1]
+    _knopf(blatt, "Löschen").on_click()
+    await blatt.on_dismiss(None)
+    assert lauf.abschnitte() == [] and lauf.ereignisse() == []
+    meldung = seite.aufrufe[-1]
+    assert isinstance(meldung, ft.SnackBar)
+    meldung.action.on_click()
+    assert [b.name for b in lauf.abschnitte()] == ["Stufen"]
+    lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+
+
+def test_getippte_grenzen_ergeben_abschnitt_und_folgen_den_notizen(daten) -> None:
+    """Auswertung (Ben, 12.11.2026): Notizen „X: Start“ / „X: Ende“ ohne Marke werden beim
+    Öffnen ein Abschnitt; wer die Start-Notiz verschiebt, verschiebt ihn — sofort, mit
+    Sidecar; „Mit zwei Zeiten …“ legt einen nach Dauer an."""
+    import json
+
+    from hrv_core.ereignisse import anker_aus_herz, metadaten_schreiben, notiz
+    from hrv_core.korrektur import analyse_pfad
+    from hrv_core.recording import laden
+
+    state, tmp_path = daten
+    eintrag, pfad = _golden_eintrag(state, tmp_path)
+    rec = laden(pfad)
+    metadaten_schreiben(
+        pfad,
+        ereignisse=[
+            notiz("Behandlung: Start", anker_aus_herz(rec.beats, 60.0), rec.start_utc),
+            notiz("behandlung: ende", anker_aus_herz(rec.beats, 200.0), rec.start_utc),
+        ],
+    )
+    seite = _seite()
+    view = messung_detail_view(seite, state, eintrag)
+    assert "ABSCHNITTE · 1" in _baum_texte(view)
+    marken = [e["marke"] for e in laden(pfad).ereignisse]
+    assert [m["art"] for m in marken] == ["abschnitt", "ende"]
+    assert marken[0]["spur"] == marken[1]["spur"] and marken[0]["name"] == "Behandlung"
+
+    def segmente() -> list[dict]:
+        return json.loads(analyse_pfad(pfad).read_text())["segments"]
+
+    def warten() -> None:
+        async def lauf() -> None:
+            while seite.aufgaben:
+                aufgaben, seite.aufgaben[:] = list(seite.aufgaben), []
+                await asyncio.gather(*aufgaben)
+
+        asyncio.run(lauf())
+
+    # Die Start-Notiz um 5 s verschieben: der Abschnitt folgt
+    zeile = next(
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.Container)
+        and c.on_click is not None
+        and _baum_texte(c)
+        and "Behandlung: Start" in _baum_texte(c)
+        and "ABSCHNITTE · 1" not in _baum_texte(c)
+    )
+    zeile.on_click()
+    _knopf(view, "+5 s").on_click()
+    _symbol(view, ft.Icons.CHECK, "Speichern").on_click()
+    warten()
+    (seg,) = segmente()
+    assert seg["id"] == marken[0]["spur"] and seg["name"] == "Behandlung"
+    assert seg["t_start_s"] == pytest.approx(65, abs=1.0)
+    assert seg["t_end_s"] == pytest.approx(200, abs=1.0)
+    # Mit zwei Zeiten anlegen
+    punkt = next(
+        i
+        for c in _alle_controls(view)
+        if isinstance(c, ft.PopupMenuButton)
+        for i in c.items
+        if i.content == "Mit zwei Zeiten …"
+    )
+    punkt.on_click()
+    blatt = seite.aufrufe[-1]
+    assert isinstance(blatt, ft.BottomSheet)
+    _feld(blatt, "Name").value = "Ruhe"
+    _feld(blatt, "Von").value = "3:40"
+    _feld(blatt, "Bis").value = "4:30"
+    _knopf(blatt, "Speichern").on_click()
+    _schliessen_und_warten(seite, blatt)
+    namen = [(s["name"], round(s["t_start_s"]), round(s["t_end_s"])) for s in segmente()]
+    assert namen[1] == ("Ruhe", 220, 270) and len(namen) == 2
+    texte = [e["text"] for e in laden(pfad).ereignisse]
+    assert texte == ["Behandlung: Start", "behandlung: ende", "Ruhe: Start", "Ruhe: Ende"]
+    assert "ABSCHNITTE · 2" in _baum_texte(view)

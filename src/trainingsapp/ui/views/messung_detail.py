@@ -149,6 +149,7 @@ from trainingsapp.core.timer import ENDE_MARKE
 from trainingsapp.core.timer import name_aus_notiz as abschnittsname
 from trainingsapp.core.zeitangabe import DAUER, UHR
 from trainingsapp.ui import ausrichtung
+from trainingsapp.ui.components.abschnitt_blatt import abschnitt_blatt
 from trainingsapp.ui.components.abschnitte import liste_rollen, raender_text, rand_zeile
 from trainingsapp.ui.components.analyse import Analyse, Analysefenster, verlaufsdaten
 from trainingsapp.ui.components.bereich import BereichEditor, band, schatten
@@ -417,11 +418,14 @@ def _kurven_info(nur_puls: bool, verworfen: object) -> str:
 ABSCHNITTE_INFO = (
     "Werte je Abschnitt — so lassen sich Belastung und Pause oder Übungen vergleichen.\n\n"
     "- **„+ Abschnitt“** wählt einen Bereich in der Kurve.\n"
-    "- **Menü daneben:** Notizen werden zu Grenzen.\n"
+    "- **Notizen „Name: Start“ und „Name: Ende“** ergeben einen Abschnitt — getippt, live "
+    "oder hier. Wer so eine Notiz verschiebt, umbenennt oder löscht, ändert den Abschnitt.\n"
+    "- **Menü daneben:** „Mit zwei Zeiten …“ legt einen Abschnitt nach Dauer oder Uhrzeit "
+    "an; „Aus Notizen …“ macht beliebige Notizen zu Grenzen.\n"
     "- **Antippen** eines Abschnitts: Grenzen in der Kurve verschieben, umbenennen, löschen; "
-    "nahe Notizen ziehen die Grenzen an.\n\n"
-    "Notizen sind dafür nicht nötig. Mit dem Timer entstehen Abschnitte beim Speichern der "
-    "Aufnahme von selbst."
+    "nahe Notizen ziehen die Grenzen an. Die **Uhr** an der Zeile: Name und Zeiten "
+    "eintippen.\n\n"
+    "Mit dem Timer entstehen Abschnitte beim Speichern der Aufnahme von selbst."
 )
 
 KORREKTUR_INFO = (
@@ -624,12 +628,17 @@ def _laden(pfad: Path, vorgabe: Korrekturregeln) -> _Geladen:
         # `docs/plan_abschnitte.md`); das Sidecar wird mit ihnen zusammengeführt
         zb = Zeitbezug(lambda: rec.beats, rec.start_utc, achse=lambda: zeilen_achse)
         ende = float(zeilen_achse[-1]) if zeilen_achse else 0.0
+        # Getippte Grenzen („Behandlung: Start“ / „… Ende“) bekommen ihre Marke (Ben,
+        # 12.11.2026) — auch in Messungen von früher und aus praxis_gui
+        mit_marken = eigene_abschnitte.marken_aus_text(rec.ereignisse, zb.x)
+        getippt = mit_marken != rec.ereignisse
+        rec.ereignisse = mit_marken
         paare = eigene_abschnitte.paare(rec.ereignisse, zb.x, ende)
         notiz_x = [x for e in rec.ereignisse if (x := zb.x(e)) is not None]
         eigene, nachzutragen = eigene_abschnitte.zusammenfuehren(eigene, paare, notiz_x)
-        if nachzutragen:  # frühere eigene Abschnitte ohne Paar: einmalig, gleich hier im Thread
+        if nachzutragen or getippt:  # einmalig, gleich hier im Thread
             liste = list(rec.ereignisse)
-            for a in nachzutragen:
+            for a in nachzutragen:  # frühere eigene Abschnitte ohne Paar
                 liste.extend(eigene_abschnitte.grenznotizen(a, zb))
             rec.ereignisse = sortiert(liste, rec.beats)
             with contextlib.suppress(OSError, ValueError):
@@ -1742,6 +1751,12 @@ def _aufbauen(
                         ],
                     ),
                     ft.IconButton(
+                        ft.Icons.SCHEDULE,
+                        icon_size=18,
+                        tooltip="Name und Zeiten eintippen",
+                        on_click=lambda: abschnitt_zeiten(a),
+                    ),
+                    ft.IconButton(
                         ft.Icons.CLOSE,
                         icon_size=18,
                         tooltip="Abschnitt löschen",
@@ -1894,6 +1909,11 @@ def _aufbauen(
             icon=ft.Icons.MORE_VERT,
             tooltip="Mehr",
             items=[
+                ft.PopupMenuItem(
+                    content="Mit zwei Zeiten …",
+                    icon=ft.Icons.SCHEDULE,
+                    on_click=lambda: abschnitt_zeiten(None),
+                ),
                 ft.PopupMenuItem(
                     content="Aus Notizen …",
                     icon=ft.Icons.NOTES,
@@ -2213,6 +2233,54 @@ def _aufbauen(
             page.show_dialog(ft.SnackBar(ft.Text("Der sichtbare Bereich ist zu kurz.")))
             return
         editor_oeffnen(ABSCHNITT, von, bis, None)
+
+    def abschnitt_zeiten(a: Abschnitt | None) -> None:
+        """Das Blatt mit Name und zwei Zeiten (Ben, 12.11.2026) — neu (``None``) oder ein
+        bestehender Abschnitt; Dauer oder Uhrzeit, ohne die Kurve zu verschieben."""
+        lo, hi = grenzen()
+        if a is None:
+            x_von, x_bis = sichtbar()
+            von, bis = max(x_von, lo), min(x_bis, hi)
+        else:
+            von, bis = a.von_s, a.bis_s
+
+        def sichern(
+            name: str, von_s: float, bis_s: float | None, kopf_s: float, endteil_s: float
+        ) -> None:
+            if bis_s is None:
+                return
+            if m.editor is not None:
+                editor_schliessen(zeichnen_=False)
+            if a is None:
+                ziel = Abschnitt(name, von_s, bis_s, kopf_s=kopf_s, endteil_s=endteil_s)
+                farben_nach_namen([ziel], vergeben=len(eigene))
+                eigene.append(ziel)
+            else:
+                ziel = a
+                ziel.name, ziel.von_s, ziel.bis_s = name, von_s, bis_s
+                ziel.kopf_s, ziel.endteil_s = kopf_s, endteil_s
+            notizen_fuer(ziel, neu=a is None)
+            zusatz_sichern()
+            zeichnen()
+
+        page.show_dialog(
+            abschnitt_blatt(
+                page,
+                zeitbezug=zeitbezug,
+                live=False,
+                grenzen=grenzen,
+                name=a.name if a is not None else f"Abschnitt {len(eigene) + 1}",
+                von=von,
+                bis=bis,
+                kopf_s=a.kopf_s if a is not None else 0.0,
+                endteil_s=a.endteil_s if a is not None else 0.0,
+                neu=a is None,
+                uhr=einst.achse_uhrzeit,
+                vorschlaege=[t.name for t in state.hrv.titel_liste(state.profil.id)],
+                sichern=sichern,
+                loeschen=(lambda: abschnitt_entfernen(a)) if a is not None else None,
+            )
+        )
 
     def abschnitt_bearbeiten(a: Abschnitt) -> None:
         breite_setzen(max(a.dauer_s * 1.4, 30.0), (a.von_s + a.bis_s) / 2)
@@ -2596,9 +2664,17 @@ def _aufbauen(
 
         Die Ansicht übernimmt die Liste sofort (die nächste Änderung baut darauf auf);
         geschrieben wird in einem Thread, ein Vorgang nach dem anderen (`sperre`, H39).
+
+        Getippte Grenzen („Behandlung: Start“ / „… Ende“) bekommen dabei ihre Marke, und
+        die Abschnitte folgen den Notizen (Ben, 12.11.2026): verschobene Grenz-Notiz =
+        verschobener Abschnitt, neues Paar = neuer Abschnitt (`abschnitte_nachziehen`).
         """
+        vorher = eigene_abschnitte.kennungen(rec.ereignisse)
+        if not z.nur_puls:
+            liste = eigene_abschnitte.marken_aus_text(liste, zeitbezug.x)
         rec.ereignisse = list(liste)
         kopie = [dict(e) for e in liste]
+        abschnitte_nachziehen(vorher)
 
         async def schreiben() -> None:
             try:
@@ -2610,6 +2686,29 @@ def _aufbauen(
             state.hrv.sha1_setzen(eintrag.id, sha1)  # Datenbank: im Loop
 
         page.run_task(schreiben)
+
+    def abschnitte_nachziehen(vorher: list[str]) -> None:
+        """Nach einer Notizänderung: die Abschnitte aus den Notizpaaren (`core.abschnitte.
+        abgleichen`) — nur wenn sich etwas bewegt hat, dann Sidecar und Ansicht."""
+        if z.nur_puls:
+            return
+
+        def bild() -> list[tuple[Any, ...]]:
+            return [(a.id, a.name, a.von_s, a.bis_s, a.kopf_s, a.endteil_s) for a in eigene]
+
+        alt, alte_ids = bild(), {a.id for a in eigene}
+        paare = eigene_abschnitte.paare(rec.ereignisse, zeitbezug.x, dauer)
+        neu = eigene_abschnitte.abgleichen(eigene, paare, vorher)
+        dazu = [a for a in neu if a.id not in alte_ids]
+        farben_nach_namen(dazu, vergeben=len(alte_ids))
+        eigene[:] = neu
+        if bild() == alt:
+            return
+        if m.abschnitt is not None and all(a.id != m.abschnitt.id for a in eigene):
+            editor_schliessen(zeichnen_=False)  # sein Paar ist weg
+        zusatz_sichern()
+        if gebaut:
+            zeichnen(aktualisieren=False)
 
     def notizen_offen(offen: bool) -> None:
         state.notizen_offen = offen

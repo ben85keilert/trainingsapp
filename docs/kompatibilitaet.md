@@ -431,6 +431,14 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
   Start“ / „Name: Ende“. Die Abschnitte des Timers bleiben ihre Kette (`art=abschnitt` je
   Grenze); auch ihre Start-Notiz darf `kopf_s`/`endteil_s` tragen.
   `hrv_core.ausschnitte.paare_aus_notizen`, `trainingsapp.core.abschnitte`.
+  **Der Text ist der Eingang** (Ben, 12.11.2026): Eine Notiz **ohne Marke** mit dem Text
+  „Name: Start“ bekommt beim Speichern der Notizliste (live und in der Aufzeichnung, auch
+  beim Öffnen einer Messung von früher oder aus praxis_gui) die Start-Marke mit neuer
+  Kennung; „Name: Ende“ schließt den zuletzt begonnenen offenen eigenen Abschnitt dieses
+  Namens (Groß-/Kleinschreibung egal), sonst bleibt sie eine gewöhnliche Notiz. Ändert
+  jemand den Text einer Start-Notiz auf „Anders: Start“, folgt `name` in beiden Marken.
+  Notizen mit einer anderen Marke bleiben unberührt. Kein neues Feld, kein neues Format
+  (`trainingsapp.core.abschnitte.marken_aus_text`).
 - **praxis_gui** liest das Feld nicht und behält es beim Bearbeiten wie `uebungen`.
 - Keine neue Schema-Version: ein zusätzliches, optionales Feld wie `uebungen`; ältere
   Leser übergehen es.

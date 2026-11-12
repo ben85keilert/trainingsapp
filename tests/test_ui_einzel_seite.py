@@ -112,11 +112,11 @@ def test_bereiche_von_oben_nach_unten(page, state) -> None:
     ansicht = plan_view(page, state, einzel_plan(uebung), einzel=True)
     assert _bereiche(ansicht) == [
         es.KOPF,
+        es.VERWALTEN,  # direkt unter der festen Uhr (P190)
         es.AUSFUEHRUNG,
         es.EINTRAGEN,
         es.AKTIONEN,
         es.HEUTE,
-        es.VERWALTEN,
         es.HINWEIS,
     ]
     # Der Name steht einmal — im festen Kopf, nicht in der Titelleiste

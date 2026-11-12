@@ -1101,7 +1101,9 @@ def plan_view(
     # die Knöpfe; dann, abgesetzt unter „EINTRAGEN“, je Parameter ein umrandeter
     # Abschnitt mit Überschrift — man sieht, wo etwas anfängt und aufhört.
 
-    def geleistet_tafel(uebung: Exercise, item: PlanItem, st: offene.Stand) -> ft.Control:
+    def geleistet_tafel(
+        uebung: Exercise, item: PlanItem, st: offene.Stand, *, neueste_zuerst: bool = False
+    ) -> ft.Control:
         """Was heute schon da ist — **Einträge statt Bündel** (Ben, 19.10.2026, Skizze A1).
 
         Jeder Eintrag eine Zeile: Zeit, Ausprägung, die Werte groß, die Notiz kursiv. Der
@@ -1109,11 +1111,17 @@ def plan_view(
         Tipp; passt die gewählte Ausführung nicht, steht er ohne Markierung da. Ein Tipp auf
         einen geschlossenen Eintrag bietet „Wieder öffnen“ (`eintrag_blatt`), auf den offenen
         das Leistungen-Blatt. Das „i“ erklärt die Regel (`OFFEN_ERKLAERUNG`).
+
+        ``neueste_zuerst`` (Einzelübung, Ben 12.11.2026, P190): der jüngste Eintrag oben —
+        im Plan bleibt die Reihenfolge des Tages.
         """
         eigene = sorted(
             (e for e in tages_eintraege if e.exercise_id == uebung.id),
             key=lambda e: (e.started_at is None, e.started_at),
         )
+        if neueste_zuerst:
+            mit_zeit = [e for e in eigene if e.started_at is not None]
+            eigene = [*reversed(mit_zeit), *(e for e in eigene if e.started_at is None)]
         aufnahme = marken.aufnahme_laeuft(state)
         inhalt: list[ft.Control] = [
             eintrag_zeile(e, uebung, item, st, e.id in vom_timer, aufnahme) for e in eigene
@@ -2340,7 +2348,10 @@ def plan_view(
         einzel_kopf.visible = True
         mengen_teile = parameter_abschnitte(item, uebung)
         ausfuehrung = ausfuehrung_abschnitt(item, uebung, t.st, None)
-        karten: list[ft.Control] = []
+        # Die Werkzeugzeile zuerst, direkt unter der festen Uhr (Ben, 12.11.2026, P190)
+        karten: list[ft.Control] = [
+            einzel_seite.verwalten_zeile(einzel_verwalten(item, uebung, t.st))
+        ]
         if ausfuehrung is not None:
             karten.append(einzel_seite.bereich(ausfuehrung, einzel_seite.AUSFUEHRUNG))
         karten.append(
@@ -2356,8 +2367,11 @@ def plan_view(
                 ),
             )
         )
-        karten.append(einzel_seite.bereich(geleistet_tafel(uebung, item, t.st), einzel_seite.HEUTE))
-        karten.append(einzel_seite.verwalten_zeile(einzel_verwalten(item, uebung, t.st)))
+        karten.append(
+            einzel_seite.bereich(
+                geleistet_tafel(uebung, item, t.st, neueste_zuerst=True), einzel_seite.HEUTE
+            )
+        )
         return einzel_seite.spalte(karten)
 
     def block(index: int, item: PlanItem) -> ft.Control:

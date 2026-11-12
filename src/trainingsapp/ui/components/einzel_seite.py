@@ -12,15 +12,17 @@ oben fest, was man im Blick behält. Von oben nach unten:
 
 1. **fest:** Bild, Name und Art der Übung (`kopf`), darunter die Uhr-Zeile
    `Uhr ▾ · Zeit · Takt · ▶` und — wenn die Übung zählt — die Zählzeile (`fester_kopf`);
-2. **Ausführung** (Variante, Gewicht, Seite …) — die getönte Zone wie im Plan;
-3. **Eintragen** (`eintragen_karte`): je Menge eine Zeile, wohin der nächste Tipp geht, und
+2. **Werkzeugzeile** (`verwalten_zeile`): Notiz · Variante · Material · Verlauf · Übung —
+   seit 12.11.2026 (Ben, P190) direkt unter der festen Uhr, im Scrollfeld, ohne eigene
+   Fläche (die Uhr darüber bleibt die eine helle Karte). „Übung bearbeiten“ steht bewusst
+   nicht dabei: Dorthin führt nur die Übungsseite (P79, `docs/plan_uebungen_einstellen.md`:
+   i → Stift, nie ein Schritt);
+3. **Ausführung** (Variante, Gewicht, Seite …) — die getönte Zone wie im Plan;
+4. **Eintragen** (`eintragen_karte`): je Menge eine Zeile, wohin der nächste Tipp geht, und
    unten, je über die ganze Breite, „Wie geplant“ und „Gemacht“/„Abschließen“
    (`aktionszeile`);
-4. **Heute geleistet** — was sich gesammelt hat, darunter statt darüber: die Eingabe bleibt
-   stehen, während man Satz um Satz sammelt;
-5. **Verwalten** (`verwalten_zeile`): Notiz · Variante · Material · Verlauf · Übung — eine
-   Zeile, unaufdringlich. „Übung bearbeiten“ steht bewusst nicht dabei: Dorthin führt nur die
-   Übungsseite (P79, `docs/plan_uebungen_einstellen.md`: i → Stift, nie ein Schritt).
+5. **Heute geleistet** — was sich gesammelt hat, darunter statt darüber: die Eingabe bleibt
+   stehen, während man Satz um Satz sammelt; der jüngste Eintrag zuerst.
 
 Keine HRV-Kacheln und keine Kurven (Ben: „HRV braucht es dort nicht, weil man eh leicht hin und
 her wechseln kann“). Hier wird nur gezeichnet; was ein Knopf tut, gibt `views/plan.py` herein —
@@ -198,10 +200,11 @@ def verwalten_zeile(felder: Sequence[Verwalten]) -> ft.Control:
             ),
         )
 
+    # Ohne eigene Fläche: Direkt darüber steht die Uhr als helle Karte — zwei helle Flächen
+    # übereinander verschmölzen (Ben, 12.11.2026). Eine feine Linie setzt die Zeile ab.
     return ft.Container(
-        padding=ft.Padding.symmetric(horizontal=4, vertical=4),
-        border_radius=12,
-        bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+        padding=ft.Padding.only(left=4, right=4, bottom=6),
+        border=ft.Border.only(bottom=ft.BorderSide(1, ft.Colors.OUTLINE_VARIANT)),
         data=VERWALTEN,
         content=ft.Row(spacing=2, controls=[feld(v) for v in felder]),
     )

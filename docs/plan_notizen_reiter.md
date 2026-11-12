@@ -1,7 +1,7 @@
 # Plan: Verlauf → „Notizen“ statt „Tagebuch“, „Tage“ als Zeitleiste
 
-Stand: 12.11.2026 — **Entwurf, noch nichts gebaut.** Offene Punkte P195–P198 in
-`docs/offene_fragen.md`.
+Stand: 12.11.2026 abends — **Entwurf, noch nichts gebaut.** Bens Antworten vom 12.11. sind
+eingearbeitet (§6); offen ist noch P196 (`docs/offene_fragen.md`).
 
 > Ben, 12.11.2026: „Der Oberreiter Tagebuch wird zu ‚Notizen‘. In den Notizen gibt es eine
 > chronologische Abhandlung von allem, was geschrieben wurde. Mit den Filtern kann man sich da
@@ -47,11 +47,19 @@ zuletzt im Tagebuch war, landet wieder dort. Dazu ein zweiter Weg ohne Umweg üb
 **2.4 Filterblatt** (Bauart `components/uebungsfilter.py`: Chips je Bereich, wirkt sofort,
 Trefferzahl, „Alles leeren“ · „Fertig“):
 
-- **Art:** Zum Tag · Übung · Plan · Workout · Tagesfeld · mit Aufnahmen. Jede Art hat ihr
+- **Art:** Zum Tag · Übung · Plan · Workout · Tagesfeld · **Anhänge** (Ben: „Photos sollten
+  im Verlauf irgendwo einsehbar sein, bzw. zu filtern sein. Filter: Anhänge“ — zeigt alles
+  mit Foto, Video oder Audio, auch ohne Text). Jede Art hat ihr
   Symbol und ihre Label-Farbe — dieselben wie an der Karte, so bleiben Tagesfelder,
   Übungsnotizen und Tagesnotizen auf einen Blick unterscheidbar.
 - **Notiz-Tags:** die Tags der Notizen zum Tag, dazu „ohne Tag“ (bisher die Chip-Zeile des
   Segments „Notizen“).
+- **Zeitraum:** 7 Tage · 4 Wochen · 3 Monate · Jahr · alles (Ben, P197: „beides wäre gut“).
+- **Plan:** die Pläne, zu denen etwas geschrieben ist — trifft die Plan-Notiz, die
+  Workout-Notiz und die Notizen an Übungen, die in diesem Plan gemacht wurden.
+- **Zuletzt gemacht:** die Übungen der letzten Wochen, zu denen es Notizen gibt, die jüngste
+  zuerst (höchstens ein Dutzend; alle anderen findet die Suche). Antwort auf Bens Frage zu
+  P195: „Gibt es eine Möglichkeit zu filtern, welche Übungen zuletzt gemacht wurden?“
 - Innerhalb eines Bereichs oder, zwischen den Bereichen und — wie beim Übungsfilter.
 
 **2.5 Suche.** Jedes Wort muss vorkommen — im Text, im **Titel** (Name der Übung, des Plans,
@@ -60,8 +68,9 @@ Notizen zur Kniebeuge. Die Suche füllt nur die Liste neu (Fokus bleibt), nicht 
 Enter.
 
 **2.6 „Alle Notizen hierzu“.** Im Blatt der Wege einer Karte (Zielsymbol, Gedrückthalten) ein
-Eintrag „Notizen zu ‚Kniebeuge‘“ → setzt die Suche auf den Namen. Das ersetzt die Ordnung
-„nach Übungen“ (P195).
+Eintrag „Notizen zu ‚Kniebeuge‘“ → setzt den Filter auf diese Übung (bzw. diesen Plan, dieses
+Feld). Zusammen mit den Bereichen „Plan“ und „Zuletzt gemacht“ ersetzt das die Ordnung „nach
+Übungen“ (P195: Ben „ja“).
 
 **2.7 Was hineinkommt** (Regel seit 12.11.2026: nur selbst Geschriebenes, unverändert):
 Notizen zum Tag, Plan-Notizen, Notizen an Übungseinträgen, Workout-Notizen (Skalen als Zeile
@@ -122,7 +131,7 @@ genau die Doppelung, die vermieden werden soll.
 Tagebuch (erledigt 12.11.). **Bleibt bewusst doppelt:** Eine Notiz steht am Tag (zum
 Schreiben) und in „Notizen“ (zum Finden) — dieselbe Notiz, zwei Wege.
 
-**Lücken, die der Plan nicht schließt** (zur Entscheidung, P198):
+**Lücken** (P198 — Bens Antworten in §6):
 
 1. **Verlauf eines Plans** über die Zeit (wie oft, welche Übungen) gibt es nirgends — nur je
    Tag. „Tage“ zeigt künftig den Planblock, mehr nicht.
@@ -144,3 +153,30 @@ Schreiben) und in „Notizen“ (zum Finden) — dieselbe Notiz, zwei Wege.
    „im Tagebuch der Abschnitt ‚Notizen‘“ → Reiter „Notizen“).
 
 Jeder Schritt ist für sich lauffähig und einzeln zu committen.
+
+## 6. Bens Antworten vom 12.11.2026 (P195, P197, P198)
+
+- **P195** ja — die Ordnung „nach Übungen“ entfällt; dazu der Bereich „Zuletzt gemacht“ (2.4).
+- **P197** Zeitraum und Plan kommen ins Filterblatt (2.4). „Evtl. auch Doppelungen raus nehmen,
+  dann erübrigt sich P195“ — gelesen als: Mit den Filtern braucht es keine zweite Ordnung
+  (Auslegung Claude, bei Ben nachgefragt).
+- **Lücke 1, Verlauf eines Plans** — Ben: „Ein Plan, wenn als Workout, vergibt doch die
+  Belastung sRPE. Ist das nicht einsehbar?“ Doch: je Durchlauf auf dem Workout-Eintrag
+  (`/workout/<einheit>`) und als Reihe unter „Alle Durchläufe“ (Datum, Dauer, Übungen,
+  Anstrengung, Notiz). Was fehlt, ist der **Weg dorthin aus dem Verlauf** — seit die Workouts
+  ohne Notiz nicht mehr im Tagebuch stehen, führt nur noch die Zeitleiste unter Heute hin. Das
+  schließt die Workout-Zeile in „Tage“ (§3). Eine Kurve der Anstrengung gibt es nicht und ist
+  hier nicht geplant (P179: keine Lastrechnung). Ein Plan als **Liste** hat keinen Durchlauf
+  und damit keinen eigenen Verlauf — nur seinen Block in „Tage“.
+- **Lücke 2, Notizen der Messungen** — Ben: „bleiben auf jeden Fall in der Messung. HRV hat
+  einen Titel und Beschreibung. Zusätzlich könnte man dort Notizen mit rein nehmen. Notizen
+  auch für GPS-Messungen. Diese können dann weitergegeben werden. Sollte etwas passiert sein,
+  wird das dort eingetragen und ist nachträglich einsehbar.“ → **nicht** in Verlauf →
+  Notizen. Eigener Auftrag außerhalb dieses Umbaus: Notizen an GPS-Aufzeichnungen
+  (`core/strecke.py` kennt heute weder Titel noch Notiz). Vor dem Bauen zu klären: wo die
+  Notiz liegt (Strecken werden nie geteilt, die Notiz soll aber weitergegeben werden können —
+  also in der Messdatei bzw. beim Training, nie bei den Koordinaten) und dass sie keinen Ort
+  trägt.
+- **Lücke 3, Text am Foto** — bleibt beim Foto. Fotos sind über den Filter „Anhänge“ im
+  Reiter „Notizen“ einsehbar (2.4).
+

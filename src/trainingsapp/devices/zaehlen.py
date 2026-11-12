@@ -688,6 +688,8 @@ class ZaehlBaustein:
             return f"{self.name} · …{takt}{dazu}"
         if phase == PHASE_PAUSE and self.satz is None:
             return f"{self.name} · Pause{dazu}"
+        if self.angehalten and not self._mit_uhr:  # ⏸ ohne Uhr (P189)
+            return f"{self.name} · {self.wert}{takt}{dazu} · angehalten"
         if phase == PHASE_ENDE:
             return f"{self.name} · {self.summe} Wdh.{takt}{dazu}"
         return f"{self.name} · {self.wert}{takt}{dazu}"
@@ -962,6 +964,24 @@ class ZaehlBaustein:
         if satz is not self._offen and satz.bis_s is not None:
             self._zaehlung_schreiben(satz, satz.bis_s)  # in der Pause: der Satz neu
         return True
+
+    def anhalten_umschalten(self) -> bool:
+        """⏸ für die Übung, wenn **keine Uhr** läuft (Ben, 12.11.2026, P189): das Zählen hält
+        an bzw. läuft weiter — die Messung nie. Mit einer Uhr hält deren Pause das Zählen an
+        (`beobachten`); dann tut das hier nichts. ``False``, wenn nichts umzuschalten war."""
+        if self._t0 is None or self.grund is not None or self._mit_uhr or not self.wdh:
+            return False
+        t = max(self._uhr() - self._t0, self._start_s)
+        if self._angehalten_seit is None:
+            self._anhalten(t)
+        else:
+            self._weiter(t)
+        return True
+
+    @property
+    def pausierbar(self) -> bool:
+        """Lässt sich das Zählen selbst anhalten (`anhalten_umschalten`)?"""
+        return self._t0 is not None and self.grund is None and not self._mit_uhr and self.wdh
 
     def von_hand(self) -> bool:
         """Diagnosemodus (P122: beides zugleich nur zum Prüfen): Die Person trug eben einen Satz

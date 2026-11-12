@@ -226,7 +226,7 @@ def startleiste(
         wo = art()
         aussen = () if im_reiter() else ablauf.ausserhalb_schluessel(state)
         if e is not None and wo == "lauf":
-            return (wo, aussen, e.zustand, _timer_schluessel(e.timer))
+            return (wo, aussen, e.zustand, _pause_schluessel(e))
         if e is not None and wo == "info":
             return (
                 wo,
@@ -252,6 +252,18 @@ def startleiste(
 
     _selbst_auffrischend(page, state, e, box, schluessel, bauen, name="leiste")
     return box
+
+
+def _zaehlen_ohne_uhr(e: Any) -> Any:
+    """Der Zähl-Teil, den ⏸ selbst anhält (keine Uhr in der Einheit) — sonst ``None``."""
+    z = e.teil("zaehlen")
+    return z if z is not None and getattr(z, "pausierbar", False) else None
+
+
+def _pause_schluessel(e: Any) -> tuple:
+    """Woran der ⏸-Knopf hängt: die Uhr — ohne sie das Zählen."""
+    z = _zaehlen_ohne_uhr(e) if e.timer is None else None
+    return (*_timer_schluessel(e.timer), None if z is None else z.angehalten)
 
 
 def _timer_schluessel(t: TimerBaustein | None) -> tuple:
@@ -360,6 +372,15 @@ def _lauf_knoepfe(page: Any, state: AppState, e: Any) -> list[ft.Control]:
             ft.IconButton(
                 ft.Icons.PAUSE if t.lauf.laeuft else ft.Icons.PLAY_ARROW,
                 tooltip="Timer anhalten" if t.lauf.laeuft else "Timer fortsetzen",
+                on_click=lambda: ablauf.anhalten_oder_weiter(page, state),
+            )
+        )
+    elif t is None and (z := _zaehlen_ohne_uhr(e)) is not None:
+        # Ohne Uhr: ⏸ hält das Zählen der Übung an — die Messung nie (Ben, 12.11.2026, P189)
+        knoepfe.append(
+            ft.IconButton(
+                ft.Icons.PLAY_ARROW if z.angehalten else ft.Icons.PAUSE,
+                tooltip="Übung fortsetzen" if z.angehalten else "Übung anhalten",
                 on_click=lambda: ablauf.anhalten_oder_weiter(page, state),
             )
         )
@@ -605,7 +626,7 @@ def einheit_reiter(page: Any, state: AppState) -> ft.Control:
                 "lauf",
                 e.zustand,
                 tuple(t.art for t in e.teile),
-                _timer_schluessel(e.timer),
+                _pause_schluessel(e),
                 e.ende_mit_timer,
                 e.stoppt_am_ende("hrv"),
             )

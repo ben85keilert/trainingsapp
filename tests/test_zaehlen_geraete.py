@@ -330,6 +330,38 @@ async def test_anhalten_der_uhr_haelt_das_zaehlen_an(aufbau) -> None:
     assert not any(20.5 < t < 90.0 for t in zaehlung.daten["zeiten_s"])
 
 
+async def test_ohne_uhr_haelt_die_pause_der_uebung_das_zaehlen_an(aufbau) -> None:
+    """P189 (Ben, 12.11.2026): ⏸ in der Laufleiste gilt der Übung, nicht der Messung — ohne
+    Uhr hält es das Zählen selbst an; in der Pause endet nichts als „keine Bewegung“."""
+    a = aufbau
+    e, z = _zaehllauf(a)
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 20, e)
+    vorher = z.wert
+    assert z.pausierbar and z.anhalten_umschalten()
+    a.gurt.bewegung = False
+    await _sekunden(a, 70, e)
+    assert z.aktiv and z.angehalten and z.phase == PHASE_PAUSE and z.wert == vorher
+    assert z.status().endswith("· angehalten")
+    assert z.bereit  # der Sensor bleibt verbunden — angehalten ist nur die Übung
+    assert z.anhalten_umschalten() and not z.angehalten
+    a.gurt.bewegung = True
+    await _sekunden(a, 20, e)
+    assert abs(z.wert - 16) <= 1  # 40 s Bewegung, die 70 s dazwischen nicht
+
+
+async def test_mit_uhr_haelt_nur_die_uhr_an(aufbau) -> None:
+    a = aufbau
+    timer = TimerBaustein(TimerLauf(stoppuhr(), uhr=a.lauf.uhr))
+    z = ZaehlBaustein(a.lauf, KNIEBEUGE, feld="reps")
+    e = _einheit(a, UebungBaustein(KNIEBEUGE), timer, z)
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 5, e)
+    assert not z.pausierbar and not z.anhalten_umschalten()
+
+
 async def test_zaehlen_tritt_der_laufenden_uhr_bei_und_zaehlt_nicht_rueckwirkend(aufbau) -> None:
     """Leitentscheidung 2: Läuft die Uhr der Übung, tritt das Zählen ihrer Einheit bei —
     es beginnt jetzt; endet die Uhr, endet die Einheit, das Zählen gilt als fertig."""

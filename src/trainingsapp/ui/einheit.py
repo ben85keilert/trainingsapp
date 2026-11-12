@@ -856,7 +856,12 @@ def anhalten_oder_weiter(page: Any, state: Any) -> None:
     """⏸ in der Laufleiste: den Timer anhalten bzw. fortsetzen. Die HRV pausiert nie —
     die Pause wird ein Abschnitt (Vertrag §2)."""
     e = laeuft(state)
-    if e is None or (teil := e.timer) is None:
+    if e is None:
+        return
+    if (teil := e.timer) is None:
+        # Ohne Uhr: das Zählen der Übung hält an (Ben, 12.11.2026, P189)
+        if isinstance(z := e.teil("zaehlen"), ZaehlBaustein) and z.anhalten_umschalten():
+            melden(state)
         return
     if teil.lauf.laeuft:
         teil.lauf.pause()
@@ -1066,6 +1071,8 @@ def _teile_text(e: Einheitslauf) -> str:
         teile.append(f"Übung {ablauf.k + 1} von {len(ablauf.schritte)}")
     if isinstance(z := e.teil("zaehlen"), ZaehlBaustein):
         teile.append(zaehl_stand.leisten_text(z))
+    if e.timer is not None and (lage := e.timer.lauf.takt_lage()) is not None:
+        teile.append(f"Takt: {lage.phase.name}")  # wo der Takt gerade steht (P189)
     if (h := e.hrv) is not None:
         lauf = h.messlauf
         if lauf.aufnahme is not None:

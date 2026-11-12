@@ -2318,7 +2318,8 @@ def _feld(wurzel, label: str) -> ft.TextField:
 
 async def test_live_abschnitt_nachtragen_aendern_loeschen(daten) -> None:
     """Live (Ben, 12.11.2026): „+“ trägt einen Abschnitt mit zwei Zeiten nach, der Stift an
-    der Zeile ändert ihn, „Löschen“ nimmt ihn mit „Rückgängig“ weg."""
+    der Zeile öffnet den Editor in der Kurve (P193), „Löschen“ nimmt ihn mit „Rückgängig“
+    weg."""
     state, tmp_path = daten
     lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
     await lauf.verbinden(SIM_SYNTH, "Simulator H10")
@@ -2350,32 +2351,57 @@ async def test_live_abschnitt_nachtragen_aendern_loeschen(daten) -> None:
     assert (a.name, a.von_s - anfang, a.bis_s - anfang) == ("Treppe", 5.0, 25.0)
     texte = _baum_texte(ansicht)
     assert "ABSCHNITTE · 1" in texte and "Treppe: Start" in texte and "Treppe: Ende" in texte
-    # Der Stift öffnet ihn wieder: umbenennen und das Ende verschieben
-    stift = next(
-        c
-        for c in _alle_controls(ansicht)
-        if isinstance(c, ft.Container) and c.tooltip == "Abschnitt ändern"
+
+    # Der Stift öffnet den Editor in der Kurve (P193) — derselbe wie in der Aufzeichnung:
+    # die Kurve hält an und zeigt den Abschnitt, Name und Grenzen lassen sich ändern
+    def stift() -> ft.Container:
+        return next(
+            c
+            for c in _alle_controls(ansicht)
+            if isinstance(c, ft.Container) and c.data == "abschnitt_stift"
+        )
+
+    def editor_box() -> ft.Container:
+        return next(
+            c
+            for c in _alle_controls(ansicht)
+            if isinstance(c, ft.Container) and c.data == "abschnitt_editor"
+        )
+
+    assert not editor_box().visible
+    stift().on_click()
+    box = editor_box()
+    assert box.visible and state.messung_ende_s is not None  # angehalten
+    assert "ABSCHNITT" in _baum_texte(box) and "0:05" in _baum_texte(box)
+    name = next(
+        c for c in _alle_controls(box) if isinstance(c, ft.TextField) and c.data == "abschnitt_name"
     )
-    stift.on_click()
-    blatt = seite.aufrufe[-1]
-    assert _feld(blatt, "Von").value == "0:05" and _feld(blatt, "Bis").value == "0:25"
-    _feld(blatt, "Name").value = "Stufen"
+    assert name.value == "Treppe"
+    name.value = "Stufen"
+    plus5 = next(
+        c for c in _alle_controls(box) if isinstance(c, ft.TextButton) and c.content == "+5 s"
+    )
+    plus5.on_click()
+    plus5.on_click()  # der Anfang ist gewählt: 0:05 → 0:15
     next(
         c
-        for c in _alle_controls(blatt)
-        if isinstance(c, ft.OutlinedButton) and c.content == "+10 s"
-    ).on_click()  # der erste gehört zu „Von“
-    _knopf(blatt, "Speichern").on_click()
-    await blatt.on_dismiss(None)
+        for c in _alle_controls(box)
+        if isinstance(c, ft.FilledButton) and c.data == "abschnitt_speichern"
+    ).on_click()
+    assert not editor_box().visible
     (a,) = lauf.abschnitte()
     assert (a.name, a.von_s - anfang, a.bis_s - anfang) == ("Stufen", 15.0, 25.0)
     assert "Stufen: Start" in _baum_texte(ansicht)
+    # „Abbrechen“ ändert nichts; „Zeiten …“ im Editor öffnet das Blatt mit zwei Zeiten
+    stift().on_click()
+    _knopf(editor_box(), "Abbrechen").on_click()
+    assert not editor_box().visible and lauf.abschnitte()[0].name == "Stufen"
+    stift().on_click()
+    _knopf(editor_box(), "Zeiten …").on_click()
+    assert not editor_box().visible
+    blatt = seite.aufrufe[-1]
+    assert _feld(blatt, "Von").value == "0:15" and _feld(blatt, "Bis").value == "0:25"
     # Löschen aus dem Blatt, „Rückgängig“ holt ihn zurück
-    next(
-        c
-        for c in _alle_controls(ansicht)
-        if isinstance(c, ft.Container) and c.tooltip == "Abschnitt ändern"
-    ).on_click()
     blatt = seite.aufrufe[-1]
     _knopf(blatt, "Löschen").on_click()
     await blatt.on_dismiss(None)
@@ -2384,6 +2410,68 @@ async def test_live_abschnitt_nachtragen_aendern_loeschen(daten) -> None:
     assert isinstance(meldung, ft.SnackBar)
     meldung.action.on_click()
     assert [b.name for b in lauf.abschnitte()] == ["Stufen"]
+    lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+
+
+async def test_live_abschnitt_grenzen_in_der_kurve_ziehen(daten) -> None:
+    """P193: Mit offenem Editor gehören Tipp und Zug in der Kurve der gewählten Grenze, die
+    Kurve zeigt Grenzen und Balken; ein laufender Abschnitt hat nur den Anfang („läuft“)."""
+    from trainingsapp.ui.components.live_abschnitte import LiveAbschnitte
+    from trainingsapp.ui.components.zeitfenster import Fenster
+
+    state, tmp_path = daten
+    lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    state.messlauf = lauf
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 60:
+        await asyncio.sleep(0.01)
+    anfang = float(lauf.notiz_zeitbezug().wand_versatz or 0.0)
+    kennung = lauf.abschnitt_setzen(None, "Treppe", anfang + 10, anfang + 30)
+    fenster = Fenster(60, None)
+    gezeichnet: list[int] = []
+    la = LiveAbschnitte(
+        _seite(),
+        state,
+        lauf,
+        fenster=fenster,
+        anfang=lambda: anfang,
+        breite_gesetzt=lambda _b: None,
+        notizen_auffrischen=lambda: None,
+        danach=lambda: gezeichnet.append(1),
+    )
+    la.neu()
+    assert la.reihen(anfang, anfang + 60) == [] and not la.tippen(anfang + 12)
+    assert not la.greifen(anfang + 12)
+    (a,) = lauf.abschnitte()
+    la.bearbeiten(a, False)
+    assert la.editor is not None and fenster.ende_s is not None  # angehalten, ganz zu sehen
+    von, bis = fenster.bereich(lauf.jetzt_s(), anfang)
+    assert von <= a.von_s and a.bis_s <= bis
+    assert len(la.reihen(von, bis)) == 3  # Balken und zwei Grenzen
+    assert la.tippen(anfang + 14.0) and la.editor.von == anfang + 14.0
+    la.editor.waehlen("ende")
+    assert la.greifen(anfang + 40.0) and la.editor.bis == anfang + 40.0
+    la.editor_sichern()
+    (a,) = lauf.abschnitte()
+    assert (a.id, a.von_s - anfang, a.bis_s - anfang) == (kennung, 14.0, 40.0)
+    assert la.editor is None and gezeichnet
+    # Ein laufender Abschnitt: Das Ende bleibt „läuft“, nur der Anfang rückt
+    lauf.abschnitt_starten("Pause")
+    await asyncio.sleep(0.2)
+    offen = next(b for b in lauf.abschnitte() if b.name == "Pause")
+    la.bearbeiten(offen, True)
+    assert la.editor.nur_anfang and "läuft" in _baum_texte(la.editor_box)
+    la.editor.waehlen("ende")
+    assert la.editor.aktiv == "anfang"
+    la.tippen(offen.von_s - 5.0)
+    la.editor_sichern()
+    assert lauf.offener_abschnitt() is not None  # läuft weiter
+    neu = next(b for b in lauf.abschnitte() if b.name == "Pause")
+    assert neu.von_s == pytest.approx(offen.von_s - 5.0, abs=0.01)
     lauf.aufnahme_stoppen(tmp_path)
     await lauf.trennen()
     await asyncio.wait_for(task, 5)

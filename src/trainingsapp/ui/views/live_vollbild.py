@@ -378,6 +378,8 @@ def _vollbild(
     # -- Gesten in der Kurve ----------------------------------------------------------------
 
     def kurve_tippen(x: float, _y: float) -> None:
+        if live_abschnitte.tippen(x):  # offener Abschnitts-Editor: die Grenze (P193)
+            return
         if st.ablesen:
             strich_setzen(x)
         elif notizfeld.waehlen:
@@ -387,6 +389,8 @@ def _vollbild(
             aktualisieren(erzwingen=True)
 
     def kurve_greifen(x: float) -> bool:
+        if live_abschnitte.greifen(x):
+            return True
         if st.ablesen:
             strich_setzen(x, zeichnen=False)
             return True
@@ -409,7 +413,7 @@ def _vollbild(
             x_von,
             x_bis,
         )
-        marken = notizfeld.marken(x_von, x_bis)
+        marken = [*notizfeld.marken(x_von, x_bis), *live_abschnitte.reihen(x_von, x_bis)]
         if st.ablesen and st.strich is not None and x_von <= st.strich <= x_bis:
             marken.append(senkrechte([st.strich], ft.Colors.ON_SURFACE, 1.2, gestrichelt=False))
         st.gesehen = {}

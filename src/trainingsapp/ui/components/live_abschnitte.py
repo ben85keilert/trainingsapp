@@ -8,11 +8,22 @@ Zeile öffnen das Blatt mit Name und zwei Zeiten (`components.abschnitt_blatt`);
 eines Ablaufs (Timer, Übung) bleiben live, wie sie sind. Hochkant steht es als Klappfeld unter
 der Hauptkurve (`views/messung.py`), quer als Seitenleiste neben der Kurve
 (`views/live_vollbild.py`, Ben, 28.10.2026: „so wie für die Notizen braucht es auch den
-Abschnitte-Editor im Querformat“). Vertrag: `docs/plan_abschnitte.md`.
+Abschnitte-Editor im Querformat“; seit 12.11.2026 auch `views/hf_vollbild.py`). Vertrag:
+`docs/plan_abschnitte.md`.
+
+**In der Kurve bearbeiten** (P193, Ben 12.11.2026: „ein Abschnittsbearbeitungsmodus, wie er
+in Aufzeichnungen ist … halte das einheitlich“): Der Stift hält die Kurve an, zeigt den
+Abschnitt ganz und öffnet **denselben Bereichseditor wie in der Aufzeichnung**
+(`components.bereich.BereichEditor`) — Anfang oder Ende wählen, in die Kurve tippen oder
+ziehen, Notizen rasten ein; dazu Name, Kopf · Endteil, Löschen. Läuft der Abschnitt noch,
+steht sein Ende auf „läuft“ und nur der Anfang lässt sich setzen. „Zeiten …“ im Editor
+öffnet das Blatt mit zwei Zeiten. Gespeichert wird über `Messlauf.abschnitt_setzen`. Die
+Ansicht fragt `reihen` (Grenzen in der Kurve), `tippen` und `greifen` (Gesten).
 """
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from typing import Any
 
@@ -21,8 +32,15 @@ import flet as ft
 from trainingsapp.core import abschnitte as eigene_abschnitte
 from trainingsapp.core.laufend import minuten
 from trainingsapp.ui.components.abschnitt_blatt import abschnitt_blatt
-from trainingsapp.ui.components.abschnitte import Abschnittsfeld, abschnitt_chip, name_dialog
+from trainingsapp.ui.components.abschnitte import (
+    Abschnittsfeld,
+    abschnitt_chip,
+    name_dialog,
+    rand_zeile,
+)
+from trainingsapp.ui.components.bereich import BereichEditor
 from trainingsapp.ui.components.dialoge import meldung
+from trainingsapp.ui.components.kurve import Reihe
 
 #: So weit vor jetzt beginnt der Vorschlag für einen nachgetragenen Abschnitt (s)
 NACHTRAG_VORGABE_S = 300.0
@@ -85,10 +103,18 @@ class LiveAbschnitte:
             knoepfe=[self.start_knopf, self.marker_knopf, self.nachtrag_knopf],
             zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
         )
+        #: Der offene Editor in der Kurve (P193) — ``None``: keiner
+        self.editor: BereichEditor | None = None
+        self._editor_stand: dict[str, Any] = {}
+        self.editor_box = ft.Container(visible=False, data="abschnitt_editor")
+        self._control = ft.Column(
+            spacing=6, tight=True, controls=[self.feld.control, self.editor_box]
+        )
 
     @property
     def control(self) -> ft.Control:
-        return self.feld.control
+        """Feld und Editor — der Editor steht direkt unter der Liste."""
+        return self._control
 
     @property
     def gebunden(self) -> str | None:
@@ -146,16 +172,7 @@ class LiveAbschnitte:
 
         def loeschen() -> None:
             assert a is not None
-            vorher = lauf.abschnitt_loeschen(a.id)
-            if self.stand["gebunden"] == a.id:
-                self.stand["gebunden"] = None
-            self._zeichnen_und_melden()
-
-            def zurueck() -> None:
-                lauf.ereignisse_setzen(vorher)
-                self._zeichnen_und_melden()
-
-            page.show_dialog(meldung(f"„{a.name}“ gelöscht", zurueck))
+            self._loeschen(a)
 
         page.show_dialog(
             abschnitt_blatt(
@@ -175,6 +192,233 @@ class LiveAbschnitte:
                 loeschen=loeschen if a is not None else None,
             )
         )
+
+    # -- In der Kurve bearbeiten (P193) ------------------------------------------------
+
+    def _notiz_punkte(self) -> list[tuple[float, str]]:
+        """Rastpunkte des Editors: die Notizen der Aufnahme auf der Live-Achse."""
+        zb = self.lauf.notiz_zeitbezug()
+        if zb is None:
+            return []
+        aus: list[tuple[float, str]] = []
+        for e in self.lauf.ereignisse():
+            x = zb.x(e)
+            if x is not None:
+                aus.append((float(x), str(e.get("text") or "")))
+        return aus
+
+    def _zeigen(self, x: float) -> None:
+        """Die Kurve auf eine Zeit rücken und dort halten."""
+        fenster, jetzt = self.fenster, self.lauf.jetzt_s()
+        fenster.ende_s = min(x + fenster.breite_s / 2, jetzt - 1.0)
+        self.danach()
+
+    def bearbeiten(self, a: Any, laeuft: bool) -> None:
+        """Der Stift: Kurve anhalten, den Abschnitt ganz zeigen, Editor öffnen."""
+        lauf, fenster = self.lauf, self.fenster
+        zb = lauf.notiz_zeitbezug()
+        if lauf.aufnahme is None or zb is None:
+            return
+        jetzt = lauf.jetzt_s()
+        anfang = float(zb.wand_versatz or 0.0)
+        bis = jetzt if laeuft else a.bis_s
+        # Der ganze Abschnitt mit etwas Rand, angehalten (ein laufender bis kurz vor jetzt)
+        fenster.breite_s = max(60.0, (bis - a.von_s) * 1.2)
+        fenster.ende_s = min(bis + (bis - a.von_s) * 0.1, jetzt - 1.0)
+        self.breite_gesetzt(fenster.breite_s)
+        stand: dict[str, Any] = {"a": a, "laeuft": laeuft, "raender": (a.kopf_s, a.endteil_s)}
+        self._editor_stand = stand
+        self.editor = BereichEditor(
+            von=a.von_s,
+            bis=bis,
+            anfang=anfang,
+            ende=jetzt,
+            notizen=self._notiz_punkte,
+            geaendert=self.danach,
+            zeigen=self._zeigen,
+            breite=lambda: fenster.breite_s,
+            farbe=a.farbe,
+            nur_anfang=laeuft,
+        )
+        editor = self.editor
+        name = ft.TextField(
+            label="Name",
+            value=a.name,
+            dense=True,
+            capitalization=ft.TextCapitalization.SENTENCES,
+            data="abschnitt_name",
+        )
+        stand["name"] = name
+
+        def rechen_text() -> str:
+            kopf, endteil = stand["raender"]
+            von, bis_ = editor.von - kopf, editor.bis + endteil
+            return f"{_uhr(max(von, anfang))}–{_uhr(bis_)} · {_uhr(bis_ - max(von, anfang))}"
+
+        def kopf_setzen(s: float) -> None:
+            stand["raender"] = (s, stand["raender"][1])
+
+        def endteil_setzen(s: float) -> None:
+            stand["raender"] = (stand["raender"][0], s)
+
+        rand_box = ft.Container(
+            visible=any(stand["raender"]),
+            content=rand_zeile(
+                self.page,
+                kopf=lambda: stand["raender"][0],
+                endteil=lambda: stand["raender"][1],
+                kopf_setzen=kopf_setzen,
+                endteil_setzen=endteil_setzen,
+                bereich_text=rechen_text,
+            ),
+        )
+
+        def rand_umschalten() -> None:
+            rand_box.visible = not rand_box.visible
+            with contextlib.suppress(Exception):
+                rand_box.update()
+
+        def zeiten() -> None:
+            self.editor_schliessen()
+            self._blatt(a, laeuft)
+
+        def loeschen() -> None:
+            self.editor_schliessen(zeichnen=False)
+            self._loeschen(a)
+
+        self.editor_box.content = ft.Container(
+            border_radius=10,
+            padding=ft.Padding.only(left=10, right=4, top=4, bottom=8),
+            border=ft.Border.all(1, ft.Colors.with_opacity(0.4, a.farbe)),
+            content=ft.Column(
+                spacing=8,
+                tight=True,
+                controls=[
+                    ft.Row(
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Text(
+                                "ABSCHNITT",
+                                size=11,
+                                weight=ft.FontWeight.BOLD,
+                                opacity=0.7,
+                                expand=True,
+                            ),
+                            ft.IconButton(
+                                ft.Icons.CLOSE,
+                                icon_size=18,
+                                tooltip="Schließen",
+                                on_click=lambda _e=None: self.editor_schliessen(),
+                            ),
+                        ],
+                    ),
+                    name,
+                    editor.control,
+                    rand_box,
+                    ft.Text(
+                        "Anfang wählen, dann in die Kurve tippen oder ziehen — das Ende "
+                        "setzt „‹Name› · Ende“."
+                        if laeuft
+                        else "Anfang oder Ende wählen, dann in die Kurve tippen oder ziehen — "
+                        "Notizen ziehen die Grenze an, die Stecknadel setzt sie genau auf eine.",
+                        size=12,
+                        opacity=0.65,
+                    ),
+                    ft.Row(
+                        spacing=4,
+                        wrap=True,
+                        alignment=ft.MainAxisAlignment.END,
+                        controls=[
+                            ft.TextButton(
+                                "Kopf · Endteil",
+                                icon=ft.Icons.SWAP_HORIZ,
+                                tooltip="Rechenbereich über die Grenzen hinaus (+) oder "
+                                "innerhalb (−)",
+                                on_click=lambda _e=None: rand_umschalten(),
+                            ),
+                            ft.TextButton(
+                                "Zeiten …",
+                                icon=ft.Icons.SCHEDULE,
+                                tooltip="Name und zwei Zeiten eintippen",
+                                on_click=lambda _e=None: zeiten(),
+                            ),
+                            ft.TextButton(
+                                "Löschen",
+                                icon=ft.Icons.DELETE_OUTLINE,
+                                on_click=lambda _e=None: loeschen(),
+                            ),
+                            ft.TextButton(
+                                "Abbrechen", on_click=lambda _e=None: self.editor_schliessen()
+                            ),
+                            ft.FilledButton(
+                                "Speichern",
+                                icon=ft.Icons.CHECK,
+                                data="abschnitt_speichern",
+                                on_click=lambda _e=None: self.editor_sichern(),
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        )
+        self.editor_box.visible = True
+        self.neu(erzwingen=True)
+        self.danach()
+
+    def editor_sichern(self) -> None:
+        """Name, Grenzen, Kopf und Endteil in die Aufnahme — das Paar Grenz-Notizen rückt mit."""
+        editor, stand = self.editor, self._editor_stand
+        if editor is None:
+            return
+        a, laeuft = stand["a"], stand["laeuft"]
+        kopf, endteil = stand["raender"]
+        self.lauf.abschnitt_setzen(
+            a.id,
+            str(stand["name"].value or "").strip() or a.name,
+            editor.von,
+            None if laeuft else editor.bis,
+            kopf_s=kopf,
+            endteil_s=endteil,
+        )
+        self.editor_schliessen(zeichnen=False)
+        self._zeichnen_und_melden()
+
+    def editor_schliessen(self, *, zeichnen: bool = True) -> None:
+        """Editor zu — die Kurve bleibt, wo sie steht („Live“ holt die Gegenwart zurück)."""
+        self.editor, self._editor_stand = None, {}
+        self.editor_box.visible = False
+        self.editor_box.content = None
+        if zeichnen:
+            self.neu(erzwingen=True)
+            self.danach()
+
+    def reihen(self, x_von: float, x_bis: float) -> list[Reihe]:
+        """Was der offene Editor in die Kurve zeichnet (Grenzen, Balken) — sonst nichts."""
+        return self.editor.reihen(x_von, x_bis) if self.editor is not None else []
+
+    def tippen(self, x: float) -> bool:
+        """Ein Tipp in die Kurve: Mit offenem Editor setzt er die gewählte Grenze."""
+        if self.editor is None:
+            return False
+        self.editor.tippen(x)
+        return True
+
+    def greifen(self, x: float) -> bool:
+        """Ein Zug in der Kurve: Mit offenem Editor folgt die gewählte Grenze dem Finger."""
+        return self.editor.ziehen(x) if self.editor is not None else False
+
+    def _loeschen(self, a: Any) -> None:
+        lauf = self.lauf
+        vorher = lauf.abschnitt_loeschen(a.id)
+        if self.stand["gebunden"] == a.id:
+            self.stand["gebunden"] = None
+        self._zeichnen_und_melden()
+
+        def zurueck() -> None:
+            lauf.ereignisse_setzen(vorher)
+            self._zeichnen_und_melden()
+
+        self.page.show_dialog(meldung(f"„{a.name}“ gelöscht", zurueck))
 
     def nachtragen(self) -> None:
         """„+“: ein Abschnitt mit zwei Zeiten, die schon vorbei sind."""
@@ -220,8 +464,9 @@ class LiveAbschnitte:
                     border_radius=20,
                     ink=True,
                     alignment=ft.Alignment.CENTER,
-                    tooltip="Abschnitt ändern",
-                    on_click=lambda _=None: self._blatt(a, laeuft),
+                    tooltip="Abschnitt in der Kurve bearbeiten",
+                    data="abschnitt_stift",
+                    on_click=lambda _=None: self.bearbeiten(a, laeuft),
                     content=ft.Icon(ft.Icons.EDIT_OUTLINED, size=18),
                 )
             ]

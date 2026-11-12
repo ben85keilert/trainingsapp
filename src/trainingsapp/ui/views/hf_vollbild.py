@@ -375,6 +375,8 @@ def hf_vollbild(
     # -- Gesten in der Kurve ----------------------------------------------------------------
 
     def kurve_tippen(x: float, _y: float) -> None:
+        if live_abschnitte.tippen(x):  # offener Abschnitts-Editor: die Grenze (P193)
+            return
         if state.hf_intervall is not None:
             intervall_setzen(intervall_naechste(x), x)
             aktualisieren(erzwingen=True)
@@ -382,6 +384,8 @@ def hf_vollbild(
             notizfeld.tippen(x)
 
     def kurve_greifen(x: float) -> bool:
+        if live_abschnitte.greifen(x):
+            return True
         iv = state.hf_intervall
         if iv is None:
             return notizfeld.greifen(x)
@@ -485,7 +489,7 @@ def hf_vollbild(
         haupt = Reihe(punkte, farbe=ft.Colors.PRIMARY)
         st.y = y_grenzen([haupt], y_von=y_von, y_bis=y_bis, y_spanne_min=HF_SPANNE_MIN_BPM)
         reihen: list[Reihe] = [*einatem_schatten(state, lauf.jetzt_s(), x_von, x_bis)]
-        marken = notizfeld.marken(x_von, x_bis)
+        marken = [*notizfeld.marken(x_von, x_bis), *live_abschnitte.reihen(x_von, x_bis)]
         if erg is not None:
             # Die vorige Erholung blass dahinter, auf das jetzige Belastungsende geschoben
             vorige = hl.fruehere_erholungen()

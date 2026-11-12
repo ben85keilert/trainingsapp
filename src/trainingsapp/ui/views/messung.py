@@ -1086,6 +1086,8 @@ def _live_teil(
             )
 
     def kurve_tippen(x: float) -> None:
+        if live_abschnitte.tippen(x):  # offener Abschnitts-Editor: die Grenze (P193)
+            return
         if ablesen["an"]:
             strich_setzen(x)
         else:
@@ -1093,6 +1095,8 @@ def _live_teil(
 
     def kurve_greifen(x: float) -> bool:
         """Beim Ablesen folgt der Strich dem Finger; sonst blättert die Geste."""
+        if live_abschnitte.greifen(x):
+            return True
         if not ablesen["an"]:
             return False
         strich_setzen(x, zeichnen=False)
@@ -1185,7 +1189,6 @@ def _live_teil(
         notizen_auffrischen=lambda: notizfeld.auffrischen(),
         danach=lambda: aktualisieren(erzwingen=True),
     )
-    abschnittsfeld = live_abschnitte.feld
     abschnitte_neu = live_abschnitte.neu
 
     state.notiz_beobachter["live"] = timer_notizen
@@ -2065,7 +2068,7 @@ def _live_teil(
 
     def hauptkurve(x_von: float, x_bis: float) -> ft.Control:
         x_text, x_null = achse(lauf.achse_utc, x_von, x_bis, uhrzeit=einst.achse_uhrzeit)
-        marken = notizfeld.marken(x_von, x_bis)
+        marken = [*notizfeld.marken(x_von, x_bis), *live_abschnitte.reihen(x_von, x_bis)]
         x = strich()
         if x is not None and x_von <= x <= x_bis:
             marken.append(senkrechte([x], ft.Colors.ON_SURFACE, 1.2, gestrichelt=False))
@@ -2407,7 +2410,7 @@ def _live_teil(
             ],
         ),
         gruppe("Zeitachse", ft.Row(spacing=4, controls=[breiten_knoepfe, uhr_knopf])),
-        gruppe("Abschnitte", abschnittsfeld.control),
+        gruppe("Abschnitte", live_abschnitte.control),
         lage_box,
         wischbar(
             rr_box,

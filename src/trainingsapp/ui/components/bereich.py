@@ -70,6 +70,8 @@ class BereichEditor:
         breite: sichtbare Breite (s) — bestimmt, wie weit das Einrasten greift.
         farbe: Farbe der Grenzen.
         schattieren: außerhalb grau (Zuschneiden) statt eines Balkens (Abschnitt).
+        nur_anfang: Das Ende steht fest (ein Abschnitt, der live noch läuft) — nur der
+            Anfang lässt sich wählen und verschieben.
     """
 
     def __init__(
@@ -85,7 +87,9 @@ class BereichEditor:
         breite: Callable[[], float],
         farbe: str = ft.Colors.PRIMARY,
         schattieren: bool = False,
+        nur_anfang: bool = False,
     ) -> None:
+        self.nur_anfang = nur_anfang
         self.anfang, self.ende = anfang, max(ende, anfang + MIN_BREITE_S)
         self.von = min(max(von, self.anfang), self.ende - MIN_BREITE_S)
         self.bis = max(min(bis, self.ende), self.von + MIN_BREITE_S)
@@ -114,6 +118,8 @@ class BereichEditor:
 
     def waehlen(self, welche: str) -> None:
         """Welche Grenze Tippen und Ziehen bewegen — die Kurve rückt zu ihr."""
+        if self.nur_anfang and welche == ENDE:
+            return
         self.aktiv = welche
         self.rast = ""
         self._zeigen(self.grenze)
@@ -146,6 +152,8 @@ class BereichEditor:
 
     def an_rand(self, welche: str) -> None:
         """Anfang an den Beginn bzw. Ende an den Schluss — wählt die Grenze, die Kurve rückt mit."""
+        if self.nur_anfang and welche == ENDE:
+            return
         self.aktiv = welche
         self._setzen(self.anfang if welche == ANFANG else self.ende, rasten=False)
         self._zeigen(self.grenze)
@@ -208,7 +216,11 @@ class BereichEditor:
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
                     ft.Text("Anfang" if welche == ANFANG else "Ende", size=11, opacity=0.75),
-                    ft.Text(_uhr(zeit), size=17, weight=ft.FontWeight.W_600),
+                    ft.Text(
+                        "läuft" if self.nur_anfang and welche == ENDE else _uhr(zeit),
+                        size=17,
+                        weight=ft.FontWeight.W_600,
+                    ),
                 ],
             )
         dauer = f"Dauer {_uhr(self.bis - self.von)}"

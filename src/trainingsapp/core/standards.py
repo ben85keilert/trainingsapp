@@ -98,6 +98,25 @@ def ziel_von(item: PlanItem, uebung: Exercise) -> dict[str, Any]:
     return dict(uebung.default_target if item.target is None else item.target)
 
 
+def ziel_wirksam(item: PlanItem, uebung: Exercise) -> dict[str, Any]:
+    """Das Ziel der Planübung, soweit es zu den Parametern passt, die jetzt gelten: Ein
+    Zielwert für ein Feld, das die Übung nicht (mehr) hat — nach „Übung bearbeiten“ oder
+    weil eine andere **Stellung** gilt (P188) —, **ruht**. Er bleibt an der Planübung
+    stehen und gilt wieder, sobald das Feld zurück ist; gezeigt und eingetragen wird er
+    solange nicht.
+
+    >>> u = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
+    >>> ziel_wirksam(PlanItem(target={"reps": [12, 12], "hold": [45]}), u)
+    {'reps': [12, 12]}
+    >>> ziel_wirksam(PlanItem(target={"hold": [45]}), u)
+    {}
+    >>> ziel_wirksam(PlanItem(felder=["reps", "weight"], target={"weight": 20}), u)
+    {'weight': 20}
+    """
+    keys = {f.key for f in plan_spec(item, uebung).fields}
+    return {k: v for k, v in ziel_von(item, uebung).items() if k in keys}
+
+
 def sensor_von(item: PlanItem, uebung: Exercise) -> SensorWahl:
     """Die Karte „Beschleunigungssensor“, die in der Planübung gilt: ihre eigene, sonst die der
     Übung (A6, wie `ziel_von`; `core.zaehlen.wirksame_wahl`).
@@ -575,5 +594,6 @@ __all__ = [
     "ziel_bereinigen",
     "ziel_spec",
     "ziel_von",
+    "ziel_wirksam",
     "zusatzfelder",
 ]

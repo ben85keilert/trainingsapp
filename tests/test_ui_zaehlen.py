@@ -210,7 +210,9 @@ def test_karte_beschleunigungssensor_speichert_nur_was_man_umlegt(formular) -> N
     assert texte.index("BESCHLEUNIGUNGSSENSOR") < texte.index("VIDEOS, LINKS UND DATEIEN")
     assert "Prototyp" in texte
     (bewegung,) = [
-        x for x in _alle(ansicht) if isinstance(x, ft.Dropdown) and x.label != "Weiter, wenn"
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Dropdown) and x.label not in ("Weiter, wenn", "Beim Öffnen")
     ]
     assert bewegung.value == "auto" and [o.text for o in bewegung.options] == [
         "Automatisch",
@@ -275,7 +277,9 @@ def test_bewegung_waehlt_die_vorlage_und_laesst_unbekannte_in_ruhe(formular) -> 
     u = _kniebeuge(state, "Kniebeuge", "reps")
     ansicht = uebung_bearbeiten(page, state, u)
     (bewegung,) = [
-        x for x in _alle(ansicht) if isinstance(x, ft.Dropdown) and x.label != "Weiter, wenn"
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Dropdown) and x.label not in ("Weiter, wenn", "Beim Öffnen")
     ]
     bewegung.value = "kniebeuge"
     bewegung.on_select()
@@ -285,7 +289,9 @@ def test_bewegung_waehlt_die_vorlage_und_laesst_unbekannte_in_ruhe(formular) -> 
     # Wieder geöffnet: die Wahl steht da; zurück auf Automatisch wird gespeichert
     ansicht = uebung_bearbeiten(page, state, state.uebungen.laden(u.id))
     (bewegung,) = [
-        x for x in _alle(ansicht) if isinstance(x, ft.Dropdown) and x.label != "Weiter, wenn"
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Dropdown) and x.label not in ("Weiter, wenn", "Beim Öffnen")
     ]
     assert bewegung.value == "kniebeuge"
     bewegung.value = "auto"
@@ -296,7 +302,9 @@ def test_bewegung_waehlt_die_vorlage_und_laesst_unbekannte_in_ruhe(formular) -> 
     fremd = _kniebeuge(state, "Rudern", "reps", beschleunigung=SensorWahl(vorlage="rudern"))
     ansicht = uebung_bearbeiten(page, state, fremd)
     (bewegung,) = [
-        x for x in _alle(ansicht) if isinstance(x, ft.Dropdown) and x.label != "Weiter, wenn"
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Dropdown) and x.label not in ("Weiter, wenn", "Beim Öffnen")
     ]
     assert bewegung.value == "auto"
     asyncio.run(_knopf(ansicht, "Speichern").on_click())

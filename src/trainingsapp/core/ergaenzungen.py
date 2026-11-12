@@ -15,13 +15,23 @@ Was eine Ergänzung darf (`ERGAENZBAR`, Felder wie in `core.pakete.stand`):
 - ``media`` — Videos, Links, Dateien: was die Übung (nach Adresse) noch nicht hat, kommt dazu.
 - ``result_spec`` (Parameter), ``default_target`` (Ziel), ``timer``, ``takt`` — ersetzen.
 
+**Stellungen** (Ben, 12.11.2026, P188): Parameter (samt Varianten und Chips), Ziel und Takt
+sind die **Trainingsumgebung** einer Übung (`BUENDEL`) — sie lässt sich nicht zusammenlegen
+(ein Ziel „3x15“ passt nur zu den Parametern, mit denen es geschrieben wurde). Statt „die
+spätere gewinnt“ gibt es darum **einen Schalter**: Standard (das Grundpaket) oder eine
+Erweiterung, die im Bündel etwas setzt (`stellungen`, `vorgabe`). `wirksam` bildet den
+Paketstand für die gewählte Stellung: Beschreibung und Medien aus **allen** Erweiterungen,
+die Timer aller Schichten in einer Liste (die der gewählten Stellung zuerst — das erste
+Profil ist die Vorgabe der Übung), das Bündel nur aus der gewählten. Der Takt gehört ins
+Bündel: Er ist ein einzelner Wert, und „Takt zählt“ zählt in ein Feld der Parameter.
+
 Dieses Modul kennt kein flet.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -32,6 +42,10 @@ from .beschreibung import Abschnitt, zusammen
 ERGAENZBAR: Final = ("description", "media", "result_spec", "default_target", "timer", "takt")
 #: Felder, die eine Ergänzung ganz ersetzt
 ERSETZT: Final = ("result_spec", "default_target", "timer", "takt")
+#: Die Trainingsumgebung — gilt nur aus der gewählten Stellung (P188)
+BUENDEL: Final = ("result_spec", "default_target", "takt")
+#: Die Stellung des Grundpakets (sonst die ID des Pakets der Erweiterung)
+STANDARD: Final = ""
 
 
 @dataclass(slots=True)
@@ -118,6 +132,128 @@ def mit_ergaenzungen(
     return ergebnis
 
 
+def hat_buendel(daten: Mapping[str, Any]) -> bool:
+    """Setzt die Ergänzung etwas an der Trainingsumgebung — ist sie eine **Stellung**?
+
+    >>> hat_buendel({"default_target": {"reps": [8]}}), hat_buendel({"media": [], "timer": []})
+    (True, False)
+    """
+    return any(feld in daten for feld in BUENDEL)
+
+
+def stellungen(ergaenzungen: Iterable[tuple[str, Mapping[str, Any]]]) -> list[str]:
+    """Die Pakete (IDs), die eine Stellung des Schalters sind — in der Reihenfolge ihrer
+    Installation. „Standard“ (`STANDARD`) gibt es immer und steht nicht darin.
+
+    >>> stellungen([("reha", {"result_spec": {}}), ("video", {"media": []}), ("qi", {"takt": {}})])
+    ['reha', 'qi']
+    """
+    return [paket_id for paket_id, daten in ergaenzungen if hat_buendel(daten)]
+
+
+def vorgabe(ergaenzungen: Iterable[tuple[str, Mapping[str, Any]]]) -> str:
+    """Die Stellung, die gilt, solange niemand wählt: die zuletzt installierte Erweiterung
+    mit Trainingsumgebung, sonst Standard.
+
+    >>> vorgabe([("reha", {"result_spec": {}}), ("qi", {"takt": {}})]), vorgabe([("v", {})])
+    ('qi', '')
+    """
+    liste = stellungen(ergaenzungen)
+    return liste[-1] if liste else STANDARD
+
+
+def aktive(ergaenzungen: Iterable[tuple[str, Mapping[str, Any]]], wahl: str | None) -> str:
+    """Die geltende Stellung: die Wahl der Person, solange es sie gibt — sonst die Vorgabe.
+
+    >>> ergs = [("reha", {"result_spec": {}}), ("qi", {"takt": {}})]
+    >>> aktive(ergs, None), aktive(ergs, "reha"), aktive(ergs, ""), aktive(ergs, "weg")
+    ('qi', 'reha', '', 'qi')
+    """
+    ergs = list(ergaenzungen)
+    if wahl is not None and (wahl == STANDARD or wahl in stellungen(ergs)):
+        return wahl
+    return vorgabe(ergs)
+
+
+def _kopie(wert: Any) -> Any:
+    return json.loads(json.dumps(wert, ensure_ascii=False))
+
+
+def _timer_zusammen(listen: Iterable[Any]) -> list[dict[str, Any]]:
+    """Die Timer mehrerer Schichten in einer Liste — gleiche ID (ohne ID: gleicher Inhalt)
+    nur einmal, die frühere Liste gewinnt."""
+    out: list[dict[str, Any]] = []
+    gesehen: set[str] = set()
+    for liste in listen:
+        for profil in liste if isinstance(liste, list) else []:
+            if not isinstance(profil, dict):
+                continue
+            kennung = str(profil.get("id") or json.dumps(profil, sort_keys=True))
+            if kennung not in gesehen:
+                gesehen.add(kennung)
+                out.append(_kopie(profil))
+    return out
+
+
+def wirksam(
+    basis: Mapping[str, Any],
+    ergaenzungen: Sequence[tuple[str, Mapping[str, Any]]],
+    stellung: str,
+) -> dict[str, Any]:
+    """Der wirksame Paketstand in einer **Stellung** (P188): ``basis`` (Grundpaket), darauf
+    Beschreibung und Medien **aller** Ergänzungen, die Timer aller Schichten in einer Liste
+    (die der Stellung zuerst, dann die übrigen Erweiterungen — die spätere vorn —, dann die
+    des Grundpakets) und die Trainingsumgebung (`BUENDEL`) **nur** aus der Stellung. Was
+    die Stellung im Bündel nicht setzt, bleibt wie im Grundpaket.
+
+    >>> b = {"name": "Kniebeuge", "description": "Tief.", "result_spec": {"f": "reps"},
+    ...      "default_target": {"reps": [15]}, "timer": [{"id": "t0"}]}
+    >>> reha = {"description": "## Reha\\nLangsam.", "default_target": {"reps": [8]},
+    ...         "timer": [{"id": "t1"}]}
+    >>> kraft = {"result_spec": {"f": "weight"}, "media": [{"uri": "https://v"}]}
+    >>> ergs = [("reha", reha), ("kraft", kraft)]
+    >>> w = wirksam(b, ergs, "reha")
+    >>> w["result_spec"], w["default_target"], [t["id"] for t in w["timer"]]
+    ({'f': 'reps'}, {'reps': [8]}, ['t1', 't0'])
+    >>> w["description"], [m["uri"] for m in w["media"]]  # geteilt: aus allen
+    ('Tief.\\n## Reha\\nLangsam.', ['https://v'])
+    >>> w = wirksam(b, ergs, "kraft")
+    >>> w["result_spec"], w["default_target"], [t["id"] for t in w["timer"]]
+    ({'f': 'weight'}, {'reps': [15]}, ['t1', 't0'])
+    >>> w = wirksam(b, ergs, STANDARD)
+    >>> w["result_spec"], w["default_target"], [t["id"] for t in w["timer"]]
+    ({'f': 'reps'}, {'reps': [15]}, ['t0', 't1'])
+    >>> wirksam(b, [], STANDARD) == b
+    True
+    """
+    geteilt = [
+        {feld: daten[feld] for feld in ("description", "media") if feld in daten}
+        for _paket, daten in ergaenzungen
+    ]
+    ergebnis = mit_ergaenzungen(basis, geteilt)
+    gewaehlt: Mapping[str, Any] = next(
+        (daten for paket_id, daten in ergaenzungen if paket_id == stellung), {}
+    )
+    if stellung != STANDARD:
+        for feld in BUENDEL:
+            if feld in gewaehlt:
+                ergebnis[feld] = _kopie(gewaehlt[feld])
+    uebrige = [
+        daten.get("timer")
+        for paket_id, daten in reversed(list(ergaenzungen))
+        if paket_id != stellung
+    ]
+    if any(isinstance(daten.get("timer"), list) for _p, daten in ergaenzungen):
+        reihen = (
+            [basis.get("timer"), *uebrige]
+            if stellung == STANDARD
+            else [gewaehlt.get("timer"), *uebrige, basis.get("timer")]
+        )
+        if timer := _timer_zusammen(reihen):
+            ergebnis["timer"] = timer
+    return ergebnis
+
+
 def herkunft(ergaenzungen: Iterable[tuple[str, Mapping[str, Any]]]) -> dict[str, str]:
     """Welcher benannte Abschnitt aus welcher Ergänzung kommt — Schlüssel wie
     `core.abgleich.schluessel_abschnitte` → Paketname (die spätere gewinnt).
@@ -171,11 +307,18 @@ def ergaenzung_aus(basis: Mapping[str, Any], eigen: Mapping[str, Any]) -> dict[s
 
 
 __all__ = [
+    "BUENDEL",
     "ERGAENZBAR",
     "ERSETZT",
+    "STANDARD",
     "Ergaenzung",
     "abschnitte_ergaenzen",
+    "aktive",
     "ergaenzung_aus",
+    "hat_buendel",
     "herkunft",
     "mit_ergaenzungen",
+    "stellungen",
+    "vorgabe",
+    "wirksam",
 ]

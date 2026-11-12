@@ -506,6 +506,31 @@ THEMEN: dict[str, tuple[str, str, str]] = {
 }
 
 
+#: Der Schalter „Trainingsumgebung“ einer Paketübung (Ben, 12.11.2026, P188,
+#: `components/stellung.py`)
+STELLUNG_MD = """\
+Eine Übung aus einem Paket kann von anderen Paketen **erweitert** werden.
+
+**Standard** ist die Übung, wie ihr Paket sie mitbringt. Eine **Erweiterung** ist ein
+anderes Paket, das dieselbe Übung ergänzt.
+
+**Was immer gilt:** Beschreibung, Videos und Links und die Timer aller Pakete stehen
+zusammen in der Übung.
+
+**Was der Schalter umstellt:** die *Trainingsumgebung* — Parameter mit ihren Chips,
+Varianten, das Ziel und der Takt. Sie lassen sich nicht mischen (ein Ziel „3x15“ passt nur
+zu seinen Parametern), darum gilt immer genau eine Stellung. Sie steht hinter dem Namen der
+Übung.
+
+**Ändern:** „Übung bearbeiten“ ändert die Stellung, die gerade gilt. Jede Stellung behält
+ihre eigenen Änderungen; „geändert“ zeigt sie an, das ↺ setzt nur diese Stellung auf ihr
+Paket zurück. Ein Update des Pakets lässt deine Änderungen stehen.
+
+**Verlauf:** Einträge bleiben, wie sie eingetragen wurden — gleiche Parameter zählen
+zusammen, egal in welcher Stellung.
+"""
+
+
 def hilfe_dialog(thema: str = "notation") -> ft.AlertDialog:
     titel, text, _ = THEMEN[thema]
     return text_dialog(titel, text)

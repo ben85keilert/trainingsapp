@@ -59,8 +59,15 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from ..core.abgleich import Hinweis, Unterschied, hinweise_lesen, uebernehmen, unterschiede
-from ..core.ergaenzungen import Ergaenzung, mit_ergaenzungen
+from ..core.abgleich import (
+    Hinweis,
+    Unterschied,
+    abgleichen,
+    hinweise_lesen,
+    uebernehmen,
+    unterschiede,
+)
+from ..core.ergaenzungen import BUENDEL, STANDARD, Ergaenzung, aktive, stellungen, wirksam
 from ..core.kurse import (
     Kurs,
     ablauf_aufloesen,
@@ -95,6 +102,29 @@ from .db import transaktion
 from .kurse import KursRepo
 from .paketmedien import Paketablage
 from .repositories import ExerciseRepo, PlanRepo
+
+
+@dataclass(frozen=True, slots=True)
+class Stellung:
+    """Eine Stellung des Schalters „Trainingsumgebung“ einer Paketübung (P188)."""
+
+    #: `core.ergaenzungen.STANDARD` (leer) oder die ID des Pakets der Erweiterung
+    kennung: str
+    #: Name des Pakets der Erweiterung — leer bei Standard
+    paketname: str
+    aktiv: bool
+    #: die Person hat an Parametern, Ziel oder Takt dieser Stellung etwas geändert
+    geaendert: bool
+
+    @property
+    def name(self) -> str:
+        """„Standard“ bzw. der Name des Pakets der Erweiterung."""
+        return self.paketname or "Standard"
+
+
+def _buendel(werte: dict[str, Any]) -> dict[str, Any]:
+    """Die Trainingsumgebung aus einem Stand (`core.ergaenzungen.BUENDEL`) — was fehlt, fehlt."""
+    return {feld: werte[feld] for feld in BUENDEL if werte.get(feld) is not None}
 
 
 class Status(StrEnum):
@@ -856,9 +886,12 @@ class PaketRepo:
         )
 
     def ergaenzungen_anwenden(self, uebung_id: str) -> bool:
-        """Den wirksamen Paketstand einer Übung neu bilden — Grundpaket + Ergänzungen — und wie
-        bei einem Update abgleichen: was die Person geändert hat, bleibt. ``True``, wenn sich
-        der Stand änderte."""
+        """Den wirksamen Paketstand einer Übung neu bilden — Grundpaket + Ergänzungen in der
+        geltenden **Stellung** (P188, `core.ergaenzungen.wirksam`) — und wie bei einem Update
+        abgleichen: was die Person geändert hat, bleibt. Wechselt die Stellung (gewählt,
+        oder die bisherige fiel weg), geht die Trainingsumgebung der Person mit ihrer
+        Stellung beiseite (`exercise_addon_state`) und die der neuen kommt zurück.
+        ``True``, wenn sich der Stand änderte."""
         repo = ExerciseRepo(self.con)
         alt = repo.laden(uebung_id, mit_geloeschten=True)
         if alt is None or alt.package_id is None:
@@ -866,11 +899,33 @@ class PaketRepo:
         bisher, basis = self.standard(uebung_id), self._basis(uebung_id)
         if bisher is None or basis is None:
             return False
-        ergs = [d for _p, d in self.ergaenzungen_fuer(uebung_id)]
-        soll = mit_ergaenzungen(basis, ergs)
-        if soll == bisher:
+        ergs = [(p.id, d) for p, d in self.ergaenzungen_fuer(uebung_id)]
+        wahl, vorher = self._stellung_lesen(uebung_id)
+        jetzt = aktive(ergs, wahl)
+        if vorher is None:  # Altbestand: der Stand galt für das, was jetzt Vorgabe ist
+            vorher = jetzt
+        soll = wirksam(basis, ergs, jetzt)
+        wechsel = jetzt != vorher
+        if soll == bisher and not wechsel:
+            self._stellung_merken(uebung_id, jetzt)
             return False
-        gemischt, hinweise = zusammenfuehren_mit_hinweisen(bisher, stand(alt), soll)
+        eigen = stand(alt)
+        weglegen: tuple[dict[str, Any], dict[str, Any]] | None = None
+        if wechsel:
+            # Die Trainingsumgebung gehört der Stellung, in der sie entstand: Sie geht mit
+            # ihr beiseite und nimmt am Abgleich mit der neuen nicht teil
+            normiert = stand_normieren(bisher)
+            eigenes = _buendel(eigen)
+            vom_paket = _buendel(normiert)
+            if eigenes != vom_paket:
+                weglegen = (eigenes, vom_paket)
+            eigen = {k: v for k, v in eigen.items() if k not in BUENDEL} | vom_paket
+        gemischt, hinweise = zusammenfuehren_mit_hinweisen(bisher, eigen, soll)
+        gemerkt = self._stellung_stand(uebung_id, jetzt) if wechsel else None
+        if gemerkt is not None:
+            eigenes, damals = gemerkt
+            teil, _ = abgleichen(damals, eigenes, _buendel(stand_normieren(soll)), BUENDEL)
+            gemischt = {k: v for k, v in gemischt.items() if k not in BUENDEL} | teil
         try:
             ziel: Exercise | None = aus_stand(uebung_id, alt.package_id, gemischt)
         except (KeyError, TypeError, ValueError):
@@ -884,7 +939,143 @@ class PaketRepo:
                     repo.speichern(ziel)
             self._standard_setzen(uebung_id, soll)
             self._basis_setzen(uebung_id, basis if ergs else None)
+            if wechsel:
+                self._stellung_stand_setzen(uebung_id, vorher, weglegen)
+                self._stellung_stand_setzen(uebung_id, jetzt, None)
+            self._stellung_merken(uebung_id, jetzt)
             self._hinweise_nachziehen(uebung_id, hinweise)
+        return True
+
+    # -- Stellungen (P188, Migration 058) --------------------------------------------------
+
+    def _stellung_lesen(self, uebung_id: str) -> tuple[str | None, str | None]:
+        """(Wahl der Person, Stellung des gespeicherten Paketstands) — je ``None`` = keine."""
+        r = self.con.execute(
+            "SELECT addon_choice, addon_active FROM exercise WHERE id = ?", (uebung_id,)
+        ).fetchone()
+        return (None, None) if r is None else (r[0], r[1])
+
+    def _stellung_merken(self, uebung_id: str, stellung: str) -> None:
+        self.con.execute(
+            "UPDATE exercise SET addon_active = ? WHERE id = ? AND addon_active IS NOT ?",
+            (stellung, uebung_id, stellung),
+        )
+
+    def _stellung_stand(
+        self, uebung_id: str, stellung: str
+    ) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        """Was die Person in einer Stellung geändert hat, die gerade nicht gilt: (ihre
+        Trainingsumgebung, der Paketstand der Stellung beim Weglegen)."""
+        r = self.con.execute(
+            "SELECT own_json, base_json FROM exercise_addon_state "
+            "WHERE exercise_id = ? AND package_id = ?",
+            (uebung_id, stellung),
+        ).fetchone()
+        if r is None:
+            return None
+        try:
+            eigenes, damals = json.loads(r[0]), json.loads(r[1])
+        except ValueError:
+            return None
+        if not isinstance(eigenes, dict) or not isinstance(damals, dict):
+            return None
+        return eigenes, damals
+
+    def _stellung_stand_setzen(
+        self, uebung_id: str, stellung: str, werte: tuple[dict[str, Any], dict[str, Any]] | None
+    ) -> None:
+        self.con.execute(
+            "DELETE FROM exercise_addon_state WHERE exercise_id = ? AND package_id = ?",
+            (uebung_id, stellung),
+        )
+        if werte is not None:
+            self.con.execute(
+                "INSERT INTO exercise_addon_state (exercise_id, package_id, own_json, "
+                "base_json) VALUES (?, ?, ?, ?)",
+                (
+                    uebung_id,
+                    stellung,
+                    json.dumps(werte[0], ensure_ascii=False, sort_keys=True),
+                    json.dumps(werte[1], ensure_ascii=False, sort_keys=True),
+                ),
+            )
+
+    def stellungen(self, uebung_id: str) -> list[Stellung]:
+        """Der Schalter einer Übung: Standard und je Erweiterung mit Trainingsumgebung eine
+        Stellung — leer, solange es nur Standard gibt (dann gibt es nichts zu schalten)."""
+        paare = self.ergaenzungen_fuer(uebung_id)
+        ergs = [(p.id, d) for p, d in paare]
+        ids = stellungen(ergs)
+        if not ids:
+            return []
+        wahl, _ = self._stellung_lesen(uebung_id)
+        aktiv = aktive(ergs, wahl)
+        namen = {p.id: p.name for p, _ in paare}
+        u = ExerciseRepo(self.con).laden(uebung_id, mit_geloeschten=True)
+        standard = self.standard(uebung_id)
+        aktiv_geaendert = (
+            u is not None
+            and standard is not None
+            and _buendel(stand(u)) != _buendel(stand_normieren(standard))
+        )
+        return [
+            Stellung(
+                kennung,
+                namen.get(kennung, ""),
+                kennung == aktiv,
+                aktiv_geaendert
+                if kennung == aktiv
+                else self._stellung_stand(uebung_id, kennung) is not None,
+            )
+            for kennung in (STANDARD, *ids)
+        ]
+
+    def stellung_waehlen(self, uebung_id: str, stellung: str) -> bool:
+        """Die Trainingsumgebung umschalten — Standard (`STANDARD`) oder das Paket einer
+        Erweiterung. Was die Person in der bisherigen Stellung geändert hat, bleibt dort
+        liegen und kommt beim Zurückschalten wieder. ``True``, wenn sich etwas änderte."""
+        ergs = [(p.id, d) for p, d in self.ergaenzungen_fuer(uebung_id)]
+        if stellung != STANDARD and stellung not in stellungen(ergs):
+            return False
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE exercise SET addon_choice = ? WHERE id = ?", (stellung, uebung_id)
+            )
+        return self.ergaenzungen_anwenden(uebung_id)
+
+    def stellung_zuruecksetzen(self, uebung_id: str, stellung: str | None = None) -> bool:
+        """„Zurücksetzen“ nur der Trainingsumgebung einer Stellung (Vorgabe: der geltenden)
+        auf ihren Paketstand — Beschreibung, Medien und Timer bleiben, wie sie sind.
+        ``True``, wenn es etwas zurückzusetzen gab."""
+        ergs = [(p.id, d) for p, d in self.ergaenzungen_fuer(uebung_id)]
+        wahl, _ = self._stellung_lesen(uebung_id)
+        aktiv = aktive(ergs, wahl)
+        if stellung is not None and stellung != aktiv:
+            da = self._stellung_stand(uebung_id, stellung) is not None
+            with transaktion(self.con):
+                self._stellung_stand_setzen(uebung_id, stellung, None)
+            return da
+        repo = ExerciseRepo(self.con)
+        alt = repo.laden(uebung_id, mit_geloeschten=True)
+        standard = self.standard(uebung_id)
+        if alt is None or alt.package_id is None or standard is None:
+            return False
+        eigen = stand(alt)
+        soll = {k: v for k, v in eigen.items() if k not in BUENDEL} | _buendel(
+            stand_normieren(standard)
+        )
+        if soll == eigen:
+            return False
+        try:
+            neu = aus_stand(uebung_id, alt.package_id, soll)
+        except (KeyError, TypeError, ValueError):
+            return False
+        with transaktion(self.con):
+            _tags_angleichen(neu, self._bekannte_tags())
+            _lokales_behalten(neu, alt)
+            neu.archived = alt.archived
+            repo.speichern(neu)
+            self._hinweise_nachziehen(uebung_id, [])
         return True
 
     def _ergaenzungen_einspielen(self, inhalt: Paketinhalt) -> list[str]:
@@ -1381,9 +1572,10 @@ class PaketRepo:
             soll = stand(ziel)
             # Ergänzungen anderer Pakete liegen darüber (U5): der wirksame Stand ist Grund +
             # Ergänzungen; den Grund merkt sich die Übung daneben
-            if ergs := [d for _p, d in self.ergaenzungen_fuer(u.id)]:
+            if ergs := [(p.id, d) for p, d in self.ergaenzungen_fuer(u.id)]:
                 vorschau.basis_staende[u.id] = soll
-                soll = mit_ergaenzungen(soll, ergs)
+                # … in der geltenden Stellung (P188): das Bündel nur aus ihr
+                soll = wirksam(soll, ergs, aktive(ergs, self._stellung_lesen(u.id)[0]))
                 try:
                     ziel_mit = aus_stand(u.id, paket.id, soll)
                 except (KeyError, TypeError, ValueError):

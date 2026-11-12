@@ -257,11 +257,41 @@ media = [{ uri = "https://…", title = "Reha-Video" }]   # auch datei = "…" (
   `default_target`, `timer`, `takt` — ersetzen. Alles andere (Name, Typen …) fällt weg
   (`trainingsapp-paket pruefen` gibt einen Hinweis). Eine Ergänzung einer Übung desselben Pakets
   gibt es nicht (dann schreibt man die Übung).
-- **Schichten:** Grundpaket → Ergänzungen in der Reihenfolge ihrer Installation (die spätere
-  gewinnt je Feld) → Eigenes. Der **wirksame Paketstand** (`package_standard_json`) ist Grund +
-  Ergänzungen, der Grund liegt daneben (`package_base_json`, Migration 049); kommt, ändert oder
-  geht eine Ergänzung, gleicht die App ab wie bei einem Update — **Eigenes bleibt** (U1),
-  „Auf Paketstand“ nimmt die Ergänzungen mit, „Wieder installieren“ den Grund.
+- **Zwei Stufen, ein Schalter** (Ben, 12.11.2026, P188; `core.ergaenzungen.wirksam`,
+  Migration 058): Sichtbar heißen die Stufen **Standard** (das Grundpaket) und **Erweiterung**
+  (jedes ergänzende Paket, nebeneinander — keine Eltern und Enkel, keine Stufe „Eigene“).
+  - **Zusammengelegt** aus Standard und allen Erweiterungen: Beschreibung (je Abschnitt),
+    Medien (je Eintrag) und die **Timer** — alle Profile in einer Liste, die der geltenden
+    Stellung zuerst (das erste Profil ist die Vorgabe der Übung), dann die übrigen
+    Erweiterungen (die spätere vorn), dann das Grundpaket; gleiche ID nur einmal.
+  - **Trainingsumgebung** — `result_spec` (Parameter samt Varianten und Chips),
+    `default_target` (Ziel) und `takt` — gilt nur aus **einer Stellung**: Standard oder eine
+    Erweiterung, die dort etwas setzt (eine Erweiterung nur mit Text, Medien oder Timern ist
+    keine Stellung). Was die Stellung im Bündel nicht setzt, bleibt wie im Grundpaket. Der
+    Takt gehört dazu, weil er ein einzelner Wert ist und „Takt zählt“ in ein Feld der
+    Parameter zählt. **Vorgabe:** die zuletzt installierte Erweiterung mit
+    Trainingsumgebung, sonst Standard; eine Wahl der Person (`exercise.addon_choice`) bleibt,
+    bis ihre Stellung wegfällt. Vor dem 12.11.2026 gewann still „die spätere je Feld“.
+  - Der **wirksame Paketstand** (`package_standard_json`) ist Grund + Geteiltes + die
+    Trainingsumgebung der geltenden Stellung (`exercise.addon_active`), der Grund liegt
+    daneben (`package_base_json`, Migration 049). Kommt, ändert oder geht eine Ergänzung,
+    gleicht die App ab wie bei einem Update — **Eigenes bleibt** (U1).
+  - **Je Stellung ein eigener Stand:** „Übung bearbeiten“ ändert die geltende Stellung.
+    Beim Umschalten geht die geänderte Trainingsumgebung mit ihrer Stellung beiseite
+    (`exercise_addon_state`: eigener Stand und Paketstand beim Weglegen) und kommt beim
+    Zurückschalten wieder — abgeglichen wie ein Update, falls das Paket inzwischen neu ist.
+    „Zurücksetzen“ (`PaketRepo.stellung_zuruecksetzen`) bringt nur die Trainingsumgebung
+    einer Stellung auf ihr Paket; „Auf Paketstand“ wie bisher die ganze Übung in der
+    geltenden Stellung, „Wieder installieren“ den Grund.
+  - **Oberfläche** (`components/stellung.py`): auf der Übungsseite direkt hinter dem „i“ der
+    Knopf mit den Ebenen (nur mit mindestens einer Stellung neben Standard), die geltende
+    Stellung hinter dem Namen („Kniebeuge · Kraft“), im Dialog „geändert“ und ↺ je Stellung;
+    „Übung bearbeiten“ nennt über den Parametern, welche Stellung man ändert. Übungen gelten
+    je Gerät, die Stellung darum auch (nicht je Profil).
+  - **Pläne und Verlauf:** Einträge halten ihre Kopie der Parameter — nichts ändert sich.
+    Ein Ziel der Planübung für ein Feld, das die geltende Stellung nicht hat, **ruht**
+    (`core.standards.ziel_wirksam`): Es bleibt an der Planübung und gilt wieder, sobald das
+    Feld zurück ist.
 - **Gespeichert** je Paket und Übung (`exercise_addon`): Deaktivieren und Entfernen nehmen die
   Ergänzungen heraus, Aktivieren bringt sie zurück; ein Update ersetzt nur die eigenen.
   **Fehlt die Übung** (ihr Paket ist nicht installiert), wartet die Ergänzung und greift, sobald

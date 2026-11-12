@@ -28,10 +28,11 @@ Linie (`linien`) — „kurze und lange getrennt dargestellt in der selben Kurve
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from .models import SessionEntry
+from .parameter import kontextfelder
 from .result_spec import (
     KENNZAHL_TYPEN,
     FieldSpec,
@@ -41,10 +42,12 @@ from .result_spec import (
     ist_leer,
     kennzahl_keys,
     skala_bereich_text,
+    wert_text,
 )
 from .tagesbilanz import kacheln
 from .units import format_dauer
 from .varianten import VARIANTE
+from .varianten import namen as varianten_namen
 from .varianten import von as variante_von
 
 MODUS_NUMMER = "nummer"
@@ -369,15 +372,267 @@ class Linie:
     #: leer = Einträge ohne Variante
     variante: str
     werte: tuple[tuple[date, float], ...]
+    #: mit einer `Aufteilung`: die Wahl je Einstellung, in ihrer Reihenfolge („blind“, „0°“)
+    teile: tuple[str, ...] = ()
+    #: mit einer `Aufteilung`: wie die Linie heißt („blind · 0°“, „Gesamt“)
+    name: str = ""
+    #: wie viele Einträge in ihr stecken („wie oft“)
+    anzahl: int = 0
+    #: der Wert über alle ihre Einträge: Summe, Mittel oder Höchstwert, wie die Kennzahl rechnet
+    gesamt: float | None = None
 
     @property
     def schluessel(self) -> str:
+        if self.name:
+            return f"{self.exercise_id}|{'|'.join(self.teile)}"
         return f"{self.exercise_id}|{self.variante}"
 
 
-def linien(eintraege: Iterable[tuple[date, SessionEntry]], k: Kennzahl) -> list[Linie]:
+@dataclass(frozen=True, slots=True)
+class Dimension:
+    """Eine Einstellung, nach der sich der Verlauf aufteilen und filtern lässt: die Variante
+    oder eine Ausprägung (Seite, Gewicht, Winkel) mit den Werten, die in den Einträgen stehen."""
+
+    key: str
+    label: str
+    werte: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Aufteilung:
+    """Wie der Verlauf einer Übung zählt (Ben, 12.11.2026, `docs/plan_verlauf_kennzahlen.md`):
+    „Summiert nach bestimmten Filterkriterien. Diese sind mehrfaktoriell einstellbar.“
+
+    ``nach``: die Einstellungen, die **trennen** — jede Kombination ihrer Werte ist eine Reihe;
+    über alle anderen wird summiert. Leer = eine Reihe „Gesamt“. ``nur``: je Einstellung die
+    Werte, die überhaupt zählen (Filter); fehlt eine, zählen alle.
+
+    >>> a = aufteilung_lesen({"nach": ["angle"], "nur": {"variant": ["blind"]}})
+    >>> a.nach, dict(a.nur), a.ist_vorgabe, Aufteilung().ist_vorgabe
+    (('angle',), {'variant': ('blind',)}, False, True)
+    >>> aufteilung_lesen(a.als_dict()) == a, aufteilung_lesen("kaputt") == Aufteilung()
+    (True, True)
+    """
+
+    nach: tuple[str, ...] = (VARIANTE,)
+    nur: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+
+    @property
+    def ist_vorgabe(self) -> bool:
+        """Wie bisher: je Variante eine Linie, kein Filter."""
+        return self.nach == (VARIANTE,) and not self.nur
+
+    def passt(self, e: SessionEntry) -> bool:
+        """Zählt der Eintrag — steht er in jedem Filter bei den gewählten Werten?"""
+        return all(dimension_wert(e, key) in werte for key, werte in self.nur.items())
+
+    def als_dict(self) -> dict[str, object]:
+        return {"nach": list(self.nach), "nur": {k: list(v) for k, v in self.nur.items()}}
+
+
+def aufteilung_lesen(roh: object) -> Aufteilung:
+    """Aus dem gespeicherten JSON — Unlesbares ist die Vorgabe."""
+    if not isinstance(roh, Mapping):
+        return Aufteilung()
+    nach = roh.get("nach")
+    nur = roh.get("nur")
+    return Aufteilung(
+        tuple(str(k) for k in nach) if isinstance(nach, list) else (VARIANTE,),
+        {
+            str(k): tuple(str(w) for w in v)
+            for k, v in (nur.items() if isinstance(nur, Mapping) else ())
+            if isinstance(v, list) and v
+        },
+    )
+
+
+#: Die feste Ansicht: jede Kombination aller Einstellungen eine Reihe
+ALLES_GETRENNT = "Alles getrennt"
+
+
+@dataclass(frozen=True, slots=True)
+class Ansicht:
+    """Eine gespeicherte Kombination aus Aufteilen und Filter, mit Namen („Nach Winkel“)."""
+
+    name: str
+    aufteilung: Aufteilung
+
+
+@dataclass(frozen=True, slots=True)
+class Ansichten:
+    """Die gespeicherten Ansichten **einer Übung** (Ben, 12.11.2026: „oft gebrauchte
+    Kombinationen“, nur je Übung) und welche beim Öffnen des Verlaufs gilt — leer: wie
+    bisher, je Variante eine Linie.
+
+    >>> a = Ansichten((Ansicht("Nach Winkel", Aufteilung(("angle",))),), "Nach Winkel")
+    >>> ansichten_lesen(a.als_dict()) == a, ansichten_lesen(None) == Ansichten()
+    (True, True)
+    >>> a.beim_oeffnen([]).nach, a.ohne("Nach Winkel").start
+    (('angle',), '')
+    >>> a.mit(Ansicht("Nach Winkel", Aufteilung(()))).ansichten[0].aufteilung.nach
+    ()
+    """
+
+    ansichten: tuple[Ansicht, ...] = ()
+    start: str = ""
+
+    def beim_oeffnen(self, dims: Sequence[Dimension]) -> Aufteilung:
+        """Die Aufteilung, mit der der Verlauf beginnt."""
+        if self.start == ALLES_GETRENNT:
+            return alles_getrennt(dims)
+        return next((a.aufteilung for a in self.ansichten if a.name == self.start), Aufteilung())
+
+    def mit(self, ansicht: Ansicht) -> Ansichten:
+        """Dazu — eine gleichnamige wird ersetzt und bleibt an ihrer Stelle."""
+        if any(a.name == ansicht.name for a in self.ansichten):
+            neu = tuple(ansicht if a.name == ansicht.name else a for a in self.ansichten)
+        else:
+            neu = (*self.ansichten, ansicht)
+        return Ansichten(neu, self.start)
+
+    def ohne(self, name: str) -> Ansichten:
+        return Ansichten(
+            tuple(a for a in self.ansichten if a.name != name),
+            "" if self.start == name else self.start,
+        )
+
+    def als_dict(self) -> dict[str, object]:
+        return {
+            "start": self.start,
+            "ansichten": [{"name": a.name, **a.aufteilung.als_dict()} for a in self.ansichten],
+        }
+
+
+def ansichten_lesen(roh: object) -> Ansichten:
+    if not isinstance(roh, Mapping):
+        return Ansichten()
+    liste = roh.get("ansichten")
+    ansichten = tuple(
+        Ansicht(str(a["name"]), aufteilung_lesen(a))
+        for a in (liste if isinstance(liste, list) else ())
+        if isinstance(a, Mapping) and str(a.get("name") or "").strip()
+    )
+    return Ansichten(ansichten, str(roh.get("start") or ""))
+
+
+def alles_getrennt(dims: Sequence[Dimension]) -> Aufteilung:
+    """Die feste Ansicht „Alles getrennt“: jede Einstellung trennt, kein Filter."""
+    return Aufteilung(tuple(d.key for d in dims))
+
+
+def aufteilung_text(aufteilung: Aufteilung, dims: Sequence[Dimension]) -> str:
+    """In Worten, für die Liste der Ansichten: „trennt Winkel · nur Variante blind“.
+
+    >>> d = [Dimension("variant", "Variante"), Dimension("angle", "Winkel")]
+    >>> aufteilung_text(Aufteilung(("angle",), {"variant": ("blind",)}), d)
+    'trennt Winkel · nur Variante blind'
+    >>> aufteilung_text(Aufteilung(()), d)
+    'alles zusammen'
+    """
+    namen = {d.key: d.label for d in dims}
+    teile = []
+    if aufteilung.nach:
+        teile.append("trennt " + ", ".join(namen.get(k, k) for k in aufteilung.nach))
+    else:
+        teile.append("alles zusammen")
+    for k, werte in aufteilung.nur.items():
+        teile.append(f"nur {namen.get(k, k)} {', '.join(werte)}")
+    return " · ".join(teile)
+
+
+def dimension_wert(e: SessionEntry, key: str) -> str:
+    """Was ein Eintrag in einer Einstellung trägt, als Text („blind“, „20 kg“, „30°“) — leer,
+    wenn er sie nicht hat.
+
+    >>> from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+    >>> spec = ResultSpec(fields=[vorrat_feld("hold"), vorrat_feld("weight")])
+    >>> werte = {"hold": [30], "weight": 20, "variant": "blind"}
+    >>> e = SessionEntry(result=werte, spec_snapshot=spec)
+    >>> dimension_wert(e, "weight"), dimension_wert(e, "variant"), dimension_wert(e, "angle")
+    ('20 kg', 'blind', '')
+    """
+    if key == VARIANTE:
+        return variante_von(e.result)
+    wert = e.result.get(key)
+    if ist_leer(wert):
+        return ""
+    f = e.spec_snapshot.field_by_key(key) if e.spec_snapshot is not None else None
+    return wert_text(f, wert) if f is not None else str(wert)
+
+
+def dimensionen(
+    eintraege: Iterable[SessionEntry], spec: ResultSpec | None = None
+) -> list[Dimension]:
+    """Wonach sich aufteilen lässt: die Variante zuerst, dann die Ausprägungen, die vor dem
+    Eintragen gewählt werden (`core.parameter.kontextfelder`) — aus den Kopien der Einträge
+    und, wenn gegeben, der Übung von heute; je Einstellung die Werte, die vorkommen.
+
+    >>> from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+    >>> spec = ResultSpec(fields=[vorrat_feld("hold"), vorrat_feld("weight")])
+    >>> def e(kg, v=""): return SessionEntry(spec_snapshot=spec,
+    ...     result={"hold": [30], "weight": kg, **({"variant": v} if v else {})})
+    >>> [(d.key, d.label, d.werte) for d in dimensionen([e(20, "blind"), e(5), e(20)])]
+    [('variant', 'Variante', ('blind',)), ('weight', 'Gewicht', ('5 kg', '20 kg'))]
+    >>> dimensionen([SessionEntry(result={"hold": [30]}, spec_snapshot=ResultSpec(
+    ...     fields=[vorrat_feld("hold")]))])
+    []
+    """
+    liste = list(eintraege)
+    namen: dict[str, str] = {}
+    for s in [*(e.spec_snapshot for e in liste), spec]:
+        if s is None:
+            continue
+        for f in kontextfelder(s):
+            namen.setdefault(f.key, "Variante" if f.key == VARIANTE else basis_label(f))
+    if any(variante_von(e.result) for e in liste):
+        namen.setdefault(VARIANTE, "Variante")
+    werte: dict[str, dict[str, object]] = {k: {} for k in namen}
+    for e in liste:
+        for k in namen:
+            w = dimension_wert(e, k)
+            if w:
+                werte[k].setdefault(w, e.result.get(k))
+    keys = sorted(namen, key=lambda k: k != VARIANTE)  # die Variante steht über den anderen
+    return [Dimension(k, namen[k], _geordnet(k, werte[k], spec)) for k in keys]
+
+
+def _geordnet(key: str, werte: Mapping[str, object], spec: ResultSpec | None) -> tuple[str, ...]:
+    """Die Werte einer Einstellung in ruhiger Folge: Zahlen aufsteigend (5 kg vor 20 kg),
+    Varianten wie in der Übung, sonst wie sie zuerst vorkamen."""
+    texte = list(werte)
+    if key == VARIANTE and spec is not None:
+        folge = varianten_namen(spec)
+        return tuple(sorted(texte, key=lambda t: folge.index(t) if t in folge else len(folge)))
+    zahlen = [w for w in werte.values() if isinstance(w, int | float) and not isinstance(w, bool)]
+    if len(zahlen) == len(texte):
+        return tuple(sorted(texte, key=lambda t: float(werte[t])))  # type: ignore[arg-type]
+    return tuple(texte)
+
+
+def linien(
+    eintraege: Iterable[tuple[date, SessionEntry]],
+    k: Kennzahl,
+    aufteilung: Aufteilung | None = None,
+) -> list[Linie]:
     """Je Teil (Übung + Variante) eine Linie, in der Reihenfolge des ersten Eintrags. Teile
     ohne Wert in dieser Kennzahl (nur abgehakt) fallen weg.
+
+    Mit einer ``aufteilung`` je Kombination der trennenden Einstellungen eine Linie, über
+    alles andere summiert; ihr Filter lässt Einträge weg:
+
+    >>> from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+    >>> s = ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("weight")])
+    >>> def w(v, kg, n): return SessionEntry(exercise_id="x", spec_snapshot=s,
+    ...     result={"reps": [n], "weight": kg, "variant": v})
+    >>> t = date(2026, 11, 2)
+    >>> alle = [(t, w("blind", 5, 10)), (t, w("blind", 20, 4)), (t, w("offen", 5, 7))]
+    >>> kz = kennzahlen([e for _, e in alle])[0]
+    >>> [(x.name, x.gesamt, x.anzahl) for x in linien(alle, kz, Aufteilung(("weight",)))]
+    [('5 kg', 17.0, 2), ('20 kg', 4.0, 1)]
+    >>> [(x.name, x.gesamt) for x in linien(alle, kz, Aufteilung((), {"variant": ("blind",)}))]
+    [('Gesamt', 14.0)]
+    >>> [x.name for x in linien(alle, kz, Aufteilung(("variant", "weight")))]
+    ['blind · 5 kg', 'blind · 20 kg', 'offen · 5 kg']
 
     >>> from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
     >>> def e(v, *n): return SessionEntry(exercise_id="lgs", spec_snapshot=SPEC_SAETZE_WDH,
@@ -388,6 +643,8 @@ def linien(eintraege: Iterable[tuple[date, SessionEntry]], k: Kennzahl) -> list[
     >>> [(x.variante, [w for _, w in x.werte]) for x in linien(tage, summe)]
     [('kurz', [60.0, 40.0]), ('lang', [15.0])]
     """
+    if aufteilung is not None:
+        return _linien_aufgeteilt(eintraege, k, aufteilung)
     gruppen: dict[tuple[str, str], list[tuple[date, SessionEntry]]] = {}
     for tag, e in eintraege:
         gruppen.setdefault((e.exercise_id, variante_von(e.result)), []).append((tag, e))
@@ -399,6 +656,40 @@ def linien(eintraege: Iterable[tuple[date, SessionEntry]], k: Kennzahl) -> list[
     return ergebnis
 
 
+def _linien_aufgeteilt(
+    eintraege: Iterable[tuple[date, SessionEntry]], k: Kennzahl, aufteilung: Aufteilung
+) -> list[Linie]:
+    gruppen: dict[tuple[str, tuple[str, ...]], list[tuple[date, SessionEntry]]] = {}
+    for tag, e in eintraege:
+        if not aufteilung.passt(e):
+            continue
+        teile = tuple(dimension_wert(e, key) for key in aufteilung.nach)
+        gruppen.setdefault((e.exercise_id, teile), []).append((tag, e))
+    ergebnis = []
+    for (exercise_id, teile), liste in gruppen.items():
+        werte = tageswerte(liste, k)
+        if not werte:
+            continue
+        if not aufteilung.nach:
+            name = "Gesamt"
+        else:
+            ohne = "ohne Variante" if aufteilung.nach == (VARIANTE,) else "ohne Angabe"
+            name = " · ".join(t for t in teile if t) or ohne
+        variante = teile[aufteilung.nach.index(VARIANTE)] if VARIANTE in aufteilung.nach else ""
+        ergebnis.append(
+            Linie(
+                exercise_id,
+                variante,
+                tuple(werte),
+                teile=teile,
+                name=name,
+                anzahl=len(liste),
+                gesamt=tageswert([e for _, e in liste], k),
+            )
+        )
+    return ergebnis
+
+
 def linie_name(linie: Linie) -> str:
     """Wie eine Linie heißt: ihre Variante („kurz“), ohne Variante „ohne Variante“.
 
@@ -407,7 +698,7 @@ def linie_name(linie: Linie) -> str:
     >>> linie_name(Linie("lgs", "", ()))
     'ohne Variante'
     """
-    return linie.variante or "ohne Variante"
+    return linie.name or linie.variante or "ohne Variante"
 
 
 def linien_ordnen(liste: Iterable[Linie], reihenfolge: Sequence[str]) -> list[Linie]:
@@ -696,6 +987,7 @@ def tageszeilen(eintraege: Iterable[SessionEntry], namen: dict[str, str]) -> lis
 
 
 __all__ = [
+    "ALLES_GETRENNT",
     "BESTER",
     "HOECHSTER",
     "MITTEL",
@@ -708,11 +1000,21 @@ __all__ = [
     "WOCHENTAGE_LANG",
     "ZEITRAEUME",
     "ZEITRAUM_VORGABE",
+    "Ansicht",
+    "Ansichten",
+    "Aufteilung",
+    "Dimension",
     "Kennzahl",
     "Linie",
     "Tageszeile",
     "Ueberblick",
+    "alles_getrennt",
+    "ansichten_lesen",
+    "aufteilung_lesen",
+    "aufteilung_text",
     "datum_marken",
+    "dimension_wert",
+    "dimensionen",
     "haeufigkeit",
     "kennzahlen",
     "kurven_punkte",

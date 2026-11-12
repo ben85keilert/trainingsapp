@@ -12,8 +12,13 @@ Zeile.
 - **Zeitraum** 4 Wochen · 3 Monate · Jahr · alles; die Kurve beginnt beim ersten Wert darin.
 - **Achse**: das Datum (Vorgabe) oder die Trainingsnummer (gleiche Abstände) — das Symbol
   rechts über der Kurve schaltet um.
+- **Ansichten, Aufteilen, Filter** (Ben, 12.11.2026, P191, `components/verlauf_aufteilung.py`):
+  über der Kurve die gespeicherten Ansichten der Übung und „Aufteilen nach“ — gewählte
+  Einstellungen (Variante, Seite, Gewicht, Winkel …) trennen, über alles andere wird
+  summiert; der Filter lässt nur zählen, was gewählt ist. Darunter je Reihe Summe und „wie
+  oft“. Bei mehr als vier Reihen zeigt die Kurve zuerst die vier jüngsten.
 - **Varianten** (Ben, 21.10.2026, Skizze B2): eine Linie je Variante, jede mit fester
-  Farbe (`core.verlauf.linien_ordnen`).
+  Farbe (`core.verlauf.linien_ordnen`) — die Vorgabe der Aufteilung.
   Die Farbpunkte unter der Kurve blenden Linien aus; „Zusammen“ (gestrichelt) ist
   zuschaltbar und als Vorgabe aus. Die Trainingsnummer zählt über alle Linien.
 """
@@ -34,8 +39,11 @@ from trainingsapp.core.verlauf import (
     MODUS_ZEIT,
     WOCHENTAGE,
     ZEITRAEUME,
+    Ansicht,
+    Aufteilung,
     Kennzahl,
     Linie,
+    dimensionen,
     haeufigkeit,
     kennzahlen,
     linie_name,
@@ -50,6 +58,12 @@ from trainingsapp.core.verlauf import (
 from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.karte import karte
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.verlauf_aufteilung import (
+    ansichten_zeile,
+    aufteilen_zeile,
+    filter_blatt,
+    name_fragen,
+)
 from trainingsapp.ui.components.verlaufskurve import Reihe, saeulen
 from trainingsapp.ui.components.verlaufskurve import linien as kurve_linien
 from trainingsapp.ui.farben import FARBEN, REIHEN
@@ -57,6 +71,10 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.verlauf import kurz_datum
 from trainingsapp.ui.views.ziele import ziele_fuer
 
+#: So viele Linien zeigt die Kurve von sich aus — mehr schaltet man an den Farbpunkten zu
+LINIEN_MAX = 4
+#: ``data`` der Tafel mit Summe und „wie oft“ je Reihe
+REIHEN_TAFEL = "verlauf:reihen"
 #: Die Linie „Zusammen“ — gestrichelt in der Farbe der Nebentexte
 ZUSAMMEN_FARBE = ft.Colors.ON_SURFACE_VARIANT
 
@@ -81,7 +99,13 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
 
     # -- Auswahl: Kennzahl, Zeitraum, Achse, Linien --------------------------------------
 
-    optionen = kennzahlen([e for _, e in alle])
+    dims = dimensionen([e for _, e in alle], original.result_spec if original else None)
+    gespeichert = state.verlauf_ansichten(kachel_id)
+    gewaehlte = state.verlauf_wahl.get(kachel_id)
+    aufteilung = gewaehlte if gewaehlte is not None else gespeichert.beim_oeffnen(dims)
+    ungefiltert = alle
+    alle = [(t, e) for t, e in alle if aufteilung.passt(e)]
+    optionen = kennzahlen([e for _, e in ungefiltert])
     gewaehlt = state.verlauf_kennzahlen.get(kachel_id)
     kennzahl = next((k for k in optionen if k.schluessel == gewaehlt), None)
     kennzahl = kennzahl or (optionen[0] if optionen else None)
@@ -92,11 +116,16 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
     # Die Farbe hängt an der Linie, nicht am Zeitraum: vergeben über alle Einträge
     farben = {
         x.schluessel: FARBEN[REIHEN[i % len(REIHEN)]]
-        for i, x in enumerate(ordnen(linien(alle, kennzahl) if kennzahl else []))
+        for i, x in enumerate(ordnen(linien(alle, kennzahl, aufteilung) if kennzahl else []))
     }
-    teile = ordnen(linien(im_zeitraum, kennzahl)) if kennzahl is not None else []
+    teile = ordnen(linien(im_zeitraum, kennzahl, aufteilung)) if kennzahl is not None else []
     mehrere = len(teile) > 1
     aus = state.verlauf_aus.get(kachel_id, set())
+    if kachel_id not in state.verlauf_aus and len(teile) > LINIEN_MAX:
+        # Viele Reihen (fünf Gewichte): zuerst die mit den jüngsten Einträgen, der Rest
+        # lässt sich an den Farbpunkten zuschalten
+        juengste = sorted(teile, key=lambda x: x.werte[-1][0], reverse=True)[:LINIEN_MAX]
+        aus = {x.schluessel for x in teile if x not in juengste}
     zusammen = mehrere and kachel_id in state.verlauf_zusammen
     sichtbar = [x for x in teile if x.schluessel not in aus]
     if not sichtbar and not zusammen:
@@ -114,7 +143,7 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
 
     def linie_umschalter(schluessel: str) -> Callable[[object], None]:
         def umschalten(_e: object = None) -> None:
-            versteckt = state.verlauf_aus.setdefault(kachel_id, set())
+            versteckt = state.verlauf_aus.setdefault(kachel_id, set(aus))
             if schluessel in versteckt:
                 versteckt.discard(schluessel)
             elif len(sichtbar) > 1 or zusammen:
@@ -133,6 +162,29 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
         else:
             state.verlauf_zusammen.add(kachel_id)
         neu()
+
+    def aufteilung_setzen(wahl: Aufteilung) -> None:
+        state.verlauf_wahl_setzen(kachel_id, wahl)
+        neu()
+
+    def zaehlen(wahl: Aufteilung) -> tuple[int, int]:
+        """Wie viele Einträge im Zeitraum mit diesem Filter zählen — und von wie vielen."""
+        im_raum = [e for t, e in ungefiltert if beginn is None or t >= beginn]
+        return sum(1 for e in im_raum if wahl.passt(e)), len(im_raum)
+
+    def speichern_als(wahl: Aufteilung | None = None) -> None:
+        ziel = wahl if wahl is not None else aufteilung
+
+        def benannt(name: str) -> None:
+            state.verlauf_ansichten_setzen(kachel_id, gespeichert.mit(Ansicht(name, ziel)))
+            aufteilung_setzen(ziel)
+
+        name_fragen(page, "", benannt)
+
+    def filter_oeffnen() -> None:
+        filter_blatt(
+            page, dims, aufteilung, aufteilung_setzen, zaehlen=zaehlen, on_speichern=speichern_als
+        )
 
     def zeitraum_waehlen(e: ft.Event[ft.SegmentedButton]) -> None:
         if e.control.selected:
@@ -179,6 +231,11 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
                 ],
             )
         )
+    if dims:
+        inhalt.append(
+            ansichten_zeile(gespeichert, dims, aufteilung, aufteilung_setzen, speichern_als)
+        )
+        inhalt.append(aufteilen_zeile(dims, aufteilung, aufteilung_setzen, filter_oeffnen))
     inhalt.append(
         ft.SegmentedButton(
             selected=[state.verlauf_zeitraum if state.verlauf_zeitraum in ZEITRAEUME else "3m"],
@@ -261,6 +318,8 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
                 )
             )
         inhalt.append(karte(*teile_der_karte, abstand=4, padding=12))
+        if dims and (mehrere or not aufteilung.ist_vorgabe):
+            inhalt.append(_reihen_tafel(teile, im_zeitraum, kennzahl, farben, name))
         if mehrere:
             # Je sichtbarer Linie ihr höchster Wert (Skizze B2) — gezählt wird je Variante
             zahlen = [
@@ -343,6 +402,76 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
         scroll=ft.ScrollMode.AUTO,
         padding=16,
         controls=[sicher(ft.Column(spacing=10, controls=inhalt), expand=False)],
+    )
+
+
+def _reihen_tafel(
+    teile: list[Linie],
+    eintraege: list[tuple[date, SessionEntry]],
+    kennzahl: Kennzahl,
+    farben: dict[str, str],
+    name: Callable[[Linie], str],
+) -> ft.Control:
+    """Je Reihe ihr Wert über den Zeitraum und wie oft — „Gesamt“ immer zuerst (Ben,
+    12.11.2026: „einmal die Gesamtausgabe der Zeit, dann wie oft ich mit 0°, mit 30°
+    gestanden habe“)."""
+
+    def zeile(punkt: ft.Control, text: str, wert: float | None, oft: int, fett: bool) -> ft.Row:
+        return ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                punkt,
+                ft.Text(
+                    text,
+                    size=13,
+                    weight=ft.FontWeight.W_700 if fett else None,
+                    expand=True,
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+                ft.Text(
+                    kennzahl.text(wert) if wert is not None else "–",
+                    size=13,
+                    weight=ft.FontWeight.W_700,
+                ),
+                ft.Text(f"{oft}×", size=12, opacity=0.7, width=40, text_align=ft.TextAlign.RIGHT),
+            ],
+        )
+
+    alle = [e for _, e in eintraege]
+    zeilen: list[ft.Control] = [
+        zeile(
+            ft.Container(width=10, height=2, bgcolor=ZUSAMMEN_FARBE),
+            "Gesamt",
+            tageswert(alle, kennzahl),
+            len(alle),
+            True,
+        )
+    ]
+    for x in teile:
+        if len(teile) == 1 and name(x) == "Gesamt":
+            continue
+        zeilen.append(
+            zeile(
+                ft.Container(
+                    width=10,
+                    height=10,
+                    border_radius=5,
+                    bgcolor=farben.get(x.schluessel, ft.Colors.PRIMARY),
+                ),
+                name(x),
+                x.gesamt,
+                x.anzahl,
+                False,
+            )
+        )
+    return ft.Container(
+        data=REIHEN_TAFEL,
+        padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+        border_radius=12,
+        bgcolor=ft.Colors.SURFACE_CONTAINER,
+        content=ft.Column(spacing=6, tight=True, controls=zeilen),
     )
 
 

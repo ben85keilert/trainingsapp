@@ -19,7 +19,7 @@ from . import eintraege as offene
 from .models import Exercise, Plan, PlanItem, Session, SessionEntry
 from .parameter import kontextfelder
 from .result_spec import ist_leer
-from .standards import aktive_felder, ziel_von
+from .standards import aktive_felder, ziel_von, ziel_wirksam
 from .tagesfelder import UHRZEIT_NACHTRAGEN
 from .varianten import VARIANTE
 
@@ -312,9 +312,15 @@ def ziel_ohne_kontext(item: PlanItem, uebung: Exercise) -> dict[str, Any]:
     ...                           FieldSpec("hold", FieldType.SET_LIST, "Halten")])
     >>> ziel_ohne_kontext(PlanItem(target={"angle": 90, "hold": [30]}), Exercise(result_spec=spec))
     {'hold': [30]}
+
+    Ein Zielwert für ein Feld, das die Übung nicht mehr hat, ruht
+    (`core.standards.ziel_wirksam`):
+
+    >>> ziel_ohne_kontext(PlanItem(target={"hold": [30], "reps": [8]}), Exercise(result_spec=spec))
+    {'hold': [30]}
     """
     keys = {f.key for f in kontextfelder(uebung.result_spec)}
-    return {k: v for k, v in ziel_von(item, uebung).items() if k not in keys}
+    return {k: v for k, v in ziel_wirksam(item, uebung).items() if k not in keys}
 
 
 def spaetere_stelle_offen(

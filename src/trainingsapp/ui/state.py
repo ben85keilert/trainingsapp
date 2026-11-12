@@ -90,7 +90,13 @@ from trainingsapp.core.training_einstellungen import einstellungen_lesen as trai
 from trainingsapp.core.training_einstellungen import einstellungen_schreiben as training_schreiben
 from trainingsapp.core.uebungsfilter import Uebungsfilter
 from trainingsapp.core.update import Release
-from trainingsapp.core.verlauf import MODUS_ZEIT, ZEITRAUM_VORGABE
+from trainingsapp.core.verlauf import (
+    MODUS_ZEIT,
+    ZEITRAUM_VORGABE,
+    Ansichten,
+    Aufteilung,
+)
+from trainingsapp.core.verlauf import ansichten_lesen as verlauf_ansichten_lesen
 from trainingsapp.data.anhaenge import AnhangRepo
 from trainingsapp.data.bezuege import BezugRepo
 from trainingsapp.data.db import oeffnen
@@ -136,6 +142,9 @@ FOKUS_TAKT = "takt"
 FOKUS_BEWEGUNG = "bewegung"
 FOKUS_HF = "hf"
 FOKUS_KURVE = "kurve"
+#: Schlüssel der Einstellung `<das>:<profil-id>`: je Übung die Ansichten ihres Verlaufs (JSON)
+VERLAUF_ANSICHTEN = "verlauf_ansichten"
+
 FOKUS_EBENEN: dict[str, str] = {
     FOKUS_TAKT: "Takt",
     FOKUS_BEWEGUNG: "Bewegung",
@@ -314,6 +323,8 @@ class AppState:
     verlauf_kennzahlen: dict[str, str] = field(default_factory=dict)
     verlauf_aus: dict[str, set[str]] = field(default_factory=dict)
     verlauf_zusammen: set[str] = field(default_factory=set)
+    #: je Übung, wie ihr Verlauf gerade aufteilt und filtert (`core.verlauf.Aufteilung`)
+    verlauf_wahl: dict[str, Aufteilung] = field(default_factory=dict)
     #: Tagesfelder: die zuletzt gewählte Variante je Feld — der Schnellknopf unter Heute
     #: trägt sie ein (`ui/components/tagesfeld_blatt.py`)
     tagesfeld_varianten: dict[str, str] = field(default_factory=dict)
@@ -1042,6 +1053,35 @@ class AppState:
     def hf_einstellungen_setzen(self, e: HfEinstellungen, profil_id: str | None = None) -> None:
         pid = profil_id or self.profil.id
         self.einstellungen.setzen(f"{SettingRepo.HF_EINSTELLUNGEN}:{pid}", hf_schreiben(e))
+
+    def verlauf_ansichten(self, uebung_id: str) -> Ansichten:
+        """Die gespeicherten Ansichten des Verlaufs dieser Übung — **je Profil und Übung**
+        (Ben, 12.11.2026: in der Übung und im Verlauf einstellbar, `core.verlauf.Ansichten`)."""
+        return verlauf_ansichten_lesen(self._verlauf_ansichten().get(uebung_id))
+
+    def verlauf_ansichten_setzen(self, uebung_id: str, ansichten: Ansichten) -> None:
+        alle = self._verlauf_ansichten()
+        if ansichten == Ansichten():
+            alle.pop(uebung_id, None)
+        else:
+            alle[uebung_id] = ansichten.als_dict()
+        self.einstellungen.setzen(
+            f"{VERLAUF_ANSICHTEN}:{self.profil.id}", json.dumps(alle, ensure_ascii=False)
+        )
+
+    def verlauf_wahl_setzen(self, uebung_id: str, aufteilung: Aufteilung) -> None:
+        """Was der Verlauf der Übung gerade zeigt — gilt, bis die App endet; danach wieder
+        die Ansicht „beim Öffnen“."""
+        self.verlauf_wahl[uebung_id] = aufteilung
+        self.verlauf_aus.pop(uebung_id, None)  # andere Linien: die Auswahl beginnt neu
+
+    def _verlauf_ansichten(self) -> dict[str, Any]:
+        roh = self.einstellungen.lesen(f"{VERLAUF_ANSICHTEN}:{self.profil.id}")
+        try:
+            daten = json.loads(roh) if roh else {}
+        except ValueError:
+            return {}
+        return daten if isinstance(daten, dict) else {}
 
     def hf_eintraege(self, heute: date | None = None) -> list[Profilwert]:
         """Alle Einträge, aus denen das HF-Profil am Stichtag gerechnet wird: die Profilwerte

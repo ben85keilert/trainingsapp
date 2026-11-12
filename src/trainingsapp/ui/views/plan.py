@@ -129,7 +129,7 @@ from trainingsapp.core.standards import (
     chips_fuer,
     mit_plan_spec,
     varianten_an,
-    ziel_von,
+    ziel_wirksam,
 )
 from trainingsapp.core.tagesbilanz import buendeln, ist_leistung, je_variante, mengen
 from trainingsapp.core.timer_eintrag import vom_timer_text
@@ -2388,7 +2388,8 @@ def plan_view(
             )
         uebung = uebung_fuer(item)
         n = item.id in fertig_ids
-        ziel = ziel_text(uebung, ziel_von(item, uebung))
+        # Ein Zielwert für ein Feld, das die Übung nicht mehr hat, ruht (P188)
+        ziel = ziel_text(uebung, ziel_wirksam(item, uebung))
         if einzeln:
             return einzel_block(item, uebung, ziel)
         # Beim Nachtragen steht die Übung schon im Kopf der Seite (Skizze G1)
@@ -2698,7 +2699,7 @@ def plan_view(
                 PlanZeile(
                     item.id,
                     u.name,
-                    ziel_text(mit_spec, ziel_von(item, mit_spec)),
+                    ziel_text(mit_spec, ziel_wirksam(item, mit_spec)),
                     f"{stelle[item.id]}. Mal im Plan" if u.id in mehrfach else "",
                     erledigt=item.id in fertig_ids,
                     uhr_laeuft=e is not None and e.timer is not None,

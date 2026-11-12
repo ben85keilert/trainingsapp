@@ -61,6 +61,7 @@ from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.medienliste import medium_zeile
 from trainingsapp.ui.components.paketvergleich import vergleich_blatt
 from trainingsapp.ui.components.planstand import stand_zeile
+from trainingsapp.ui.components.stellung import mit_stellung, stellung_knopf
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.varianten import etikett
 from trainingsapp.ui.state import AppState
@@ -191,7 +192,7 @@ def zaehlt_als_text(uebung: Exercise, item: PlanItem | None = None) -> tuple[str
     return zaehlt, erklaerung
 
 
-def seitenhilfe(uebung: Exercise, item: PlanItem | None = None) -> str:
+def seitenhilfe(uebung: Exercise, item: PlanItem | None = None, *, stellungen: bool = False) -> str:
     """Das eine „i“ der Übungsseite (Ben, 7.11.2026: „In dieser View reicht ein ‚i‘ für die
     ganze Seite“) — was die Abschnitte bedeuten, samt der Erklärung zu „Zählt als“."""
     zaehlt, erklaerung = zaehlt_als_text(uebung, item)
@@ -211,6 +212,13 @@ def seitenhilfe(uebung: Exercise, item: PlanItem | None = None) -> str:
             "die Beschreibung, angelegt werden sie unter „Übung bearbeiten“."
         )
     teile.append(f"**Zählt als: {zaehlt}.** {erklaerung}")
+    if stellungen:
+        teile.append(
+            "**Trainingsumgebung** (das Symbol mit den Ebenen neben diesem i): Mehrere "
+            "Pakete bringen für diese Übung eigene Parameter, ein Ziel oder einen Takt mit. "
+            "Es gilt immer eine Stellung — Standard oder eine Erweiterung —, sie steht hinter "
+            "dem Namen. Beschreibung, Medien und Timer gelten immer."
+        )
     if sensor_text(uebung, item) is not None:
         teile.append(
             "**Beschleunigungssensor** (Prototyp): Hat das verbundene Gerät einen, zählt er "
@@ -788,10 +796,17 @@ def uebung_detail(
         ft.Icons.INFO_OUTLINE,
         tooltip="Zu dieser Seite",
         on_click=lambda: page.show_dialog(
-            text_dialog("Zu dieser Seite", seitenhilfe(uebung, item))
+            text_dialog(
+                "Zu dieser Seite",
+                seitenhilfe(uebung, item, stellungen=bool(state.pakete.stellungen(uebung.id))),
+            )
         ),
     )
-    aktionen: list[ft.Control] = [info] + (
+    # Direkt hinter dem i (Ben, 12.11.2026, P188): der Schalter der Trainingsumgebung — nur
+    # wenn eine Erweiterung eigene Parameter, ein Ziel oder einen Takt mitbringt
+    schalter = None if geloescht else stellung_knopf(page, state, uebung, state.neu_zeichnen)
+    stellungen = state.pakete.stellungen(uebung.id) if schalter is not None else []
+    aktionen: list[ft.Control] = [info, *([schalter] if schalter is not None else [])] + (
         []
         if geloescht
         else [
@@ -829,7 +844,8 @@ def uebung_detail(
     )
     return ft.View(
         route=route or f"/uebung/{uebung.id}",
-        appbar=ft.AppBar(title=ft.Text(uebung.name), actions=aktionen),
+        # Bei mehreren Stellungen steht die geltende hinter dem Namen (P188)
+        appbar=ft.AppBar(title=ft.Text(mit_stellung(uebung.name, stellungen)), actions=aktionen),
         scroll=ft.ScrollMode.AUTO,
         padding=20,
         controls=[sicher(ft.Column(spacing=22, controls=abschnitte), expand=False)],

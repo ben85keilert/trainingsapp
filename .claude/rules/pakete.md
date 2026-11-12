@@ -47,7 +47,12 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   (U5): `ergaenzungen[]` (Formatversion 5) ergänzen Übungen anderer Pakete — Abschnitte, Medien,
   Parameter, Ziel, Timer, Takt (`core/ergaenzungen.py`); wirksamer Paketstand = Grund
   (`package_base_json`) + Ergänzungen (`exercise_addon`, Migration 049), abgeglichen wie ein
-  Update (`PaketRepo.ergaenzungen_anwenden`) — Eigenes bleibt. **Private Pakete** (U7):
+  Update (`PaketRepo.ergaenzungen_anwenden`) — Eigenes bleibt. **Stellungen** (Ben, 12.11.2026,
+  P188, Migration 058): zwei Stufen, „Standard“ und „Erweiterung“ nebeneinander — Beschreibung,
+  Medien und Timer zusammengelegt, die Trainingsumgebung (`BUENDEL`: Parameter, Ziel, Takt)
+  nur aus der gewählten Stellung (`core.ergaenzungen.wirksam`, Schalter
+  `components/stellung.py` hinter dem „i“ der Übungsseite); je Stellung ein eigener Stand
+  (`exercise_addon_state`), nie wieder still „die spätere gewinnt“. **Private Pakete** (U7):
   verschlüsselt mit einem 8-stelligen Code (`core/privat.py`, nur stdlib: scrypt, SHAKE-256,
   HMAC), Link in einem Ordner mit Zufallsnamen; die App fragt beim Import nach dem Code
   (`CodeNoetig`/`ZugangNoetig`), merkt ihn sich (`package.access_json`, Migration 050) und

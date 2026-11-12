@@ -78,6 +78,7 @@ from trainingsapp.core.standards import ziel_bereinigen, ziel_spec
 from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import TimerProfil
 from trainingsapp.core.uebung_timer import profile_der_uebung
+from trainingsapp.core.verlauf import Ansichten, dimensionen
 from trainingsapp.core.zaehlen import (
     VORLAGE_AUTO,
     VORLAGEN_ANGEBOT,
@@ -88,6 +89,7 @@ from trainingsapp.core.zaehlen import (
     vorlagen_angebot,
 )
 from trainingsapp.ui import paketdatei, systemdialog
+from trainingsapp.ui.components import stellung
 from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
 from trainingsapp.ui.components.bewegungsbild import bewegungsbild_blatt
 from trainingsapp.ui.components.chips_wahl import chips_zeile
@@ -104,6 +106,7 @@ from trainingsapp.ui.components.takt_blatt import takt_blatt, takt_zeile
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.varianten import plakette
 from trainingsapp.ui.components.varianten import symbol as varianten_symbol
+from trainingsapp.ui.components.verlauf_aufteilung import ansichten_karte
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route, kamera_moeglich
@@ -1845,11 +1848,109 @@ def uebung_bearbeiten(
             ),
         ]
 
+    # -- Stellung (Ben, 12.11.2026, P188): welche Trainingsumgebung man hier ändert — und
+    # „Zurücksetzen“ nur für sie (Beschreibung, Medien und Timer bleiben)
+    # Verlauf · Ansichten (Ben, 12.11.2026, P191): dieselben gespeicherten Kombinationen wie
+    # über der Kurve. Sie sind Darstellung, kein Feld der Übung — jede Änderung gilt sofort,
+    # „Speichern“ und „Abbrechen“ des Formulars berühren sie nicht.
+    verlauf_platz = ft.Container()
+
+    def verlauf_zeichnen() -> None:
+        if uebung is None:
+            return
+        eintraege = [
+            e
+            for _, e in state.sitzungen.eintraege_zwischen(
+                state.profil.id, None, state.heute(), exercise_ids=[uebung.id]
+            )
+        ]
+        dims = dimensionen(eintraege, uebung.result_spec)
+        if not dims:
+            verlauf_platz.content = None
+            return
+
+        def geaendert(neue: Ansichten) -> None:
+            state.verlauf_ansichten_setzen(uebung.id, neue)
+            verlauf_zeichnen()
+            with contextlib.suppress(RuntimeError, AssertionError):
+                verlauf_platz.update()
+
+        verlauf_platz.content = ft.Column(
+            spacing=18,
+            controls=[
+                abschnitt("VERLAUF"),
+                ansichten_karte(
+                    page,
+                    state.verlauf_ansichten(uebung.id),
+                    dims,
+                    geaendert,
+                    zaehlen=lambda w: (sum(w.passt(e) for e in eintraege), len(eintraege)),
+                ),
+            ],
+        )
+
+    verlauf_zeichnen()
+
+    stellung_bereich: list[ft.Control] = []
+    stellungen = (
+        state.pakete.stellungen(uebung.id) if paket is not None and uebung is not None else []
+    )
+    if uebung is not None and (gilt := stellung.aktive(stellungen)) is not None:
+        stellung_bereich = [
+            ft.Text(stellung.stellung_text(stellungen), size=12, opacity=0.75, data="stellung")
+        ]
+        if gilt.geaendert:
+            stellung_zurueck = Nachher()
+
+            def stellung_zuruecksetzen() -> None:
+                assert uebung is not None
+                try:
+                    state.pakete.stellung_zuruecksetzen(uebung.id)
+                except sqlite3.Error as fehler:
+                    obersten_schliessen(page)
+                    page.show_dialog(ft.SnackBar(ft.Text(f"Nicht zurückgesetzt: {fehler}")))
+                    return
+                stellung_zurueck.danach(
+                    lambda: page.run_task(page.push_route, f"/uebung/{uebung.id}")
+                )
+                obersten_schliessen(page)
+                page.show_dialog(ft.SnackBar(ft.Text(f"„{gilt.name}“ ist wieder wie im Paket")))
+
+            def stellung_fragen() -> None:
+                page.show_dialog(
+                    ft.AlertDialog(
+                        modal=True,
+                        on_dismiss=stellung_zurueck.bei_schliessen,
+                        title=ft.Text(f"„{gilt.name}“ zurücksetzen?"),
+                        content=ft.Text(
+                            "Parameter, Varianten, Ziel und Takt dieser Stellung werden wieder "
+                            "wie im Paket. Beschreibung, Medien und Timer bleiben — verloren "
+                            "geht auch, was hier noch nicht gespeichert ist. Einträge bleiben."
+                        ),
+                        actions=[
+                            ft.TextButton("Abbrechen", on_click=lambda: obersten_schliessen(page)),
+                            ft.FilledButton("Zurücksetzen", on_click=stellung_zuruecksetzen),
+                        ],
+                    )
+                )
+
+            stellung_bereich.append(
+                ft.TextButton(
+                    f"„{gilt.name}“ zurücksetzen",
+                    icon=ft.Icons.RESTORE,
+                    data="stellung_zurueck",
+                    on_click=stellung_fragen,
+                )
+            )
+
     ausgang["stand"] = stand()
     ansicht = ft.View(
         route=route,
         appbar=formular_leiste(
-            "Neue Übung" if neu else "Übung bearbeiten",
+            "Neue Übung"
+            if neu
+            # Bei mehreren Stellungen steht die geltende dabei (P188)
+            else stellung.mit_stellung("Übung bearbeiten", stellungen),
             abbrechen=abbrechen,
             speichern=speichern,
         ),
@@ -1868,6 +1969,7 @@ def uebung_bearbeiten(
                         abschnitt("BESCHREIBUNG"),
                         beschreibung_spalte,
                         abschnitt("PARAMETER", hilfe_knopf(page, thema="parameter")),
+                        *stellung_bereich,
                         parameter_knoepfe,
                         karten_spalte,
                         abschnitt("VARIANTEN", hilfe_knopf(page, thema="varianten")),
@@ -1928,6 +2030,7 @@ def uebung_bearbeiten(
                                 datei_menue(),
                             ],
                         ),
+                        verlauf_platz,
                         abschnitt("ORDNEN", hilfe_knopf(page, thema="uebungen")),
                         tagwahl.control,
                         ft.Row(

@@ -286,8 +286,11 @@ media = [{ uri = "https://…", title = "Reha-Video" }]   # auch datei = "…" (
   - **Oberfläche** (`components/stellung.py`): auf der Übungsseite direkt hinter dem „i“ der
     Knopf mit den Ebenen (nur mit mindestens einer Stellung neben Standard), die geltende
     Stellung hinter dem Namen („Kniebeuge · Kraft“), im Dialog „geändert“ und ↺ je Stellung;
-    „Übung bearbeiten“ nennt über den Parametern, welche Stellung man ändert. Übungen gelten
-    je Gerät, die Stellung darum auch (nicht je Profil).
+    „Übung bearbeiten“ nennt über den Parametern, welche Stellung man ändert. **Die Wahl der
+    Stellung gilt je Profil** (Ben, 12.11.2026): gemerkt in der Einstellung
+    `stellungen:<profil-id>` (`AppState.stellung_waehlen`), beim Profilwechsel angeglichen
+    (`PaketRepo.stellungen_angleichen`). Die Übung selbst — und was man in einer Stellung an
+    ihr geändert hat — liegt weiter je Gerät (`exercise` hat keine Profilspalte).
   - **Pläne und Verlauf:** Einträge halten ihre Kopie der Parameter — nichts ändert sich.
     Ein Ziel der Planübung für ein Feld, das die geltende Stellung nicht hat, **ruht**
     (`core.standards.ziel_wirksam`): Es bleibt an der Planübung und gilt wieder, sobald das

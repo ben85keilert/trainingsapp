@@ -142,6 +142,8 @@ FOKUS_TAKT = "takt"
 FOKUS_BEWEGUNG = "bewegung"
 FOKUS_HF = "hf"
 FOKUS_KURVE = "kurve"
+#: Schlüssel der Einstellung `<das>:<profil-id>`: je Paketübung die gewählte Stellung (JSON)
+STELLUNGEN = "stellungen"
 #: Schlüssel der Einstellung `<das>:<profil-id>`: je Übung die Ansichten ihres Verlaufs (JSON)
 VERLAUF_ANSICHTEN = "verlauf_ansichten"
 
@@ -749,9 +751,34 @@ class AppState:
             raise KeyError(profil_id)
         if profil.id != self.profil.id:
             self._sitzung_des_profils_raeumen()
+        gewechselt = profil.id != self.profil.id
         self.profil = profil
         self.einstellungen.setzen(SettingRepo.AKTIVES_PROFIL, profil.id)
+        if gewechselt:
+            # Die Stellungen der Paketübungen gelten je Profil (Ben, 12.11.2026, P188)
+            self.pakete.stellungen_angleichen(self._stellungen_des_profils())
         return profil
+
+    def stellung_waehlen(self, uebung_id: str, stellung: str) -> bool:
+        """Die Trainingsumgebung einer Paketübung umschalten (`PaketRepo.stellung_waehlen`) —
+        und sich die Wahl **für dieses Profil** merken: Ein anderes Profil behält seine."""
+        geaendert = self.pakete.stellung_waehlen(uebung_id, stellung)
+        wahlen = self._stellungen_des_profils()
+        wahlen[uebung_id] = stellung
+        self.einstellungen.setzen(
+            f"{STELLUNGEN}:{self.profil.id}", json.dumps(wahlen, ensure_ascii=False)
+        )
+        return geaendert
+
+    def _stellungen_des_profils(self) -> dict[str, str]:
+        roh = self.einstellungen.lesen(f"{STELLUNGEN}:{self.profil.id}")
+        try:
+            daten = json.loads(roh) if roh else {}
+        except ValueError:
+            return {}
+        if not isinstance(daten, dict):
+            return {}
+        return {str(k): str(v) for k, v in daten.items()}
 
     def _sitzung_des_profils_raeumen(self) -> None:
         """Vor dem Profilwechsel: was nur zu diesem Profil gehört, bleibt nicht stehen (N81) —

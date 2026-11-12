@@ -88,7 +88,7 @@ def stellung_dialog(
                 schliessen(dialog)
                 return
             try:
-                state.pakete.stellung_waehlen(uebung.id, s.kennung)
+                state.stellung_waehlen(uebung.id, s.kennung)
             except sqlite3.Error as fehler:
                 scheitern(fehler)
                 return

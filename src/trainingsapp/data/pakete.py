@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
@@ -1042,6 +1042,29 @@ class PaketRepo:
                 "UPDATE exercise SET addon_choice = ? WHERE id = ?", (stellung, uebung_id)
             )
         return self.ergaenzungen_anwenden(uebung_id)
+
+    def stellungen_angleichen(self, wahlen: Mapping[str, str]) -> int:
+        """Die Stellungen so setzen, wie ein **Profil** sie gewählt hat (Ben, 12.11.2026:
+        „Stellung gilt nach Profil“): ``wahlen`` Übung → Stellung; jede andere Übung mit einer
+        Wahl geht auf die Vorgabe zurück. Die Übung selbst liegt je Gerät — beim Profilwechsel
+        wird darum umgeschaltet wie von Hand (`ergaenzungen_anwenden`); was in einer Stellung
+        geändert wurde, bleibt bei ihr liegen. Gibt zurück, wie viele Übungen umschalteten."""
+        bisherige = dict(
+            self.con.execute(
+                "SELECT id, addon_choice FROM exercise WHERE addon_choice IS NOT NULL"
+            ).fetchall()
+        )
+        geaendert = 0
+        for uebung_id in sorted({*bisherige, *wahlen}):
+            bisher, soll = bisherige.get(uebung_id), wahlen.get(uebung_id)
+            if soll == bisher:
+                continue
+            with transaktion(self.con):
+                self.con.execute(
+                    "UPDATE exercise SET addon_choice = ? WHERE id = ?", (soll, uebung_id)
+                )
+            geaendert += self.ergaenzungen_anwenden(uebung_id)
+        return geaendert
 
     def stellung_zuruecksetzen(self, uebung_id: str, stellung: str | None = None) -> bool:
         """„Zurücksetzen“ nur der Trainingsumgebung einer Stellung (Vorgabe: der geltenden)

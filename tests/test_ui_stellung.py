@@ -139,3 +139,31 @@ def test_geaendert_und_zuruecksetzen(page, state) -> None:
     formular = uebung_bearbeiten(page, state, _knie(state))
     assert "schon geändert" not in _daten(formular, "stellung").value
     assert _daten(formular, "stellung_zurueck") is None
+
+
+def test_stellung_gilt_je_profil(state) -> None:
+    """Ben, 12.11.2026: „Stellung gilt nach Profil“ — ein Profil schaltet um, das andere
+    behält seine Wahl; beim Profilwechsel gilt wieder die eigene."""
+    from trainingsapp.core.models import Subject
+    from trainingsapp.data.pakete import STANDARD
+
+    knie = seed_id("kniebeuge")
+    state.pakete.importieren(paket_lesen(KRAFT))
+    kraft_ziel = {"reps": [5, 5, 5]}
+    grund_ziel = None
+
+    def ziel():
+        return state.uebungen.laden(knie).default_target
+
+    assert ziel() == kraft_ziel  # Vorgabe: die Erweiterung
+    erstes = state.profil
+    assert state.stellung_waehlen(knie, STANDARD)
+    grund_ziel = ziel()
+    assert grund_ziel != kraft_ziel
+    zweites = Subject(name="Zweites")
+    state.profile.speichern(zweites)
+    state.profil_wechseln(zweites.id)
+    assert ziel() == kraft_ziel  # das zweite Profil hat nichts gewählt: Vorgabe
+    state.profil_wechseln(erstes.id)
+    assert ziel() == grund_ziel  # das erste hat seine Wahl wieder
+    assert [s.name for s in state.pakete.stellungen(knie) if s.aktiv] == ["Standard"]

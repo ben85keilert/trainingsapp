@@ -20,6 +20,8 @@ Töne auf der Karte stehen; Stillstand grau und gepunktet.
 
 from __future__ import annotations
 
+import contextlib
+import math
 from collections.abc import Sequence
 
 import flet as ft
@@ -36,6 +38,11 @@ USER_AGENT_PAKET = "de.praxisebert.trainingsassistent"
 
 LINIE = ft.Colors.BLUE_700
 POSITION = ft.Colors.BLUE_600
+#: Der Marker, der dem Strich der Kurve folgt
+ZEIGER = ft.Colors.DEEP_PURPLE_600
+#: Rand um die eingepasste Strecke (px) und die größte Zoomstufe dabei
+RAND_PX = 28
+ZOOM_MAX = 17.0
 
 #: Ein Linienstück: Ortungen, Farbe, gepunktet (Stillstand)
 Faerbung = Sequence[tuple[Sequence[Punkt], str, bool]]
@@ -208,70 +215,184 @@ class StreckenKarte:
         await self.karte.center_on(_ort(punkt), zoom=None)
 
 
-def ganze_strecke(
-    teilstuecke: Sequence[Sequence[Punkt]], *, hoehe: float = 300, faerbung: Faerbung | None = None
-) -> ft.Control:
+def zoom_fuer(
+    sued: float, nord: float, west: float, ost: float, breite_px: float, hoehe_px: float
+) -> float:
+    """Die Zoomstufe, bei der der Kasten in die Fläche passt (Web-Mercator, Kacheln 256 px).
+
+    >>> round(zoom_fuer(52.50, 52.51, 13.40, 13.42, 320, 244), 1)   # rund 1,4 km breit
+    14.4
+    >>> zoom_fuer(52.5, 52.5, 13.4, 13.4, 320, 244)                 # ein Punkt: nah heran
+    17.0
+    """
+
+    def merkator(breite_grad: float) -> float:
+        sinus = math.sin(math.radians(max(min(breite_grad, 85.0), -85.0)))
+        return math.log((1 + sinus) / (1 - sinus)) / 2
+
+    anteil_x = max(ost - west, 0.0) / 360.0
+    anteil_y = max(merkator(nord) - merkator(sued), 0.0) / (2 * math.pi)
+    stufen = [
+        math.log2(px / (256.0 * anteil))
+        for px, anteil in ((breite_px, anteil_x), (hoehe_px, anteil_y))
+        if anteil > 0 and px > 0
+    ]
+    return max(min(min(stufen, default=ZOOM_MAX), ZOOM_MAX), 1.0)
+
+
+class GanzeStrecke:
     """Die ganze Strecke, eingepasst — für die Auswertung; Start grün, Ziel rot.
 
     Für die Linie reicht ein Punkt je 5 m; eine Stunde Laufen hat sonst 3600. Mit
     ``faerbung`` stattdessen die Stücke in Farbe.
+
+    Ben, 12.11.2026: ein Knopf **„Ganze Strecke zeigen“** (oben rechts) passt die Karte
+    wieder ein, nachdem man sie verschoben oder gezoomt hat; `zeiger` setzt einen Marker
+    auf eine Ortung — er folgt dem Strich der Kurve „Weg über die Zeit“.
     """
-    teile = [ausgeduennt(teil, 5.0) for teil in teilstuecke if teil]
-    alle = [p for teil in teile for p in teil]
-    if not alle:
-        return ft.Container(
-            height=80,
-            alignment=ft.Alignment.CENTER,
-            content=ft.Text("Ohne GPS aufgezeichnet — keine Strecke.", opacity=0.6),
+
+    def __init__(
+        self,
+        teilstuecke: Sequence[Sequence[Punkt]],
+        *,
+        hoehe: float = 300,
+        faerbung: Faerbung | None = None,
+    ) -> None:
+        teile = [ausgeduennt(teil, 5.0) for teil in teilstuecke if teil]
+        alle = [p for teil in teile for p in teil]
+        self.karte: fm.Map | None = None
+        self._hoehe = hoehe
+        self._breite_px = 320.0
+        self._zeiger: fm.CircleMarker | None = None
+        if not alle:
+            self.control: ft.Control = ft.Container(
+                height=80,
+                alignment=ft.Alignment.CENTER,
+                content=ft.Text("Ohne GPS aufgezeichnet — keine Strecke.", opacity=0.6),
+            )
+            return
+        self._sued, self._nord = min(p.lat for p in alle), max(p.lat for p in alle)
+        self._west, self._ost = min(p.lon for p in alle), max(p.lon for p in alle)
+        kacheln, namensnennung = osm_ebenen()  # einmal — zwei Aufrufe verwarfen je eine Schicht
+        self._zeiger = fm.CircleMarker(
+            coordinates=_ort(alle[0]),
+            radius=0,
+            color=ZEIGER,
+            border_color=ft.Colors.WHITE,
+            border_stroke_width=3,
         )
-    sued, nord = min(p.lat for p in alle), max(p.lat for p in alle)
-    west, ost = min(p.lon for p in alle), max(p.lon for p in alle)
-    kacheln, namensnennung = osm_ebenen()  # einmal — zwei Aufrufe verwarfen je eine Schicht
-    return fm.Map(
-        height=hoehe,
-        initial_center=fm.MapLatitudeLongitude((sued + nord) / 2, (west + ost) / 2),
-        initial_zoom=15,
-        initial_camera_fit=fm.CameraFit(
-            bounds=fm.MapLatitudeLongitudeBounds(
-                fm.MapLatitudeLongitude(sued, west), fm.MapLatitudeLongitude(nord, ost)
+        self.karte = fm.Map(
+            height=hoehe,
+            initial_center=self._mitte(),
+            initial_zoom=15,
+            initial_camera_fit=fm.CameraFit(
+                bounds=fm.MapLatitudeLongitudeBounds(
+                    fm.MapLatitudeLongitude(self._sued, self._west),
+                    fm.MapLatitudeLongitude(self._nord, self._ost),
+                ),
+                padding=ft.Padding.all(RAND_PX),
+                max_zoom=ZOOM_MAX,
             ),
-            padding=ft.Padding.all(28),
-            max_zoom=17,
-        ),
-        layers=[
-            kacheln,
-            fm.PolylineLayer(
-                polylines=_linien(faerbung)
-                if faerbung is not None
-                else [
-                    fm.PolylineMarker(
-                        coordinates=[_ort(p) for p in teil], color=LINIE, stroke_width=4
-                    )
-                    for teil in teile
-                    if len(teil) > 1
+            layers=[
+                kacheln,
+                fm.PolylineLayer(
+                    polylines=_linien(faerbung)
+                    if faerbung is not None
+                    else [
+                        fm.PolylineMarker(
+                            coordinates=[_ort(p) for p in teil], color=LINIE, stroke_width=4
+                        )
+                        for teil in teile
+                        if len(teil) > 1
+                    ]
+                ),
+                fm.CircleLayer(
+                    circles=[
+                        fm.CircleMarker(
+                            coordinates=_ort(alle[0]),
+                            radius=7,
+                            color=ft.Colors.GREEN_600,
+                            border_color=ft.Colors.WHITE,
+                            border_stroke_width=2,
+                        ),
+                        fm.CircleMarker(
+                            coordinates=_ort(alle[-1]),
+                            radius=7,
+                            color=ft.Colors.RED_600,
+                            border_color=ft.Colors.WHITE,
+                            border_stroke_width=2,
+                        ),
+                        self._zeiger,
+                    ]
+                ),
+                namensnennung,
+            ],
+        )
+
+        def groesse(e: ft.LayoutSizeChangeEvent) -> None:
+            self._breite_px = max(float(e.width), 100.0)
+
+        self.control = ft.Container(
+            on_size_change=groesse,
+            content=ft.Stack(
+                controls=[
+                    self.karte,
+                    ft.Container(
+                        right=8,
+                        top=8,
+                        border_radius=20,
+                        bgcolor=ft.Colors.with_opacity(0.85, ft.Colors.WHITE),
+                        content=ft.IconButton(
+                            ft.Icons.FIT_SCREEN,
+                            icon_color=ft.Colors.BLACK_87,
+                            tooltip="Ganze Strecke zeigen",
+                            data="karte_einpassen",
+                            on_click=self.einpassen,
+                        ),
+                    ),
                 ]
             ),
-            fm.CircleLayer(
-                circles=[
-                    fm.CircleMarker(
-                        coordinates=_ort(alle[0]),
-                        radius=7,
-                        color=ft.Colors.GREEN_600,
-                        border_color=ft.Colors.WHITE,
-                        border_stroke_width=2,
-                    ),
-                    fm.CircleMarker(
-                        coordinates=_ort(alle[-1]),
-                        radius=7,
-                        color=ft.Colors.RED_600,
-                        border_color=ft.Colors.WHITE,
-                        border_stroke_width=2,
-                    ),
-                ]
-            ),
-            namensnennung,
-        ],
-    )
+        )
+
+    def _mitte(self) -> fm.MapLatitudeLongitude:
+        return fm.MapLatitudeLongitude((self._sued + self._nord) / 2, (self._west + self._ost) / 2)
+
+    def zoom(self) -> float:
+        """Die Zoomstufe, bei der die Strecke mit Rand in die Karte passt."""
+        return zoom_fuer(
+            self._sued,
+            self._nord,
+            self._west,
+            self._ost,
+            self._breite_px - 2 * RAND_PX,
+            self._hoehe - 2 * RAND_PX,
+        )
+
+    async def einpassen(self, _e: object = None) -> None:
+        """Die Karte zurück auf die ganze Strecke: Mitte des Kastens, Zoom mit Rand."""
+        if self.karte is None:
+            return
+        with contextlib.suppress(Exception):  # Karte nicht (mehr) auf der Seite
+            await self.karte.move_to(destination=self._mitte(), zoom=self.zoom(), rotation=0)
+
+    def zeiger(self, p: Punkt | None) -> None:
+        """Den Marker auf eine Ortung setzen — ``None`` nimmt ihn weg."""
+        if self._zeiger is None:
+            return
+        if p is None:
+            self._zeiger.radius = 0
+        else:
+            self._zeiger.coordinates = _ort(p)
+            self._zeiger.radius = 8
+        with contextlib.suppress(Exception):
+            self._zeiger.update()
+
+
+def ganze_strecke(
+    teilstuecke: Sequence[Sequence[Punkt]], *, hoehe: float = 300, faerbung: Faerbung | None = None
+) -> ft.Control:
+    """Die Karte der `GanzeStrecke` — für Aufrufer, die weder Marker noch Einpassen brauchen."""
+    return GanzeStrecke(teilstuecke, hoehe=hoehe, faerbung=faerbung).control
 
 
 __all__ = [
@@ -279,9 +400,11 @@ __all__ = [
     "OSM_URL",
     "USER_AGENT_PAKET",
     "Faerbung",
+    "GanzeStrecke",
     "StreckenKarte",
     "faerbung_aus",
     "ganze_strecke",
     "legende",
     "osm_ebenen",
+    "zoom_fuer",
 ]

@@ -241,3 +241,39 @@ def test_griff_bleibt_im_bild() -> None:
     assert y_grenzen([Reihe([])]) is None
     assert griff_oben_px(200.0, (50.0, 150.0), 322.0) == 0.0  # über der Achse: oben
     assert griff_oben_px(0.0, (50.0, 150.0), 322.0) == 276.0  # darunter: unten
+
+
+async def test_hf_vollbild_hat_die_abschnitte_wie_das_hrv_vollbild(daten) -> None:
+    """Ben, 12.11.2026 („halte das einheitlich“): Die Leiste hat „Abschnitte“ — dieselbe
+    Seitenleiste wie im HRV-Vollbild: Start fragt den Namen, „‹Name› · Ende“ beendet, die
+    Liste zeigt den Abschnitt; ein zweiter Tipp auf den Knopf schließt die Leiste."""
+    state, tmp_path = daten
+    _profil_fuellen(state)
+    lauf, task = await _lauf(state, tmp_path, sekunden=30)
+    try:
+        seite = _quer()
+        ansicht = live_vollbild_view(seite, state)
+        assert "Abschnitt: Start" not in _textknoepfe(ansicht)
+        _leiste(ansicht, "Abschnitte").on_click(None)
+        assert "Abschnitt: Start" in _textknoepfe(ansicht)
+        lauf.abschnitt_starten("Stufe 1")
+        await _weiter(lauf, 10)
+        lauf.beobachter(True)
+        assert "Stufe 1 · Ende" in _textknoepfe(ansicht)
+        assert "Stufe 1" in _texte(ansicht)
+        ende = next(
+            c
+            for c in _alle(ansicht)
+            if isinstance(c, ft.TextButton) and c.content == "Stufe 1 · Ende"
+        )
+        ende.on_click()
+        assert lauf.offener_abschnitt() is None and len(lauf.abschnitte()) == 1
+        _leiste(ansicht, "Abschnitte").on_click(None)
+        assert "Abschnitt: Start" not in _textknoepfe(ansicht)
+    finally:
+        await lauf.trennen()
+        await asyncio.wait_for(task, 5)
+
+
+def _textknoepfe(wurzel) -> list[str]:
+    return [str(c.content) for c in _alle(wurzel) if isinstance(c, ft.TextButton) and c.visible]

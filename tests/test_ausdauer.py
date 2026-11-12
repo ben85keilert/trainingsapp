@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import itertools
 import json
 import math
 import random
@@ -1579,3 +1580,170 @@ def test_werte_zwischen_baut_die_felder_einmal_je_messung(monkeypatch) -> None:
     rec.beats.append(Beat(float(t[-1]) + 0.8, 800, 75, float(t[-1]) + 0.8))
     hrv_training.werte_zwischen(rec, korr, 0.0, 100.0)
     assert len(gebaut) == 3
+
+
+# ---------------------------------------------------------------------------
+# Ben, 12.11.2026: Weg über die Zeit, Karte einpassen, Schnitt am Strich, Uhrendrift
+# ---------------------------------------------------------------------------
+
+
+def _mit_pause() -> list[Punkt]:
+    """120 s gehen, 60 s stehen, 120 s gehen."""
+    return [
+        *_gang(120, 1.5),
+        *_gang(60, 0.0, t0=1_000_120.0, start_m=180.0),
+        *_gang(120, 1.5, t0=1_000_180.0, start_m=180.0),
+    ]
+
+
+def test_weg_ueber_die_zeit_strich_marker_und_schnitt() -> None:
+    """Die Kurve trägt die Farben der Karte, die Pause ist ein eigenes (graues) Stück; ein
+    Tipp setzt den Strich: Ablesezeile, Marker auf der Karte und „Hier kürzen …“ folgen."""
+    pytest.importorskip("flet")
+    import flet as ft
+
+    from trainingsapp.core.strecke_farbe import spanne, stuecke
+    from trainingsapp.ui.components.karte_strecke import GanzeStrecke, faerbung_aus
+    from trainingsapp.ui.components.weg_zeit import WegZeit
+
+    punkte = _mit_pause()
+    r = rechnen(punkte, GEHEN)
+    st = stuecke(r.teilstuecke, lambda p: p.tempo_ms)
+    faerbung = faerbung_aus(st, "tempo", spanne(st))
+    karte = GanzeStrecke(r.teilstuecke, faerbung=faerbung)
+    geschnitten: list[float] = []
+    herz = {p.t: 120 + int(p.t - punkte[0].t) // 10 for p in punkte}
+    wz = WegZeit(
+        r,
+        punkte,
+        sportart=GEHEN,
+        faerbung=faerbung,
+        karte=karte,
+        herz=herz,
+        kuerzen=geschnitten.append,
+    )
+    assert ft.Colors.GREY_500 in {reihe.farbe for reihe in wz._reihen}  # die Pause
+    # Die Zeit läuft nie zurück, der Weg nimmt nie ab — nichts liegt übereinander
+    alle = [p for reihe in wz._reihen for p in reihe.punkte]
+    assert all(a[0] <= b[0] and a[1] <= b[1] + 1e-9 for a, b in itertools.pairwise(alle))
+    assert alle[-1][0] == pytest.approx(299 / 60, abs=0.01)
+    assert alle[-1][1] == pytest.approx(r.distanz_m / 1000, abs=0.01)
+    assert wz.strich_s is None and not wz._schnitt.visible and "Tippen" in wz._text.value
+    # Tipp in die Mitte der Zeichenfläche (Breite 320, links 52 px Achse): halbe Dauer
+    wz._breite_px = 320.0
+    wz._getippt(SimpleNamespace(local_position=SimpleNamespace(x=52 + 134, y=40)))
+    assert wz.strich_s == pytest.approx(149.5, abs=0.5)
+    assert wz._text.value.startswith("2:29 · 0,18 km · Pause · 13")  # steht, HF aus der Messung
+    assert karte._zeiger.radius > 0
+    assert karte._zeiger.coordinates.latitude == pytest.approx(wz.ortung(149.5).lat)
+    assert wz._schnitt.visible
+    wz._schnitt.on_click()
+    assert geschnitten == [wz.strich_s]
+    # In Bewegung steht das Tempo da; ✕ nimmt Strich und Marker weg
+    wz.setzen(60.0)
+    assert " /km" in wz._text.value and "Pause" not in wz._text.value
+    wz._weg.on_click()
+    assert wz.strich_s is None and karte._zeiger.radius == 0 and not wz._schnitt.visible
+    # Ohne `kuerzen` (laufendes Training) gibt es den Schnitt nicht
+    ohne = WegZeit(r, punkte, sportart=GEHEN)
+    ohne.setzen(30.0)
+    assert not ohne._schnitt.visible and len(ohne._reihen) >= 1
+
+
+async def test_karte_einpassen_zeigt_wieder_die_ganze_strecke() -> None:
+    """Der Knopf auf der Karte: Mitte des Kastens um die Strecke, Zoom mit Rand, ungedreht."""
+    pytest.importorskip("flet")
+    import flet as ft
+
+    from trainingsapp.ui.components.karte_strecke import ZOOM_MAX, GanzeStrecke
+
+    punkte = _gang(600, 3.0)
+    karte = GanzeStrecke(rechnen(punkte, GEHEN).teilstuecke)
+    gerufen: list[dict] = []
+
+    async def move_to(**werte) -> None:
+        gerufen.append(werte)
+
+    object.__setattr__(karte.karte, "move_to", move_to)
+    knopf = next(
+        c
+        for c in _alle(karte.control)
+        if isinstance(c, ft.IconButton) and c.data == "karte_einpassen"
+    )
+    await knopf.on_click(None)
+    (aufruf,) = gerufen
+    lats = [p.lat for p in punkte]
+    assert aufruf["destination"].latitude == pytest.approx((min(lats) + max(lats)) / 2, abs=1e-4)
+    assert aufruf["rotation"] == 0 and 12 < aufruf["zoom"] < ZOOM_MAX  # 1,8 km auf 244 px
+    # Ohne Ortungen: ein Hinweis statt Karte, Marker und Einpassen tun nichts
+    leer = GanzeStrecke([])
+    leer.zeiger(punkte[0])
+    await leer.einpassen()
+    assert leer.karte is None
+
+
+async def test_auswertung_zeigt_weg_ueber_die_zeit_und_schneidet_am_strich(daten) -> None:
+    """Die Auswertung hat die Karte „Weg über die Zeit“; „Hier kürzen …“ öffnet das Blatt
+    „Ende kürzen“ mit der Zeit des Strichs und dem Chip „Strich der Kurve“."""
+    import flet as ft
+
+    from trainingsapp.ui.views.ausdauer import ausdauer_detail_view
+
+    state, tmp_path = daten
+    strecke, _ = await _training(state, tmp_path, punkte=_mit_nachlauf())
+    seite = _seite()
+    gezeigt: list = []
+    seite.show_dialog = gezeigt.append
+    view = ausdauer_detail_view(seite, state, state.strecken.laden(strecke.id))
+    await asyncio.gather(*seite.aufgaben)
+    assert "WEG ÜBER DIE ZEIT" in _texte(view)
+    finger = next(
+        c for c in _alle(view) if isinstance(c, ft.GestureDetector) and c.on_tap_down is not None
+    )
+    finger.on_tap_down(SimpleNamespace(local_position=SimpleNamespace(x=52 + 134, y=40)))
+    schnitt = next(
+        c for c in _alle(view) if isinstance(c, ft.TextButton) and c.data == "weg_zeit_kuerzen"
+    )
+    assert schnitt.visible
+    seite.aufgaben.clear()
+    schnitt.on_click()
+    await asyncio.gather(*seite.aufgaben)
+    blatt = next(d for d in gezeigt if isinstance(d, ft.BottomSheet))
+    feld = next(c for c in _alle(blatt) if isinstance(c, ft.TextField))
+    assert feld.value not in ("", "15:00")  # nicht die letzte Bewegung — der Strich
+    assert any(isinstance(c, ft.Chip) and c.label.value == "Strich der Kurve" for c in _alle(blatt))
+
+
+def test_tiefschlaf_verschiebt_herzschlaege_gegen_ortungen() -> None:
+    """Die Uhr der Herzschläge steht im Tiefschlaf des Handys, die der Ortungen nicht
+    (`core.uhrendrift`): Der Versatz der Einheit gilt für das Ende; davor liegt ein Schlag
+    um den noch kommenden Schlaf später auf der App-Uhr. Ohne Einheit (Startzeiten) gilt der
+    Anfang."""
+    from pathlib import Path
+
+    from trainingsapp.ui.training import HrvBezug, mit_schlaf
+
+    t0 = 1_000_000.0
+    wach = [Punkt(t0 + i, LAT0, LON0, t_empfang=50.0 + i) for i in range(100)]
+    # 40 s Tiefschlaf: Ortungszeit +40, App-Uhr steht
+    danach = [Punkt(t0 + 140 + i, LAT0, LON0, t_empfang=150.0 + i) for i in range(100)]
+    # Versatz der Einheit: laufendes Minimum von t_empfang − t, also der Stand am Ende
+    bezug = mit_schlaf(HrvBezug(Path("x.json"), verschiebung_s=t0 + 40.0 - 50.0), wach + danach)
+    assert bezug.schlaf == ((t0, 40.0), (t0 + 140.0, 0.0))
+    # App-Uhr 50 + i beim Empfang ↔ t_wall_s = Ortungszeit − Verschiebung (+ Schlaf danach)
+    assert bezug.ortung_zu_wand(t0 + 10.0, None) == pytest.approx(60.0)  # vorher: 20.0
+    assert bezug.ortung_zu_wand(t0 + 150.0, None) == pytest.approx(160.0)
+    assert bezug.wand_zu_ortung(60.0, None) == pytest.approx(t0 + 10.0)
+    assert bezug.wand_zu_ortung(160.0, None) == pytest.approx(t0 + 150.0)
+    # Ohne Schlaf ändert sich nichts
+    ruhig = mit_schlaf(HrvBezug(Path("x.json"), verschiebung_s=t0 - 50.0), wach)
+    assert ruhig.schlaf == () and ruhig.ortung_zu_wand(t0 + 10.0, None) == pytest.approx(60.0)
+    assert mit_schlaf(None, wach) is None
+    # Über die Startzeiten: richtig am Anfang, danach fehlt der Schlaf auf der App-Uhr
+    from datetime import UTC, datetime
+
+    start = datetime.fromtimestamp(t0, UTC)
+    alt = mit_schlaf(HrvBezug(Path("x.json")), wach + danach)
+    assert alt.ortung_zu_wand(t0 + 10.0, start) == pytest.approx(10.0)
+    assert alt.ortung_zu_wand(t0 + 150.0, start) == pytest.approx(110.0)
+    assert alt.wand_zu_ortung(110.0, start) == pytest.approx(t0 + 150.0)

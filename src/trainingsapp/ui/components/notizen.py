@@ -216,6 +216,8 @@ class Notizfeld:
         #: Beim Ziehen: die Höhe, die die Liste gerade hat (None = es wird nicht gezogen)
         self._zug_px: float | None = None
         self._anzahl = 0
+        #: Live kam eine Notiz dazu — nach dem nächsten `update` ans Ende rollen
+        self._ende_faellig = False
         #: So viele Zeilen zeigt die Liste, mehr rollt (0 = alle)
         self._zeilen = zeilen or (lambda: 0)
         self._ereignisse = ereignisse
@@ -803,6 +805,7 @@ class Notizfeld:
         self._aufbauen()
         with contextlib.suppress(Exception):
             self.control.update()
+        self._ans_ende()
         if kurve:
             self._neu_zeichnen()
 
@@ -1047,25 +1050,41 @@ class Notizfeld:
         self._rollen(len(sichtbar))
 
     def _rollen(self, anzahl: int) -> None:
-        """Mehr Notizen als eingestellt: feste Höhe, Rollbalken — live ans Ende (die
-        neueste), außer eine Eingabe ist offen (sie stünde sonst außer Sicht)."""
+        """Mehr Notizen als eingestellt: feste Höhe, Rollbalken.
+
+        ``auto_scroll`` bleibt aus (Ben, 12.11.2026): Flet baut die Rollfläche neu, sobald
+        es wechselt — mit offener Eingabe sprang die Liste darum in die erste Zeile. Ans
+        Ende (zur neuesten) rückt `_ans_ende`, wenn live eine Notiz dazukommt.
+        """
+        gewachsen = anzahl > self._anzahl
         self._anzahl = anzahl
+        self._liste.auto_scroll = False
         fest = self._zug_px if self._zug_px is not None else self._hoehe()
-        if fest and self._hoehe_merken is not None:
-            # Von Hand gezogen (A21): diese Höhe gilt, die Liste rollt darin
+        # Die gezogene Höhe ist eine Obergrenze: Mit wenigen (oder keinen) Notizen bliebe
+        # sonst ein leeres Feld zwischen Kopf und Kurven stehen (Ben, 12.11.2026)
+        if fest and self._hoehe_merken is not None and anzahl * ZEILE_PX > fest:
             self._liste.height = float(fest)
             self._liste.scroll = ft.ScrollMode.AUTO
-            self._liste.auto_scroll = self.live and self.bearbeite is None
-            return
-        grenze = self._zeilen()
-        if grenze > 0 and anzahl > grenze:
-            self._liste.height = grenze * ZEILE_PX
-            self._liste.scroll = ft.ScrollMode.AUTO
-            self._liste.auto_scroll = self.live and self.bearbeite is None
         else:
-            self._liste.height = None
-            self._liste.scroll = None
-            self._liste.auto_scroll = False
+            grenze = self._zeilen()
+            if not fest and grenze > 0 and anzahl > grenze:
+                self._liste.height = grenze * ZEILE_PX
+                self._liste.scroll = ft.ScrollMode.AUTO
+            else:
+                self._liste.height = None
+                self._liste.scroll = None
+        if gewachsen and self.live and self.bearbeite is None and self._liste.scroll is not None:
+            self._ende_faellig = True
+
+    def _ans_ende(self) -> None:
+        """Live nach einer neuen Notiz: die Liste zeigt die neueste (nach dem `update`)."""
+        if not self._ende_faellig:
+            return
+        self._ende_faellig = False
+        with contextlib.suppress(Exception):
+            page = self._liste.page
+            if page is not None:
+                page.run_task(self._liste.scroll_to, offset=-1, duration=200)
 
     # -- Höhe von Hand (A21) ------------------------------------------------------
 
@@ -1083,8 +1102,14 @@ class Notizfeld:
         ohne_auto_update()  # kommt beim Ziehen dauernd — nur die Liste neu zeichnen
         if self._zug_px is None:
             return
+        # ``global_delta`` zählt ab dem letzten **gemeldeten** Ereignis; ``primary_delta`` nur
+        # ab dem letzten überhaupt — mit ``drag_interval`` ginge der Weg der verworfenen
+        # verloren, die Höhe bliebe hinter dem Finger zurück (Ben, 12.11.2026). Lokal taugt
+        # nicht: Der Griff wandert mit der Liste.
+        gd = getattr(e, "global_delta", None)
+        weg = gd.y if gd is not None and gd.y is not None else e.primary_delta
         self._zug_px = min(
-            max(self._zug_px + float(e.primary_delta or 0.0), NOTIZEN_HOEHE_MIN_PX),
+            max(self._zug_px + float(weg or 0.0), NOTIZEN_HOEHE_MIN_PX),
             NOTIZEN_HOEHE_MAX_PX,
         )
         self._rollen(self._anzahl)

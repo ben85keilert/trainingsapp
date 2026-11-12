@@ -74,6 +74,7 @@ from trainingsapp.core.strecke import (
     StreckenRechner,
     rechnen,
 )
+from trainingsapp.core.uhrendrift import Stufen, rest_auf_app_uhr, rest_bei, schlaf_rest
 from trainingsapp.data.db import transaktion
 from trainingsapp.data.seed import seed_id
 from trainingsapp.data.strecken import (
@@ -611,6 +612,15 @@ class HrvBezug:
     verschiebung_s: float | None = None
     #: ``t_wall_s`` der Messdatei beim Start des Trainings — ``None`` wie oben
     beginn_s: float | None = None
+    #: Tiefschlaf des Handys (`core.uhrendrift.schlaf_rest`, über `mit_schlaf`): Die Uhr der
+    #: Herzschläge steht im Schlaf, die der Ortungen nicht — ohne das driftet die
+    #: Herzfrequenz gegen das Tempo (Ben, 12.11.2026). Leer: kein Schlaf, oder unbekannt
+    schlaf: Stufen = ()
+
+    def _schlaf_bezug(self) -> float:
+        """Der Versatz der Einheit gilt für das Ende des Trainings (Rest 0), der Start der
+        Aufnahme für seinen Anfang (der ganze Schlaf steht noch aus)."""
+        return 0.0 if self.verschiebung_s is not None or not self.schlaf else self.schlaf[0][1]
 
     def ortung_zu_wand(self, t: float, start_utc: datetime | None) -> float | None:
         """Eine Ortungszeit als ``t_wall_s`` der Messdatei — über den Versatz der Einheit,
@@ -619,11 +629,15 @@ class HrvBezug:
         >>> b = HrvBezug(Path("x.json"), verschiebung_s=1_000_000.0 - 734.0)
         >>> b.ortung_zu_wand(1_000_010.0, None)
         744.0
+        >>> s = HrvBezug(Path("x.json"), verschiebung_s=0.0, schlaf=((100.0, 30.0), (200.0, 0.0)))
+        >>> s.ortung_zu_wand(150.0, None), s.ortung_zu_wand(250.0, None)   # 30 s Schlaf bei 200
+        (180.0, 250.0)
         """
+        rest = rest_bei(self.schlaf, t) - self._schlaf_bezug()
         if self.verschiebung_s is not None:
-            return t - self.verschiebung_s
+            return t - self.verschiebung_s + rest
         if start_utc is not None:
-            return t - start_utc.timestamp()
+            return t - start_utc.timestamp() + rest
         return None
 
     def wand_zu_ortung(self, w: float, start_utc: datetime | None) -> float | None:
@@ -632,12 +646,26 @@ class HrvBezug:
         >>> b = HrvBezug(Path("x.json"), verschiebung_s=1_000_000.0 - 734.0)
         >>> b.wand_zu_ortung(744.0, None)
         1000010.0
+        >>> s = HrvBezug(Path("x.json"), verschiebung_s=0.0, schlaf=((100.0, 30.0), (200.0, 0.0)))
+        >>> s.wand_zu_ortung(180.0, None), s.wand_zu_ortung(250.0, None)
+        (150.0, 250.0)
         """
         if self.verschiebung_s is not None:
-            return w + self.verschiebung_s
-        if start_utc is not None:
-            return w + start_utc.timestamp()
+            u = w + self.verschiebung_s
+        elif start_utc is not None:
+            u = w + start_utc.timestamp()
+        else:
+            return None
+        bezug = self._schlaf_bezug()
+        return u - (rest_auf_app_uhr(self.schlaf, u + bezug) - bezug)
+
+
+def mit_schlaf(bezug: HrvBezug | None, punkte: Iterable[Punkt]) -> HrvBezug | None:
+    """Der Bezug mit dem Tiefschlaf aus den Ortungen (`core.uhrendrift`) — wer Ortungen und
+    Herzschläge aufeinanderlegt, nimmt diesen."""
+    if bezug is None:
         return None
+    return replace(bezug, schlaf=schlaf_rest(punkte))
 
 
 def hrv_bezug(state: Any, strecke: Strecke) -> HrvBezug | None:
@@ -929,6 +957,9 @@ def herz_je_ortung(
 ) -> dict[float, int]:
     """Ortungszeit → Herzfrequenz (Schläge/min) für den GPX-Export — nur Ortungen, zu
     denen die Messdatei einen Schlag hat."""
+    punkte = list(punkte)
+    if bezug is not None and not bezug.schlaf:
+        bezug = mit_schlaf(bezug, punkte)
     wand = {p.t: w for p in punkte if (w := ortung_zu_wand(bezug, rec, p.t)) is not None}
     je_wand = hf_je_zeit(rec, list(wand.values()))
     return {t: bpm for t, w in wand.items() if (bpm := je_wand.get(w)) is not None}
@@ -1010,6 +1041,7 @@ __all__ = [
     "hrv_laden",
     "lauftext",
     "messungsbezuege",
+    "mit_schlaf",
     "nachlauf_der_strecke",
     "ortung_zu_wand",
     "sportart_aendern",

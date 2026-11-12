@@ -70,6 +70,7 @@ from trainingsapp.ui.components.hf_sicht import (
 from trainingsapp.ui.components.kacheln import zahl
 from trainingsapp.ui.components.kurve import Reihe, kurve, y_grenzen
 from trainingsapp.ui.components.layout import ohne_auto_update, sicher
+from trainingsapp.ui.components.live_abschnitte import LiveAbschnitte
 from trainingsapp.ui.components.notizen import (
     Notizfeld,
     senkrechte,
@@ -108,6 +109,7 @@ _GREIF_ANTEIL = 0.06
 #: Seitenleisten
 ZIEL = "ziel"
 NOTIZEN = "notizen"
+ABSCHNITTE = "abschnitte"
 
 
 @dataclass
@@ -207,8 +209,25 @@ def hf_vollbild(
         zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
     )
 
+    # Abschnitte wie im HRV-Vollbild und hochkant (Ben, 12.11.2026: „halte das
+    # einheitlich“): dasselbe Feld als Seitenleiste — Start/Ende, Marker, Nachtragen, Liste
+    live_abschnitte = LiveAbschnitte(
+        page,
+        state,
+        lauf,
+        fenster=fenster,
+        anfang=anfang,
+        breite_gesetzt=lambda b: setattr(
+            breiten_knoepfe, "selected", breiten_auswahl(b, einst.breiten())
+        ),
+        notizen_auffrischen=lambda: notizfeld.auffrischen(),
+        danach=lambda: aktualisieren(erzwingen=True),
+        offen=True,
+    )
+
     def timer_notizen() -> None:
         notizfeld.auffrischen()
+        live_abschnitte.neu(erzwingen=True)
         aktualisieren(erzwingen=True)
 
     state.notiz_beobachter["live"] = timer_notizen
@@ -606,6 +625,7 @@ def hf_vollbild(
         for knopf, aktiv in (
             (ton_knopf, st.seite == ZIEL),
             (notiz_knopf, st.seite == NOTIZEN),
+            (abschnitte_knopf, st.seite == ABSCHNITTE),
             (intervall_knopf, state.hf_intervall is not None),
         ):
             knopf.bgcolor = ft.Colors.with_opacity(
@@ -654,6 +674,11 @@ def hf_vollbild(
                 seitenkopf("Notizen", lambda: seite_umschalten(NOTIZEN)),
                 notizfeld.control,
             ]
+        elif st.seite == ABSCHNITTE:
+            seite_inhalt.controls = [
+                seitenkopf("Abschnitte", lambda: seite_umschalten(ABSCHNITTE)),
+                live_abschnitte.control,
+            ]
         else:
             seite_inhalt.controls = []
 
@@ -672,6 +697,7 @@ def hf_vollbild(
         leiste_setzen(erg)
         erholung_zeichnen(erg, rest)
         intervall_zeichnen(x_von, x_bis)
+        live_abschnitte.neu()
         seite_setzen()
 
     def aktualisieren(erzwingen: bool = False) -> None:
@@ -962,6 +988,11 @@ def hf_vollbild(
     notiz_knopf = leistenknopf(
         knopftext("Notiz"), lambda: seite_umschalten(NOTIZEN), tooltip="Notizen: Liste, Text, Zeit"
     )
+    abschnitte_knopf = leistenknopf(
+        knopftext("Abschnitte"),
+        lambda: seite_umschalten(ABSCHNITTE),
+        tooltip="Abschnitte: Start/Ende, Liste",
+    )
     intervall_knopf = leistenknopf(
         knopftext("Intervall"),
         intervall_umschalten,
@@ -988,6 +1019,7 @@ def hf_vollbild(
                     betont=True,
                 ),
                 notiz_knopf,
+                abschnitte_knopf,
                 ton_knopf,
                 intervall_knopf,
                 leistenknopf(

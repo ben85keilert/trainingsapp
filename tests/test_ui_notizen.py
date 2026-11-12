@@ -90,8 +90,10 @@ def test_neue_notiz_oben_bestehende_unter_ihrer_zeile() -> None:
 
 
 def test_liste_rollt_ab_der_eingestellten_zeilenzahl() -> None:
-    """Mehr Notizen als Zeilen (Ben, 27.10.2026): feste Höhe und Rollbalken, live ans Ende —
-    nicht, solange eine Eingabe offen ist; 0 = alle, wie bisher."""
+    """Mehr Notizen als Zeilen (Ben, 27.10.2026): feste Höhe und Rollbalken; 0 = alle, wie
+    bisher. ``auto_scroll`` bleibt immer aus (Ben, 12.11.2026): Sein Wechsel beim Öffnen der
+    Eingabe ließ Flet die Rollfläche neu bauen — die Liste sprang in die erste Zeile. Ans
+    Ende rückt die Liste nur, wenn live eine Notiz dazukommt und keine Eingabe offen ist."""
     from trainingsapp.ui.components.notizen import ZEILE_PX
 
     w = _Welt(live=True)
@@ -100,9 +102,16 @@ def test_liste_rollt_ab_der_eingestellten_zeilenzahl() -> None:
     w.zeilen = 2
     f.auffrischen()
     assert f._liste.height == 2 * ZEILE_PX and f._liste.scroll == ft.ScrollMode.AUTO
-    assert f._liste.auto_scroll is True
+    assert f._liste.auto_scroll is False
+    f._ende_faellig = False
     f.bearbeiten(1)
-    assert f._liste.auto_scroll is False  # die Eingabe bleibt in Sicht
+    assert f._liste.auto_scroll is False and not f._ende_faellig  # die Eingabe bleibt in Sicht
+    f.abbrechen()
+    w.liste.append({"t_wall_s": 99.0, "t_herz_s": 99.0, "text": "neu"})
+    f.auffrischen()
+    assert f._liste.auto_scroll is False and not f._ende_faellig  # gemerkt und abgearbeitet
+    f._rollen(f._anzahl + 1)
+    assert f._ende_faellig  # eine Notiz mehr: nach dem nächsten update ans Ende
     w.zeilen = 5
     f.abbrechen()
     assert f._liste.height is None and f._liste.auto_scroll is False
@@ -239,19 +248,39 @@ def test_notizliste_hoehe_mit_dem_griff_ziehen() -> None:
     griff.on_vertical_drag_start(None)
     griff.on_vertical_drag_update(SimpleNamespace(primary_delta=90.0))
     erwartet = max(3 * ZEILE_PX, NOTIZEN_HOEHE_MIN_PX) + 90
-    assert f._liste.height == erwartet and f._liste.scroll == ft.ScrollMode.AUTO
+    # Die gezogene Höhe ist eine Obergrenze (Ben, 12.11.2026): Drei Notizen füllen sie
+    # nicht — kein leeres Feld zwischen Kopf und Kurven
+    assert f._zug_px == erwartet and f._liste.height is None
     griff.on_vertical_drag_end(None)
-    assert gemerkt == [erwartet] and f._liste.height == erwartet
+    assert gemerkt == [erwartet] and f._liste.height is None
+    # Mit `drag_interval` verwirft Flet Zwischenereignisse: es zählt der Weg seit dem
+    # letzten gemeldeten (`global_delta`), nicht der letzte Frame (`primary_delta`)
+    griff.on_vertical_drag_start(None)
+    griff.on_vertical_drag_update(
+        SimpleNamespace(primary_delta=2.0, global_delta=SimpleNamespace(x=0.0, y=-30.0))
+    )
+    assert f._zug_px == erwartet - 30
+    griff.on_vertical_drag_end(None)
+    # Mehr Notizen, als hineinpassen: Die gezogene Höhe gilt, die Liste rollt darin
+    w.liste.extend({"t_wall_s": 70.0 + k, "t_herz_s": 70.0 + k, "text": str(k)} for k in range(9))
+    f.auffrischen()
+    assert f._liste.height == erwartet - 30 and f._liste.scroll == ft.ScrollMode.AUTO
+    # Keine Notiz: kein leeres Feld, auch wenn die Höhe vorher groß gezogen war
+    alle, w.liste[:] = list(w.liste), []
+    f.auffrischen()
+    assert f._liste.height is None and not griff.visible
+    w.liste[:] = alle
+    f.auffrischen()
     # Grenzen: nie kleiner als zwei Zeilen, nie höher als der Bildschirm
     griff.on_vertical_drag_start(None)
     griff.on_vertical_drag_update(SimpleNamespace(primary_delta=-5000.0))
     assert f._liste.height == NOTIZEN_HOEHE_MIN_PX
     griff.on_vertical_drag_update(SimpleNamespace(primary_delta=9000.0))
-    assert f._liste.height == NOTIZEN_HOEHE_MAX_PX
+    assert f._zug_px == NOTIZEN_HOEHE_MAX_PX
     griff.on_vertical_drag_end(None)
     # Doppeltipp: wieder nach der Zeilenzahl
     griff.on_double_tap(None)
-    assert gemerkt[-1] == 0 and f._liste.height is None
+    assert gemerkt[-1] == 0 and f._liste.height == 7 * ZEILE_PX  # zwölf Notizen, sieben Zeilen
 
 
 async def test_grenznotiz_loeschen_loescht_den_abschnitt() -> None:

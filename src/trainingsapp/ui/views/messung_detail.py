@@ -3842,7 +3842,7 @@ def _aufbauen(
         fragt dieser Aufruf im Loop; die Streckendatei liest und rechnet erst die Funktion,
         die er zurückgibt — sie läuft im Thread (H100)."""
         from trainingsapp.core.forschung import tempo_reihe
-        from trainingsapp.ui.training import hrv_bezug, strecken_punkte
+        from trainingsapp.ui.training import hrv_bezug, mit_schlaf, strecken_punkte
 
         strecke = state.strecken.zur_hrv(eintrag.id)
         if strecke is None:
@@ -3860,8 +3860,10 @@ def _aufbauen(
             t0 = min(p.t for p in punkte)
             ts: list[float] = []
             vs: list[float] = []
+            # Mit dem Tiefschlaf des Handys (`core.uhrendrift`) — sonst driftet das Tempo
+            genau = mit_schlaf(bezug, punkte) or bezug
             for t_s, v in tempo_reihe(punkte, -t0):
-                w = bezug.ortung_zu_wand(t0 + t_s, rec.start_utc)
+                w = genau.ortung_zu_wand(t0 + t_s, rec.start_utc)
                 if w is not None and v is not None:
                     ts.append(w)
                     vs.append(float(v))

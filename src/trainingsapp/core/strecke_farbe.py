@@ -14,7 +14,7 @@ Stufen 0 … n−1.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -148,6 +148,41 @@ def gestuft(
     return aus
 
 
+def laeufe[K: Hashable](
+    teile: Sequence[tuple[Sequence[Punkt], K]], hoechstens: int = 120
+) -> list[tuple[list[Punkt], K]]:
+    """Aufeinanderfolgende Stücke mit demselben Kennzeichen (Farbe) zu Läufen verbinden —
+    für die Kurve „Weg über die Zeit“, die dieselben Farben trägt wie die Karte. Mehr als
+    ``hoechstens`` Läufe zeichnet ein Diagramm zäh: Dann fassen sich je ``n`` Stücke zu
+    einem zusammen, mit dem häufigsten Kennzeichen darin (das spätere bei Gleichstand).
+
+    Je Stück bleiben erste und letzte Ortung (dazwischen ist der Weg nahezu gerade); die
+    letzte eines Stücks ist die erste des nächsten, so reißt die Linie nicht.
+
+    >>> p = [Punkt(float(i), 52.0, 13.0) for i in range(7)]
+    >>> l = laeufe([(p[0:3], "a"), (p[2:5], "a"), (p[4:7], "b")])
+    >>> [([q.t for q in punkte], k) for punkte, k in l]
+    [([0.0, 2.0, 4.0], 'a'), ([4.0, 6.0], 'b')]
+    >>> [k for _, k in laeufe([(p[0:2], "a"), (p[1:3], "b"), (p[2:4], "b"), (p[3:5], "a")], 2)]
+    ['b', 'a']
+    """
+    teile = [(punkte, k) for punkte, k in teile if len(punkte) > 1]
+    n = max(1, -(-len(teile) // max(hoechstens, 1)))
+    aus: list[tuple[list[Punkt], K]] = []
+    for i in range(0, len(teile), n):
+        gruppe = teile[i : i + n]
+        zahl: dict[K, int] = {}
+        for _, k in gruppe:
+            zahl[k] = zahl.get(k, 0) + 1
+        kennzeichen = max(reversed(list(zahl)), key=lambda k: zahl[k])
+        punkte = [gruppe[0][0][0]] + [stueck[-1] for stueck, _ in gruppe]
+        if aus and aus[-1][1] == kennzeichen and aus[-1][0][-1] is punkte[0]:
+            aus[-1][0].extend(punkte[1:])
+        else:
+            aus.append((punkte, kennzeichen))
+    return aus
+
+
 def tempo_s_pro_km(ms: float) -> float | None:
     """m/s → s/km (``None`` im Stand).
 
@@ -163,6 +198,7 @@ __all__ = [
     "SCHRITT_S",
     "Stueck",
     "gestuft",
+    "laeufe",
     "perzentil",
     "spanne",
     "stuecke",

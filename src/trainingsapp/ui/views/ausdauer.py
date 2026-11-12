@@ -50,7 +50,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import flet as ft
 from hrv_core.korrektur import (
@@ -63,7 +63,7 @@ from hrv_core.trends import aktuell, reihe
 
 from trainingsapp.config import datenverzeichnis, streckenverzeichnis
 from trainingsapp.core import atem_auswertung as aa
-from trainingsapp.core.forschung import tempo_reihe
+from trainingsapp.core.forschung import TEMPO_SCHRITT_S, tempo_reihe
 from trainingsapp.core.hrv_training import (
     dfa_verlauf,
     herz_aus_messung,
@@ -111,12 +111,12 @@ from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.ausrichtung import querformat
 from trainingsapp.ui.components.dialoge import Erledigt, Nachher, reste_dialog, schliessen
 from trainingsapp.ui.components.forschung import forschung_fragen
-from trainingsapp.ui.components.karte import hinweis, karte, titel
+from trainingsapp.ui.components.karte import hinweis, info_knopf, karte, titel
 from trainingsapp.ui.components.karte_strecke import (
     Faerbung,
+    GanzeStrecke,
     StreckenKarte,
     faerbung_aus,
-    ganze_strecke,
     legende,
 )
 from trainingsapp.ui.components.kuerzen import kuerzen_blatt
@@ -131,6 +131,7 @@ from trainingsapp.ui.components.tabellen import (
     zahl_text,
     zeit_text,
 )
+from trainingsapp.ui.components.weg_zeit import WegZeit
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.farben import FARBEN
 from trainingsapp.ui.state import AppState
@@ -139,6 +140,7 @@ from trainingsapp.ui.training import (
     herz_je_ortung,
     hrv_bezug,
     hrv_laden,
+    mit_schlaf,
     nachlauf_der_strecke,
     ortung_zu_wand,
     sportart_aendern,
@@ -1123,6 +1125,21 @@ def _tempo_kurz(sportart: str, s_pro_km: float | None) -> str:
     return tempo_text(sportart, s_pro_km).removesuffix(" /km").removesuffix(" km/h")
 
 
+#: Nach Strecke: weniger Weg (m) in ± so vielen Sekunden heißt „steht“
+STAND_FENSTER_S: Final[float] = 5.0
+STAND_WEG_M: Final[float] = 3.0
+
+WEG_ZEIT_INFO = (
+    "Die zurückgelegte Strecke über die Zeit: Je steiler, desto schneller; eine Pause ist "
+    "ein waagrechtes Stück. Anders als auf der Karte liegt hier nie etwas übereinander — "
+    "auch nicht bei mehreren Runden.\n\n"
+    "- **Farben** wie auf der Karte (Tempo oder Herzfrequenz, Einstellungen → Training).\n"
+    "- **Tippen oder ziehen** setzt einen Strich: Darunter stehen Zeit, Strecke, Tempo und "
+    "Herzfrequenz an dieser Stelle, auf der Karte zeigt ein Marker den Ort.\n"
+    "- **„Hier kürzen …“** öffnet „Ende kürzen“ mit der Zeit des Strichs."
+)
+
+
 def _reihe_mit_naehten(punkte: Sequence[tuple[float, float] | None], farbe: str) -> Reihe:
     """Eine Linie, die an ``None`` abreißt (Lücke, Pause)."""
     werte: list[tuple[float, float]] = []
@@ -1187,13 +1204,31 @@ def _hf_tempo_teil(
         stand = r.stand_bei(t) if r is not None else None
         return stand[0] / 1000.0 if stand is not None else None
 
+    def steht(t: float) -> bool:
+        """Nach Strecke: In einer Pause kommt kein Weg dazu — alle Werte lägen auf einer
+        Stelle übereinander (Ben, 12.11.2026). Die Kurve reißt dort ab."""
+        vor = r.stand_bei(t - STAND_FENSTER_S) if r is not None else None
+        nach = r.stand_bei(t + STAND_FENSTER_S) if r is not None else None
+        return vor is not None and nach is not None and nach[0] - vor[0] < STAND_WEG_M
+
     def x_wand(w: float) -> float | None:
-        if not nach_strecke:
-            return (w - beginn) / 60.0
+        # Dieselbe Uhr wie das Tempo: die der Ortungen, mit dem Tiefschlaf des Handys
+        # (`HrvBezug.schlaf`) — vorher lief die Herzfrequenz auf der App-Uhr und driftete
+        if (
+            not nach_strecke
+            and bezug is not None
+            and bezug.verschiebung_s is None
+            and bezug.beginn_s is not None
+        ):
+            return (w - beginn) / 60.0  # Einheit ohne Versatz der Ortungen: wie bisher
         t = bezug.wand_zu_ortung(w, rec.start_utc) if bezug is not None else None
         if t is None and rec.start_utc is not None:
             t = w + rec.start_utc.timestamp()
-        return x_ortung(t) if t is not None else None
+        if t is None:
+            return None if nach_strecke else (w - beginn) / 60.0
+        if nach_strecke and steht(t):
+            return None
+        return x_ortung(t)
 
     hf_punkte: list[tuple[float, float] | None] = []
     letzte = None
@@ -1204,6 +1239,8 @@ def _hf_tempo_teil(
         x = x_wand(w)
         if x is not None:
             hf_punkte.append((x, bpm))
+        elif nach_strecke:
+            hf_punkte.append(None)  # Pause oder außerhalb: Naht statt Verbindungslinie
     reihen = [_reihe_mit_naehten(hf_punkte, FARBEN["hf_rr"])]
     rechts: Skala | None = None
     if r is not None and r.erste is not None:
@@ -1213,7 +1250,8 @@ def _hf_tempo_teil(
             if v is None or v < 0.3:
                 tempo_punkte.append(None)
                 continue
-            x = x_ortung(t0 + t_s)
+            # Fenstermitte, wie die Herzfrequenz (`hf_reihe`) — nicht der Fensteranfang
+            x = x_ortung(t0 + t_s + TEMPO_SCHRITT_S / 2)
             if x is None:
                 continue
             y = v * 3.6 if strecke.sportart == RAD else 1000.0 / v / 60.0
@@ -1314,17 +1352,21 @@ def ausdauer_detail_view(
         strecken_pfad = None
     einst_box: dict[str, TrainingEinstellungen] = {"e": state.training_einstellungen()}
     stillstand_s = STILLSTAND_S if einst_box["e"].auto_pause else math.inf
+    bezug = hrv_bezug(state, strecke)
 
     def strecke_lesen() -> tuple[list[Punkt], StreckenRechner | None]:
         """Die Ortungen und ihr Rechner — nur Datei und Rechnen, darf in einen Thread."""
+        nonlocal bezug
         if strecken_pfad is None:
             return [], None
         gelesen = jsonl_lesen(strecken_pfad)
         if not gelesen:
             return [], None
+        # Herzschläge und Ortungen laufen auf zwei Uhren — der Tiefschlaf des Handys
+        # zwischen ihnen steht in den Ortungen (`core.uhrendrift`, Ben 12.11.2026)
+        bezug = mit_schlaf(bezug, gelesen)
         return gelesen, rechnen(gelesen, strecke.sportart, stillstand_s=stillstand_s)
 
-    bezug = hrv_bezug(state, strecke)
     # Eine lange Strecke liest und rechnet ein Thread (H80: 5 h sind am Handy spürbar) —
     # zusammen mit der Messdatei, wenn es eine gibt; eine kurze ohne Messung gleich hier
     hrv_da = bezug is not None and bezug.pfad.exists()
@@ -1405,9 +1447,10 @@ def ausdauer_detail_view(
         disabled=not punkte and not (im_thread and strecken_pfad is not None),
     )
 
-    async def ende_kuerzen() -> None:
+    async def ende_kuerzen(_e: object = None, ende_s: float | None = None) -> None:
         """„Ende kürzen“ (Ben, 28.10.2026): dasselbe Blatt wie beim Speichern — hier immer,
-        vorgeschlagen ist die letzte Bewegung. Lesen und Rechnen im Thread (H80)."""
+        vorgeschlagen ist die letzte Bewegung. Lesen und Rechnen im Thread (H80).
+        ``ende_s``: der Strich der Kurve „Weg über die Zeit“ steht schon im Feld."""
         try:
             n = await asyncio.to_thread(nachlauf_der_strecke, strecke, mindestens_s=0.0)
         except (OSError, ValueError):
@@ -1426,6 +1469,7 @@ def ausdauer_detail_view(
                 lauf=state.messlauf,
                 beim_speichern=False,
                 danach=state.neu_zeichnen,
+                ende_s=ende_s,
             )
         )
 
@@ -1566,14 +1610,15 @@ def ausdauer_detail_view(
         e = einst_box["e"]
         faerbung: Faerbung | None = None
         legende_teil: ft.Control | None = None
+        #: Ortungszeit → Schläge/min: für die Färbung und die Ablesezeile der Weg-Zeit-Kurve
+        herz_ort = herz_je_ortung(punkte, bezug, hrv[0]) if hrv is not None and punkte else {}
         if r is not None and e.faerbung == FAERBUNG_TEMPO:
             faerbung, grenzen = _tempo_faerbung(r.teilstuecke, e)
             legende_teil = _tempo_legende(e, strecke.sportart, grenzen)
         elif r is not None and e.faerbung == FAERBUNG_HF and hrv is not None:
-            faerbung, grenzen = _hf_faerbung(
-                r.teilstuecke, herz_je_ortung(punkte, bezug, hrv[0]), e
-            )
+            faerbung, grenzen = _hf_faerbung(r.teilstuecke, herz_ort, e)
             legende_teil = _hf_legende(e, grenzen)
+        strecken_karte = GanzeStrecke(r.teilstuecke if r is not None else [], faerbung=faerbung)
         teile: list[ft.Control] = [
             karte(
                 ft.Row(
@@ -1607,10 +1652,31 @@ def ausdauer_detail_view(
             ),
             karte(
                 titel("Strecke"),
-                ganze_strecke(r.teilstuecke if r is not None else [], faerbung=faerbung),
+                strecken_karte.control,
                 *([legende_teil] if legende_teil is not None else []),
             ),
         ]
+        if r is not None and r.erste is not None and r.letzter is not None and len(punkte) > 1:
+            # Weg über die Zeit (Ben, 12.11.2026): Pausen waagrecht, Runden nebeneinander
+            # statt übereinander, Farben der Karte; der Strich bewegt den Marker der Karte
+            weg_zeit = WegZeit(
+                r,
+                punkte,
+                sportart=strecke.sportart,
+                faerbung=faerbung,
+                karte=strecken_karte,
+                herz=herz_ort,
+                kuerzen=None if unterwegs else (lambda s: page.run_task(ende_kuerzen, None, s)),
+            )
+            teile.append(
+                karte(
+                    titel(
+                        "Weg über die Zeit",
+                        info_knopf(page, "Weg über die Zeit", WEG_ZEIT_INFO),
+                    ),
+                    weg_zeit.control,
+                )
+            )
         # Die Abschnitte des Timers, der mitlief (Skizze 6) — aus der Zeitleiste der Einheit
         herz: HerzQuelle | None = None
         if hrv is not None and bezug is not None and bezug.beginn_s is not None:

@@ -56,16 +56,21 @@ def kuerzen_blatt(
     lauf: Any = None,
     beim_speichern: bool,
     danach: Callable[[], Any] | None = None,
+    ende_s: float | None = None,
 ) -> ft.BottomSheet:
     """Das Blatt: Satz, Feld „Ende bei“, Schnellwahl, was geschieht, „So lassen“ · „Kürzen“.
 
     ``danach`` läuft nach dem Kürzen, wenn das Blatt zu ist (die Auswertung baut sich neu).
+    ``ende_s``: steht statt der letzten Bewegung im Feld — der Strich der Kurve „Weg über
+    die Zeit“ (Ben, 12.11.2026); ein Chip holt ihn zurück.
     """
+    if ende_s is not None:
+        ende_s = min(max(ende_s, 1.0), n.bisher_s)
     nachher = Nachher()
     blatt: ft.BottomSheet
     feld = ft.TextField(
         label="Ende bei (Zeit seit Start)",
-        value=dauer_text(n.vorschlag_s),
+        value=dauer_text(n.vorschlag_s if ende_s is None else ende_s),
         helper=ft.Text(f"Letzte Bewegung {minuten(n.vorschlag_s)} · bisher {minuten(n.bisher_s)}"),
         width=220,
         keyboard_type=ft.KeyboardType.DATETIME,
@@ -118,6 +123,11 @@ def kuerzen_blatt(
         spacing=6,
         wrap=True,
         controls=[
+            *(
+                [ft.Chip(ft.Text("Strich der Kurve"), on_click=lambda _: setzen(ende_s))]
+                if ende_s is not None
+                else []
+            ),
             ft.Chip(ft.Text("Letzte Bewegung"), on_click=lambda _: setzen(n.vorschlag_s)),
             ft.Chip(ft.Text("Ganze Aufzeichnung"), on_click=lambda _: setzen(n.bisher_s)),
         ],

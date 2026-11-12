@@ -161,3 +161,25 @@ Spalten und Chip „ohne/mit Pausen“), `views/einstellungen_training.py` (Rout
 `tests/test_training_einstellungen.py`, `test_ausdauer.py::test_auswertung_und_liste_zeigen_das_training`.
 Live färbt nur nach Tempo — die Herzfrequenz je Ortung bräuchte die laufende Aufnahme je Sekunde; sie kommt in
 der Auswertung dazu.
+
+## 8. Nachtrag 12.11.2026 — Weg über die Zeit, Karte einpassen, Drift
+
+Ben, 12.11.2026 („Kurve Herzfrequenz und Tempo passt nicht ganz … braucht eine zusätzliche Kurve Zeit,
+akkumulierte Strecke, die man auch abfahren kann“). Gebaut:
+
+- **Karte „Weg über die Zeit“** (`components/weg_zeit.WegZeit`, direkt unter der Karte): x = Minuten seit der
+  ersten Ortung, y = Kilometer. Pausen sind waagrecht, Runden liegen nebeneinander statt übereinander. Die Linie
+  trägt die Farben der Karte (`core.strecke_farbe.laeufe` fasst gleichfarbige Stücke zusammen, höchstens 120
+  Läufe). Tippen oder Ziehen setzt einen **Strich**: darunter Zeit · Strecke · Tempo · Herzfrequenz, auf der Karte
+  ein Marker (`GanzeStrecke.zeiger`). **„Hier kürzen …“** öffnet „Ende kürzen“ mit der Zeit des Strichs
+  (`kuerzen_blatt(ende_s=…)`, Chip „Strich der Kurve“) — geschnitten wird weiter nur das Ende.
+- **Karte einpassen:** `components/karte_strecke.GanzeStrecke` — Knopf oben rechts, Mitte des Kastens um die
+  Strecke, Zoom mit Rand (`zoom_fuer`, flet_map kennt kein nachträgliches Einpassen).
+- **Achse „Strecke“:** In einer Pause kommt kein Weg dazu, alle Werte lägen auf einer Stelle — die
+  Herzfrequenz-Kurve reißt dort ab (`STAND_FENSTER_S`, `STAND_WEG_M`). Pausen zeigt die Zeitachse und die neue Kurve.
+- **Drift** zwischen Herzfrequenz und Tempo: zwei Uhren (`core/uhrendrift.py`, Katalog H118). Beide Kurven
+  rechnen jetzt auf der Uhr der Ortungen; das Tempo steht in der Fenstermitte wie die Herzfrequenz.
+
+Offen (Vorschläge, nicht gebaut): Katalog P193 (Abschnitt live in der Kurve bearbeiten); Ideen zur Auswertung
+stehen in der Antwort vom 12.11.2026 und kommen bei Zustimmung als P-Einträge in den Katalog.
+

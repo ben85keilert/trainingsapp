@@ -362,6 +362,21 @@ def hf_verteilung(
     return [(k, zahl.get(k, 0.0)) for k in range(min(zahl), max(zahl) + 1, breite_bpm)]
 
 
+def zeit_je_grenze(
+    reihe: Sequence[tuple[float, float]], schritt_s: float, grenzen: Sequence[float]
+) -> list[float]:
+    """Sekunden je Bereich zwischen festen ``grenzen`` (aufsteigend) — aus einer Reihe mit
+    einem Wert je ``schritt_s``; einer mehr als Grenzen, eine Grenze gehört zum oberen.
+
+    >>> zeit_je_grenze([(0, 100.0), (5, 110.0), (10, 151.0), (15, 190.0)], 5.0, [110.0, 152.0])
+    [5.0, 10.0, 5.0]
+    """
+    aus = [0.0] * (len(grenzen) + 1)
+    for _, wert in reihe:
+        aus[bisect_right(grenzen, wert)] += schritt_s
+    return aus
+
+
 #: Unter diesem Namen holt ihn die Ansicht — dort heißen die Intervalle des Timers ``runden``
 runden_erkennen = runden
 
@@ -381,5 +396,6 @@ __all__ = [
     "runden_erkennen",
     "schnellste_strecke",
     "weiteste_in",
+    "zeit_je_grenze",
     "zeit_je_stufe",
 ]

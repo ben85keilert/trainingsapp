@@ -14,6 +14,7 @@ Stufen 0 … n−1.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 from typing import Final
@@ -148,6 +149,24 @@ def gestuft(
     return aus
 
 
+def gestuft_fest(
+    stuecke_: Sequence[Stueck], grenzen: Sequence[float]
+) -> list[tuple[Stueck, int | None]]:
+    """Jedes Stück mit seiner Stufe nach **festen** Grenzen (aufsteigend, in der Einheit der
+    Werte): 0 unter der ersten … ``len(grenzen)`` ab der letzten; eine Grenze selbst gehört
+    zur oberen Stufe. So fallen zwei Trainings in dieselben Stufen und lassen sich
+    vergleichen — anders als mit `gestuft`, das sich nach dem Training richtet.
+
+    >>> p = [Punkt(float(i), 52.0, 13.0) for i in range(3)]
+    >>> st = [Stueck(p, 1.9), Stueck(p, 2.0), Stueck(p, 9.0), Stueck(p, 0.1, pause=True)]
+    >>> [s for _, s in gestuft_fest(st, [2.0, 3.0])]
+    [0, 1, 2, None]
+    """
+    return [
+        (s, None if s.pause or s.wert is None else bisect_right(grenzen, s.wert)) for s in stuecke_
+    ]
+
+
 def laeufe[K: Hashable](
     teile: Sequence[tuple[Sequence[Punkt], K]], hoechstens: int = 120
 ) -> list[tuple[list[Punkt], K]]:
@@ -198,6 +217,7 @@ __all__ = [
     "SCHRITT_S",
     "Stueck",
     "gestuft",
+    "gestuft_fest",
     "laeufe",
     "perzentil",
     "spanne",

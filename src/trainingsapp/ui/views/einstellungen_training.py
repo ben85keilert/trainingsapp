@@ -1,28 +1,37 @@
 """Einstellungen → Training und GPS: Karte einfärben, Tempo mit Pausen, Spalten, Kurve,
-Auto-Pause — und der Weg zum GPS-Test (bis 11.11.2026 eine Zeile der Hauptseite).
+Auto-Pause, feste Tempo-Stufen — und der Weg zum GPS-Test (bis 11.11.2026 eine Zeile der
+Hauptseite).
 
 Ben, 26.10.2026 (P81, ``docs/plan_strecken_ansicht.md`` §5). Gerätelokal
-(`core.training_einstellungen`), gilt live und in der Auswertung. Keine Zonen, keine
-Grenzwerte — nur Darstellung und Lesart.
+(`core.training_einstellungen`), gilt live und in der Auswertung — nur Darstellung und
+Lesart. **Feste Tempo-Stufen** (Ben, 13.11.2026): je Sportart vier Grenzen in km/h für
+„Zeit je Tempo“, aus einer Vorgabe (langsam · mittel · schnell) oder selbst eingetragen;
+sie teilen ein, sie werten nicht.
 """
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import replace
 from typing import Any
 
 import flet as ft
 
+from trainingsapp.core.strecke import RAD, SPORT_NAMEN, SPORTARTEN
 from trainingsapp.core.training_einstellungen import (
     FAERBUNG_AUS,
     FAERBUNG_HF,
     FAERBUNG_TEMPO,
     KURVE_STRECKE,
     KURVE_ZEIT,
+    NIVEAU_EIGEN,
+    NIVEAU_NAMEN,
     SKALEN,
     SPALTEN,
     SPALTEN_TEXT,
+    grenzen_gueltig,
 )
+from trainingsapp.core.zeitangabe import dauer_text
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.farben import SKALEN_NAMEN, TEMPO_SKALEN
@@ -35,6 +44,31 @@ FAERBUNG_TEXT = {
     FAERBUNG_AUS: "aus — einfarbig",
 }
 KURVE_TEXT = {KURVE_ZEIT: "Zeit (Minuten)", KURVE_STRECKE: "Strecke (km)"}
+STUFEN_HINWEIS = (
+    "Für „Zeit je Tempo“ in der Auswertung, wenn dort „Fest“ gewählt ist: vier Grenzen in "
+    "km/h je Sportart, darunter, dazwischen und darüber liegen die fünf Stufen. Mit festen "
+    "Grenzen lassen sich Trainings vergleichen; die Stufen teilen ein, sie werten nicht."
+)
+STUFEN_FEHLER = "Vier aufsteigende Zahlen über 0"
+
+
+def kmh_text(kmh: float) -> str:
+    """„13“ oder „8,5“ — für die Felder der Grenzen."""
+    return f"{kmh:.1f}".removesuffix(".0").replace(".", ",")
+
+
+def kmh_lesen(text: str) -> float | None:
+    try:
+        return float(text.strip().replace(",", "."))
+    except ValueError:
+        return None
+
+
+def umrechnung(sportart: str, grenzen: Any) -> str:
+    """Die Grenzen als Tempo in min/km — beim Rad leer (dort liest man km/h)."""
+    if sportart == RAD or not grenzen:
+        return ""
+    return "= " + " · ".join(dauer_text(round(3600.0 / g)) for g in grenzen) + " /km"
 
 
 def skalen_vorschau(skala: str) -> ft.Control:
@@ -98,6 +132,82 @@ def einstellungen_training(page: Any, state: AppState) -> ft.View:
             label=SPALTEN_TEXT[name], value=stand["e"].zeigt(name), on_change=handler
         )
 
+    def stufen(sportart: str) -> ft.Control:
+        """Vorgabe und die vier Grenzen einer Sportart. Wer eine Zahl ändert, hat „eigene
+        Werte“ — gespeichert wird, sobald alle vier aufsteigend sind."""
+        grenzen = stand["e"].tempo_grenzen_kmh(sportart)
+        felder = [
+            ft.TextField(
+                value=kmh_text(g),
+                width=64,
+                dense=True,
+                text_size=13,
+                text_align=ft.TextAlign.RIGHT,
+                keyboard_type=ft.KeyboardType.NUMBER,
+                data=f"grenze:{sportart}:{i}",
+            )
+            for i, g in enumerate(grenzen)
+        ]
+        in_min = hinweis(umrechnung(sportart, grenzen))
+        fehler = ft.Text(STUFEN_FEHLER, size=12, color=ft.Colors.ERROR, visible=False)
+
+        def zeigen(werte: Any) -> None:
+            in_min.value = umrechnung(sportart, werte)
+            fehler.visible = False
+            with contextlib.suppress(Exception):
+                page.update()
+
+        def getippt(_ev: Any = None) -> None:
+            werte = grenzen_gueltig([kmh_lesen(str(f.value or "")) for f in felder])
+            if werte is None:
+                fehler.visible = True
+                with contextlib.suppress(Exception):
+                    page.update()
+                return
+            e = stand["e"]
+            setzen(
+                tempo_niveau={**e.tempo_niveau, sportart: NIVEAU_EIGEN},
+                tempo_eigen={**e.tempo_eigen, sportart: werte},
+            )
+            niveau.value = NIVEAU_EIGEN
+            zeigen(werte)
+
+        def gewaehlt(ev: ft.Event[ft.Dropdown]) -> None:
+            wert = str(ev.control.value or "")
+            if wert not in NIVEAU_NAMEN:
+                return
+            setzen(tempo_niveau={**stand["e"].tempo_niveau, sportart: wert})
+            werte = stand["e"].tempo_grenzen_kmh(sportart)
+            for f, g in zip(felder, werte, strict=True):
+                f.value = kmh_text(g)
+            zeigen(werte)
+
+        for f in felder:
+            f.on_change = getippt
+        niveau = ft.Dropdown(
+            label=SPORT_NAMEN[sportart],
+            value=stand["e"].niveau(sportart),
+            options=[ft.DropdownOption(key=k, text=v) for k, v in NIVEAU_NAMEN.items()],
+            on_select=gewaehlt,
+            dense=True,
+            width=300,
+            data=f"niveau:{sportart}",
+        )
+        return ft.Column(
+            spacing=4,
+            tight=True,
+            controls=[
+                niveau,
+                ft.Row(
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[*felder, ft.Text("km/h", size=12, opacity=0.7)],
+                ),
+                in_min,
+                fehler,
+            ],
+        )
+
     vorschau = ft.Column(
         spacing=6,
         tight=True,
@@ -158,6 +268,12 @@ def einstellungen_training(page: Any, state: AppState) -> ft.View:
                         karte(
                             titel("Kurve „Herzfrequenz und Tempo“"),
                             wahl("kurve_x", "Achse", KURVE_TEXT),
+                        ),
+                        karte(
+                            titel("Feste Tempo-Stufen"),
+                            hinweis(STUFEN_HINWEIS),
+                            *[stufen(s) for s in SPORTARTEN],
+                            abstand=10,
                         ),
                         karte(
                             titel("GPS"),

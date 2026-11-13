@@ -1790,6 +1790,59 @@ async def test_auswertung_bestwerte_pausen_verteilung_und_hoehenprofil(daten) ->
     assert "RUNDEN" not in texte
 
 
+async def test_auswertung_feste_tempo_stufen_und_hf_bereiche(daten) -> None:
+    """Ben, 13.11.2026: „Zeit je Tempo“ auch nach festen Grenzen der Sportart (zum
+    Vergleichen von Trainings), „Zeit je Herzfrequenz“ nach 3 · 5 · 10 Bereichen des Profils
+    — ohne Ruhe-HF und HFmax bleiben die Schritte von zehn Schlägen."""
+    from datetime import date
+
+    import flet as ft
+
+    from trainingsapp.core.hf_profil import Profilwert
+    from trainingsapp.ui.views.ausdauer import HF_OHNE_PROFIL, ausdauer_detail_view
+
+    state, tmp_path = daten
+    strecke, _ = await _training(state, tmp_path, punkte=_mit_nachlauf())
+    seite = _seite()
+    view = ausdauer_detail_view(seite, state, state.strecken.laden(strecke.id))
+    await asyncio.gather(*seite.aufgaben)
+
+    def knopf(name: str) -> ft.SegmentedButton:
+        return next(c for c in _alle(view) if isinstance(c, ft.SegmentedButton) and c.data == name)
+
+    def waehlen(name: str, wert: str) -> None:
+        k = knopf(name)
+        k.selected = [wert]
+        k.on_change(SimpleNamespace(control=k))
+
+    assert knopf("tempo_stufen").selected == ["relativ"]
+    assert HF_OHNE_PROFIL in _texte(view) and knopf("hf_bereiche").selected == ["bpm"]
+    waehlen("tempo_stufen", "fest")
+    texte = _texte(view)
+    assert state.training_einstellungen().tempo_stufen == "fest"
+    grenzen = state.training_einstellungen().tempo_grenzen_kmh(strecke.sportart)
+    erste = f"{grenzen[0]:.1f}".replace(".", ",").removesuffix(",0")
+    assert any(t.startswith("Feste Stufen „") and f"bei {erste} · " in t for t in texte)
+    assert sum(t.startswith(("schneller als ", "langsamer als ")) for t in texte) == 2
+
+    heute = date.today()
+    for groesse, wert in (("ruhe_hf", 60), ("hf_max", 180)):
+        state.profilwerte.hinzufuegen(Profilwert(state.profil.id, groesse, wert, "eintrag", heute))
+    waehlen("hf_bereiche", "drei")
+    texte = _texte(view)
+    assert knopf("hf_bereiche").selected == ["drei"]
+    assert [t for t in texte if t.startswith("Bereich ")] == [
+        "Bereich 3 · ab 152",
+        "Bereich 2 · 110–151",
+        "Bereich 1 · unter 110",
+    ]
+    assert any(t.startswith("Bereiche aus Ruhe-HF 60 und HFmax 180") for t in texte)
+    waehlen("hf_bereiche", "cluster")
+    assert sum(t.startswith("Bereich ") for t in _texte(view)) == 10
+    waehlen("hf_bereiche", "bpm")
+    assert any(t.endswith(" bpm") and "–" in t for t in _texte(view))
+
+
 async def test_auswertung_ohne_hrv_zeigt_das_tempo_und_runden(daten, monkeypatch) -> None:
     """Ohne HRV-Aufnahme: die Kurve „Tempo“ (Ben, 12.11.2026: „Zeit-Geschwindigkeit-Kurve
     auch“). Wer dreimal ums Karree läuft, bekommt die Tabelle „Runden“."""

@@ -204,7 +204,8 @@ interessant für die HF- und HRV-Erholung“), Tempo-Verteilung, HF-Verteilung, 
     HRV-Aufnahme die Herzfrequenz Spitze → Ende (hrv-core `intervall_erholung`, 5-s-Mittel) und ab einer
     Minute mit EKG-Gurt der RMSSD der Pause (`core.hrv_training.erholung_in_pause`). Zahlen, keine Wertung.
   - `zeit_je_stufe` — „Zeit je Tempo“: dieselben Stufen und Farben wie die Karte, dazu „Stand“.
-  - `hf_verteilung` — „Zeit je Herzfrequenz“ in Bereichen von zehn Schlägen (neutral, keine Zonen).
+  - `hf_verteilung` — „Zeit je Herzfrequenz“ in Bereichen von zehn Schlägen (seit 13.11. auch nach den
+    Bereichen des HF-Profils, §10).
 - **Zeitachse:** Liegen die Uhr des Handys und die des Empfängers mehr als eine Stunde auseinander, zählt
   die Achse ab der ersten Ortung (`UHREN_ABSTAND_MAX_S`) — sonst läge das Tempo außerhalb der Achse.
 
@@ -213,3 +214,35 @@ einpassen, Strich und Marker, Schere mit der Zeit des Strichs, alle neuen Karten
 
 Nicht gebaut (Ideen vom 12.11.): Kilometer-Marken und Notizen auf der Karte, Abspielen im Zeitraffer,
 Vergleich mit einem früheren Training derselben Strecke.
+
+## 10. Nachtrag 13.11.2026 — feste Tempo-Stufen, Herzfrequenz nach Bereichen
+
+Ben: „Für ‚Zeit je Tempo‘ braucht es zum Vergleich zusätzlich eine absolute Einordnung. Die relative
+ist gut für die derzeitige Messung; um Messungen vergleichen zu können, brauche ich verlässliche Werte.
+Diese sollen eingetragen werden können und haben Standardwerte für Gehen, Laufen, Radfahren“ — je
+langsam · mittel · schnell. „Für die Herzfrequenz eine Verteilung wie bei ‚Zeit je Tempo‘, eingeteilt
+in entweder die 3, 5 oder 10 Zonen.“
+
+- **Zeit je Tempo:** Umschalter „Training · Fest“ an der Karte (gemerkt, `tempo_stufen`). „Fest“ teilt
+  nach vier Grenzen in km/h je Sportart (`TrainingEinstellungen.tempo_grenzen_kmh`,
+  `core.strecke_farbe.gestuft_fest`) — fünf Stufen in den Farben der Skala. Vorgaben
+  (`TEMPO_GRENZEN_KMH`, Setzungen zum Einteilen, keine Normwerte):
+
+  | | langsam | mittel | schnell |
+  |---|---|---|---|
+  | Gehen | 2 · 3 · 4 · 5 | 3 · 4 · 5 · 6 | 4 · 5 · 6 · 7 |
+  | Laufen | 6 · 7 · 8,5 · 10 | 7 · 9 · 11 · 13 | 10 · 12 · 14 · 16 |
+  | Radfahren | 10 · 14 · 18 · 22 | 13 · 17 · 21 · 25 | 20 · 25 · 30 · 35 |
+
+  Einstellungen → Training und GPS → „Feste Tempo-Stufen“: je Sportart die Vorgabe und die vier Zahlen;
+  wer eine Zahl ändert, hat „eigene Werte“ (gespeichert, sobald alle vier aufsteigend sind). Die Karte
+  und ihre Legende färben weiter nach dem Training — das ist dort die Lesart, die beide Enden ausfärbt.
+- **Zeit je Herzfrequenz:** Umschalter „3 · 5 · 10 · bpm“ (gemerkt, `hf_bereiche`). Die Bereiche sind die
+  des HF-Profils (`core.hf_profil.bereiche_fuer`: drei Bereiche nach Schwellen, fünf Stufen ACSM, zehn
+  Cluster der Reserve) — dieselben Grenzen, Namen und Farbstufen wie in der Herzfrequenz-Sicht; ohne
+  eigene Wahl gilt das Modell aus Einstellungen → Herzfrequenz (auch „eigene Bereiche“). Fehlen Ruhe-HF
+  oder HFmax, bleiben die Schritte von zehn Schlägen, mit Hinweis. `docs/recht/00_zweckbestimmung.md`
+  erlaubt HF-Bereiche als Anzeige (Tabelle „HF-Zonen anzeigen“); gewertet oder gesteuert wird nichts.
+
+Am Rechner gerendert geprüft (Skill `web-fotos`): beide Karten mit allen Umschaltern, die
+Einstellungsseite. Gerätetest T135.

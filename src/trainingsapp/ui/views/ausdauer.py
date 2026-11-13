@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import flet as ft
+from hrv_core import herzfrequenz as hz
 from hrv_core.korrektur import (
     Korrigiert,
     korr_zeiten,
@@ -65,6 +66,8 @@ from hrv_core.trends import aktuell, reihe
 from trainingsapp.config import datenverzeichnis, streckenverzeichnis
 from trainingsapp.core import atem_auswertung as aa
 from trainingsapp.core.forschung import TEMPO_SCHRITT_S, tempo_reihe
+from trainingsapp.core.hf_einstellungen import HfEinstellungen
+from trainingsapp.core.hf_profil import HfProfil, bereiche_fuer, grenzen_bpm, wirksames_modell
 from trainingsapp.core.hrv_training import (
     dfa_verlauf,
     erholung_in_pause,
@@ -105,15 +108,27 @@ from trainingsapp.core.strecke_auswertung import (
     hoehenprofil,
     pausen,
     runden_erkennen,
+    zeit_je_grenze,
     zeit_je_stufe,
 )
-from trainingsapp.core.strecke_farbe import gestuft, spanne, stuecke, tempo_s_pro_km
+from trainingsapp.core.strecke_farbe import (
+    gestuft,
+    gestuft_fest,
+    spanne,
+    stuecke,
+    tempo_s_pro_km,
+)
 from trainingsapp.core.training_einstellungen import (
     FAERBUNG_HF,
     FAERBUNG_TEMPO,
+    HF_BPM,
+    HF_WIE_PROFIL,
     KURVE_STRECKE,
     KURVE_ZEIT,
+    NIVEAU_NAMEN,
     SPALTEN,
+    TEMPO_FEST,
+    TEMPO_RELATIV,
     TrainingEinstellungen,
 )
 from trainingsapp.data.repositories import SettingRepo
@@ -128,6 +143,7 @@ from trainingsapp.ui.ausrichtung import querformat
 from trainingsapp.ui.components.abfahren import Abfahrkurve, Strich
 from trainingsapp.ui.components.dialoge import Erledigt, Nachher, reste_dialog, schliessen
 from trainingsapp.ui.components.forschung import forschung_fragen
+from trainingsapp.ui.components.hf_sicht import stufenfarbe
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte, titel
 from trainingsapp.ui.components.karte_strecke import (
     Faerbung,
@@ -1149,6 +1165,18 @@ STAND_WEG_M: Final[float] = 3.0
 #: zählt die Zeitachse ab der ersten Ortung
 UHREN_ABSTAND_MAX_S: Final[float] = 3600.0
 
+#: Wahl der Karte „Zeit je Herzfrequenz“: Modell des Profils → Beschriftung des Knopfs
+HF_WAHL: Final[dict[str, str]] = {
+    hz.MODELL_DREI: "3",
+    hz.MODELL_ACSM: "5",
+    hz.MODELL_CLUSTER: "10",
+    HF_BPM: "bpm",
+}
+HF_OHNE_PROFIL = (
+    "Für Bereiche fehlen Ruhe-HF oder HFmax (Einstellungen → Herzfrequenz) — bis dahin "
+    "Schritte von zehn Schlägen."
+)
+
 WEG_ZEIT_INFO = (
     "Die zurückgelegte Strecke über die Zeit: Je steiler, desto schneller; eine Pause ist "
     "ein waagrechtes Stück. Anders als auf der Karte liegt hier nie etwas übereinander — "
@@ -1559,7 +1587,7 @@ def _pause_werte(
     return werte
 
 
-def _balken(zeilen: Sequence[tuple[str, float, str]]) -> ft.Control:
+def _balken(zeilen: Sequence[tuple[str, float, str]], *, name_px: int = 108) -> ft.Control:
     """Waagrechte Balken „Name · Balken · Minuten“ — die Länge nach dem größten Wert."""
     groesster = max((s for _, s, _ in zeilen), default=0.0) or 1.0
     aus: list[ft.Control] = []
@@ -1570,7 +1598,7 @@ def _balken(zeilen: Sequence[tuple[str, float, str]]) -> ft.Control:
                 spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
-                    ft.Text(name, size=12, width=108, opacity=0.85),
+                    ft.Text(name, size=12, width=name_px, opacity=0.85),
                     ft.Row(
                         expand=True,
                         spacing=0,
@@ -1597,16 +1625,25 @@ def _balken(zeilen: Sequence[tuple[str, float, str]]) -> ft.Control:
 def _tempo_verteilung(
     teilstuecke: Sequence[Sequence[Punkt]], e: TrainingEinstellungen, sportart: str
 ) -> ft.Control | None:
-    """Zeit je Tempo-Stufe — dieselben Stufen und Farben wie die Karte, dazu der Stand."""
+    """Zeit je Tempo-Stufe, dazu der Stand. Die Stufen richten sich nach diesem Training
+    (dieselben wie auf der Karte) oder nach den **festen Grenzen** der Sportart
+    (`TrainingEinstellungen.tempo_grenzen_kmh`) — nur die festen lassen zwei Trainings
+    vergleichen."""
     st = stuecke(teilstuecke, lambda p: p.tempo_ms)
-    grenzen = spanne(st)
-    if grenzen is None:
-        return None
     farben = TEMPO_SKALEN.get(e.skala) or TEMPO_SKALEN["tempo"]
     n = len(farben)
-    sekunden, pause = zeit_je_stufe(gestuft(st, n, grenzen), n)
-    unten, oben = grenzen
-    schritt = (oben - unten) / n
+    if e.tempo_stufen == TEMPO_FEST:
+        if not any(not x.pause and x.wert is not None for x in st):
+            return None
+        grenzen = [kmh / 3.6 for kmh in e.tempo_grenzen_kmh(sportart)]
+        sekunden, pause = zeit_je_stufe(gestuft_fest(st, grenzen), n)
+    else:
+        spanne_ = spanne(st)
+        if spanne_ is None:
+            return None
+        unten, oben = spanne_
+        grenzen = [unten + k * (oben - unten) / n for k in range(1, n)]
+        sekunden, pause = zeit_je_stufe(gestuft(st, n, spanne_), n)
 
     def tempo(ms: float) -> str:
         return _tempo_kurz(sportart, tempo_s_pro_km(ms))
@@ -1614,23 +1651,55 @@ def _tempo_verteilung(
     zeilen: list[tuple[str, float, str]] = []
     for k in reversed(range(n)):  # schnell oben
         if k == n - 1:
-            name = f"schneller als {tempo(unten + k * schritt)}"
+            name = f"schneller als {tempo(grenzen[-1])}"
         elif k == 0:
-            name = f"langsamer als {tempo(unten + schritt)}"
+            name = f"langsamer als {tempo(grenzen[0])}"
         elif sportart == RAD:
-            name = f"{tempo(unten + k * schritt)}–{tempo(unten + (k + 1) * schritt)}"
+            name = f"{tempo(grenzen[k - 1])}–{tempo(grenzen[k])}"
         else:
-            name = f"{tempo(unten + (k + 1) * schritt)}–{tempo(unten + k * schritt)}"
+            name = f"{tempo(grenzen[k])}–{tempo(grenzen[k - 1])}"
         zeilen.append((name, sekunden[k], farben[k]))
     if pause >= 1:
         zeilen.append(("Stand", pause, PAUSE_FARBE))
     return _balken(zeilen)
 
 
+def _tempo_stufen_text(e: TrainingEinstellungen, sportart: str) -> str:
+    """Was unter den Balken steht: wonach die Stufen gerade teilen."""
+    if e.tempo_stufen != TEMPO_FEST:
+        return (
+            "Stufen nach diesem Training (wie die Farben der Karte). Zum Vergleichen mit "
+            "anderen Trainings: „Fest“."
+        )
+    grenzen = " · ".join(zahl_text(g, 1).removesuffix(",0") for g in e.tempo_grenzen_kmh(sportart))
+    return (
+        f"Feste Stufen „{SPORT_NAMEN.get(sportart, sportart)} · "
+        f"{NIVEAU_NAMEN[e.niveau(sportart)]}“: Grenzen bei {grenzen} km/h — zu ändern unter "
+        "Einstellungen → Training und GPS."
+    )
+
+
+def _hf_bereiche(
+    e: TrainingEinstellungen, profil: HfProfil, einst: HfEinstellungen
+) -> list[hz.Bereich]:
+    """Die Bereiche, nach denen „Zeit je Herzfrequenz“ teilt — leer heißt: Schritte von zehn
+    Schlägen (so gewählt, oder dem Profil fehlen Ruhe-HF oder HFmax)."""
+    if e.hf_bereiche == HF_BPM:
+        return []
+    if e.hf_bereiche != HF_WIE_PROFIL:
+        einst = replace(einst, modell=e.hf_bereiche)
+    return bereiche_fuer(profil, einst)
+
+
 def _hf_verteilung_teil(
-    hrv: tuple[Recording, Korrigiert], bezug: HrvBezug | None, r: StreckenRechner
+    hrv: tuple[Recording, Korrigiert],
+    bezug: HrvBezug | None,
+    r: StreckenRechner,
+    bereiche: Sequence[hz.Bereich] = (),
 ) -> ft.Control | None:
-    """Zeit je Herzfrequenz-Bereich von zehn Schlägen — nur die Zeit des Trainings."""
+    """Zeit je Herzfrequenz-Bereich — nur die Zeit des Trainings. Mit ``bereiche`` nach den
+    Bereichen des Profils (Farben wie in der Herzfrequenz-Sicht: eine Farbe in Stufen),
+    sonst in Schritten von zehn Schlägen."""
     rec, korr = hrv
     if r.erste is None or r.letzter is None:
         return None
@@ -1638,13 +1707,26 @@ def _hf_verteilung_teil(
     if von is None or bis is None:
         return None
     reihe_ = [(w, bpm) for w, bpm in hf_reihe(rec, korr, 5.0) if von <= w <= bis]
-    verteilung = hf_verteilung(reihe_, 5.0)
-    if not verteilung:
+    if not reihe_:
         return None
+    if bereiche:
+        n = len(bereiche)
+        sekunden = zeit_je_grenze(reihe_, 5.0, grenzen_bpm(list(bereiche)))
+        zeilen: list[tuple[str, float, str]] = []
+        for i in reversed(range(n)):  # hoch oben
+            b = bereiche[i]
+            if i == n - 1:
+                spanne_ = f"ab {round(b.von_bpm)}"
+            elif i == 0:
+                spanne_ = f"unter {round(b.bis_bpm)}"
+            else:
+                spanne_ = f"{round(b.von_bpm)}–{round(b.bis_bpm) - 1}"
+            zeilen.append((f"{b.name} · {spanne_}", sekunden[i], stufenfarbe(i, n)))
+        return _balken(zeilen, name_px=148)
     return _balken(
         [
-            (f"{k}–{k + HF_BREITE_BPM - 1} bpm", sekunden, FARBEN["hf_rr"])
-            for k, sekunden in reversed(verteilung)
+            (f"{k}–{k + HF_BREITE_BPM - 1} bpm", sekunden_, FARBEN["hf_rr"])
+            for k, sekunden_ in reversed(hf_verteilung(reihe_, 5.0))
         ]
     )
 
@@ -1910,6 +1992,41 @@ def ausdauer_detail_view(
                 ft.Segment(value=KURVE_STRECKE, label=ft.Text("Strecke", size=12)),
             ],
             on_change=gewaehlt,
+        )
+
+    def tempo_stufenwahl(e: TrainingEinstellungen) -> ft.Control:
+        def gewaehlt(ev: ft.Event[ft.SegmentedButton]) -> None:
+            wahl = next(iter(ev.control.selected or []), None)
+            if wahl in (TEMPO_RELATIV, TEMPO_FEST) and wahl != einst_box["e"].tempo_stufen:
+                einstellung_aendern(tempo_stufen=wahl)
+
+        return ft.SegmentedButton(
+            selected=[e.tempo_stufen],
+            show_selected_icon=False,
+            segments=[
+                ft.Segment(value=TEMPO_RELATIV, label=ft.Text("Training", size=12)),
+                ft.Segment(value=TEMPO_FEST, label=ft.Text("Fest", size=12)),
+            ],
+            on_change=gewaehlt,
+            data="tempo_stufen",
+        )
+
+    def hf_bereichswahl(e: TrainingEinstellungen, gezeigt: str) -> ft.Control:
+        """3 · 5 · 10 Bereiche des Profils oder Schritte von zehn Schlägen — ``gezeigt`` ist,
+        was die Karte gerade zeigt (leer bei eigenen Bereichen des Profils)."""
+
+        def gewaehlt(ev: ft.Event[ft.SegmentedButton]) -> None:
+            wahl = next(iter(ev.control.selected or []), None)
+            if wahl in HF_WAHL and wahl != einst_box["e"].hf_bereiche:
+                einstellung_aendern(hf_bereiche=wahl)
+
+        return ft.SegmentedButton(
+            selected=[gezeigt] if gezeigt in HF_WAHL else [],
+            allow_empty_selection=True,
+            show_selected_icon=False,
+            segments=[ft.Segment(value=k, label=ft.Text(v, size=12)) for k, v in HF_WAHL.items()],
+            on_change=gewaehlt,
+            data="hf_bereiche",
         )
 
     inhalt = ft.Column(spacing=12)
@@ -2185,12 +2302,39 @@ def ausdauer_detail_view(
             _tempo_verteilung(r.teilstuecke, e, strecke.sportart) if r is not None else None
         )
         if tempo_balken is not None:
-            teile.append(karte(titel("Zeit je Tempo"), tempo_balken))
-        hf_balken = (
-            _hf_verteilung_teil(hrv, bezug, r) if hrv is not None and r is not None else None
-        )
-        if hf_balken is not None:
-            teile.append(karte(titel("Zeit je Herzfrequenz"), hf_balken))
+            teile.append(
+                karte(
+                    titel("Zeit je Tempo", tempo_stufenwahl(e)),
+                    tempo_balken,
+                    hinweis(_tempo_stufen_text(e, strecke.sportart)),
+                )
+            )
+        if hrv is not None and r is not None:
+            hf_profil_, hf_einst = state.hf_profil(), state.hf_einstellungen()
+            bereiche = _hf_bereiche(e, hf_profil_, hf_einst)
+            hf_balken = _hf_verteilung_teil(hrv, bezug, r, bereiche)
+            if hf_balken is not None:
+                if e.hf_bereiche == HF_BPM:
+                    gezeigt, text = HF_BPM, "Schritte von zehn Schlägen."
+                elif not bereiche:
+                    gezeigt, text = HF_BPM, HF_OHNE_PROFIL
+                else:
+                    gezeigt = e.hf_bereiche or wirksames_modell(hf_profil_, hf_einst)
+                    text = (
+                        f"Bereiche aus Ruhe-HF {round(hf_profil_.ruhe_bpm or 0)} und HFmax "
+                        f"{round(hf_profil_.hfmax_bpm or 0)} bpm (Einstellungen → Herzfrequenz)."
+                    )
+                teile.append(
+                    karte(
+                        titel("Zeit je Herzfrequenz"),
+                        ft.Row(
+                            alignment=ft.MainAxisAlignment.END,
+                            controls=[hf_bereichswahl(e, gezeigt)],
+                        ),
+                        hf_balken,
+                        hinweis(text),
+                    )
+                )
         pausen_ = pausen(weg_liste)
         if pausen_ and ablesung is not None:
             teile.append(

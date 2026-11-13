@@ -111,3 +111,24 @@ def test_geaenderte_oder_fehlende_mainactivity_bricht_ab(apk_bauen, tmp_path) ->
     # N124: nach dem Abbruch liegt keine halbe Vorlage da, die der nächste Lauf nähme
     assert not (tmp_path / "a.zip").exists() and not (tmp_path / "b.zip").exists()
     assert list(tmp_path.glob("*.teil")) == []
+
+
+def test_gepackte_pakete_und_flet_abweichung(apk_bauen, tmp_path) -> None:
+    """Ben, 13.11.2026: Die APK löst ihre Pakete selbst auf — v0.3.90 trug flet 1.0.5, getestet
+    war 1.0.3. Das Skript liest, was gepackt wurde, und bricht bei abweichendem Flet ab."""
+    arch = tmp_path / "arm64-v8a"
+    for ordner in (
+        "flet-1.0.5.dist-info",
+        "flet_charts-1.0.5.dist-info",
+        "msgpack-1.1.2.dist-info",
+    ):
+        (arch / ordner).mkdir(parents=True)
+    (arch / "flet").mkdir()  # das Paket selbst zählt nicht
+    gepackt = apk_bauen.gepackte_pakete(tmp_path)
+    assert gepackt == {"flet": "1.0.5", "flet-charts": "1.0.5", "msgpack": "1.1.2"}
+    gleich = {"flet": "1.0.5", "flet-charts": "1.0.5", "msgpack": "1.2.4"}
+    assert apk_bauen.flet_abweichungen(gepackt, gleich) == []  # nur Flet zählt
+    alt = {"flet": "1.0.3", "flet-charts": "1.0.5"}
+    assert apk_bauen.flet_abweichungen(gepackt, alt) == ["flet: APK 1.0.5, getestet 1.0.3"]
+    with pytest.raises(SystemExit, match="Keine gepackten Pakete"):
+        apk_bauen.gepacktes_pruefen(tmp_path / "leer")

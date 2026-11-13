@@ -223,6 +223,12 @@ lesen. Die Spalte „Schwere“ sagt nichts darüber, ob der verwundbare Pfad hi
   nicht schließen. Pillow, Authlib, fastmcp, dnspython und joserfc sind nicht in der APK
   (nur Gruppe `flet-dev`). Eine Meldung zum Lock sagt also nichts Sicheres über die APK —
   und ein grünes Lock auch nicht.
+  **Seit 13.11.2026 ist Flet genau festgeschrieben** (`flet==1.0.5` samt Erweiterungen in
+  `pyproject.toml`): Die APK bekommt dasselbe Flet wie Entwicklung und CI, und
+  `scripts/apk_bauen.py` nennt nach dem Bau jedes gepackte Paket mit Version („In der APK: …“
+  im Protokoll des Laufs) und bricht ab, wenn Flet abweicht. Die übrigen Pakete lassen sich
+  nicht aus dem Lock nehmen: Für Android gibt es binäre Pakete (numpy, msgpack) nur in den
+  Versionen, die pypi.flet.dev baut — das Lock ist für den Entwicklungsrechner aufgelöst.
 - **Secret-Scanning** ist ein anderer Dienst (sucht nach Tokens in Commits),
   läuft aber unter derselben Überschrift „Code security“. Siehe README,
   „Repo-Einstellungen (Sicherheit)“.

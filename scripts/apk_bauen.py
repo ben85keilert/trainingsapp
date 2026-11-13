@@ -379,6 +379,55 @@ def _vorlage_patchen_in(quelle: Path, version: str) -> Path:
     return ziel
 
 
+def gepackte_pakete(ordner: Path) -> dict[str, str]:
+    """Paket → Version, wie `flet build` sie in die APK gepackt hat (``build/site-packages``).
+
+    Gelesen aus den Namen der ``.dist-info``-Ordner, je Architektur ein Unterordner. Die APK
+    löst ihre Pakete selbst auf, nicht aus ``uv.lock`` (`docs/dependabot.md`) — nur hier
+    steht, was wirklich ausgeliefert wird.
+    """
+    pakete: dict[str, str] = {}
+    for info in sorted(ordner.glob("*/*.dist-info")):
+        name, _, stand = info.name.removesuffix(".dist-info").rpartition("-")
+        if name:
+            pakete[name.lower().replace("_", "-")] = stand
+    return pakete
+
+
+def flet_abweichungen(gepackt: dict[str, str], getestet: dict[str, str]) -> list[str]:
+    """Flet-Pakete, die in der APK in einer anderen Version stecken als in der Umgebung,
+    mit der entwickelt und getestet wird (Ben, 13.11.2026: flet wandert nie von selbst —
+    v0.3.90 trug flet 1.0.5, das Lock stand auf 1.0.3)."""
+    return [
+        f"{name}: APK {stand}, getestet {getestet[name]}"
+        for name, stand in sorted(gepackt.items())
+        if name.startswith("flet") and name in getestet and getestet[name] != stand
+    ]
+
+
+def gepacktes_pruefen(ordner: Path) -> None:
+    """Nennt, was in der APK steckt, und bricht ab, wenn Flet vom getesteten Stand abweicht."""
+    from importlib import metadata
+
+    gepackt = gepackte_pakete(ordner)
+    if not gepackt:
+        sys.exit(f"Keine gepackten Pakete unter {ordner} — scripts/apk_bauen.py anpassen.")
+    print("In der APK: " + ", ".join(f"{n} {v}" for n, v in sorted(gepackt.items())))
+    getestet: dict[str, str] = {}
+    for name in gepackt:
+        try:
+            getestet[name] = metadata.version(name)
+        except metadata.PackageNotFoundError:
+            continue
+    anders = flet_abweichungen(gepackt, getestet)
+    if anders:
+        sys.exit(
+            "Flet in der APK weicht vom getesteten Stand ab — die Versionen in "
+            "pyproject.toml genau festschreiben (==) und uv.lock nachziehen:\n  "
+            + "\n  ".join(anders)
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument(
@@ -433,6 +482,7 @@ def main() -> None:
     art = "Debug" if args.debug else "signiert"
     print(f"Baue Version {version()} (Build {nummer}), {art}, {arch}")
     subprocess.run(befehl, cwd=PROJEKT, env=umgebung, check=True)
+    gepacktes_pruefen(PROJEKT / "build" / "site-packages")
 
     apks = sorted((PROJEKT / "build" / "apk").glob("*.apk"))
     if not apks:

@@ -18,14 +18,20 @@ license = { file = "LICENSE" }
 # über [tool.uv.sources], für `flet build` über [tool.flet.dev_packages]; die CI
 # legt beide Repos nebeneinander ab (.github/workflows). Formeln und Regeln:
 # hrv-core/docs/hrv_algorithmen.md und korrektur.md.
+#
+# Flet und seine Erweiterungen sind genau festgeschrieben (Ben, 13.11.2026): `flet build`
+# löst die Pakete der APK aus dieser Liste selbst auf, nicht aus uv.lock — mit `1.0.*` trug
+# v0.3.90 flet 1.0.5, entwickelt und getestet war 1.0.3. Ein Flet-Wechsel hebt alle Zeilen
+# hier und in der Gruppe flet-dev gemeinsam; `scripts/apk_bauen.py` bricht ab, wenn die APK
+# ein anderes Flet trägt als die Umgebung. Übrige Pakete der APK: docs/dependabot.md.
 dependencies = [
-    "flet==1.0.*",
-    "flet-charts==1.0.*",
-    "flet-video==1.0.*",
-    "flet-permission-handler==1.0.*",
+    "flet==1.0.5",
+    "flet-charts==1.0.5",
+    "flet-video==1.0.5",
+    "flet-permission-handler==1.0.5",
     # GPS-Tracking (docs/plan_gps.md): Karte (flutter_map, OSM-Kacheln) und Position
-    "flet-map==1.0.*",
-    "flet-geolocator==1.0.*",
+    "flet-map==1.0.5",
+    "flet-geolocator==1.0.5",
     "numpy>=2.1",
     "hrv-core",
     # Eigene Flet-Erweiterungen im Repo: BLE auf Android über flutter_blue_plus
@@ -46,13 +52,13 @@ dependencies = [
     # Schwesterrepo hrv-watch (../hrv-watch/flet_medien), eingebunden wie hrv-core;
     # CI und APK-Workflow nehmen den Commit aus `hrv-watch.ref`.
     "flet-medien",
-    "flet-camera==1.0.*",
+    "flet-camera==1.0.5",
     # Audioaufnahmen an Einträgen und an der Notiz zum Tag (Ben, 22.10.2026): Aufnehmen
     # über flet-audio-recorder (Flutter-Plugin record, schreibt gleich in eine Datei),
     # Abspielen in der Ansicht über flet-audio (audioplayers) — das nimmt Musik-Apps den
     # Audiofokus, hier gewollt: Man hört sich die Aufnahme bewusst an.
-    "flet-audio-recorder==1.0.*",
-    "flet-audio==1.0.*",
+    "flet-audio-recorder==1.0.5",
+    "flet-audio==1.0.5",
 ]
 
 # Werkzeug fürs Inhalte-Repo: Paketdateien prüfen, bauen, Index schreiben
@@ -88,9 +94,9 @@ dev = [
 # (`flet mcp`, eingetragen in .mcp.json) — er gibt KI-Assistenten die echte API
 # statt veralteten Trainingswissens. Version immer im Gleichschritt mit flet.
 flet-dev = [
-    "flet-cli==1.0.*",
-    "flet-desktop==1.0.*",
-    "flet-mcp==1.0.*",
+    "flet-cli==1.0.5",
+    "flet-desktop==1.0.5",
+    "flet-mcp==1.0.5",
 ]
 ci = [
     "numpy>=2.1",
@@ -206,6 +212,8 @@ NSMicrophoneUsageDescription = "Ton für Videos und Audioaufnahmen zu deinen Üb
 # path_provider_android 2.3.1) verlangt jni ^1.1.0 → „Constant evaluation error …
 # expect package:jni ^1.1.0“ beim Build. 1.0.3 passt zu jni 1.0.0 (gleiche Abhilfe
 # wie in praxis_mobil, 2026-10-06). Wegnehmen, sobald eine Flet-Vorlage jni ≥ 1.1 zulässt.
+# Die Vorlage 1.0.5 schreibt jni nicht mehr vor (13.11.2026, Vorlagen verglichen) — die
+# beiden Festlegungen bleiben, bis ein Build ohne sie geprüft ist.
 # Ebenso shared_preferences_android 2.5.0 (erschienen 17.10.2026, verlangt jni ^1.1.0 —
 # der Tag v0.2.2 scheiterte daran); 2.4.28 kommt ohne jni aus.
 [tool.flet.flutter.pubspec.dependency_overrides]

@@ -236,5 +236,10 @@ werden können, wird mit Programminstallation automatisch mitgeliefert.“
   es gibt kein erneutes Einspielen wie bei einem Paket.
 - Das **Buch-Symbol unter Heute** hängt nicht am gespeicherten Filter: Es setzt den festen
   Tag direkt und bleibt, auch wenn „Tagebuch“ aus der Schnellwahl gelöscht ist.
+- **„Tage“: jedes Workout steht da** (Ben nach dem Gerätetest, 13.11.2026: „Einfaches Label
+  Workout mit der Anstrengung (auch wenn keine eingetragen) dahinter“) — ohne Eintrag
+  „Anstrengung —“. Die Übungen bleiben eigene Zeilen mit dem Plan als Etikett, damit sich
+  Übung A aus dem Workout und allein geübt bei der Übung sammeln; eine Zusammenfassung des
+  Workouts steht auf dem Workout-Eintrag (Tipp auf die Zeile).
 - Nennt ein gespeicherter Filter etwas, das es nicht mehr gibt (gelöschter Tag oder Plan),
   fällt das beim Setzen heraus; der Chip gilt dann nicht mehr als „gewählt“.

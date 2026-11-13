@@ -85,7 +85,7 @@ Notiz; unveränderlich — eine Änderung ist eine neue Zeile mit `replaces_id`,
 Außerhalb der Seite: Das **Tagebuch** zeigt Workouts, zu denen eine **Notiz** geschrieben ist
 — die Skalen stehen als Zeile darunter; ein Workout nur mit Anstrengung steht dort nicht (Ben,
 12.11.2026: im Tagebuch nur selbst Geschriebenes; der Reiter heißt seither „Notizen“, und
-jedes Workout mit Eintrag steht in Verlauf → „Tage“ als Zeile nach der Uhr, Tipp → der Eintrag)
+jedes Workout — seit 13.11.2026 auch ohne Eintrag, dann „Anstrengung —“ — steht in Verlauf → „Tage“ als Zeile nach der Uhr, Tipp → der Eintrag)
 (`core.tagebuch.WORKOUT`, `EinheitRepo.workout_zeilen`; nach Tagen an ihrer Uhrzeit, nach Übungen
 als Gruppe je Workout), Tipp → der Eintrag. In der **Zeitleiste** zeigt bei mehreren Workouts nur
 das jüngste seine Übungen, die älteren klappen auf Tipp auf.

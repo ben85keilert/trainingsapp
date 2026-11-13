@@ -432,6 +432,7 @@ async def test_verlauf_tage_nach_der_uhr_mit_workout(page, state) -> None:
     texte = _texte(ansicht)
     assert "Kniebeuge" in texte and "Beine" in texte  # der Plan als Etikett
     assert "Workout Beine" in texte and "Anstrengung 6" in texte
+    assert "Anstrengung —" not in texte
     assert "Knie ruhig" not in texte and "1 Notiz zum Tag" in texte
     uhr = [t for t in texte if len(t) == 5 and t[2] == ":" and t.replace(":", "").isdigit()]
     assert len(uhr) >= 2 and uhr == sorted(uhr)  # nach der Uhr
@@ -451,3 +452,7 @@ async def test_verlauf_tage_nach_der_uhr_mit_workout(page, state) -> None:
     assert state.verlauf_tab == TAGEBUCH and state.tagebuch_sprung == state.heute()
     state.verlauf_tab = 0
     state.tagebuch_sprung = None
+    # Ben, 13.11.2026: jedes Workout steht da — ohne Eintrag mit „Anstrengung —“
+    _workout(state, plan, "e-2", 10)
+    texte = _texte(verlauf(page, state))
+    assert texte.count("Workout Beine") == 2 and texte.count("Anstrengung —") == 1

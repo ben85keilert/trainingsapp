@@ -46,7 +46,7 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   entfernte lesbar). Die Seite hat dazu die HF-Kurve mit Schrittgrenzen (Thread, `hf_lesen`),
   den gegangenen Weg im Ablaufbild (nur mit Abzweig, eingeklappt; `Durchlauf.kanten`) und
   `/workout/<einheit>/alle`; Verlauf → „Notizen“ zeigt Workouts **mit Notiz** (`core.tagebuch.WORKOUT`), Verlauf → „Tage“
-  jedes Workout mit Eintrag als Zeile nach der Uhr (`EinheitRepo.workout_zeilen`, Ben 12.11.2026), die Zeitleiste klappt ältere Workout-Blöcke ein. **Ein Workout bleibt ein
+  jedes Workout als Zeile nach der Uhr, die Anstrengung dahinter — „—“ ohne Eintrag (`EinheitRepo.workout_zeilen(mit_leeren=True)`, Ben 13.11.2026), die Zeitleiste klappt ältere Workout-Blöcke ein. **Ein Workout bleibt ein
   Workout:** „Trainieren“ öffnet es immer als Workout (`uebungen.heute_trainieren` nimmt
   `plan_als_plan` zurück), die Liste gibt es nur von Hand.
 

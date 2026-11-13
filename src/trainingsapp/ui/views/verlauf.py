@@ -110,7 +110,9 @@ def _daten(state: AppState) -> _Daten:
         {},
         {f.id: f for f in state.tagesfelder.alle(state.profil.id, mit_geloeschten=True)},
         state.tageswerte.zwischen(state.profil.id, None, heute),
-        state.einheiten.workout_zeilen(state.profil.id) if state.einheiten is not None else [],
+        state.einheiten.workout_zeilen(state.profil.id, mit_leeren=True)
+        if state.einheiten is not None
+        else [],
     )
     for tag, e in eintraege:
         daten.je_kachel.setdefault(e.exercise_id, []).append((tag, e))
@@ -519,10 +521,16 @@ def _notizen_zeile(state: AppState, tag: date, anzahl: int) -> ft.Control:
 def _workout_zeile(page: ft.Page, w: WorkoutZeile) -> ft.Control:
     """Ein Workout des Tags mit dem, was zu ihm eingetragen ist — der Tipp öffnet den
     Workout-Eintrag (dort „Alle Durchläufe“). Seit 12.11.2026 der Ort für Workouts ohne
-    Notiz, die nicht mehr im Reiter „Notizen“ stehen."""
-    teile: list[ft.Control] = [ft.Text(f"Workout {w.name}".strip(), size=15)]
-    if text := w.werte.werte_text():
-        teile.append(ft.Text(text, size=12, opacity=0.75))
+    Notiz, die nicht mehr im Reiter „Notizen“ stehen. **Jedes Workout steht da, die
+    Anstrengung dahinter** — „—“, solange keine eingetragen ist (Ben, 13.11.2026); seine
+    Übungen bleiben eigene Zeilen, damit sie sich bei der Übung sammeln."""
+    text = w.werte.werte_text()
+    if w.werte.srpe is None:
+        text = " · ".join(t for t in ("Anstrengung —", text) if t)
+    teile: list[ft.Control] = [
+        ft.Text(f"Workout {w.name}".strip(), size=15),
+        ft.Text(text, size=12, opacity=0.75),
+    ]
     return ft.Container(
         bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,
         border_radius=14,

@@ -425,6 +425,9 @@ def test_workout_zeilen_fuers_tagebuch_und_kopie_der_felder(repo) -> None:
     ]
     assert zeilen[0].werte.werte_text() == "Anstrengung 5 · Schmerz 2"
     assert zeilen[0].werte.note == "gut"
+    # Verlauf → Tage (Ben, 13.11.2026): jedes Workout, auch ohne Eintrag
+    alle = r.workout_zeilen(profil, mit_leeren=True)
+    assert [(z.einheit_id, z.werte.leer) for z in alle] == [("e-1", False), ("e-2", True)]
     # Alles zurückgenommen: nicht mehr im Tagebuch
     r.workout_eintragen("e-1", result={"srpe": None, "skala:Schmerz": None}, note="")
     assert r.workout_zeilen(profil) == []

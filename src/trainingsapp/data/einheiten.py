@@ -203,17 +203,19 @@ class EinheitRepo:
             )
         return out
 
-    def workout_zeilen(self, subject_id: str) -> list[WorkoutZeile]:
+    def workout_zeilen(self, subject_id: str, *, mit_leeren: bool = False) -> list[WorkoutZeile]:
         """Alle Workouts des Profils, zu denen etwas eingetragen ist (Anstrengung, Skala,
-        Notiz) — für das Tagebuch; Name und Plan aus ``plan/start`` der Zeitleiste."""
+        Notiz) — für das Tagebuch; Name und Plan aus ``plan/start`` der Zeitleiste.
+        ``mit_leeren``: auch die ohne Eintrag (Verlauf → Tage, Ben 13.11.2026: jedes Workout
+        des Tags steht da, die Anstrengung dahinter — auch wenn keine eingetragen ist)."""
         koepfe: dict[str, tuple[str, str, datetime]] = {}
         for r in self.con.execute(
             "SELECT e.id, e.started_at, x.text, x.daten_json FROM einheit e "
             "JOIN einheit_ereignis x ON x.einheit_id = e.id "
             "WHERE e.subject_id = ? AND e.deleted_at IS NULL AND x.quelle = 'plan' "
-            "AND x.art = 'start' AND e.id IN (SELECT einheit_id FROM workout_entry) "
+            "AND x.art = 'start' AND (? OR e.id IN (SELECT einheit_id FROM workout_entry)) "
             "ORDER BY e.started_at, x.nr",
-            (subject_id,),
+            (subject_id, int(mit_leeren)),
         ):
             d = json.loads(r["daten_json"] or "{}")
             if d.get("workout") and r["id"] not in koepfe:
@@ -224,9 +226,9 @@ class EinheitRepo:
                 )
         werte = self.workout_werte(list(koepfe))
         return [
-            WorkoutZeile(i, plan, name, beginn, werte[i])
+            WorkoutZeile(i, plan, name, beginn, werte.get(i) or WorkoutWerte(i))
             for i, (plan, name, beginn) in koepfe.items()
-            if i in werte and not werte[i].leer
+            if mit_leeren or (i in werte and not werte[i].leer)
         ]
 
     def workout_wert(self, einheit_id: str) -> WorkoutWerte:

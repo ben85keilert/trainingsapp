@@ -888,15 +888,19 @@ def main(page: ft.Page) -> None:
                         )
                         if gemeinsam is not None:
                             ablegen(lambda: timer_zuordnen_view(page, state, basis, gemeinsam))
-                elif teile[i + 1 : i + 2] == ["ablauf"] and teile[:1] == ["plan"] and i == 2:
+                elif (
+                    teile[i + 1 : i + 2] == ["ablauf"]
+                    and teile[:1] == ["plan"]
+                    and i == 2
                     # Die alte Ablauf-Route (bis 8.11.2026) zeigt das Workout — ein Motor, ein
                     # Einstieg (K4, `docs/plan_uhren.md` §4.7)
-                    if (plan := state.plaene.laden(teile[1])) is not None:
-                        ablegen(
-                            lambda: workout_view(
-                                page, state, plan, route=f"{basis}/timer/ablauf", browser=browser
-                            )
+                    and (plan := state.plaene.laden(teile[1])) is not None
+                ):
+                    ablegen(
+                        lambda: workout_view(
+                            page, state, plan, route=f"{basis}/timer/ablauf", browser=browser
                         )
+                    )
         else:
             stapel(teile)
         return list(ablage)

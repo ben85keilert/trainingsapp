@@ -177,16 +177,20 @@ class TimerBaustein:
         if self._lief and not laeuft and not self.lauf.fertig:
             halt = self.lauf.angehalten_bei if self.lauf.angehalten_bei is not None else jetzt
             out.append(Ereignis(halt - t0, "timer", "pause", "Timer angehalten"))
-        elif not self._lief and laeuft and start is not None:
+        elif (
+            not self._lief
+            and laeuft
+            and start is not None
             # Geht es im selben Abschnitt weiter, meldet `neue_marken` nichts — dann ist es
             # ein „weiter“; ein übersprungener Abschnitt beginnt mit seiner eigenen Marke.
-            if not any(m.bei is not None and m.bei >= start - 1e-6 for m in marken):
-                nummer = self.lauf.stand().nummer
-                name, runde, von = self.lauf.angaben(nummer)
-                abschnitt = self.lauf.abschnittsname(nummer)
-                weiter = {"abschnitt": abschnitt, "name": name, "runde": runde, "von": von}
-                weiter.update(self._ablauf(self.lauf.abschnitt(nummer)))
-                out.append(Ereignis(start - t0, "timer", "weiter", f"weiter: {abschnitt}", weiter))
+            and not any(m.bei is not None and m.bei >= start - 1e-6 for m in marken)
+        ):
+            nummer = self.lauf.stand().nummer
+            name, runde, von = self.lauf.angaben(nummer)
+            abschnitt = self.lauf.abschnittsname(nummer)
+            weiter = {"abschnitt": abschnitt, "name": name, "runde": runde, "von": von}
+            weiter.update(self._ablauf(self.lauf.abschnitt(nummer)))
+            out.append(Ereignis(start - t0, "timer", "weiter", f"weiter: {abschnitt}", weiter))
         self._lief = laeuft
         for m in marken:
             t = (m.bei if m.bei is not None else jetzt - m.vor_s) - t0

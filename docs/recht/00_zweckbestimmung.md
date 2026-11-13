@@ -67,7 +67,8 @@ wie jede Sportuhr. Bedingungen: die Grenzen setzt die Person selbst (ein Vorschl
 Fitness-Zonen ist erlaubt, nie eine „sichere“ Grenze aus Alter oder Messdaten); der Ton ist
 Information, keine Steuerung (kein Pausieren, kein „weiter, wenn im Bereich“, kein Eintrag);
 Fitness-Sprache („Zielbereich“, „Intensität“, „darüber/darunter“ — nie „Grenze“, „Warnung“,
-„Schonung“, „Herz“); im Patientenmodus aus. Damit teilt sich `core/limits.py` künftig in
+„Schonung“, „Herz“); im Patientenmodus aus (so am 7.11.2026 — **geändert 13.11.2026**, siehe
+„Zielbereich-Ton im Patientenmodus“ unten). Damit teilt sich `core/limits.py` künftig in
 **Zielbereich-Ton** (Solo erlaubt) und **Steuerung** (`rest_until_hr_below`, Bedingungen aus der
 Herzfrequenz — gesperrt, `physiologische_steuerung`). HF-Zonen als **Workout-Bedingung**
 („x Minuten in Zone y“) bleiben Steuerung und damit gesperrt (Variante B abgelehnt).
@@ -75,6 +76,26 @@ Herzfrequenz — gesperrt, `physiologische_steuerung`). HF-Zonen als **Workout-B
 mit oberer und unterer Grenze und zwei Klängen (`HfEinstellungen.ziel_unten_bpm`,
 `alarm_klang_tief`), gespielt im Fokus (`components/fokus.py`) und in der Live-Sicht; die
 HF-Kachel des Fokus zeigt Zone, Anteil der Reserve und Zeit in der Zone — nur Anzeige.
+
+**Zielbereich-Ton im Patientenmodus** (Ben, 13.11.2026 — löst „im Patientenmodus aus“ vom
+7.11. ab): Der Ton bleibt auch dort erlaubt. Ben: „Zieltöne werden vom Patient manuell
+eingestellt. Dazu gibt es ein Briefing, user müssen das aber alleine machen“ und „Ein selbst
+gesetzter Ton sollte kein Problem sein“. Die Begründung ist dieselbe wie in Solo: Die Grenze
+ist die der Person, der Ton ist Information wie bei einer Sportuhr. Es gelten die Bedingungen
+der Entscheidung C unverändert (selbst gesetzt, Information statt Steuerung, Fitness-Sprache),
+dazu: **Die Grenzen kommen nie von der Praxis** — nicht mit einem Plan, Kurs oder Paket und
+nicht über die Praxisanbindung. Geprüft am 13.11.2026: Das Paketformat kennt keine Pulsgrenzen
+(kein Treffer für die Felder in `core/paketdatei.py`, `core/pakete.py`, `paket_werkzeug.py`,
+`docs/uebungspakete.md`); sie stehen nur in den Einstellungen des Profils
+(`core/hf_einstellungen.py`, `core/hf_ziel.py`). Das muss so bleiben: Ein Paket, das Grenzen
+mitbrächte, machte aus dem Ton der Person einen Alarm der Praxis.
+Damit ist der Ton die **eine Ausnahme** von „nicht warnen — im Patientenmodus auch nicht
+lokal“ (Faustregel unten, Satz 2). **Offen** (Einschätzung Claude, von Ben nicht entschieden):
+Die Ausnahme trägt nur, solange die Grenze wirklich die der Person ist. Nennt das Briefing
+einer Patientin einen Wert für sie oder einen gesundheitlichen Grund („damit du dich nicht
+überlastest“), ist es der Sache nach eine Vorgabe der Therapeutin, die die App überwacht —
+das Briefing erklärt deshalb die Bedienung und verweist höchstens auf den Vorschlag aus den
+Fitness-Zonen. Nicht anwaltlich geprüft; gehört in die fachanwaltliche Prüfung.
 
 **Vorschlag nach der Belastung** (Ben, 12.11.2026, `core/anpassung.py`, `docs/plan_kurse.md`
 §8): Ein Plan aus einem Kurs oder Paket kann nach dem Workout ein anderes **Zeitziel**
@@ -171,7 +192,7 @@ Dokumentations- und Kommunikationswerkzeug. Was die Diskussion ergab, verbindlic
 **Faustregel in drei Sätzen.** (1) *Die App* darf erheben, speichern, zeigen, exportieren und
 **Selbstauskünfte und Leistungen** (Einträge, Skalen, Notizen, Fotos) an die Praxis
 übertragen. (2) *Die App* darf nicht deuten, warnen oder steuern — im Patientenmodus auch
-nicht lokal. (3) *Die Therapeutin* darf alles beurteilen, was die Patientin ihr gibt — im
+nicht lokal (eine Ausnahme seit 13.11.2026: der selbst gesetzte Zielbereich-Ton, oben). (3) *Die Therapeutin* darf alles beurteilen, was die Patientin ihr gibt — im
 Gespräch, als Export, über den Rückkanel für Selbstauskünfte — und den Plan danach anpassen.
 Physiologische Messwerte kommen über den Weg „die Patientin gibt sie“, nie über eine
 eingebaute Überwachungsfunktion.
@@ -183,7 +204,7 @@ eingebaute Überwachungsfunktion.
 | Pläne, Kurse, Workouts; Bedingungen Zeit · Wiederholungen · X-in-Y · Freischaltung | ja | ja | **ja** — Einträge, Häkchen, Skalen, Notizen, Fotos (der Übungszettel mit Rückkanal) |
 | HF/HRV live und als Kurve, Rohwerte (HF, RR, RMSSD) | ja | ja — Zahlen und Kurven | nein (nur, wenn die Person selbst exportiert und schickt) |
 | HF-Zonen anzeigen (HRR %, Zeit in Zone) | ja | ja, als Anzeige | nein |
-| Zielbereich-Ton (selbst gesetzt, Entscheidung C) | ja | **nein** | — |
+| Zielbereich-Ton (selbst gesetzt, Entscheidung C) | ja | **ja** — die Person setzt die Grenzen selbst, nie die Praxis (Ben, 13.11.2026; bis dahin „nein“) | — |
 | HF-Zone als Alarm der App oder Workout-Bedingung | nein (Steuerung) | nein | — |
 | HRV-Auswertung mit Schwellen und Hinweisen (DFA-α1-Schwellen, Atemlage-Hinweis, HF-Auswertung) | ja, als Fitness-Information formuliert, keine Gesundheitsurteile | **nein** — ausblenden, nur Rohwerte (`config.ist_aktiv("hrv_bewertung")`) | nein |
 | Diagnosemodus, Mitschnitt, Export der Messdatei | ja | ja | nur als bewusste Handlung der Person, nicht über die Anbindung |

@@ -1,6 +1,6 @@
 [project]
 name = "trainingsapp"
-version = "0.3.93"
+version = "0.3.94"
 description = "Trainingsassistent für Bewegungsübungen mit begleitender HRV-Messung"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -212,8 +212,8 @@ NSMicrophoneUsageDescription = "Ton für Videos und Audioaufnahmen zu deinen Üb
 # jni_flutter 1.0.3, shared_preferences_android 2.4.28), weil die Flet-Vorlage 1.0.3 jni auf
 # 1.0.0 zwang und neuere Plugins jni ^1.1.0 verlangen („Constant evaluation error … expect
 # package:jni ^1.1.0“; der Tag v0.2.2 scheiterte daran). Die Vorlage 1.0.5 schreibt jni nicht
-# mehr vor; ein Probebau ohne beide lief durch (APK-Lauf 43522697024, Zweig
-# versuch/ohne-jni-overrides). Kommt der Fehler mit einer späteren Vorlage wieder: Abschnitt
+# mehr vor; ein Probebau ohne beide lief durch (APK-Lauf 43522697024 von Hand,
+# Versuchszweig danach gelöscht). Kommt der Fehler mit einer späteren Vorlage wieder: Abschnitt
 # wieder anlegen.
 
 # ---------------------------------------------------------------------------

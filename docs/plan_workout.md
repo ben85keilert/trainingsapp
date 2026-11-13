@@ -114,7 +114,7 @@ HF-Zonen nur als Anzeige, der Zielbereich-Ton (Entscheidung C) ist Information.
 | W1 | Schalter und ▶, Start-Bild mit hart/weich, Fokus je Übung (Komponente), Minus-Timer, Workout-Abschnitt, Ende-Bild, Kurven-Einblendung HF/RR/RMSSD/SDNN/Atemfrequenz/RSA | **gebaut 7.11.2026 (0.3.60)** — Ende-Bild ohne Kurve der Aufnahme (Hinweis statt Karte, P98) |
 | W2 | Bedingungen `zeit` · `wdh` · `wdh_in_zeit` · `gemacht`, Härte als Freischaltung mit Inhalt (Text, Link), Karte „Weiter, wenn …“ in „Im Plan einstellen“ | **gebaut 7.11.2026 (0.3.61)** — Kurse unverändert (hart = `zugewiesene_kurse`, P97) |
 | W3 | Zweige A–D je Planübung, „erfüllt →“/„nicht erfüllt →“ auf jede Planübung, C3-Wahl in der Ansicht, Schleifenprüfung (`core.bedingung.schleifen`, noch ohne Hinweis im Editor) | **gebaut 7.11.2026 (0.3.61)** |
-| W4 | HF-Zone als Anzeige (Zone · % HRR · Zeit in Zone) in der HF-Kachel des Fokus; Zielbereich-Ton oben/unten (Entscheidung C, Einstellungen → Herzfrequenz) | **gebaut 7.11.2026 (0.3.61)** — Patientenmodus (Ton aus) folgt mit dem Modus |
+| W4 | HF-Zone als Anzeige (Zone · % HRR · Zeit in Zone) in der HF-Kachel des Fokus; Zielbereich-Ton oben/unten (Entscheidung C, Einstellungen → Herzfrequenz) | **gebaut 7.11.2026 (0.3.61)** — im Patientenmodus bleibt der Ton (Ben, 13.11.2026; bis dahin „Ton aus“ — `docs/recht/00_zweckbestimmung.md`, „Zielbereich-Ton im Patientenmodus“) |
 
 ## 4a. Umsetzungsstand W1 (7.11.2026)
 

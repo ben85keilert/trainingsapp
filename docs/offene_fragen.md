@@ -191,6 +191,14 @@ Abschnitt 3; die beantworteten stehen unter „Entschieden“):
 
 ## 2. Am Gerät zu prüfen (Ben)
 
+**Als Nächstes, mit dem nächsten Build** (Ben, 13.11.2026 — er will daran erinnert werden):
+**T136** (Dokumente als Anhang: Ausrichtung hochkant, Zuschnitt und Abdunklung, Lesbarkeit und
+Größe bei 1080p, Regler mit dem Finger, „Öffnen mit …“, fünf Knöpfe in den Leistungen) ·
+**T134** (Material, Kurse aus Blöcken) · **T133** (Editoren in Reitern) · **T125** (Dienst ohne
+Berechtigung, Geräte-Backup) · **T115** (App-Update von selbst). T136 ist in 0.3.91 enthalten
+und am Gerät noch gar nicht geprüft; im Browser nicht prüfbar sind dort Ausrichtung und
+Abdunklung gedrehter Seiten.
+
 - **T13** (Kurse, 15.10.): Übungen → Kurse → „HRV-Messung verstehen“: Kapitel lesen, Markdown-Darstellung, „Weiter“, Kapitel 3 ohne Messung → „Trotzdem freischalten“, Kapitel 6 legt den Plan „Kurs: Ruhig atmen“ auf „Heute“; nach Abschluss ist er deaktiviert. „Von vorn beginnen“ im Menü.
 
 | # | Woher | Was | Stand |

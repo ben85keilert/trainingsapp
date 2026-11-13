@@ -90,6 +90,9 @@ derselben Version wie `flet` halten.
 **Aussagen über die Oberfläche** (Ben, 12.11.2026) stützen sich auf den Code, der sie baut,
 nicht auf Docstrings oder Plan-Dokumente — die können veraltet sein (ein Docstring nannte den
 Knopf „zählt“ noch in der Uhr-Zeile, er stand seit P148 im Uhr-Blatt).
+**Meldet Ben, dass etwas fehlt oder nicht geht, zuerst ein Web-Foto der Stelle** (Skill
+`web-fotos`; Ben, 13.11.2026) — der Code zeigte den Foto-Knopf an der Notiz, am Bildschirm
+erschien die Leiste nie, weil der Editor mit Fokus öffnet.
 
 `TRAININGSAPP_EDITION=praxis uv run pytest …` bzw. `TRAININGSAPP_DATA_DIR=…` setzen
 Edition und Datenpfad zur Laufzeit (siehe `config.py`).

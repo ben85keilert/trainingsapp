@@ -76,7 +76,9 @@ eingetragen 10.11.2026): Nach einem Versions-Commit (Version in `pyproject.toml`
 angehoben, im Betreff „(Version X.Y.Z)“) und **grüner CI dieses Commits** den Tag `v<Version>`
 setzen und pushen — der Workflow „APK“ baut daraus ein Vorab-Release. Den APK-Lauf abwarten und
 das Release mit Dateinamen nennen. Den **CI**-Lauf des Commits beobachten (`gh run list` zeigt
-daneben Dependabots „Graph Update“ — der zählt nicht). Scheitert der APK-Lauf an einem 504 von
+daneben Dependabots „Graph Update“ — der zählt nicht) und ihn über die volle SHA suchen
+(`gh run list --workflow CI --commit "$(git rev-parse HEAD)"` — mit gekürztem Hash findet `gh`
+nichts; Ben, 13.11.2026). Scheitert der APK-Lauf an einem 504 von
 GitHubs Downloads, reicht `gh run rerun <id> --failed`; kein neuer Tag, keine neue Version.
 **Lokale Builds startet nur Ben.** **Vor dem Tag die offenen Dependabot-Warnungen ansehen** (Ben,
 13.11.2026; `gh api repos/ben85keilert/trainingsapp/dependabot/alerts`): kritische und hohe zu

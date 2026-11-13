@@ -7,7 +7,7 @@ Er tut drei getrennte Dinge, die man leicht verwechselt:
 | Funktion | Was passiert | Wo eingestellt |
 |---|---|---|
 | **Alerts** | GitHub vergleicht `uv.lock` mit seiner Datenbank bekannter Sicherheitslücken und meldet Treffer unter „Security → Dependabot“. Kein Code wird geändert. | Repo-Einstellung (an) |
-| **Sicherheitsupdates** | Für eine gemeldete Lücke öffnet Dependabot von sich aus einen PR, der das betroffene Paket im Lock auf die erste reparierte Version hebt. | Repo-Einstellung (an) |
+| **Sicherheitsupdates** | Für eine gemeldete Lücke öffnet Dependabot von sich aus einen PR, der das betroffene Paket im Lock auf die erste reparierte Version hebt. | Repo-Einstellung (**aus** seit 13.11.2026 — scheiterte hier immer, siehe unten) |
 | **Versionsupdates** | Unabhängig von Lücken: einmal pro Woche ein PR, der veraltete Abhängigkeiten auf den neuesten Stand hebt. | `.github/dependabot.yml` |
 
 Die ersten beiden sind reine Schalter in den Repo-Einstellungen. Das dritte
@@ -115,6 +115,11 @@ Hintergrund. An seiner Stelle:
 - **Einmal einzustellen** (Repo → Settings → Actions → General → Workflow permissions):
   „Allow GitHub Actions to create and approve pull requests“ — sonst scheitert `gh pr create`.
 - Lokal dasselbe: `python3 scripts/uv_updates.py`, dann Tests, committen.
+- **Dependabots Sicherheitsupdates sind seit dem 13.11.2026 abgeschaltet** (Ben; Repo →
+  Settings → Advanced Security): Jeder Lauf „Dependabot Updates“ endete rot an den
+  Schwesterordnern. Damit fehlt auch der rote Lauf als Hinweis auf eine neue Lücke — an
+  seine Stelle tritt die Regel in CLAUDE.md (vor jedem Tag die Warnungen ansehen); bei einer
+  Warnung den Lauf „uv-Updates“ von Hand starten statt auf Montag zu warten.
 - Die Meldungen unter „Security → Dependabot“ bleiben; der wöchentliche Lauf räumt sie mit
   ab, soweit eine reparierte Version zu den Anforderungen passt.
 
@@ -229,6 +234,11 @@ lesen. Die Spalte „Schwere“ sagt nichts darüber, ob der verwundbare Pfad hi
   im Protokoll des Laufs) und bricht ab, wenn Flet abweicht. Die übrigen Pakete lassen sich
   nicht aus dem Lock nehmen: Für Android gibt es binäre Pakete (numpy, msgpack) nur in den
   Versionen, die pypi.flet.dev baut — das Lock ist für den Entwicklungsrechner aufgelöst.
+  **msgpack** (13.11.2026): Solange die APK eine Version vor 1.2.3 trägt, entpackt die App
+  eingehende Nachrichten in reinem Python, das den Fehler nicht hat
+  (`ui/flet_absicherung.msgpack_absichern`, beim Laden von `ui/app.py`); gepackt wird
+  weiter in C. Die Zeile „In der APK: …“ im Bauprotokoll zeigt, wann ein neueres
+  Android-Paket da ist — dann tut die Funktion von selbst nichts mehr.
 - **Secret-Scanning** ist ein anderer Dienst (sucht nach Tokens in Commits),
   läuft aber unter derselben Überschrift „Code security“. Siehe README,
   „Repo-Einstellungen (Sicherheit)“.

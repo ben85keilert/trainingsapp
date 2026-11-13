@@ -1,4 +1,4 @@
-"""Absicherungen gegen Eigenheiten von Flet 1.0.3 — an einer Stelle, damit sie beim nächsten
+"""Absicherungen gegen Eigenheiten von Flet und msgpack — an einer Stelle, damit sie beim nächsten
 Flet-Wechsel auffallen (`tests/test_ui_flet_absicherung.py`).
 
 **Antwort auf einen Methodenaufruf für ein ersetztes Control** (18.10.2026 im Flet-Web
@@ -19,6 +19,14 @@ alle weiteren Meldungen dahinter. Einzelne Stellen nachzuziehen reichte nicht (�
 Meldungen, jede neue wäre wieder eine Falle); `snackbars_absichern` gibt darum jeder
 SnackBar beim Zeigen ``persist=False`` und `MELDUNG_MS` statt Flets 4 s — was eine Stelle
 ausdrücklich setzt, bleibt.
+
+**msgpack vor 1.2.3 entpackt in reinem Python** (Ben, 13.11.2026): Die C-Erweiterung gibt
+Speicher nicht frei, wenn eine Nachricht einen ungültigen Schlüssel trägt (GitHub-Meldung
+zu msgpack, behoben in 1.2.3). In der APK steckt 1.1.2 — neuere Android-Pakete bietet
+pypi.flet.dev nicht, über ``uv.lock`` lässt sich das nicht heben (`docs/dependabot.md`).
+Der reine Python-Teil hat den Fehler nicht. `msgpack_absichern` stellt darum nur das
+**Entpacken** um: Was von der Flutter-Seite kommt, ist klein (Tipp, Eingabe); das Packen der
+großen Ansichten bleibt in C. Ab 1.2.3 tut die Funktion nichts.
 """
 
 from __future__ import annotations
@@ -33,6 +41,29 @@ log = logging.getLogger(__name__)
 MELDUNG_MS = 5000
 #: Flets Vorgabe für ``SnackBar.duration`` (ms)
 FLET_MELDUNG_MS = 4000
+
+
+#: Ab dieser Version ist das Leck der C-Erweiterung beim Entpacken behoben
+MSGPACK_REPARIERT = (1, 2, 3)
+
+
+def msgpack_absichern() -> bool:
+    """Lässt ``msgpack.unpackb`` in reinem Python laufen, solange die installierte Version
+    vor `MSGPACK_REPARIERT` liegt. Flet ruft ``msgpack.unpackb`` bei jeder eingehenden
+    Nachricht über das Modul auf — darum genügt es, den Namen dort umzuhängen. Mehrfach
+    aufrufbar; ``True``, wenn in reinem Python entpackt wird, ``False``, wenn es nicht nötig
+    ist (oder msgpack fehlt)."""
+    try:
+        import msgpack
+        from msgpack import fallback
+    except ImportError:
+        return False
+    if msgpack.unpackb is fallback.unpackb:
+        return True
+    if tuple(msgpack.version) >= MSGPACK_REPARIERT:
+        return False
+    msgpack.unpackb = fallback.unpackb
+    return True
 
 
 def methodenantworten_absichern() -> bool:
@@ -126,8 +157,10 @@ def snackbars_absichern() -> bool:
 __all__ = [
     "FLET_MELDUNG_MS",
     "MELDUNG_MS",
+    "MSGPACK_REPARIERT",
     "antwort_zustellen",
     "meldung_vorgaben",
     "methodenantworten_absichern",
+    "msgpack_absichern",
     "snackbars_absichern",
 ]

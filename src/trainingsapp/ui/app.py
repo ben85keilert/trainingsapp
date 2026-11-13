@@ -104,7 +104,11 @@ from trainingsapp.ui.components.startleiste import (
 )
 from trainingsapp.ui.components.zaehlen import meldung_zeigen as zaehlen_meldung_zeigen
 from trainingsapp.ui.components.zurueck import formular_geaendert
-from trainingsapp.ui.flet_absicherung import methodenantworten_absichern, snackbars_absichern
+from trainingsapp.ui.flet_absicherung import (
+    methodenantworten_absichern,
+    msgpack_absichern,
+    snackbars_absichern,
+)
 from trainingsapp.ui.laufend import takt as laufend_takt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import anwenden, hintergrund_setzen
@@ -474,6 +478,11 @@ def schreibende_sichern(state: AppState) -> None:
             sichern()
         except Exception:
             logging.getLogger(__name__).exception("Speichern vor dem Verlassen: %s", schluessel)
+
+
+# Schon beim Laden, nicht erst in `main`: Die erste Nachricht der Flutter-Seite kommt an,
+# bevor `main` läuft (msgpack vor 1.2.3, `ui/flet_absicherung.py`)
+msgpack_absichern()
 
 
 def main(page: ft.Page) -> None:

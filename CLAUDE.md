@@ -60,7 +60,10 @@ uv run python scripts/pruefe_flet_beispiele.py   # Flet-Skripte des Lernpfads oh
 in `../hrv-core`): `ruff format` und `ruff check --fix` nur auf die eigenen Dateien, nie auf einen
 ganzen Ordner (`ruff format --check .` und `ruff check .` zum Prüfen bleiben); **nie `git stash`** — es räumt die halbfertige
 Arbeit der anderen mit weg. Wer den Stand ohne die eigene Änderung braucht, nimmt
-`git worktree` oder `git show HEAD:<datei>`. Beim Committen die eigenen Dateien einzeln nennen,
+`git worktree` oder `git show HEAD:<datei>`. Wer in einem eigenen `git worktree` testet, legt
+hrv-core und hrv-watch auf dem Stand der `.ref`-Dateien daneben, nicht als Verweis auf die
+lebenden Ordner (Ben, 13.11.2026 — ein Testlauf las die halbfertige Arbeit einer anderen
+Sitzung in `../hrv-core` mit). Beim Committen die eigenen Dateien einzeln nennen,
 nie `git add -A`/`.`/Ordner oder `git commit -a`. Ebenso nie `git reset --hard`, `git clean -f`,
 `git checkout -- <Ordner>` oder `git restore <Ordner>` (Ben, 11.11.2026) — sie verwerfen fremde
 Arbeit wie `stash`; einzelne eigene Dateien bleiben frei. **Ein Hook erzwingt das** (`.claude/settings.json`

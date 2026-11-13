@@ -194,6 +194,10 @@ async def test_hf_vollbild_intervall_ablesen(daten) -> None:
     try:
         seite = _quer()
         ansicht = live_vollbild_view(seite, state)
+        # Der Aufbau der Ansicht hält die Schleife an: Die Uhr des Simulators läuft weiter,
+        # die Schläge kommen erst danach an. Aufholen lassen — sonst endet das Intervall
+        # hinter den Daten (13.11.2026: Schläge bis 91 s, Intervall bis 97 s, „HRR –“)
+        await _weiter(lauf, 6)
         _leiste(ansicht, "Intervall").on_click(None)
         iv = state.hf_intervall
         assert iv is not None and iv["von"] < iv["bis"] and iv["bezug"] == "spitze"

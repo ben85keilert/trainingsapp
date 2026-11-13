@@ -85,7 +85,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import varianten
-from trainingsapp.core.anhaenge import AUDIO, Ziel, ziel_lesen
+from trainingsapp.core.anhaenge import AUDIO, DOKUMENT, Ziel, ziel_lesen
 from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
 from trainingsapp.core.plan_durchlauf import startet_als_workout
@@ -778,6 +778,8 @@ def main(page: ft.Page) -> None:
             ziel, art = gelesen[0], ARTEN.get(gelesen[1][0])
             if art is None:
                 return
+            if art == DOKUMENT and (ziel.eintrag_id is None and ziel.notiz_id is None):
+                return  # ein Dokument hängt an einem Eintrag oder einer Notiz, nie an einer Übung
             route = aufnahme_route(basis, ziel, art)
             if art == AUDIO:
                 ablegen(lambda: anhang_ton_view(page, state, route, ziel))

@@ -7,8 +7,9 @@ einem ‚+‘.“
 
 - `Tagesnotiz` — **eine** Notiz (`core.models.DayNote`) im Editor (`components/notizeditor`):
   über dem Feld die Chip-Zeile ihrer Tags (ein Tipp setzt oder nimmt einen und speichert
-  sofort; „+ Tag“ legt einen neuen an — in der Zeile, kein Dialog), ohne Schreiben Foto ·
-  Video · Audio **an dieser Notiz** (`core.anhaenge.Ziel.fuer_notiz`, P99) und darunter ihre
+  sofort; „+ Tag“ legt einen neuen an — in der Zeile, kein Dialog), unter dem Feld Foto ·
+  Video · Audio · Dokument **an dieser Notiz** — auch beim Schreiben
+  (13.11.2026; `core.anhaenge.Ziel.fuer_notiz`, P99) und darunter ihre
   Kacheln.
 - `Tagesnotizen` — die Notizen **eines Tags**: fertige als Karten (`notiz_karte`: Uhrzeit,
   Tags, Text bis `NOTIZ_ZEILEN`, Antippen öffnet sie wieder), höchstens eine offen als
@@ -32,7 +33,7 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.anhaenge import AUDIO, BILD, VIDEO, Anhang, Ziel
+from trainingsapp.core.anhaenge import AUDIO, BILD, DOKUMENT, VIDEO, Anhang, Ziel
 from trainingsapp.core.models import DayNote, NoteTag
 from trainingsapp.core.tagebuch import NOTIZ_ZEILEN
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
@@ -164,6 +165,10 @@ class Tagesnotiz(Notizeditor):
         self._tag_zeile_bauen()
         return [self.tag_zeile]
 
+    #: Foto · Video · Audio · Dokument stehen unter dem Feld, auch beim Schreiben (Ben,
+    #: 13.11.2026: „Habe den Button übersehen“ — er war nie da: der Editor geht mit Fokus auf)
+    anhaenge_beim_schreiben = True
+
     def _ohne_schreiben(self) -> list[ft.Control]:
         return [
             ft.IconButton(symbol, tooltip=tooltip, icon_size=22, on_click=self._oeffner(ziel))
@@ -216,7 +221,7 @@ class Tagesnotiz(Notizeditor):
         )
 
     def _anhang_wege(self) -> list[tuple[Any, str, str]]:
-        """Foto, Video, Audio — und aus der Fotoauswahl, wo die Erweiterung da ist."""
+        """Foto, Video, Audio, Dokument — und aus der Fotoauswahl, wo die Erweiterung da ist."""
         from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
         from trainingsapp.ui.views.anhang_hochladen import hochladen_route
 
@@ -233,6 +238,11 @@ class Tagesnotiz(Notizeditor):
                 aufnahme_route(self.basis, ziel, VIDEO),
             ),
             (ft.Icons.MIC_NONE, "Audio zur Notiz", aufnahme_route(self.basis, ziel, AUDIO)),
+            (
+                ft.Icons.DOCUMENT_SCANNER_OUTLINED,
+                "Dokument zur Notiz (Seiten aufnehmen oder PDF wählen)",
+                aufnahme_route(self.basis, ziel, DOKUMENT),
+            ),
         ]
         if self.state.hochladen is not None:
             wege.append(
@@ -258,6 +268,7 @@ class Tagesnotiz(Notizeditor):
         der Datenbank, denn der Anhang braucht ihre ID."""
 
         async def handler() -> None:
+            self.tipp_war_eigener()  # kein „Fertig“ durch den Tipp neben das Feld
             self.speichern(auch_leer=True)
             await self.page.push_route(route)
 

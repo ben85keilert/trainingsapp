@@ -145,6 +145,9 @@ class Notizeditor:
         """Controls über dem Feld (die Tags der Notiz zum Tag)."""
         return []
 
+    #: Die Anhang-Leiste auch zeigen, während geschrieben wird
+    anhaenge_beim_schreiben = False
+
     def _ohne_schreiben(self) -> list[ft.Control]:
         """Die Leiste, wenn nicht geschrieben wird (Foto · Video · Audio)."""
         return []
@@ -219,7 +222,12 @@ class Notizeditor:
     def _stand_setzen(self) -> None:
         """Welche Leiste, was gesperrt ist, „gespeichert“ — nur Eigenschaften (Moduldocstring)."""
         self.schreib_leiste.visible = self.schreibt
-        self.anhang_leiste.visible = not self.schreibt and bool(self.anhang_leiste.controls)
+        # Die Anhänge stehen auch beim Schreiben da, wo eine Unterklasse das will (Notiz zum
+        # Tag, 13.11.2026): Ihr Editor geht immer mit Fokus auf und wird mit „Fertig“ zur
+        # Karte — „ohne Schreiben“ gab es dort nie, die Leiste war nicht zu erreichen
+        self.anhang_leiste.visible = bool(self.anhang_leiste.controls) and (
+            not self.schreibt or self.anhaenge_beim_schreiben
+        )
         self.zurueck_knopf.disabled = not self.verlauf.kann_rueckgaengig
         self.vor_knopf.disabled = not self.verlauf.kann_wiederholen
         self.stand.value = self._stand_text() if self.schreibt else ""

@@ -49,6 +49,15 @@ die Person selbst auslöst. Löschung jederzeit durch die Person, endgültig (Ei
 Anhänge). Eine Übertragung an die Praxis gibt es nicht; käme sie, braucht sie eine eigene
 Einwilligung (`20_einwilligung.md`).
 
+**Dokumente als Anhang** (gebaut 13.11.2026, `docs/plan_anhaenge.md` Teil I): mit der Kamera
+der App Seite für Seite aufgenommene Dokumente und gewählte PDF-Dateien (z. B. ein Befund, ein
+Trainingsplan auf Papier) an einem Eintrag oder einer Notiz zum Tag. Gesundheitsbezug möglich
+— und anders als bei Fotos der eigenen Übung können **Angaben Dritter** darin stehen (Namen
+von Behandelnden, Praxisanschrift); die Person entscheidet selbst, was sie ablegt. Speicherort,
+Löschung und Weitergabe wie bei den übrigen Anhängen: app-privat, ohne Ortsangabe, nie in
+Paket, Export oder Sync; hinaus nur über „Öffnen mit …“/„Teilen“ am einzelnen Dokument, nach
+Rückfrage. Keine Texterkennung, keine Auswertung des Inhalts.
+
 **Audioaufnahmen und Anhänge am Tag** (gebaut 22.10.2026, `docs/plan_anhaenge.md`,
 Abschnitt H): Sprachaufnahmen, die die Person mit dem Mikrofon der App an einen
 Trainingseintrag oder an die Notiz zum Tag hängt (AAC, einkanalig, höchstens 30 Minuten);

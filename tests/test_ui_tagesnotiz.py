@@ -139,7 +139,10 @@ async def test_karte_und_editor_statt_dialog_mit_autosave(page, state, monkeypat
     ]
     knoepfe = list(_alle(notiz.schreib_leiste))
     notiz.feld.on_focus(None)
-    assert notiz.schreib_leiste.visible and not notiz.anhang_leiste.visible
+    # Beim Schreiben bleiben die Anhänge darunter stehen (13.11.2026): Der Editor geht mit
+    # Fokus auf — „ohne Schreiben“ gibt es am Gerät nicht, die Leiste war nie zu sehen
+    assert notiz.schreib_leiste.visible and notiz.anhang_leiste.visible
+    assert ft.Icons.DOCUMENT_SCANNER_OUTLINED in _symbole(notiz.anhang_leiste)
     assert _symbole(notiz.schreib_leiste) == [ft.Icons.UNDO, ft.Icons.REDO]
     assert "Abbrechen" in [
         x.content for x in _alle(notiz.schreib_leiste) if isinstance(x, ft.TextButton)

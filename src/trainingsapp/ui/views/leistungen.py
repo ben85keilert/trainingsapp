@@ -39,7 +39,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import varianten as var
-from trainingsapp.core.anhaenge import AUDIO, BILD, VIDEO, Anhang
+from trainingsapp.core.anhaenge import AUDIO, BILD, DOKUMENT, VIDEO, Anhang
 from trainingsapp.core.aufnahme_bezug import Bezug, zeit_text
 from trainingsapp.core.models import Exercise, Session, SessionEntry
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
@@ -261,9 +261,10 @@ class _Leistungen:
         foto = self.aufnahme_ziel(BILD, eintrag_id) or self.basis
         video = self.aufnahme_ziel(VIDEO, eintrag_id) or self.basis
         ton = self.aufnahme_ziel(AUDIO, eintrag_id) or self.basis
+        dokument = self.aufnahme_ziel(DOKUMENT, eintrag_id) or self.basis
         return ft.PopupMenuButton(
             icon=ft.Icons.ATTACH_FILE,
-            tooltip="Foto, Video oder Audio an diesen Eintrag",
+            tooltip="Foto, Video, Audio oder Dokument an diesen Eintrag",
             items=[
                 ft.PopupMenuItem(
                     content=ft.Text("Foto aufnehmen"),
@@ -279,6 +280,11 @@ class _Leistungen:
                     content=ft.Text("Audio aufnehmen"),
                     icon=ft.Icons.MIC_NONE,
                     on_click=self._weiter_zu(ton),
+                ),
+                ft.PopupMenuItem(
+                    content=ft.Text("Dokument aufnehmen"),
+                    icon=ft.Icons.DOCUMENT_SCANNER_OUTLINED,
+                    on_click=self._weiter_zu(dokument),
                 ),
                 *(
                     [
@@ -468,10 +474,13 @@ def _nachtragen_zeile(
     if leistungen is not None:
         foto, video = leistungen.aufnahme_ziel(BILD), leistungen.aufnahme_ziel(VIDEO)
         ton = leistungen.aufnahme_ziel(AUDIO)
-        if foto is None or video is None or ton is None:
+        dokument = leistungen.aufnahme_ziel(DOKUMENT)
+        if foto is None or video is None or ton is None or dokument is None:
             zeilen.append(
                 ft.Text(
-                    "Foto, Video oder Audio: erst eintragen, dann anhängen.", size=12, opacity=0.6
+                    "Foto, Video, Audio oder Dokument: erst eintragen, dann anhängen.",
+                    size=12,
+                    opacity=0.6,
                 )
             )
         else:
@@ -481,10 +490,11 @@ def _nachtragen_zeile(
                 ("Foto", ft.Icons.CAMERA_ALT_OUTLINED, foto),
                 ("Video", ft.Icons.VIDEOCAM_OUTLINED, video),
                 ("Audio", ft.Icons.MIC_NONE, ton),
+                ("Dokument", ft.Icons.DOCUMENT_SCANNER_OUTLINED, dokument),
             ]
             if hoch is not None:
                 knoepfe.append(("Hochladen", ft.Icons.PHOTO_LIBRARY_OUTLINED, hoch))
-            breit = 12 // len(knoepfe)
+            breit = max(12 // len(knoepfe), 2)
             zeilen.append(
                 ft.ResponsiveRow(
                     spacing=8,

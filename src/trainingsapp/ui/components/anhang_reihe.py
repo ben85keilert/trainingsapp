@@ -4,7 +4,9 @@ Eine waagrechte Reihe quadratischer Kacheln (64 px) unter einer Eintragskarte, i
 Tagebuch und im Tag; ein Raster im Verlauf der Übung. Jede Kachel zeigt das Foto bzw.
 das Frontbild des Videos, dekodiert klein (``cache_width``) — das Original bleibt
 liegen. Eine Audioaufnahme (seit 22.10.2026) hat kein Bild: ihre Kachel zeigt ein
-Klangsymbol und die Dauer. **Nichts läuft hier**; ein Tipp öffnet die Ansicht
+Klangsymbol und die Dauer. Ein Dokument (seit 13.11.2026) zeigt seine erste Seite mit dem
+Zeichen „PDF“ — eine gewählte PDF-Datei ohne Frontbild nur das Symbol.
+**Nichts läuft hier**; ein Tipp öffnet die Ansicht
 (`views/anhang.py`). Mehr als `REIHE_MAX` Kacheln: „+n“ als letzte.
 
 Fehlt die Datei (gelöscht, anderes Gerät), steht „fehlt“ in der Kachel statt eines
@@ -49,7 +51,19 @@ def kachel(
     Aufnahme selbst, nur um zu sehen, ob sie da ist."""
     quelle = bildquelle(pfad)
     inhalt: ft.Control
-    if quelle is not None and a.ist_audio:
+    if quelle is not None and a.ist_dokument and a.vorschau is None:
+        inhalt = ft.Container(
+            width=groesse,
+            height=groesse,
+            alignment=ft.Alignment.CENTER,
+            bgcolor=ft.Colors.SECONDARY_CONTAINER,
+            content=ft.Icon(
+                ft.Icons.PICTURE_AS_PDF_OUTLINED,
+                size=groesse // 2,
+                color=ft.Colors.ON_SECONDARY_CONTAINER,
+            ),
+        )
+    elif quelle is not None and a.ist_audio:
         inhalt = ft.Container(
             width=groesse,
             height=groesse,
@@ -101,6 +115,17 @@ def kachel(
                 content=ft.Icon(
                     ft.Icons.PLAY_CIRCLE_FILL, size=groesse // 2, color=ft.Colors.WHITE, opacity=0.9
                 ),
+            )
+        )
+    if a.ist_dokument and a.vorschau is not None:
+        ebenen.append(
+            ft.Container(
+                right=3,
+                bottom=3,
+                padding=ft.Padding.symmetric(horizontal=4, vertical=1),
+                border_radius=6,
+                bgcolor=ft.Colors.with_opacity(0.6, ft.Colors.BLACK),
+                content=ft.Text("PDF", size=10, color=ft.Colors.WHITE),
             )
         )
     if (a.ist_video or a.ist_audio) and (dauer := dauer_text(a.dauer_s)):

@@ -167,7 +167,9 @@ def anhang_view(page: Any, state: AppState, basis: str, anhang: Anhang) -> ft.Vi
 
         dialog: ft.AlertDialog = ft.AlertDialog(
             modal=True,
-            title=ft.Text("Aufnahme teilen?"),
+            title=ft.Text(
+                "Dokument öffnen oder teilen?" if anhang.ist_dokument else "Aufnahme teilen?"
+            ),
             content=ft.Text(
                 "Die Datei verlässt die App — sie geht an die App, die du im nächsten Schritt "
                 "wählst. Sonst bleiben Aufnahmen immer auf diesem Gerät: kein Export, kein "
@@ -175,7 +177,11 @@ def anhang_view(page: Any, state: AppState, basis: str, anhang: Anhang) -> ft.Vi
             ),
             actions=[
                 ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
-                ft.FilledButton("Teilen", icon=ft.Icons.SHARE, on_click=weiter),
+                ft.FilledButton(
+                    "Weiter" if anhang.ist_dokument else "Teilen",
+                    icon=ft.Icons.SHARE,
+                    on_click=weiter,
+                ),
             ],
             on_dismiss=nachher.bei_schliessen,
         )
@@ -210,6 +216,26 @@ def anhang_view(page: Any, state: AppState, basis: str, anhang: Anhang) -> ft.Vi
                     spieler.control,
                 ],
             ),
+        )
+    elif anhang.ist_dokument:
+        # Ein PDF zeigt die App nicht selbst (wie bei Paketdateien, `views/paketmedium.py`):
+        # zu sehen ist die erste Seite, das Dokument öffnet eine App auf dem Gerät — das ist
+        # dieselbe bewusste Handlung wie „Teilen“, mit derselben Rückfrage
+        erste = repo.bild(anhang) if anhang.vorschau else None
+        inhalt = ft.Column(
+            expand=True,
+            spacing=10,
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Image(src=str(erste), fit=ft.BoxFit.CONTAIN, expand=True)
+                if erste is not None and erste.is_file()
+                else ft.Icon(
+                    ft.Icons.PICTURE_AS_PDF_OUTLINED, size=72, color=ft.Colors.WHITE, opacity=0.7
+                ),
+                ft.FilledButton("Öffnen mit …", icon=ft.Icons.OPEN_IN_NEW, on_click=teilen_fragen),
+                ft.Container(height=4),
+            ],
         )
     elif anhang.ist_video:
         try:

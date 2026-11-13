@@ -39,15 +39,25 @@ from .models import jetzt, lokaler_tag, new_id
 
 #: `entry_media.kind`
 BILD, VIDEO, AUDIO = "image", "video", "audio"
-ENDUNG = {BILD: "jpg", VIDEO: "mp4", AUDIO: "m4a"}
+#: Ein Dokument (Ben, 13.11.2026): ein PDF — Seite für Seite aus der Kamera gebaut
+#: (`core/dokument.py`) oder als Datei gewählt. Die erste Seite ist sein Frontbild.
+DOKUMENT = "document"
+ENDUNG = {BILD: "jpg", VIDEO: "mp4", AUDIO: "m4a", DOKUMENT: "pdf"}
 #: Was eine Art heißt — Einzahl und Mehrzahl, für Meldungen und Zählungen
 NAMEN: dict[str, tuple[str, str]] = {
     BILD: ("Foto", "Fotos"),
     VIDEO: ("Video", "Videos"),
     AUDIO: ("Audioaufnahme", "Audioaufnahmen"),
+    DOKUMENT: ("Dokument", "Dokumente"),
 }
 #: MIME-Typ je Dateiendung — fürs Teilen
-MIME = {"jpg": "image/jpeg", "mp4": "video/mp4", "m4a": "audio/mp4", "wav": "audio/wav"}
+MIME = {
+    "jpg": "image/jpeg",
+    "mp4": "video/mp4",
+    "m4a": "audio/mp4",
+    "wav": "audio/wav",
+    "pdf": "application/pdf",
+}
 
 #: Schlüssel in `app_setting`
 SETTING_QUALITAET = "anhang_qualitaet"
@@ -188,6 +198,8 @@ TIMER_STUFEN: tuple[int, ...] = (0, 1, 3, 5, 10)
 BLITZ: dict[str, tuple[tuple[str, str], ...]] = {
     BILD: (("off", "Aus"), ("auto", "Auto"), ("always", "An")),
     VIDEO: (("off", "Licht aus"), ("torch", "Licht an")),
+    # Ein Dokument liegt im eigenen Schatten: neben dem Blitz auch das Dauerlicht
+    DOKUMENT: (("off", "Aus"), ("auto", "Auto"), ("always", "An"), ("torch", "Licht")),
 }
 
 
@@ -241,7 +253,7 @@ def countdown_text(art: str, rest_s: int, max_s: int) -> str:
     """
     if art == VIDEO:
         return f"Video in {rest_s} s · danach höchstens {dauer_text(max_s)}"
-    return f"Foto in {rest_s} s"
+    return f"{'Seite' if art == DOKUMENT else 'Foto'} in {rest_s} s"
 
 
 @dataclass(frozen=True, slots=True)
@@ -397,7 +409,8 @@ class Anhang:
     dauer_s: float | None = None
     breite: int | None = None
     hoehe: int | None = None
-    #: Frontbild eines Videos, relativ wie `pfad`; ``None`` bei Fotos und Audioaufnahmen
+    #: Frontbild eines Videos oder gescannten Dokuments (erste Seite), relativ wie `pfad`;
+    #: ``None`` bei Fotos, Audioaufnahmen und gewählten PDF-Dateien
     vorschau: str | None = None
     qualitaet: str = Qualitaet.MITTEL.value
     note: str = ""
@@ -417,6 +430,10 @@ class Anhang:
         return self.art == AUDIO
 
     @property
+    def ist_dokument(self) -> bool:
+        return self.art == DOKUMENT
+
+    @property
     def am_tag(self) -> bool:
         """Hängt am Tag (Notiz zum Tag), nicht an einem Eintrag."""
         return self.zum_tag is not None
@@ -427,13 +444,14 @@ class Anhang:
 
     @property
     def bild(self) -> str:
-        """Was als Kachel gezeigt wird: beim Video das Frontbild, sonst die Datei selbst — bei
-        einer Audioaufnahme zeigt die Kachel ein Symbol und prüft damit nur, ob sie da ist."""
+        """Was als Kachel gezeigt wird: beim Video und beim gescannten Dokument das Frontbild,
+        sonst die Datei selbst — bei einer Audioaufnahme und einem PDF ohne Frontbild zeigt
+        die Kachel ein Symbol und prüft damit nur, ob die Datei da ist."""
         return self.vorschau or self.pfad
 
     @property
     def name(self) -> str:
-        """„Foto“, „Video“, „Audioaufnahme“."""
+        """„Foto“, „Video“, „Audioaufnahme“, „Dokument“."""
         return NAMEN.get(self.art, NAMEN[BILD])[0]
 
     @property
@@ -507,10 +525,18 @@ def neuer_anhang(
     dauer_s: float | None = None,
     note: str = "",
     endung: str | None = None,
+    frontbild: bool = False,
 ) -> Anhang:
     """Ein Anhang mit fertigem Pfad (und Frontbildpfad beim Video) — noch ohne Bytes.
     ``ziel``: woran er hängt (eine Eintrags-ID genügt); ``endung`` statt der üblichen der Art
-    (am Rechner nimmt der Rekorder WAV auf, wo AAC fehlt).
+    (am Rechner nimmt der Rekorder WAV auf, wo AAC fehlt); ``frontbild``: auch diese Art
+    bekommt eins (das gescannte Dokument seine erste Seite).
+
+    >>> d = neuer_anhang("e1", DOKUMENT, Qualitaet.GROSS, frontbild=True)
+    >>> d.pfad.endswith(".pdf"), d.vorschau.endswith("_bild.jpg"), d.name, d.mime
+    (True, True, 'Dokument', 'application/pdf')
+    >>> neuer_anhang("e1", DOKUMENT, Qualitaet.GROSS).vorschau is None
+    True
 
     >>> a = neuer_anhang("e1", VIDEO, Qualitaet.KLEIN, dauer_s=12.5)
     >>> a.pfad.endswith(".mp4"), a.vorschau.endswith("_bild.jpg"), a.qualitaet
@@ -541,7 +567,7 @@ def neuer_anhang(
     if endung:
         name = f"{name.rsplit('.', 1)[0]}.{endung}"
     a.pfad = relativer_pfad(a.aufgenommen, name)
-    if art == VIDEO:
+    if art == VIDEO or frontbild:
         a.vorschau = relativer_pfad(a.aufgenommen, vorschau_name(name))
     return a
 
@@ -819,14 +845,16 @@ def dauer_text(s: float | None) -> str:
     return f"{ganz // 60}:{ganz % 60:02d}"
 
 
-def anzahl_text(bilder: int, videos: int, audios: int = 0) -> str:
-    """„3 Fotos, 1 Video, 2 Audioaufnahmen“.
+def anzahl_text(bilder: int, videos: int, audios: int = 0, dokumente: int = 0) -> str:
+    """„3 Fotos, 1 Video, 2 Audioaufnahmen, 1 Dokument“.
 
     >>> anzahl_text(1, 0), anzahl_text(3, 1), anzahl_text(0, 0), anzahl_text(0, 0, 1)
     ('1 Foto', '3 Fotos, 1 Video', 'keine Aufnahmen', '1 Audioaufnahme')
+    >>> anzahl_text(1, 0, 0, 2)
+    '1 Foto, 2 Dokumente'
     """
     teile = []
-    for art, n in ((BILD, bilder), (VIDEO, videos), (AUDIO, audios)):
+    for art, n in ((BILD, bilder), (VIDEO, videos), (AUDIO, audios), (DOKUMENT, dokumente)):
         if n:
             einzahl, mehrzahl = NAMEN[art]
             teile.append(f"{n} {einzahl if n == 1 else mehrzahl}")
@@ -835,21 +863,22 @@ def anzahl_text(bilder: int, videos: int, audios: int = 0) -> str:
 
 @dataclass(frozen=True, slots=True)
 class Umfang:
-    """Wie viele Fotos, Videos und Audioaufnahmen, und wie groß zusammen."""
+    """Wie viele Fotos, Videos, Audioaufnahmen und Dokumente, und wie groß zusammen."""
 
     bilder: int = 0
     videos: int = 0
     audios: int = 0
     bytes: int = 0
+    dokumente: int = 0
 
     @property
     def anzahl(self) -> int:
-        return self.bilder + self.videos + self.audios
+        return self.bilder + self.videos + self.audios + self.dokumente
 
     @property
     def text(self) -> str:
         """„3 Fotos, 1 Video“ — `anzahl_text`."""
-        return anzahl_text(self.bilder, self.videos, self.audios)
+        return anzahl_text(self.bilder, self.videos, self.audios, self.dokumente)
 
 
 def zusammenfassung(anhaenge: Iterable[Anhang]) -> Umfang:
@@ -860,12 +889,12 @@ def zusammenfassung(anhaenge: Iterable[Anhang]) -> Umfang:
     >>> u.bilder, u.videos, u.audios, u.bytes, u.anzahl, u.text
     (1, 1, 1, 1050, 3, '1 Foto, 1 Video, 1 Audioaufnahme')
     """
-    zahl = {BILD: 0, VIDEO: 0, AUDIO: 0}
+    zahl = {BILD: 0, VIDEO: 0, AUDIO: 0, DOKUMENT: 0}
     groesse = 0
     for a in anhaenge:
         groesse += a.bytes
         zahl[a.art if a.art in zahl else BILD] += 1
-    return Umfang(zahl[BILD], zahl[VIDEO], zahl[AUDIO], groesse)
+    return Umfang(zahl[BILD], zahl[VIDEO], zahl[AUDIO], groesse, zahl[DOKUMENT])
 
 
 # ---------------------------------------------------------------------------
@@ -1004,6 +1033,7 @@ __all__ = [
     "BEWEGUNG_TEIL",
     "BILD",
     "BLITZ",
+    "DOKUMENT",
     "ENDUNG",
     "HOCHLADEN_VIDEO_MAX_S",
     "MIME",

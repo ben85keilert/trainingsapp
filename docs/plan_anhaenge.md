@@ -306,6 +306,46 @@ beschreibbar (`ui/components/tagesnotiz.py`, Autosave, ↶ ↷ aus `core/textver
 - **Regeln wie bisher:** app-privat, ohne Ort, nie in Export, Diagnose oder Sync; hinaus nur
   über „Teilen“ (MIME ``audio/mp4``). Keine Bewertung, keine Spracherkennung.
 
+## I. Dokumente: mehrseitig aufnehmen, PDF wählen (gebaut 13.11.2026)
+
+Ben, 13.11.2026: „Ist es möglich einen Dokumentenscan (mehrseitig) einzubauen und das Dokument
+runter zu komprimieren?“ — zur Wahl standen die eigene Kamera (A) und der Scanner des Systems
+(B: ML Kit auf Android über die Play-Dienste, VisionKit auf iOS; Kanten erkennen und
+entzerren, aber eine fremde Oberfläche je System und kein Scanner ohne Play-Dienste). Ben:
+„Bau A, das muss dann reichen.“
+
+- **Vierte Art** `core.anhaenge.DOKUMENT` (``document``, Endung ``.pdf``, Migration 060 baut
+  `entry_media` für den CHECK neu). Ein Dokument hängt an einem Eintrag oder einer Notiz zum
+  Tag — nie an einer Übung (Symbol, Bewegung, Paketdatei haben ihre eigenen Wege).
+- **Aufnehmen** auf der Kameraseite, Weg ``…/anhang/aufnehmen/<ziel>/dokument``
+  (`views/anhang_aufnahme.py`): Rückkamera zuerst, Vorgabe **Groß · 1080p** (darunter wird Text
+  unleserlich; oben im Bild für diese Aufnahme kleiner stellbar), Blitz mit Dauerlicht. Nach
+  jedem Auslösen liegt die Seite über der Kamera: ↺ „Neu aufnehmen“ · „Nächste Seite“ ·
+  „Fertig · n Seiten“. Höchstens `core.dokument.MAX_SEITEN` (30) — die Seiten liegen bis
+  „Behalten“ im Speicher. Vom fertigen Dokument führt „Weitere Seite“ zurück zur Kamera.
+- **Das PDF** baut `core.dokument.pdf_aus_jpegs` ohne Bildbibliothek: Ein PDF darf ein JPEG
+  unverändert tragen (``DCTDecode``). Je Seite ein Bild über die ganze Seite, die kurze Seite
+  595 pt, die Richtung aus der Exif-Ausrichtung (``/Rotate``). **Verkleinert wird über die
+  Auflösung der Aufnahme**, kein Bildpunkt wird neu gerechnet; entzerrt und zugeschnitten wird
+  nichts. Jede Seite läuft durch `jpeg_ohne_metadaten` (kein Ort). Die erste Seite ist das
+  Frontbild (`vorschau`).
+- **PDF wählen:** der Ordner-Knopf links neben dem Auslöser (am Rechner der einzige Knopf) —
+  eine Datei vom Gerät, höchstens 25 MB, bereinigt wie eine Paketdatei
+  (`core.dokument.pdf_pruefen` → `core.bereinigen`); ohne Frontbild.
+- **Zeigen:** Kachel mit der ersten Seite und dem Zeichen „PDF“ (gewählte Datei: nur das
+  Symbol). Die Ansicht ``…/anhang/<id>`` zeigt die erste Seite und „Öffnen mit …“ — ein PDF
+  zeigt die App nicht selbst (wie bei Paketdateien); das Öffnen ist dieselbe bewusste Handlung
+  wie „Teilen“, mit derselben Rückfrage („Die Datei verlässt die App“).
+- **Wo:** Leistungen (Knopf „Dokument“, an der Büroklammer „Dokument aufnehmen“) und an der
+  Notiz zum Tag. **Dort stehen die Anhang-Symbole seit 13.11.2026 auch beim Schreiben** unter
+  dem Feld: Der Editor geht immer mit Fokus auf und wird mit „Fertig“ zur Karte — die Leiste
+  „ohne Schreiben“ war seit den Notiz-Karten (2.11.2026) am Gerät nicht mehr zu erreichen.
+- **Regeln wie bisher:** app-privat, ohne Ort, nie in Paket, Export, Diagnose oder Sync; keine
+  Texterkennung, keine Auswertung des Inhalts. Keine neue Berechtigung, keine neue
+  Abhängigkeit, keine Netzverbindung.
+- **Offen:** P206 (Zurück verwirft aufgenommene Seiten ohne Rückfrage; Seiten umordnen oder
+  einzeln löschen; Scanner des Systems als Zusatz), Gerätetest T136.
+
 ## G. Zu entscheiden (Ben)
 
 1. **Kamera in der App** (flet-camera, Qualität steuerbar, nichts in der Galerie, zwei

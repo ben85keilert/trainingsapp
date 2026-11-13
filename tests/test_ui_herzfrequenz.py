@@ -114,6 +114,16 @@ async def _lauf(state: AppState, tmp_path, *, sekunden: float = 20) -> tuple[Mes
     return lauf, task
 
 
+async def _aufholen(lauf: Messlauf, sekunden: float = 6.0) -> None:
+    """Die Messung aufholen lassen: Der Aufbau einer Ansicht hält die Schleife an, die Uhr des
+    Simulators läuft weiter — die Schläge kommen erst danach an. Wer gleich abliest, findet
+    in den letzten 5 s keine Herzfrequenz (13.11.2026: unter Last blieb der Zielton aus)."""
+    ziel = lauf.jetzt_s() + sekunden
+    while lauf.jetzt_s() < ziel:
+        await asyncio.sleep(0.01)
+    lauf.beobachter(False)
+
+
 async def _ende(lauf: Messlauf, task) -> None:
     await lauf.trennen()
     await asyncio.wait_for(task, 5)
@@ -427,6 +437,7 @@ async def test_hf_blatt_mittel_bereiche_und_signal(daten) -> None:
         ansicht = messung(seite, state)
         # Die Zeile „Zielbereich bis 40 − + Ton an“ (Skizze H4)
         assert _knopf(ansicht, "Ton an") is not None
+        await _aufholen(lauf)
         await _aufgaben(seite)
         assert [g[0] for g in ton.gespielt] == ["schale"]
         # Innerhalb der Tonfolge kein zweiter Klang
@@ -528,6 +539,7 @@ async def test_zielbereich_zeile_stumm_und_ton_darunter(daten) -> None:
     try:
         seite = _seite()
         ansicht = messung(seite, state)
+        await _aufholen(lauf)
         await _aufgaben(seite)
         assert [g[0] for g in ton.gespielt] == ["glocke3"]
         plus = next(
@@ -546,6 +558,7 @@ async def test_zielbereich_zeile_stumm_und_ton_darunter(daten) -> None:
         hl.stumm_setzen(BIS_MESSENDE)
         state.hf_zielton.zuletzt = -1e9
         ansicht = messung(seite, state)
+        await _aufholen(lauf)
         await _aufgaben(seite)
         assert len(ton.gespielt) == 1
         state.hf_zielton.zuletzt = -1e9

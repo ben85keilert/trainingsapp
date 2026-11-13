@@ -151,6 +151,7 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   Breite, Länge oder **Richtung** (Abstand plus Richtung wäre Koppelnavigation).
   Dasselbe gilt für **Anhänge** (Ben, 19.10.2026): Fotos und Videos an Einträgen — seit
   22.10.2026 auch Audioaufnahmen (`.m4a`, flet-audio-recorder, abgespielt mit flet-audio) und
+  Dokumente (seit 13.11.2026: PDF, Seite für Seite aus der Kamera, `core/dokument.py`) und
   Anhänge am Tag (Notiz zum Tag: `core.anhaenge.Ziel`, Migration 029) — liegen
   unter `Anhaenge/<JJJJ>/<MM>/` (`config.anhaengeverzeichnis()`, Tabelle `entry_media`,
   `core/anhaenge.py`), kommen aus der Kamera der App (flet-camera, drei Qualitäten) oder aus

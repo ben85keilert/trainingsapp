@@ -27,6 +27,13 @@ steht „Datei wählen“: Ein Bild oder Video vom Rechner, **unverkleinert**, n
 des Ablaufs in der Entwicklung. Am Handy kommt ein vorhandenes Foto oder Video über
 „Hochladen“ (`views/anhang_hochladen.py`, Erweiterung `flet_hochladen`: verkleinert, ohne
 Ortsangabe; Plan, Abschnitt F).
+
+**Dokument** (Ben, 13.11.2026, Plan Teil I; Route ``…/dokument``): dieselbe Kamera, Seite für
+Seite — Rückkamera zuerst, Vorgabe „Groß“, damit Text lesbar bleibt. Nach jedem Auslösen
+liegt die Seite über der Kamera: „Neu aufnehmen“, „Nächste Seite“ oder „Fertig“. „Fertig“ baut
+aus den Seiten ein PDF (`core.dokument.pdf_aus_jpegs`, die JPEG unverändert — die Größe
+bestimmt die Qualität oben im Bild); die erste Seite ist das Frontbild. Entzerrt wird nichts.
+Daneben „PDF wählen“: eine Datei vom Gerät, bereinigt (`core.dokument.pdf_pruefen`).
 """
 
 from __future__ import annotations
@@ -43,6 +50,7 @@ import flet as ft
 from trainingsapp.core.anhaenge import (
     AUDIO,
     BILD,
+    DOKUMENT,
     ENDUNG,
     VIDEO,
     Anhang,
@@ -59,6 +67,13 @@ from trainingsapp.core.anhaenge import (
     timer_weiter,
 )
 from trainingsapp.core.bereinigen import NichtBereinigbar
+from trainingsapp.core.dokument import (
+    MAX_SEITEN,
+    pdf_aus_jpegs,
+    pdf_pruefen,
+    seite_bereinigt,
+    seiten_text,
+)
 from trainingsapp.core.models import jetzt
 from trainingsapp.core.timer import COUNTDOWN
 from trainingsapp.data.anhaenge import qualitaet_lesen, video_max_s
@@ -70,7 +85,9 @@ from trainingsapp.ui.timer_takt import ton_spielen
 
 #: Routenteile
 ANHANG, AUFNEHMEN = "anhang", "aufnehmen"
-ARTEN = {"foto": BILD, "video": VIDEO, "audio": AUDIO}
+ARTEN = {"foto": BILD, "video": VIDEO, "audio": AUDIO, "dokument": DOKUMENT}
+#: Womit eine Aufnahme im Titel und in der Meldung heißt
+TITEL = {BILD: "Foto", VIDEO: "Video", DOKUMENT: "Dokument"}
 WORT = {art: wort for wort, art in ARTEN.items()}
 #: Takt des Selbstauslösers (s) — eine Zahl, ein Ton
 COUNTDOWN_TAKT_S = 1.0
@@ -130,7 +147,15 @@ class _Aufnahme:
 
     def __init__(self, page: Any, state: AppState, ziel: Ziel, art: str) -> None:
         self.page, self.state, self.ziel, self.art = page, state, ziel, art
-        self.qualitaet: Qualitaet = qualitaet_lesen(state.einstellungen)
+        # Ein Dokument beginnt „Groß“ (1080p): Darunter wird Text unleserlich; oben im Bild
+        # lässt es sich für diese Aufnahme kleiner stellen
+        self.qualitaet: Qualitaet = (
+            Qualitaet.GROSS if art == DOKUMENT else qualitaet_lesen(state.einstellungen)
+        )
+        #: Dokument: die behaltenen Seiten (bereinigte JPEG) und die gerade aufgenommene,
+        #: die noch über der Kamera liegt
+        self.seiten: list[bytes] = []
+        self.seite: bytes | None = None
         self.max_s: int = video_max_s(state.einstellungen)
         self.kamera: Any = None  # flet_camera.Camera
         self.kameras: list[Any] = []
@@ -199,9 +224,11 @@ class _Aufnahme:
         if not self.kameras:
             self.melden("Keine Kamera gefunden.")
             return
-        # Front zuerst — Übungen vor dem aufgestellten Handy sind die Regel
+        # Front zuerst — Übungen vor dem aufgestellten Handy sind die Regel; ein Dokument
+        # liegt vor einem, dafür ist die Rückkamera da
+        zuerst = "back" if self.art == DOKUMENT else "front"
         self.kamera_index = next(
-            (i for i, k in enumerate(self.kameras) if str(k.lens_direction.value) == "front"),
+            (i for i, k in enumerate(self.kameras) if str(k.lens_direction.value) == zuerst),
             0,
         )
         await self._oeffnen(ResolutionPreset(self.qualitaet.preset))
@@ -239,6 +266,8 @@ class _Aufnahme:
     def kamera_text(self) -> str:
         """„Mittel · 720p · Frontkamera · Timer 3 s“ — was gerade eingestellt ist."""
         teile = [self.qualitaet.label, self._richtung()]
+        if self.seiten:
+            teile.insert(0, seiten_text(len(self.seiten)))
         if self.timer_s:
             teile.append(f"Timer {self.timer_s} s")
         return " · ".join(t for t in teile if t)
@@ -337,6 +366,8 @@ class _Aufnahme:
             or not self.bereit
             or self.countdown_rest is not None
             or self.laeuft_seit is not None
+            or self.seite is not None
+            or len(self.seiten) >= MAX_SEITEN
         ):
             return
         if self.timer_s <= 0:
@@ -347,7 +378,7 @@ class _Aufnahme:
         self.countdown_aufgabe = self.page.run_task(self._countdown)
 
     async def _jetzt_ausloesen(self) -> None:
-        await (self.foto() if self.art == BILD else self.video_start())
+        await (self.video_start() if self.art == VIDEO else self.foto())
 
     async def _countdown(self) -> None:
         """Je Sekunde die Zahl groß in der Mitte und ein kurzer Ton (der Countdown-Ton des
@@ -387,10 +418,82 @@ class _Aufnahme:
         if self.kamera is None or not self.bereit:
             return
         try:
-            self.daten = await self.kamera.take_picture()
+            daten = await self.kamera.take_picture()
         except Exception as fehler:
             self.melden(f"Foto fehlgeschlagen: {fehler}")
             return
+        if self.art == DOKUMENT:
+            self.seite_zeigen(daten)
+            return
+        self.daten = daten
+        self.ergebnis_zeigen()
+
+    # -- Dokument: Seite für Seite (Plan Teil I) -----------------------------------------
+
+    def _ueber_die_kamera(self, inhalt: ft.Control | None) -> None:
+        """Etwas über die Kamera legen, nicht an ihre Stelle (siehe `ergebnis_zeigen`)."""
+        decke = (
+            None
+            if inhalt is None
+            else ft.Container(
+                expand=True, bgcolor=ft.Colors.BLACK, alignment=ft.Alignment.CENTER, content=inhalt
+            )
+        )
+        if self.kamera is not None:
+            self.kamera.content = decke
+        else:
+            self.flaeche.content = decke
+
+    def seite_zeigen(self, daten: bytes) -> None:
+        """Die gerade aufgenommene Seite über der Kamera — behalten oder neu aufnehmen."""
+        try:
+            self.seite = seite_bereinigt(daten)
+        except NichtBereinigbar as fehler:
+            self.status.value = f"Seite nicht lesbar: {fehler}"
+            self.zeichnen()
+            return
+        self._ueber_die_kamera(ft.Image(src=self.seite, fit=ft.BoxFit.CONTAIN, expand=True))
+        self.status.value = (
+            f"Seite {len(self.seiten) + 1} · {groesse_text(len(self.seite))} · "
+            f"{self.qualitaet.label}"
+        )
+        self.zeichnen()
+
+    def seite_verwerfen(self) -> None:
+        """„Neu aufnehmen“: Die Seite fällt weg, die Kamera ist wieder da."""
+        self.seite = None
+        self._ueber_die_kamera(None)
+        self.status.value = self.kamera_text()
+        self.zeichnen()
+
+    def seite_behalten(self) -> None:
+        """„Nächste Seite“: Die Seite kommt ins Dokument, die Kamera ist wieder da."""
+        if self.seite is not None:
+            self.seiten.append(self.seite)
+        self.seite_verwerfen()
+
+    async def dokument_fertig(self) -> None:
+        """„Fertig“: aus den Seiten (mit der gerade gezeigten) ein PDF bauen — im Thread, die
+        Bytes sind groß — und es wie jede Aufnahme zum Behalten zeigen."""
+        if getattr(self, "_baut", False):
+            return
+        if self.seite is not None:
+            self.seiten.append(self.seite)
+            self.seite = None
+        if not self.seiten:
+            return
+        self._baut = True
+        self.status.value = "Dokument wird gebaut …"
+        self.zeichnen()
+        try:
+            self.daten = await asyncio.to_thread(pdf_aus_jpegs, list(self.seiten))
+        except NichtBereinigbar as fehler:
+            self.status.value = f"Dokument nicht gebaut: {fehler}"
+            self.zeichnen()
+            return
+        finally:
+            self._baut = False
+        self.frontbild = self.seiten[0]
         self.ergebnis_zeigen()
 
     async def video_start(self) -> None:
@@ -433,12 +536,13 @@ class _Aufnahme:
         self.ergebnis_zeigen()
 
     async def datei_waehlen(self) -> None:
-        """Nur am Rechner: ein Bild oder Video von der Platte — unverkleinert, zum Prüfen."""
-        endungen = ["jpg", "jpeg"] if self.art == BILD else ["mp4"]
+        """Am Rechner: ein Bild oder Video von der Platte — unverkleinert, zum Prüfen. Beim
+        Dokument überall: eine PDF-Datei vom Gerät, bereinigt (`core.dokument.pdf_pruefen`)."""
+        endungen = {BILD: ["jpg", "jpeg"], DOKUMENT: ["pdf"]}.get(self.art, ["mp4"])
         try:
             dateien = await systemdialog.mit(
                 ft.FilePicker().pick_files(
-                    dialog_title="Foto wählen" if self.art == BILD else "Video wählen",
+                    dialog_title=f"{'PDF' if self.art == DOKUMENT else TITEL[self.art]} wählen",
                     file_type=ft.FilePickerFileType.CUSTOM,
                     allowed_extensions=endungen,
                     with_data=False,
@@ -458,10 +562,16 @@ class _Aufnahme:
                 # Die Datei kommt an Kamera und Erweiterung vorbei — das Netz darunter gilt
                 # auch hier (N117): Exif, XMP und alles hinter dem Bildende fallen weg
                 daten = bild_ohne_metadaten(daten)
+            elif self.art == DOKUMENT:
+                daten = await asyncio.to_thread(pdf_pruefen, daten)
         except (NichtBereinigbar, OSError) as fehler:
-            self.melden(f"Nicht lesbar: {fehler}")
+            # Die Kamera bleibt, wie sie ist — nur die Meldung wechselt
+            self.status.value = f"Nicht übernommen: {fehler}"
+            self.zeichnen()
             return
         self.daten = daten
+        if self.art == DOKUMENT:
+            self.seiten, self.seite, self.frontbild = [], None, None
         if self.art == VIDEO:
             self.frontbild = None  # kein Frontbild ohne Kamera — die Kachel zeigt „fehlt“
             self.dauer_s = None
@@ -475,25 +585,34 @@ class _Aufnahme:
         vorschau: ft.Control = (
             ft.Image(src=bild, fit=ft.BoxFit.CONTAIN, expand=True)
             if bild
-            else ft.Icon(ft.Icons.VIDEOCAM, size=64, opacity=0.5)
-        )
-        if self.kamera is not None:
-            # Über die Kamera legen, nicht an ihre Stelle: Aus dem Baum genommen gibt das
-            # Plugin den Controller frei, und nach „Verwerfen“ war die Kamera tot (Ben,
-            # 21.10.2026 — flet-camera `dispose` → „Camera is not initialized“)
-            self.kamera.content = ft.Container(
-                expand=True,
-                bgcolor=ft.Colors.BLACK,
-                alignment=ft.Alignment.CENTER,
-                content=vorschau,
+            else ft.Icon(
+                ft.Icons.PICTURE_AS_PDF_OUTLINED if self.art == DOKUMENT else ft.Icons.VIDEOCAM,
+                size=64,
+                color=ft.Colors.WHITE,
+                opacity=0.5,
             )
-        else:
-            self.flaeche.content = vorschau
+        )
+        # Über die Kamera legen, nicht an ihre Stelle: Aus dem Baum genommen gibt das Plugin
+        # den Controller frei, und nach „Verwerfen“ war die Kamera tot (Ben, 21.10.2026 —
+        # flet-camera `dispose` → „Camera is not initialized“)
+        self._ueber_die_kamera(vorschau)
         teile = [groesse_text(len(self.daten)), self.qualitaet.label]
+        if self.art == DOKUMENT:
+            teile = [
+                seiten_text(len(self.seiten)) if self.seiten else "PDF-Datei",
+                groesse_text(len(self.daten)),
+            ]
         if self.art == VIDEO and self.dauer_s is not None:
             teile.insert(0, dauer_text(self.dauer_s))
         self.status.value = " · ".join(teile)
         self.zeit.value = ""
+        self.zeichnen()
+
+    def dokument_weiter(self) -> None:
+        """Vom fertigen Dokument zurück zur Kamera — die Seiten bleiben, eine weitere geht."""
+        self.daten, self.frontbild = None, None
+        self._ueber_die_kamera(None)
+        self.status.value = self.kamera_text()
         self.zeichnen()
 
     async def behalten(self) -> None:
@@ -552,6 +671,7 @@ class _Aufnahme:
             jetzt(),
             dauer_s=self.dauer_s,
             note=self.notiz.value or "",
+            frontbild=self.art == DOKUMENT and self.frontbild is not None,
         )
         daten, frontbild = self.daten, self.frontbild
         try:
@@ -562,15 +682,14 @@ class _Aufnahme:
             self.melden(f"Nicht gespeichert: {fehler}")
             return
         self.daten = None
-        self.page.show_dialog(
-            ft.SnackBar(ft.Text("Foto gespeichert" if self.art == BILD else "Video gespeichert"))
-        )
+        self.page.show_dialog(ft.SnackBar(ft.Text(f"{TITEL[self.art]} gespeichert")))
         await self.zurueck()
 
     async def verwerfen(self) -> None:
         """Zurück zur Kamera — sie lief unter dem Ergebnis weiter, ein neuer Versuch geht
         sofort."""
         self.daten, self.frontbild, self.dauer_s = None, None, None
+        self.seiten, self.seite = [], None
         if self.kamera is not None and self.bereit:
             self.kamera.content = None
             self.status.value = self.kamera_text()
@@ -623,6 +742,13 @@ class _Aufnahme:
 
     def _knoepfe(self) -> list[ft.Control]:
         if self.daten is not None:
+            if self.art == DOKUMENT and self.seiten and self.kamera is not None:
+                return [
+                    ft.OutlinedButton(
+                        "Weitere Seite", icon=ft.Icons.ADD, on_click=self.dokument_weiter
+                    ),
+                    ft.FilledButton("Behalten", icon=ft.Icons.CHECK, on_click=self.behalten),
+                ]
             return [
                 ft.OutlinedButton(
                     "Verwerfen", icon=ft.Icons.DELETE_OUTLINE, on_click=self.verwerfen
@@ -632,11 +758,15 @@ class _Aufnahme:
         if not kamera_moeglich(self.page):
             return [
                 ft.FilledButton(
-                    "Datei wählen", icon=ft.Icons.FOLDER_OPEN, on_click=self.datei_waehlen
+                    "PDF wählen" if self.art == DOKUMENT else "Datei wählen",
+                    icon=ft.Icons.FOLDER_OPEN,
+                    on_click=self.datei_waehlen,
                 )
             ]
         if self.countdown_rest is not None:
             return [ft.OutlinedButton("Abbrechen", icon=ft.Icons.CLOSE, on_click=self.abbrechen)]
+        if self.art == DOKUMENT:
+            return self._knoepfe_dokument()
         wechsel = ft.IconButton(
             ft.Icons.FLIP_CAMERA_ANDROID,
             tooltip="Kamera wechseln",
@@ -678,10 +808,58 @@ class _Aufnahme:
             ft.Container(width=48),
         ]
 
+    def _knoepfe_dokument(self) -> list[ft.Control]:
+        """Dokument: über einer aufgenommenen Seite „Neu aufnehmen · Nächste Seite · Fertig“,
+        sonst links „PDF wählen“ (solange keine Seite da ist), der Auslöser, rechts „Fertig“."""
+        anzahl = len(self.seiten) + (1 if self.seite is not None else 0)
+        fertig = ft.FilledButton(
+            f"Fertig · {seiten_text(anzahl)}" if self.seite is not None else f"Fertig · {anzahl}",
+            icon=ft.Icons.CHECK,
+            on_click=self.dokument_fertig,
+            style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=10)),
+        )
+        if self.seite is not None:
+            voll = anzahl >= MAX_SEITEN
+            return [
+                ft.IconButton(
+                    ft.Icons.REPLAY, tooltip="Neu aufnehmen", on_click=self.seite_verwerfen
+                ),
+                ft.OutlinedButton(
+                    "Nächste Seite",
+                    icon=ft.Icons.ADD,
+                    on_click=self.seite_behalten,
+                    disabled=voll,
+                    tooltip=f"Höchstens {MAX_SEITEN} Seiten" if voll else None,
+                    style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=10)),
+                ),
+                fertig,
+            ]
+        return [
+            ft.IconButton(
+                ft.Icons.FOLDER_OPEN,
+                tooltip="PDF wählen",
+                on_click=self.datei_waehlen,
+                disabled=bool(self.seiten),
+            ),
+            ft.IconButton(
+                ft.Icons.CAMERA,
+                icon_size=56,
+                tooltip="Seite aufnehmen",
+                on_click=self.ausloesen,
+                disabled=not self.bereit or len(self.seiten) >= MAX_SEITEN,
+            ),
+            fertig if self.seiten else ft.Container(width=48),
+        ]
+
     def _leiste(self) -> list[ft.Control]:
         """Oben im Bild (Skizze H1): Blitz, Timer, Qualität — nur mit Kamera und solange
         kein Ergebnis dasteht. Während der Aufnahme bleibt nur das Licht schaltbar."""
-        if self.kamera is None or not self.kameras or self.daten is not None:
+        if (
+            self.kamera is None
+            or not self.kameras
+            or self.daten is not None
+            or self.seite is not None
+        ):
             return []
         frei = self.bereit and self.laeuft_seit is None and self.countdown_rest is None
         symbol = {
@@ -744,21 +922,27 @@ def _schalter(
 
 
 def anhang_aufnahme_view(page: Any, state: AppState, route: str, ziel: Ziel, art: str) -> ft.View:
-    """Die Seite. ``art``: `BILD` oder `VIDEO`; ``ziel``: woran die Aufnahme hängt."""
+    """Die Seite. ``art``: `BILD`, `VIDEO` oder `DOKUMENT`; ``ziel``: woran die Aufnahme
+    hängt."""
     a = _Aufnahme(page, state, ziel, art)
-    titel = ("Foto: " if art == BILD else "Video: ") + ziel_name(state, ziel)
-    hinweis = (
-        f"Höchstens {dauer_text(a.max_s)} min · Vorgabe der Qualität: Einstellungen → Anhänge"
-        if art == VIDEO
-        else "Vorgabe der Qualität: Einstellungen → Anhänge"
-    )
+    titel = f"{TITEL[art]}: {ziel_name(state, ziel)}"
+    hinweis = {
+        VIDEO: (
+            f"Höchstens {dauer_text(a.max_s)} min · Vorgabe der Qualität: Einstellungen → Anhänge"
+        ),
+        DOKUMENT: (
+            f"Seite für Seite, höchstens {MAX_SEITEN} · wird ein PDF · kleiner: Qualität oben"
+        ),
+    }.get(art, "Vorgabe der Qualität: Einstellungen → Anhänge")
     if kamera_moeglich(page):
         a.status.value = "Kamera wird geöffnet …"
         a.flaeche.content = ft.ProgressRing()
         page.run_task(a.kamera_starten)
     else:
         a.status.value = (
-            "Am Rechner gibt es keine Kamera in der App — zum Prüfen eine Datei wählen "
+            "Am Rechner gibt es keine Kamera in der App — eine PDF-Datei wählen."
+            if art == DOKUMENT
+            else "Am Rechner gibt es keine Kamera in der App — zum Prüfen eine Datei wählen "
             "(unverkleinert)."
         )
     a.zeichnen()

@@ -1187,7 +1187,15 @@ async def test_teile_zusammenfuegen_ergibt_einen_strom(tmp_path) -> None:
     assert [b.rr_ms for b in rec.beats[:n1]] == [b.rr_ms for b in teil1.recording.beats]
     texte = [e["text"] for e in rec.ereignisse]
     assert texte.index("in Teil 1") < texte.index("Teil 2") < texte.index("in Teil 2")
-    assert ganz.dauer_s == pytest.approx(teil1.dauer_s + teil2.dauer_s, abs=2.0)
+    # Die Dauer je Uhr für sich, aus den Dateien: Die Herzuhr zählt weiter, die Wanduhr des
+    # zweiten Teils rückt um den Abstand der Startzeiten. Vorher stand hier die Herzuhr der
+    # ganzen Datei gegen die Wanduhr der Teile (``Gespeichert.dauer_s`` einer Aufnahme) mit
+    # ±2 s — bei ``tempo=40`` sind das 50 ms echte Zeit, unter Last in der CI zu wenig.
+    t1, t2 = laden(teil1.pfad), laden(teil2.pfad)
+    assert ganz.dauer_s == rec.dauer_s == pytest.approx(t1.dauer_s + t2.dauer_s, abs=0.002)
+    assert t1.start_utc is not None and t2.start_utc is not None
+    versatz = (t2.start_utc - t1.start_utc).total_seconds()
+    assert rec.dauer_wanduhr_s == pytest.approx(versatz + t2.dauer_wanduhr_s, abs=0.002)
     # H52: Was dieselbe Zeit enthält, wird nicht aneinandergehängt (Schläge stünden doppelt)
     with pytest.raises(ValueError, match="überschneiden sich"):
         teile_zusammenfuegen([ganz.pfad, teil1.pfad])

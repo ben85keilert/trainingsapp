@@ -215,6 +215,14 @@ lesen. Die Spalte „Schwere“ sagt nichts darüber, ob der verwundbare Pfad hi
   `uv.lock` (`flet build` installiert selbst). Ein Dependabot-Merge ändert
   die nächste APK darum nur, wenn `pyproject.toml` betroffen ist oder die
   neue Version ohnehin die aktuellste im Bereich ist.
+  **Nachgesehen am 13.11.2026 an v0.3.90** (`unzip -l` auf `assets/sitepackages.zip` der APK):
+  flet 1.0.5 statt 1.0.3 wie im Lock, numpy 2.4.6 statt 2.5.2, certifi 2026.10.23 und
+  oauthlib 4.0.1 (beide schon repariert, obwohl das Lock noch die alten Stände hielt),
+  msgpack 1.1.2 — neuere Android-Räder bietet pypi.flet.dev nicht; die Meldung dazu (Leck in
+  der C-Erweiterung bei ungültigen Schlüsseln, behoben in 1.2.3) lässt sich über das Lock
+  nicht schließen. Pillow, Authlib, fastmcp, dnspython und joserfc sind nicht in der APK
+  (nur Gruppe `flet-dev`). Eine Meldung zum Lock sagt also nichts Sicheres über die APK —
+  und ein grünes Lock auch nicht.
 - **Secret-Scanning** ist ein anderer Dienst (sucht nach Tokens in Commits),
   läuft aber unter derselben Überschrift „Code security“. Siehe README,
   „Repo-Einstellungen (Sicherheit)“.

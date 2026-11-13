@@ -75,7 +75,11 @@ setzen und pushen — der Workflow „APK“ baut daraus ein Vorab-Release. Den 
 das Release mit Dateinamen nennen. Den **CI**-Lauf des Commits beobachten (`gh run list` zeigt
 daneben Dependabots „Graph Update“ — der zählt nicht). Scheitert der APK-Lauf an einem 504 von
 GitHubs Downloads, reicht `gh run rerun <id> --failed`; kein neuer Tag, keine neue Version.
-**Lokale Builds startet nur Ben.**
+**Lokale Builds startet nur Ben.** **Vor dem Tag die offenen Dependabot-Warnungen ansehen** (Ben,
+13.11.2026; `gh api repos/ben85keilert/trainingsapp/dependabot/alerts`): kritische und hohe zu
+Paketen, die in die APK gelangen (`uv tree --no-default-groups`), vorher beheben oder im Bericht
+nennen. Die APK löst ihre Pakete selbst auf, nicht aus `uv.lock` — was wirklich drin ist, zeigt
+`assets/sitepackages.zip` der gebauten APK (`docs/dependabot.md`).
 
 **Flet-API nachschlagen:** `.mcp.json` registriert den MCP-Server `flet` (`uv run flet mcp`,
 Paket `flet-mcp` in der Gruppe `flet-dev`). Er kennt die API der installierten Flet-Version —

@@ -10,7 +10,9 @@ die Tagesnotizen mit Tagebuch müssen gesondert super schnell erreichbar sein.�
   (`components/filterblatt.py`: Art · Notiz-Tags · Zeitraum · Plan · Übung), das
   Kalendersymbol (Wochenleiste ein/aus) und „+“ (neue Notiz zu heute). Darunter fest die
   **Schnellwahl „Tagebuch · Alles“** — ein Tipp, die Wahl bleibt stehen — und die Labels der
-  wirkenden Filter.
+  wirkenden Filter. Die Schnellwahl zeigt die **gespeicherten Filter** (Ben, 13.11.2026):
+  „Tagebuch“ (der feste Notiz-Tag) ist die Vorgabe, das Lesezeichen im Filterblatt legt die
+  gewählte Auswahl dazu, ✕ dort löscht — auch „Tagebuch“. Je Profil in den Einstellungen.
 - **Eine Liste**, nach Tagen: oben die Woche, ein Punkt je Notiz, der Tag oben in der Liste
   markiert; darunter die Tage, der neueste oben, je Tag ein Zeitstrahl nach der Uhr. Beim
   Scrollen geht die Woche mit (die Höhe jedes Tages meldet ``on_size_change``,
@@ -43,17 +45,22 @@ import flet as ft
 
 from trainingsapp.core.models import DayNote
 from trainingsapp.core.tagebuch import (
+    ABLAGE_SCHLUESSEL,
     AUFNAHME,
     NOTIZ_ZEILEN,
     OHNE_TAG,
     PLAN,
     TAG,
+    TAGEBUCH,
     TAGESFELD,
     UEBUNG,
     WORKOUT,
     ZEITRAEUME,
     Notiz,
     Tagesgruppe,
+    ablage_merken,
+    ablagen_lesen,
+    ablagen_schreiben,
     filtern,
     nach_tagen,
     naechster_tag_mit,
@@ -66,7 +73,7 @@ from trainingsapp.core.tagebuch import (
 from trainingsapp.core.verlauf import MONATE, WOCHENTAGE, WOCHENTAGE_LANG, wochen_titel
 from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
-from trainingsapp.ui.components.filterblatt import Bereich, Filterblatt
+from trainingsapp.ui.components.filterblatt import Ablage, Bereich, Filterblatt
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import ohne_auto_update
 from trainingsapp.ui.components.notizeditor import Notizeditor, Textnotiz
@@ -415,39 +422,84 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
         state.tagebuch_suche = str(e.control.value or "")
         auffrischen()
 
-    def schnell(tagebuch_an: bool) -> Callable[[Any], None]:
-        """Die Schnellwahl: „Tagebuch“ = Notizen zum Tag mit dem festen Tag, „Alles“ = kein
+    # Gespeicherte Filter (Ben, 13.11.2026): je Profil in den Einstellungen. Solange dort
+    # nichts steht, gilt die Vorgabe „Tagebuch“; danach nur noch die Liste der Person — ein
+    # gelöschtes „Tagebuch“ kommt mit keinem Update wieder (`core.tagebuch.ablagen_lesen`).
+    ablage_schluessel = f"{ABLAGE_SCHLUESSEL}:{profil}"
+    ablagen = ablagen_lesen(
+        state.einstellungen.lesen(ablage_schluessel), fest.id if fest is not None else None
+    )
+
+    def ablagen_sichern() -> None:
+        state.einstellungen.setzen(ablage_schluessel, ablagen_schreiben(ablagen))
+
+    def ablage_aktiv() -> str | None:
+        return next((a.name for a in ablagen if a.filter == wahl), None)
+
+    def ablage_anwenden(name: str) -> None:
+        gefunden = next((a for a in ablagen if a.name == name), None)
+        if gefunden is not None:
+            wahl.setzen(gefunden.filter)
+
+    def ablage_speichern(name: str) -> None:
+        ablagen[:] = ablage_merken(ablagen, name, wahl)
+        ablagen_sichern()
+
+    def ablage_loeschen(name: str) -> None:
+        ablagen[:] = [a for a in ablagen if a.name != name]
+        ablagen_sichern()
+
+    def schnell(name: str | None) -> Callable[[Any], None]:
+        """Die Schnellwahl: ein gespeicherter Filter („Tagebuch“) oder „Alles“ = kein
         Filter. Die Suche bleibt, wie sie ist."""
 
         def handler(_e: object = None) -> None:
-            if tagebuch_an and fest is not None:
-                wahl.tagebuch_setzen(fest.id)
-            else:
+            if name is None:
                 wahl.leeren()
+            else:
+                ablage_anwenden(name)
             filterblatt.nachziehen()
             auffrischen()
 
         return handler
 
-    def schnell_chip(text: str, tagebuch_an: bool, icon: ft.IconData) -> ft.Chip:
+    def schnell_chip(text: str, name: str | None, icon: ft.IconData, an: bool) -> ft.Chip:
         return ft.Chip(
             label=ft.Text(text, size=13),
             leading=ft.Icon(icon, size=16),
             show_checkmark=False,
+            selected=an,
             visual_density=ft.VisualDensity.COMPACT,
-            on_select=schnell(tagebuch_an),
+            on_select=schnell(name),
         )
 
-    chip_tagebuch = schnell_chip("Tagebuch", True, ft.Icons.MENU_BOOK)
-    chip_alles = schnell_chip("Alles", False, ft.Icons.NOTES)
+    schnellzeile = ft.Row(spacing=6, scroll=ft.ScrollMode.AUTO)
 
     def schnell_zeigen() -> None:
-        chip_tagebuch.selected = fest is not None and wahl.ist_tagebuch(fest.id)
-        chip_alles.selected = wahl.leer
+        """Je gespeichertem Filter ein Chip, zuletzt „Alles“ — neu nach jeder Änderung
+        (auch nach Speichern und Löschen im Blatt)."""
+        aktiv = ablage_aktiv()
+        schnellzeile.controls = [
+            *(
+                schnell_chip(
+                    a.name,
+                    a.name,
+                    ft.Icons.MENU_BOOK if a.name == TAGEBUCH else ft.Icons.BOOKMARK_OUTLINE,
+                    a.name == aktiv,
+                )
+                for a in ablagen
+            ),
+            schnell_chip("Alles", None, ft.Icons.NOTES, wahl.leer),
+        ]
 
     uebungen_wahl = list(
         dict.fromkeys(
-            [*zuletzt(alle, lambda n: n.exercise_id)[:UEBUNGEN_IM_FILTER], *sorted(wahl.uebungen)]
+            [
+                *zuletzt(alle, lambda n: n.exercise_id)[:UEBUNGEN_IM_FILTER],
+                *sorted(wahl.uebungen),
+                # was ein gespeicherter Filter nennt, steht immer zur Wahl
+                *sorted(i for a in ablagen for i in a.filter.uebungen if i in katalog),
+            ]
         )
     )
     filterblatt = Filterblatt(
@@ -494,6 +546,13 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
         # frisch gerechnet: das Blatt fragt, bevor die Liste nachzieht
         zaehlen=lambda: len(filtern(alle, wahl, state.tagebuch_suche, heute=heute, titel=titel)),
         treffer=notizen_text,
+        ablage=Ablage(
+            namen=lambda: [a.name for a in ablagen],
+            aktiv=ablage_aktiv,
+            anwenden=ablage_anwenden,
+            speichern=ablage_speichern,
+            loeschen=ablage_loeschen,
+        ),
     )
     suchfeld = ft.TextField(
         value=state.tagebuch_suche,
@@ -536,10 +595,7 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             controls=[
                 suchzeile,
                 # Das Tagebuch mit einem Tipp (Ben, 12.11.2026: „super schnell erreichbar“)
-                ft.Row(
-                    spacing=6,
-                    controls=[chip_tagebuch, chip_alles] if fest is not None else [chip_alles],
-                ),
+                schnellzeile,
             ],
         ),
     )

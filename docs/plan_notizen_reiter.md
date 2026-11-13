@@ -213,3 +213,28 @@ Abweichungen:
 
 Offen: Notizen an GPS-Aufzeichnungen (A23), Gerätetest T132.
 
+## 8. Gespeicherte Filter (Ben, 13.11.2026)
+
+Ben: „Für das reine Tagebuch reicht der Tag-Filter Tagebuch-Tag. Der andere kann raus“ und
+„Die Filter sollen gespeichert und gelöscht werden können … Tagebuch selbst soll gelöscht
+werden können, wird mit Programminstallation automatisch mitgeliefert.“
+
+- **Tagebuch = nur der Notiz-Tag „Tagebuch“** (`Notizfilter.tagebuch_setzen`); die Art „Zum
+  Tag“ ist nicht mehr mitgesetzt — nach einem Tag gefiltert kommen ohnehin nur Notizen zum
+  Tag durch (`core.tagebuch.filtern`).
+- **Speichern:** Lesezeichen im Kopf des Filterblatts → Zeile für den Namen → „Speichern“.
+  Derselbe Name ersetzt. Das Lesezeichen ist gefüllt und gesperrt, wenn die Auswahl schon
+  gespeichert ist, und gesperrt, wenn nichts gewählt ist. Die Suche gehört nicht dazu.
+- **Setzen und löschen:** Die Schnellwahl im Kopf zeigt je gespeichertem Filter einen Chip,
+  zuletzt „Alles“. Im Blatt stehen sie oben unter „Gespeichert“ — Tipp setzt, ✕ löscht
+  (ohne Rückfrage: neu anlegen sind drei Tipps).
+- **Ablage:** je Profil in ``app_setting`` (`notizfilter:<profil-id>`, JSON) — gerätelokal,
+  nicht im Sync. **Solange dort nichts steht, gilt die Vorgabe „Tagebuch“**; mit dem ersten
+  Speichern oder Löschen steht die Liste der Person da, und nur die gilt
+  (`core.tagebuch.ablagen_lesen`). Darum kommt ein gelöschtes „Tagebuch“ mit keinem Update
+  wieder, und Eigenes geht mit keinem verloren: Ein Update fasst die Einstellung nie an,
+  es gibt kein erneutes Einspielen wie bei einem Paket.
+- Das **Buch-Symbol unter Heute** hängt nicht am gespeicherten Filter: Es setzt den festen
+  Tag direkt und bleibt, auch wenn „Tagebuch“ aus der Schnellwahl gelöscht ist.
+- Nennt ein gespeicherter Filter etwas, das es nicht mehr gibt (gelöschter Tag oder Plan),
+  fällt das beim Setzen heraus; der Chip gilt dann nicht mehr als „gewählt“.

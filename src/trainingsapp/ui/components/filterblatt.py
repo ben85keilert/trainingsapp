@@ -12,6 +12,10 @@ drei Bereiche Typ · Region · Paket beisteuert:
   neue Wahl ersetzt die alte). **Die Wahl wirkt sofort**: Die Liste dahinter zieht beim
   Antippen nach, oben steht, wie viel passt. „Alles leeren“ und „Fertig“ stehen fest unten.
 
+**Gespeicherte Filter** (Ben, 13.11.2026, nur mit ``ablage``): Das Lesezeichen im Kopf des
+Blatts legt die gerade gewählte Auswahl unter einem Namen ab; oben im Blatt stehen die
+gespeicherten als Chips — ein Tipp setzt sie, ✕ löscht sie. Wo sie liegen, weiß der Aufrufer.
+
 Die Mengen gehören dem Aufrufer (im `AppState`) und werden an Ort und Stelle geändert.
 """
 
@@ -41,6 +45,20 @@ class Bereich:
     einzel: bool = False
 
 
+@dataclass(slots=True)
+class Ablage:
+    """Gespeicherte Filter — was das Blatt dafür vom Aufrufer braucht. ``anwenden`` setzt die
+    Mengen der Bereiche an Ort und Stelle, ``speichern`` legt die jetzige Wahl unter dem
+    Namen ab (derselbe Name ersetzt), ``aktiv`` nennt den gespeicherten Filter, der gerade
+    genau gilt."""
+
+    namen: Callable[[], list[str]]
+    aktiv: Callable[[], str | None]
+    anwenden: Callable[[str], None]
+    speichern: Callable[[str], None]
+    loeschen: Callable[[str], None]
+
+
 def treffer_text(n: int) -> str:
     """Kopf des Blatts: wie viele Übungen gerade passen."""
     return "keine Übung" if n == 0 else "1 Übung" if n == 1 else f"{n} Übungen"
@@ -63,6 +81,7 @@ class Filterblatt:
         on_change: Callable[[], None],
         zaehlen: Callable[[], int],
         treffer: Callable[[int], str] = treffer_text,
+        ablage: Ablage | None = None,
     ) -> None:
         self._page = page
         self.bereiche = {b.name: b for b in bereiche}
@@ -71,6 +90,11 @@ class Filterblatt:
         self._on_change = on_change
         self._zaehlen = zaehlen
         self._treffer_text = treffer
+        self._ablage = ablage
+        self._merken: ft.IconButton | None = None
+        self._gespeichert: ft.Column | None = None
+        self._name: ft.TextField | None = None
+        self._namenszeile: ft.Row | None = None
         self.knopf = ft.IconButton(icon=ft.Icons.FILTER_LIST, on_click=self.oeffnen)
         self._reihe = ft.Row(spacing=6, scroll=ft.ScrollMode.AUTO)
         self.labels = ft.Container(padding=ft.Padding.symmetric(horizontal=16), content=self._reihe)
@@ -104,7 +128,9 @@ class Filterblatt:
 
     def nachziehen(self) -> None:
         """Die Mengen wurden von außen geändert (Schnellwahl): Knopf, Labels und Blatt auf
-        den Stand bringen — ohne ``on_change``."""
+        den Stand bringen — ohne ``on_change``. Was nicht mehr zur Wahl steht, fällt heraus."""
+        for b in self.bereiche.values():
+            b.menge.intersection_update([w for w, _ in b.wahl])
         self._zeigen()
 
     def _zeigen(self) -> None:
@@ -139,6 +165,90 @@ class Filterblatt:
             self._leeren.disabled = not n
         if self._treffer is not None:
             self._treffer.value = self._treffer_text(self._zaehlen())
+        self._ablage_zeigen()
+
+    def _ablage_zeigen(self) -> None:
+        """Lesezeichen und die Chips der gespeicherten Filter im offenen Blatt."""
+        ablage = self._ablage
+        if ablage is None or self._merken is None or self._gespeichert is None:
+            return
+        aktiv = ablage.aktiv()
+        self._merken.icon = ft.Icons.BOOKMARK if aktiv else ft.Icons.BOOKMARK_ADD_OUTLINED
+        self._merken.disabled = not self.anzahl or aktiv is not None
+        self._merken.tooltip = (
+            f"Gespeichert als „{aktiv}“"
+            if aktiv
+            else "Diese Auswahl speichern"
+            if self.anzahl
+            else "Erst etwas auswählen, dann speichern"
+        )
+        if self._namenszeile is not None and self._merken.disabled:
+            self._namenszeile.visible = False
+        namen = ablage.namen()
+        self._gespeichert.visible = bool(namen)
+        self._gespeichert.controls = [
+            ft.Row(
+                spacing=6,
+                controls=[
+                    ft.Icon(ft.Icons.BOOKMARK_OUTLINE, size=18, opacity=0.8),
+                    ft.Text("Gespeichert", size=14, weight=ft.FontWeight.W_600),
+                ],
+            ),
+            ft.Row(
+                wrap=True,
+                spacing=6,
+                run_spacing=6,
+                controls=[
+                    ft.Chip(
+                        label=ft.Text(name),
+                        show_checkmark=True,
+                        selected=name == aktiv,
+                        on_select=self._anwender(name),
+                        delete_icon=ft.Icon(ft.Icons.CLOSE, size=16),
+                        delete_icon_tooltip=f"Gespeicherten Filter „{name}“ löschen",
+                        on_delete=self._loescher(name),
+                        data=("Gespeichert", name),
+                    )
+                    for name in namen
+                ],
+            ),
+        ]
+
+    def _anwender(self, name: str) -> Callable[..., None]:
+        def handler(_: Any = None) -> None:
+            assert self._ablage is not None
+            self._ablage.anwenden(name)
+            for b in self.bereiche.values():
+                b.menge.intersection_update([w for w, _ in b.wahl])
+            self._geaendert()
+
+        return handler
+
+    def _loescher(self, name: str) -> Callable[..., None]:
+        def handler(_: Any = None) -> None:
+            assert self._ablage is not None
+            self._ablage.loeschen(name)
+            self._geaendert()
+
+        return handler
+
+    def _name_zeigen(self, _: Any = None) -> None:
+        """Lesezeichen angetippt: die Zeile für den Namen."""
+        if self._namenszeile is not None and self._name is not None:
+            self._namenszeile.visible = not self._namenszeile.visible
+            self._name.value = ""
+
+    def _speichern(self, _: Any = None) -> None:
+        if self._ablage is None or self._name is None or self._namenszeile is None:
+            return
+        name = str(self._name.value or "").strip()
+        if not name:
+            self._name.error = "Name fehlt"
+            return
+        self._name.error = None
+        self._ablage.speichern(name)
+        self._namenszeile.visible = False
+        self._geaendert()
 
     def _label(self, bereich: str, wert: Any, text: str) -> ft.Chip:
         symbol, farbe = self.bereiche[bereich].symbol, self.bereiche[bereich].farbe
@@ -211,6 +321,30 @@ class Filterblatt:
                 ],
             )
         ]
+        if self._ablage is not None:
+            self._merken = ft.IconButton(
+                ft.Icons.BOOKMARK_ADD_OUTLINED,
+                visual_density=ft.VisualDensity.COMPACT,
+                on_click=self._name_zeigen,
+            )
+            kopfzeile = inhalt[0]
+            assert isinstance(kopfzeile, ft.Row)
+            kopfzeile.vertical_alignment = ft.CrossAxisAlignment.CENTER
+            kopfzeile.controls.append(self._merken)
+            self._name = ft.TextField(
+                hint_text="Name für diese Auswahl",
+                dense=True,
+                expand=True,
+                text_size=14,
+                on_submit=self._speichern,
+            )
+            self._namenszeile = ft.Row(
+                visible=False,
+                spacing=8,
+                controls=[self._name, ft.FilledTonalButton("Speichern", on_click=self._speichern)],
+            )
+            self._gespeichert = ft.Column(spacing=6, tight=True)
+            inhalt.extend([self._namenszeile, self._gespeichert])
         for b, bereich in self.bereiche.items():
             if not bereich.wahl:
                 continue
@@ -271,4 +405,4 @@ class Filterblatt:
         self._page.show_dialog(blatt)
 
 
-__all__ = ["Bereich", "Filterblatt", "treffer_text"]
+__all__ = ["Ablage", "Bereich", "Filterblatt", "treffer_text"]

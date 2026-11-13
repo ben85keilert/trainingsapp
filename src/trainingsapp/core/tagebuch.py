@@ -31,6 +31,7 @@ steht da, wenn zu ihm eine Notiz geschrieben ist; seine Skalen stehen dann als Z
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -293,10 +294,16 @@ class Notizfilter:
     >>> f = Notizfilter()
     >>> f.tagebuch_setzen("tb")
     >>> f.arten, f.tags, f.ist_tagebuch("tb"), f.leer
-    ({'tag'}, {'tb'}, True, False)
+    (set(), {'tb'}, True, False)
+    >>> g = Notizfilter.aus_dict(f.als_dict())
+    >>> g == f, g.als_dict()
+    (True, {'tags': ['tb']})
     >>> f.leeren()
     >>> f.leer, f.ist_tagebuch("tb")
     (True, False)
+    >>> f.setzen(g)
+    >>> f.tags, f.tags is not g.tags
+    ({'tb'}, True)
     """
 
     #: `TAG`, `UEBUNG`, `PLAN`, `WORKOUT`, `TAGESFELD`, `AUFNAHME` (= „Anhänge“)
@@ -320,18 +327,123 @@ class Notizfilter:
         for menge in self._mengen():
             menge.clear()
 
+    def setzen(self, anderer: Notizfilter) -> None:
+        """Die Wahl eines anderen Filters übernehmen — **in denselben Mengen** (das
+        Filterblatt hält sie fest)."""
+        for menge, quelle in zip(self._mengen(), anderer._mengen(), strict=True):
+            menge.clear()
+            menge.update(quelle)
+
     def tagebuch_setzen(self, tag_id: str) -> None:
-        """Die Schnellwahl „Tagebuch“: nur Notizen zum Tag mit dem festen Tag."""
+        """Das Tagebuch: der feste Notiz-Tag, sonst nichts (Ben, 13.11.2026 — der Tag genügt,
+        nach einem Tag gefiltert kommen ohnehin nur Notizen zum Tag durch)."""
         self.leeren()
-        self.arten.add(TAG)
         self.tags.add(tag_id)
 
     def ist_tagebuch(self, tag_id: str) -> bool:
-        return (
-            self.arten == {TAG}
-            and self.tags == {tag_id}
-            and not (self.zeitraum or self.plaene or self.uebungen)
-        )
+        return self == Notizfilter(tags={tag_id})
+
+    def als_dict(self) -> dict[str, list]:
+        """Für die Ablage — nur Bereiche, die einschränken, sortiert."""
+        return {
+            name: sorted(menge)
+            for name, menge in zip(_BEREICHE, self._mengen(), strict=True)
+            if menge
+        }
+
+    @classmethod
+    def aus_dict(cls, d: object) -> Notizfilter:
+        """Nachsichtig: Unbekanntes und falsch Getyptes fällt weg.
+
+        >>> Notizfilter.aus_dict({"zeitraum": [7, "x"], "arten": "tag", "fremd": [1]}).als_dict()
+        {'zeitraum': [7]}
+        """
+        f = cls()
+        if not isinstance(d, dict):
+            return f
+        for name, menge in zip(_BEREICHE, f._mengen(), strict=True):
+            werte = d.get(name)
+            if isinstance(werte, list):
+                typ = int if name == "zeitraum" else str
+                menge.update(w for w in werte if type(w) is typ)
+        return f
+
+
+#: Die Bereiche des Filters in der Reihenfolge von `Notizfilter._mengen`
+_BEREICHE = ("arten", "tags", "zeitraum", "plaene", "uebungen")
+#: Schlüssel der gespeicherten Filter in ``app_setting`` — je Profil: ``notizfilter:<profil-id>``
+ABLAGE_SCHLUESSEL = "notizfilter"
+#: Name des mitgelieferten gespeicherten Filters
+TAGEBUCH = "Tagebuch"
+
+
+@dataclass(frozen=True, slots=True)
+class Filterablage:
+    """Ein gespeicherter Filter des Reiters „Notizen“ (Ben, 13.11.2026): Name und Wahl."""
+
+    name: str
+    filter: Notizfilter
+
+
+def ablagen_lesen(roh: str | None, tagebuch_tag: str | None) -> list[Filterablage]:
+    """Die gespeicherten Filter eines Profils aus der Einstellung.
+
+    **Steht noch nichts da** (``None``), gilt die Vorgabe: „Tagebuch“ — der feste Notiz-Tag.
+    Sobald die Person etwas speichert oder löscht, steht ihre Liste da, und nur die gilt:
+    Ein gelöschtes „Tagebuch“ kommt mit keinem Update wieder, Eigenes geht mit keinem
+    verloren (ein Update fasst die Einstellung nie an).
+
+    >>> [(a.name, a.filter.als_dict()) for a in ablagen_lesen(None, "tb")]
+    [('Tagebuch', {'tags': ['tb']})]
+    >>> ablagen_lesen(None, None), ablagen_lesen("[]", "tb"), ablagen_lesen("kaputt", "tb")
+    ([], [], [])
+    >>> roh = ablagen_schreiben([Filterablage("Knie", Notizfilter(uebungen={"kb"}))])
+    >>> roh
+    '[{"name": "Knie", "filter": {"uebungen": ["kb"]}}]'
+    >>> [(a.name, a.filter.uebungen) for a in ablagen_lesen(roh, "tb")]
+    [('Knie', {'kb'})]
+    """
+    if roh is None:
+        return [Filterablage(TAGEBUCH, Notizfilter(tags={tagebuch_tag}))] if tagebuch_tag else []
+    try:
+        daten = json.loads(roh)
+    except ValueError:
+        return []
+    ergebnis: dict[str, Filterablage] = {}
+    for d in daten if isinstance(daten, list) else []:
+        if not isinstance(d, dict) or not isinstance(name := d.get("name"), str):
+            continue
+        f = Notizfilter.aus_dict(d.get("filter"))
+        if name.strip() and not f.leer:
+            ergebnis[name.strip()] = Filterablage(name.strip(), f)
+    return list(ergebnis.values())
+
+
+def ablagen_schreiben(ablagen: Iterable[Filterablage]) -> str:
+    return json.dumps(
+        [{"name": a.name, "filter": a.filter.als_dict()} for a in ablagen], ensure_ascii=False
+    )
+
+
+def ablage_merken(ablagen: list[Filterablage], name: str, f: Notizfilter) -> list[Filterablage]:
+    """Die Wahl unter ``name`` ablegen — eine Kopie; derselbe Name ersetzt an seiner Stelle.
+
+    >>> a = ablage_merken([], " Knie ", Notizfilter(uebungen={"kb"}))
+    >>> b = ablage_merken(a, "Woche", Notizfilter(zeitraum={7}))
+    >>> [x.name for x in ablage_merken(b, "Knie", Notizfilter(arten={"plan"}))]
+    ['Knie', 'Woche']
+    >>> ablage_merken(a, "  ", Notizfilter(zeitraum={7})) == a
+    True
+    >>> ablage_merken(a, "x", Notizfilter()) == a
+    True
+    """
+    name = name.strip()
+    if not name or f.leer:
+        return list(ablagen)
+    neu = Filterablage(name, Notizfilter.aus_dict(f.als_dict()))
+    if any(a.name == name for a in ablagen):
+        return [neu if a.name == name else a for a in ablagen]
+    return [*ablagen, neu]
 
 
 def filtern(
@@ -577,18 +689,24 @@ def woche(tag: date) -> list[date]:
 
 
 __all__ = [
+    "ABLAGE_SCHLUESSEL",
     "AUFNAHME",
     "NOTIZ_ZEILEN",
     "OHNE_TAG",
     "PLAN",
     "TAG",
+    "TAGEBUCH",
     "TAGESFELD",
     "UEBUNG",
     "WORKOUT",
     "ZEITRAEUME",
+    "Filterablage",
     "Notiz",
     "Notizfilter",
     "Tagesgruppe",
+    "ablage_merken",
+    "ablagen_lesen",
+    "ablagen_schreiben",
     "filtern",
     "nach_tagen",
     "naechster_tag_mit",

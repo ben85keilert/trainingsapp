@@ -260,7 +260,7 @@ def test_schnellwahl_tagebuch_filter_und_suche(page, state) -> None:
     assert _chips(ansicht)["Tagebuch"].selected and not _chips(ansicht)["Alles"].selected
     assert alles & set(_texte(tagebuch(page, state))) == {"Schulter fest"}  # nach dem Neubau
     labels = [c.label.value for c in _alle(ansicht) if isinstance(c, ft.Chip) and c.on_delete]
-    assert labels == ["Zum Tag", "Tagebuch"]
+    assert labels == ["Tagebuch"]  # der Tag genügt (Ben, 13.11.2026)
     _chips(ansicht)["Alles"].on_select(None)
     assert state.tagebuch_filter.leer and alles <= set(_texte(ansicht))
 
@@ -429,3 +429,56 @@ def test_notiz_nur_mit_aufnahme_bleibt_beim_filtern(page, state) -> None:
     assert "1 Audioaufnahme" not in _texte(tagebuch(page, state))
     mit_audio([])
     assert "1 Audioaufnahme" in _texte(tagebuch(page, state))
+
+
+def test_filter_speichern_und_loeschen(page, state) -> None:
+    """Ben, 13.11.2026: Das Lesezeichen im Filterblatt legt die Auswahl unter einem Namen ab;
+    gespeicherte Filter stehen in der Schnellwahl und lassen sich löschen — auch „Tagebuch“,
+    das dann nicht wiederkommt. Je Profil in den Einstellungen."""
+    from trainingsapp.core.tagebuch import ABLAGE_SCHLUESSEL, PLAN
+
+    _welt(state)
+    state.notiz_tags.sicherstellen(state.profil.id)
+    schluessel = f"{ABLAGE_SCHLUESSEL}:{state.profil.id}"
+    ansicht = tagebuch(page, state)
+    assert list(_chips(ansicht)) == ["Tagebuch", "Alles"]
+    assert state.einstellungen.lesen(schluessel) is None  # Vorgabe, nichts geschrieben
+
+    blatt = _blatt(page, ansicht)
+    merken = next(
+        x
+        for x in _alle(blatt)
+        if isinstance(x, ft.IconButton) and x.icon == ft.Icons.BOOKMARK_ADD_OUTLINED
+    )
+    assert merken.disabled  # nichts gewählt
+    _blatt_chip(blatt, ART, PLAN).on_select(None)
+    assert not merken.disabled
+    merken.on_click(None)
+    feld = next(x for x in _alle(blatt) if isinstance(x, ft.TextField))
+    speichern = next(
+        x for x in _alle(blatt) if isinstance(x, ft.FilledTonalButton) and x.content == "Speichern"
+    )
+    speichern.on_click(None)
+    assert feld.error == "Name fehlt" and list(_chips(ansicht)) == ["Tagebuch", "Alles"]
+    feld.value = "Planworte"
+    speichern.on_click(None)
+    assert list(_chips(ansicht)) == ["Tagebuch", "Planworte", "Alles"]
+    assert _chips(ansicht)["Planworte"].selected
+    assert merken.disabled and merken.icon == ft.Icons.BOOKMARK  # schon gespeichert
+
+    # im Blatt: setzen und löschen
+    _blatt_chip(blatt, "Gespeichert", "Tagebuch").on_select(None)
+    assert state.tagebuch_filter.arten == set() and _chips(ansicht)["Tagebuch"].selected
+    _blatt_chip(blatt, "Gespeichert", "Tagebuch").on_delete(None)
+    assert list(_chips(ansicht)) == ["Planworte", "Alles"]
+
+    # bleibt nach dem Neuaufbau: „Tagebuch“ kommt nicht wieder, Eigenes bleibt
+    ansicht = tagebuch(page, state)
+    assert list(_chips(ansicht)) == ["Planworte", "Alles"]
+    _chips(ansicht)["Planworte"].on_select(None)
+    assert state.tagebuch_filter.arten == {PLAN}
+    blatt = _blatt(page, ansicht)
+    _blatt_chip(blatt, "Gespeichert", "Planworte").on_delete(None)
+    assert list(_chips(ansicht)) == ["Alles"]
+    assert state.einstellungen.lesen(schluessel) == "[]"
+    assert list(_chips(tagebuch(page, state))) == ["Alles"]

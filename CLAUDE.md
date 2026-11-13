@@ -332,8 +332,8 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   als Chips (Migration 036, „Tagebuch“ fest, Einstellungen → Notiz-Tags), Anhänge an der
   Notiz, Karten gekürzt auf `core.tagebuch.NOTIZ_ZEILEN`. **Verlauf → „Notizen“** (Ben,
   12.11.2026, `docs/plan_notizen_reiter.md`; hieß „Tagebuch“): **nur selbst Geschriebenes**,
-  eine Liste nach Tagen, Suche und Filterblatt statt Ordnungen, Schnellwahl „Tagebuch“ fest
-  im Kopf und als Buch-Symbol unter Heute; Zahlen stehen in „Tage“ (nach der Uhr), nie hier.
+  eine Liste nach Tagen, Suche und Filterblatt statt Ordnungen, Schnellwahl aus
+  gespeicherten Filtern (Vorgabe „Tagebuch“ = nur der Tag, löschbar) und Buch-Symbol unter Heute; Zahlen stehen in „Tage“ (nach der Uhr), nie hier.
   Bearbeitet wird in der Liste (`Textnotiz` für die Plan-Notiz).
   Tippen daneben = „Fertig“, Scrollen daneben nicht (Ben, 2.11.2026: `AppState.schreib_gesten`
   — `components/scroll.py` meldet Ziehen, der Gestenfänger in `views/tag.py` den kurzen Tipp;

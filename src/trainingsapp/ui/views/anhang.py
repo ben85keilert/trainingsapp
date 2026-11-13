@@ -22,6 +22,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.anhaenge import Anhang, Qualitaet, dauer_text, groesse_text
+from trainingsapp.core.dokument import seiten_text
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.tonspieler import Tonspieler
@@ -79,6 +80,8 @@ def anhang_view(page: Any, state: AppState, basis: str, anhang: Anhang) -> ft.Vi
     kopf = [f"{zeit:%d.%m.%Y}, {zeit:%H:%M} Uhr"]
     if (anhang.ist_video or anhang.ist_audio) and anhang.dauer_s:
         kopf.append(f"{dauer_text(anhang.dauer_s)} min")
+    if anhang.ist_dokument and anhang.seiten:
+        kopf.append(seiten_text(anhang.seiten))
     kopf += [groesse_text(anhang.bytes), Qualitaet.lesen(anhang.qualitaet).name_kurz]
     if len(reihe) > 1:
         kopf.append(f"{position + 1} von {len(reihe)}")

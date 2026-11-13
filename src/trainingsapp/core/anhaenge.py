@@ -420,6 +420,8 @@ class Anhang:
     profil_id: str | None = None
     zum_tag: date | None = None
     notiz_id: str | None = None
+    #: Seiten eines in der App aufgenommenen Dokuments (Migration 061) — sonst ``None``
+    seiten: int | None = None
 
     @property
     def ist_video(self) -> bool:
@@ -526,6 +528,7 @@ def neuer_anhang(
     note: str = "",
     endung: str | None = None,
     frontbild: bool = False,
+    seiten: int | None = None,
 ) -> Anhang:
     """Ein Anhang mit fertigem Pfad (und Frontbildpfad beim Video) — noch ohne Bytes.
     ``ziel``: woran er hängt (eine Eintrags-ID genügt); ``endung`` statt der üblichen der Art
@@ -562,6 +565,7 @@ def neuer_anhang(
         profil_id=z.profil_id,
         zum_tag=z.zum_tag,
         notiz_id=z.notiz_id,
+        seiten=seiten,
     )
     name = dateiname(art, a.aufgenommen, a.id)
     if endung:

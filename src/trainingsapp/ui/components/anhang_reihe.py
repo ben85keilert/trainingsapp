@@ -125,7 +125,9 @@ def kachel(
                 padding=ft.Padding.symmetric(horizontal=4, vertical=1),
                 border_radius=6,
                 bgcolor=ft.Colors.with_opacity(0.6, ft.Colors.BLACK),
-                content=ft.Text("PDF", size=10, color=ft.Colors.WHITE),
+                content=ft.Text(
+                    f"PDF · {a.seiten}" if a.seiten else "PDF", size=10, color=ft.Colors.WHITE
+                ),
             )
         )
     if (a.ist_video or a.ist_audio) and (dauer := dauer_text(a.dauer_s)):

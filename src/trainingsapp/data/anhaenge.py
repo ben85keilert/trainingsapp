@@ -217,7 +217,8 @@ class AnhangRepo:
             self.con.execute(
                 "INSERT INTO entry_media (id, session_entry_id, subject_id, day, day_note_id, "
                 "kind, uri, recorded_at, bytes, dauer_s, breite, hoehe, vorschau, qualitaet, "
-                "note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "note, created_at, seiten) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     a.id,
                     a.eintrag_id,
@@ -235,6 +236,7 @@ class AnhangRepo:
                     a.qualitaet,
                     a.note,
                     iso_utc(a.created_at),
+                    a.seiten,
                 ),
             )
 
@@ -416,6 +418,7 @@ class AnhangRepo:
             profil_id=r["subject_id"],
             zum_tag=date.fromisoformat(r["day"]) if r["day"] else None,
             notiz_id=r["day_note_id"],
+            seiten=r["seiten"],
         )
 
     def _bezug(self, r: sqlite3.Row) -> AnhangMitBezug:

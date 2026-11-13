@@ -20,8 +20,13 @@ from test_ui_anhaenge import (  # noqa: E402, F401
     page,
     welt,
 )
-from trainingsapp.core.anhaenge import DOKUMENT, Qualitaet, Ziel, neuer_anhang  # noqa: E402
-from trainingsapp.core.dokument import MAX_SEITEN, beispielseite, pdf_aus_jpegs  # noqa: E402
+from trainingsapp.core.anhaenge import BILD, DOKUMENT, Qualitaet, Ziel, neuer_anhang  # noqa: E402
+from trainingsapp.core.dokument import (  # noqa: E402
+    MAX_SEITEN,
+    beispielseite,
+    gezeigte_masse,
+    pdf_aus_jpegs,
+)
 from trainingsapp.data.db import MIGRATIONS_DIR, migrieren  # noqa: E402
 from trainingsapp.ui.components.anhang_reihe import kachel  # noqa: E402
 from trainingsapp.ui.views.anhang import anhang_view  # noqa: E402
@@ -51,22 +56,24 @@ async def test_seiten_aufnehmen_wird_ein_pdf_mit_frontbild(welt, page) -> None: 
     assert a.qualitaet is Qualitaet.GROSS  # Vorgabe fürs Dokument: Text bleibt lesbar
     assert not any("Fertig" in k for k in _knoepfe(a.knoepfe))  # noch keine Seite
     await a.ausloesen()
-    assert a.seite is not None and a.seiten == []
+    assert a.offen == 0 and len(a.seiten) == 1 and a.frisch
     assert _knoepfe(a.knoepfe) == ["Nächste Seite", "Fertig · 1 Seite"]
     assert a.leiste.controls == []  # über der Seite keine Kamera-Leiste
+    assert a.werkzeuge.visible and "Neu aufnehmen" in _tooltips(a.werkzeuge)
     await a.ausloesen()  # solange eine Seite gezeigt wird, löst nichts aus
-    assert a.seiten == []
-    a.seite_verwerfen()  # „Neu aufnehmen“
-    assert a.seite is None and a.seiten == [] and a.kamera.content is None
+    assert len(a.seiten) == 1
+    a.seite_loeschen()  # „Neu aufnehmen“
+    assert a.offen is None and a.seiten == [] and a.kamera.content is None
     await a.ausloesen()
-    a.seite_behalten()
+    a.zur_kamera()  # „Nächste Seite“
     assert len(a.seiten) == 1 and a.status.value.startswith("1 Seite · ")
+    assert a.streifen.visible and len(a.streifen.controls) == 1
     await a.ausloesen()
     await a.dokument_fertig()
     assert a.daten is not None and a.daten.startswith(b"%PDF-1.4")
     assert a.daten.count(b"/Type /Page\n") == 2 and a.frontbild == a.seiten[0]
     assert a.status.value.startswith("2 Seiten · ")
-    assert _knoepfe(a.knoepfe) == ["Weitere Seite", "Behalten"]
+    assert _knoepfe(a.knoepfe) == ["Weitere Seite", "Behalten"] and not a.streifen.visible
     a.dokument_weiter()  # die Seiten bleiben, eine dritte geht
     assert a.daten is None and len(a.seiten) == 2
     await a.dokument_fertig()
@@ -74,18 +81,88 @@ async def test_seiten_aufnehmen_wird_ein_pdf_mit_frontbild(welt, page) -> None: 
     await a.behalten()
     neu = [x for x in welt.state.anhaenge.je_eintrag(welt.eintrag.id) if x.note == "Befund"]
     assert len(neu) == 1 and neu[0].ist_dokument and neu[0].pfad.endswith(".pdf")
+    assert neu[0].seiten == 2  # Migration 061: steht an der Kachel
     repo = welt.state.anhaenge
     assert repo.datei(neu[0]).read_bytes().startswith(b"%PDF-")
     assert neu[0].vorschau and repo.bild(neu[0]).read_bytes()[:2] == b"\xff\xd8"
     assert page.dialoge[-1].content.value == "Dokument gespeichert"
     assert repo.gesamt(welt.state.profil.id).dokumente == 1
+    assert "PDF · 2" in _texte(kachel(neu[0], repo.bild(neu[0]), None))
+    assert any("2 Seiten" in t for t in _texte(anhang_view(page, welt.state, "/", neu[0])))
+    assert a.seiten == []  # behalten: Zurück fragt nicht mehr
+
+
+def _tooltips(wurzel) -> list[str]:
+    return [str(c.tooltip) for c in _alle(wurzel) if getattr(c, "tooltip", None)]
+
+
+async def test_seiten_umordnen_loeschen_und_zuschneiden(welt, page) -> None:  # noqa: F811
+    """P206: eine Seite aus dem Streifen öffnen, verschieben, löschen; der Zuschnitt ist ein
+    Ausschnitt im PDF (das Bild bleibt ganz), „Ganze Seite“ nimmt ihn zurück."""
+    a = _scanner(page, welt)
+    seiten = [beispielseite(1080, 1920), beispielseite(1000, 1500), beispielseite(900, 1200)]
+    for seite in seiten:
+        a.seite_zeigen(seite)
+        a.zur_kamera()
+    a.streifen.controls[2].on_click()  # Seite 3 öffnen
+    assert a.offen == 2 and not a.frisch and a.status.value.startswith("Seite 3 von 3")
+    assert "Seite löschen" in _tooltips(a.werkzeuge)
+    a.seite_schieben(-1)
+    a.seite_schieben(-1)
+    a.seite_schieben(-1)  # vorn ist Schluss
+    assert a.offen == 0
+    assert [gezeigte_masse(s)[0] for s in a.seiten] == [900, 1080, 1000]
+    a.seite_oeffnen(1)
+    a.seite_loeschen()
+    assert [gezeigte_masse(s)[0] for s in a.seiten] == [900, 1000]
+    assert len(a.schnitte) == 2 and a.offen is None
+    # Zuschneiden: Regler statt Knöpfe, der Rand liegt dunkel über der Seite
+    a.seite_oeffnen(0)
+    a.schneiden()
+    assert a.regler.visible and not a.werkzeuge.visible and not a.streifen.visible
+    assert _knoepfe(a.knoepfe) == ["Ganze Seite", "Übernehmen"]
+    a.regler_breite.start_value, a.regler_breite.end_value = 25, 100
+    a.regler_hoehe.start_value, a.regler_hoehe.end_value = 0, 99
+    a._schnitt_geaendert()
+    assert a.schnitte[0] == (0.25, 0.0, 0.0, 0.01)
+    assert a.blende_teile[0].visible and a.blende_teile[0].expand == 250
+    assert not a.blende_teile[2].visible and a.blende_frei.expand == 750
+    a.schnitt_fertig()
+    assert a.status.value.endswith("zugeschnitten") and a.werkzeuge.visible
+    await a.dokument_fertig()
+    assert a.daten.count(b"/CropBox") == 1 and a.daten.count(b"/Type /Page\n") == 2
+    a.dokument_weiter()
+    a.seite_oeffnen(0)
+    a.schneiden()
+    a.schnitt_weg()
+    await a.dokument_fertig()
+    assert b"/CropBox" not in a.daten
+
+
+async def test_zurueck_fragt_solange_seiten_da_sind(welt, page) -> None:  # noqa: F811
+    """P206: Pfeil und Systemtaste verwerfen aufgenommene Seiten nicht still."""
+    route = aufnahme_route("/", welt.eintrag.id, DOKUMENT)
+    ansicht = anhang_aufnahme_view(page, welt.state, route, _ziel(welt), DOKUMENT)
+    assert ansicht.can_pop is False and ansicht.on_confirm_pop is not None  # Systemtaste
+    await ansicht.appbar.leading.on_click()  # ohne Seiten: gleich zurück
+    assert page.routen == ["/"] and page.dialoge == []
+    foto = anhang_aufnahme_view(
+        page, welt.state, route.replace("dokument", "foto"), _ziel(welt), BILD
+    )
+    assert foto.on_confirm_pop is None  # Foto und Video wie bisher
+    a = _scanner(page, welt)
+    a.seite_zeigen(SEITE)
+    assert a.seiten_fragen() == ""  # „selbst gefragt“: man bleibt
+    dialog = page.dialoge[-1]
+    assert dialog.title.value == "Seiten verwerfen?" and "1 Seite" in dialog.content.value
 
 
 async def test_hoechstens_so_viele_seiten(welt, page) -> None:  # noqa: F811
     a = _scanner(page, welt)
     a.seiten = [SEITE] * MAX_SEITEN
+    a.schnitte = [(0.0, 0.0, 0.0, 0.0)] * MAX_SEITEN
     await a.ausloesen()
-    assert a.seite is None  # voll: der Auslöser tut nichts mehr
+    assert a.offen is None and len(a.seiten) == MAX_SEITEN  # voll: der Auslöser tut nichts
 
 
 async def test_pdf_datei_waehlen_bereinigt_und_ohne_frontbild(
@@ -179,7 +256,7 @@ def test_migration_060_behaelt_zeilen_und_erlaubt_dokumente(tmp_path) -> None:
             "VALUES ('d', 'p', '2026-11-13', 'document', 'x.pdf', '')"
         )
     con.commit()
-    assert migrieren(con) == 60
+    assert migrieren(con) == 61
     con.execute(
         "INSERT INTO entry_media (id, subject_id, day, kind, uri, recorded_at) "
         "VALUES ('d', 'p', '2026-11-13', 'document', 'x.pdf', '')"

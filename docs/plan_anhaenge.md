@@ -321,7 +321,8 @@ entzerren, aber eine fremde Oberfläche je System und kein Scanner ohne Play-Die
   (`views/anhang_aufnahme.py`): Rückkamera zuerst, Vorgabe **Groß · 1080p** (darunter wird Text
   unleserlich; oben im Bild für diese Aufnahme kleiner stellbar), Blitz mit Dauerlicht. Nach
   jedem Auslösen liegt die Seite über der Kamera: ↺ „Neu aufnehmen“ · „Nächste Seite“ ·
-  „Fertig · n Seiten“. Höchstens `core.dokument.MAX_SEITEN` (30) — die Seiten liegen bis
+  „Fertig · n Seiten“ (seit P206 mit Werkzeugen, siehe unten). Höchstens
+  `core.dokument.MAX_SEITEN` (30) — die Seiten liegen bis
   „Behalten“ im Speicher. Vom fertigen Dokument führt „Weitere Seite“ zurück zur Kamera.
 - **Das PDF** baut `core.dokument.pdf_aus_jpegs` ohne Bildbibliothek: Ein PDF darf ein JPEG
   unverändert tragen (``DCTDecode``). Je Seite ein Bild über die ganze Seite, die kurze Seite
@@ -343,8 +344,18 @@ entzerren, aber eine fremde Oberfläche je System und kein Scanner ohne Play-Die
 - **Regeln wie bisher:** app-privat, ohne Ort, nie in Paket, Export, Diagnose oder Sync; keine
   Texterkennung, keine Auswertung des Inhalts. Keine neue Berechtigung, keine neue
   Abhängigkeit, keine Netzverbindung.
-- **Offen:** P206 (Zurück verwirft aufgenommene Seiten ohne Rückfrage; Seiten umordnen oder
-  einzeln löschen; Scanner des Systems als Zusatz), Gerätetest T136.
+- **Seiten verwalten** (P206, Ben 13.11.2026: „offene Punkte aus P206 lösen“): Unter dem Bild
+  steht der **Streifen** der Seiten; ein Tipp legt eine Seite über die Kamera. Dort: ← → (einen
+  Platz nach vorn oder hinten), Zuschneiden, Löschen (bei der eben aufgenommenen „Neu
+  aufnehmen“). **Zuschneiden** ist ein Rechteck über zwei Regler (Breite, Höhe), der Rand liegt
+  dunkel über der Seite; im PDF ist es der Ausschnitt der Seite (``/CropBox``) — das Bild
+  bleibt ganz in der Datei, nichts wird neu gerechnet, mindestens 10 % bleiben stehen. Kein
+  Entzerren: Das bräuchte eine Bildbibliothek oder den Scanner des Systems (B, abgelehnt).
+- **Zurück fragt** („Seiten verwerfen?“), solange Seiten aufgenommen und nicht behalten sind —
+  Pfeil wie Systemtaste (`zurueck_speichert`); Foto und Video bleiben, wie sie waren.
+- **Seitenzahl:** `entry_media.seiten` (Migration 061) — an der Kachel „PDF · 3“, in der
+  Ansicht „3 Seiten“; bei gewählten PDF-Dateien leer (die App liest fremde PDFs nicht).
+- Gerätetest T136.
 
 ## G. Zu entscheiden (Ben)
 

@@ -6,7 +6,9 @@ tragen (Filter ``DCTDecode``) — darum baut dieses Modul das PDF ohne Bildbibli
 ein Bildobjekt, ein Inhaltsstrom, der es über die ganze Seite legt, und die Seite in der
 Richtung, die das Foto nennt (Exif-Ausrichtung → ``/Rotate``). Wie groß die Datei wird,
 bestimmt allein die Auflösung der Aufnahme (`core.anhaenge.Qualitaet`); neu gerechnet wird
-kein Bildpunkt. Entzerrt und zugeschnitten wird nichts — die Seite ist, was im Sucher stand.
+kein Bildpunkt. Entzerrt wird nichts. **Zuschneiden** geht ohne Rechnen: Die Seite bekommt
+einen Ausschnitt (``/CropBox``), das Bild bleibt ganz in der Datei — ein Rechteck, kein
+Entzerren (`Zuschnitt`, P206).
 
 Jede Seite läuft vorher durch `jpeg_ohne_metadaten`: kein Exif außer der Ausrichtung, kein
 Ort. Dieses Modul kennt kein flet und keine Datenbank.
@@ -28,6 +30,12 @@ MAX_DATEI_BYTES: Final = 25 * 1024 * 1024
 KURZE_SEITE_PT: Final = 595.0
 #: Exif-Ausrichtung → Drehung der Seite im Uhrzeigersinn (gespiegelte Werte wie ihre Drehung)
 _DREHUNG: Final = {3: 180, 4: 180, 5: 90, 6: 90, 7: 270, 8: 270}
+#: Was von einer Seite abgeschnitten wird: Anteile (0–1) links, oben, rechts, unten — so, wie
+#: man die Seite sieht (nach der Drehung)
+Zuschnitt = tuple[float, float, float, float]
+OHNE_ZUSCHNITT: Final[Zuschnitt] = (0.0, 0.0, 0.0, 0.0)
+#: So viel bleibt in jeder Richtung mindestens stehen
+MIN_REST: Final = 0.1
 #: SOF-Marker eines JPEG: dort stehen Höhe, Breite und die Zahl der Farbkanäle
 _SOF: Final = frozenset(
     {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
@@ -92,6 +100,59 @@ def seiten_text(n: int) -> str:
     return f"{n} Seite" if n == 1 else f"{n} Seiten"
 
 
+def zuschnitt_gueltig(z: Sequence[float]) -> Zuschnitt:
+    """Ein Zuschnitt, der mindestens `MIN_REST` der Seite stehen lässt — je Richtung gekappt.
+
+    >>> zuschnitt_gueltig((0.2, -1, 0.95, 0.5))
+    (0.2, 0.0, 0.7, 0.5)
+    """
+    links, oben, rechts, unten = (round(min(max(float(x), 0.0), 1.0 - MIN_REST), 4) for x in z)
+    rechts = min(rechts, round(1.0 - MIN_REST - links, 6))
+    unten = min(unten, round(1.0 - MIN_REST - oben, 6))
+    return links, oben, rechts, unten
+
+
+def drehung(daten: bytes) -> int:
+    """Um wie viel Grad (im Uhrzeigersinn) die Seite gedreht gezeigt wird — aus dem Exif."""
+    return _DREHUNG.get(_jpeg_ausrichtung(daten) or 1, 0)
+
+
+def gezeigte_masse(daten: bytes) -> tuple[int, int]:
+    """Breite und Höhe, wie man die Seite sieht (nach der Drehung).
+
+    >>> gezeigte_masse(beispielseite(40, 30)), gezeigte_masse(beispielseite(40, 30, 6))
+    ((40, 30), (30, 40))
+    """
+    breite, hoehe, _ = jpeg_masse(daten)
+    return (hoehe, breite) if drehung(daten) in (90, 270) else (breite, hoehe)
+
+
+def _ausschnitt(b_pt: float, h_pt: float, grad: int, z: Zuschnitt) -> tuple[float, ...]:
+    """Die ``/CropBox`` (x0, y0, x1, y1; y nach oben) der **ungedrehten** Seite zu einem
+    Zuschnitt in Blickrichtung: Bei 90° im Uhrzeigersinn liegt die linke Kante des Bilds
+    oben, die untere links — die Ränder wandern mit.
+
+    >>> _ausschnitt(100, 50, 0, (0.1, 0.2, 0.3, 0.4))
+    (10.0, 20.0, 70.0, 40.0)
+    >>> _ausschnitt(100, 50, 90, (0.1, 0.2, 0.3, 0.4))
+    (20.0, 5.0, 60.0, 35.0)
+    """
+    links, oben, rechts, unten = z
+    # Ränder der ungedrehten Seite: links, oben, rechts, unten
+    li, ob, re, un = {
+        0: (links, oben, rechts, unten),
+        90: (oben, rechts, unten, links),
+        180: (rechts, unten, links, oben),
+        270: (unten, links, oben, rechts),
+    }[grad]
+    return (
+        round(li * b_pt, 2),
+        round(un * h_pt, 2),
+        round((1 - re) * b_pt, 2),
+        round((1 - ob) * h_pt, 2),
+    )
+
+
 def seite_bereinigt(daten: bytes) -> bytes:
     """Eine Seite, wie sie ins Dokument geht: ohne Metadaten (die Ausrichtung bleibt) und mit
     lesbaren Maßen — wirft `NichtBereinigbar`."""
@@ -100,10 +161,16 @@ def seite_bereinigt(daten: bytes) -> bytes:
     return rein
 
 
-def pdf_aus_jpegs(seiten: Sequence[bytes]) -> bytes:
+def pdf_aus_jpegs(seiten: Sequence[bytes], schnitte: Sequence[Zuschnitt] | None = None) -> bytes:
     r"""Ein PDF mit je einer Seite pro JPEG, in dieser Reihenfolge. Die JPEG-Daten stehen
-    unverändert darin; die kurze Seite jeder PDF-Seite misst `KURZE_SEITE_PT`. Wirft
-    `NichtBereinigbar` ohne Seiten oder bei einer Seite, die kein JPEG ist.
+    unverändert darin; die kurze Seite jeder PDF-Seite misst `KURZE_SEITE_PT`. ``schnitte``:
+    je Seite ihr `Zuschnitt` (fehlt er: die ganze Seite). Wirft `NichtBereinigbar` ohne Seiten
+    oder bei einer Seite, die kein JPEG ist.
+
+    >>> halb = pdf_aus_jpegs([beispielseite(40, 30)], [(0.5, 0.0, 0.0, 0.0)])
+    >>> b"/CropBox [396.67 0.00 793.33 595.00]" in halb, b"/CropBox" in pdf_aus_jpegs(
+    ...     [beispielseite(40, 30)])
+    (True, False)
 
     >>> pdf = pdf_aus_jpegs([beispielseite(40, 30), beispielseite(30, 40, ausrichtung=6)])
     >>> pdf[:8], pdf.count(b"/Type /Page\n"), pdf.rstrip().endswith(b"%%EOF")
@@ -118,10 +185,15 @@ def pdf_aus_jpegs(seiten: Sequence[bytes]) -> bytes:
         raise NichtBereinigbar("keine Seite")
     objekte: list[bytes] = [b"", b""]  # 1 = Katalog, 2 = Seitenbaum — am Ende gefüllt
     kinder: list[int] = []
-    for roh in seiten:
+    for nummer, roh in enumerate(seiten):
         daten = seite_bereinigt(roh)
         breite, hoehe, kanaele = jpeg_masse(daten)
-        drehung = _DREHUNG.get(_jpeg_ausrichtung(daten) or 1, 0)
+        grad = drehung(daten)
+        schnitt = (
+            zuschnitt_gueltig(schnitte[nummer])
+            if schnitte is not None and nummer < len(schnitte)
+            else OHNE_ZUSCHNITT
+        )
         faktor = KURZE_SEITE_PT / min(breite, hoehe)
         b_pt, h_pt = breite * faktor, hoehe * faktor
         farbe = {1: "/DeviceGray", 3: "/DeviceRGB", 4: "/DeviceCMYK"}[kanaele]
@@ -135,14 +207,18 @@ def pdf_aus_jpegs(seiten: Sequence[bytes]) -> bytes:
             + daten
             + b"\nendstream"
         )
+        rahmen = ""
+        if schnitt != OHNE_ZUSCHNITT:
+            x0, y0, x1, y1 = _ausschnitt(b_pt, h_pt, grad, schnitt)
+            rahmen = f"/CropBox [{x0:.2f} {y0:.2f} {x1:.2f} {y1:.2f}] "
         strom = f"q {b_pt:.2f} 0 0 {h_pt:.2f} 0 0 cm /S Do Q".encode("ascii")
         objekte.append(
             f"<< /Length {len(strom)} >>\nstream\n".encode("ascii") + strom + b"\nendstream"
         )
         objekte.append(
             (
-                f"<< /Type /Page\n/Parent 2 0 R /MediaBox [0 0 {b_pt:.2f} {h_pt:.2f}] "
-                f"/Rotate {drehung} /Resources << /XObject << /S {bild} 0 R >> >> "
+                f"<< /Type /Page\n/Parent 2 0 R /MediaBox [0 0 {b_pt:.2f} {h_pt:.2f}] {rahmen}"
+                f"/Rotate {grad} /Resources << /XObject << /S {bild} 0 R >> >> "
                 f"/Contents {bild + 1} 0 R >>"
             ).encode("ascii")
         )
@@ -183,10 +259,16 @@ __all__ = [
     "KURZE_SEITE_PT",
     "MAX_DATEI_BYTES",
     "MAX_SEITEN",
+    "MIN_REST",
+    "OHNE_ZUSCHNITT",
+    "Zuschnitt",
     "beispielseite",
+    "drehung",
+    "gezeigte_masse",
     "jpeg_masse",
     "pdf_aus_jpegs",
     "pdf_pruefen",
     "seite_bereinigt",
     "seiten_text",
+    "zuschnitt_gueltig",
 ]

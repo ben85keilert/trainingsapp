@@ -34,6 +34,9 @@ liegt die Seite über der Kamera: „Neu aufnehmen“, „Nächste Seite“ oder
 aus den Seiten ein PDF (`core.dokument.pdf_aus_jpegs`, die JPEG unverändert — die Größe
 bestimmt die Qualität oben im Bild); die erste Seite ist das Frontbild. Entzerrt wird nichts.
 Daneben „PDF wählen“: eine Datei vom Gerät, bereinigt (`core.dokument.pdf_pruefen`).
+Seit P206: Streifen der Seiten unter dem Bild (Tipp öffnet eine), an der offenen Seite ← →,
+Zuschneiden (zwei Regler, ein Rechteck — im PDF die ``/CropBox``), Löschen; Zurück fragt,
+solange Seiten da sind.
 """
 
 from __future__ import annotations
@@ -69,17 +72,22 @@ from trainingsapp.core.anhaenge import (
 from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.dokument import (
     MAX_SEITEN,
+    OHNE_ZUSCHNITT,
+    Zuschnitt,
+    gezeigte_masse,
     pdf_aus_jpegs,
     pdf_pruefen,
     seite_bereinigt,
     seiten_text,
+    zuschnitt_gueltig,
 )
 from trainingsapp.core.models import jetzt
 from trainingsapp.core.timer import COUNTDOWN
 from trainingsapp.data.anhaenge import qualitaet_lesen, video_max_s
 from trainingsapp.ui import paketdatei, systemdialog
+from trainingsapp.ui.components.dialoge import loeschen_rueckfrage
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.zurueck import zurueck_ziel
+from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.timer_takt import ton_spielen
 
@@ -155,7 +163,51 @@ class _Aufnahme:
         #: Dokument: die behaltenen Seiten (bereinigte JPEG) und die gerade aufgenommene,
         #: die noch über der Kamera liegt
         self.seiten: list[bytes] = []
-        self.seite: bytes | None = None
+        #: je Seite ihr Zuschnitt (`core.dokument.Zuschnitt`)
+        self.schnitte: list[Zuschnitt] = []
+        #: die Seite, die gerade über der Kamera liegt (Index) — ``None``: die Kamera
+        self.offen: int | None = None
+        #: die offene Seite ist die eben aufgenommene („Neu aufnehmen“ statt „Löschen“)
+        self.frisch = False
+        #: die offene Seite wird zugeschnitten (Regler statt Knöpfe)
+        self.schneidet = False
+        self.streifen = ft.Row(spacing=6, scroll=ft.ScrollMode.AUTO, visible=False)
+        self.werkzeuge = ft.Row(alignment=ft.MainAxisAlignment.CENTER, spacing=0, visible=False)
+        self.regler_breite = ft.RangeSlider(
+            min=0, max=100, start_value=0, end_value=100, on_change=self._schnitt_geaendert
+        )
+        self.regler_hoehe = ft.RangeSlider(
+            min=0, max=100, start_value=0, end_value=100, on_change=self._schnitt_geaendert
+        )
+        self.regler = ft.Column(
+            spacing=0,
+            visible=False,
+            controls=[
+                ft.Row(
+                    spacing=4,
+                    controls=[
+                        ft.Text(name, size=12, width=44),
+                        ft.Container(expand=True, content=c),
+                    ],
+                )
+                for name, c in (("Breite", self.regler_breite), ("Höhe", self.regler_hoehe))
+            ],
+        )
+        #: Was vom Zuschnitt wegfällt, dunkel über der Seite — einmal gebaut, nur die Anteile
+        #: ändern sich (`_blende_setzen`)
+        dunkel = ft.Colors.with_opacity(0.6, ft.Colors.BLACK)
+        self.blende_teile = [ft.Container(bgcolor=dunkel) for _ in range(4)]  # l, o, r, u
+        self.blende_frei = ft.Container(border=ft.Border.all(1, ft.Colors.WHITE))
+        self.blende_mitte = ft.Row(
+            spacing=0,
+            controls=[self.blende_teile[0], self.blende_frei, self.blende_teile[2]],
+            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+        )
+        self.blende = ft.Column(
+            spacing=0,
+            controls=[self.blende_teile[1], self.blende_mitte, self.blende_teile[3]],
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        )
         self.max_s: int = video_max_s(state.einstellungen)
         self.kamera: Any = None  # flet_camera.Camera
         self.kameras: list[Any] = []
@@ -366,7 +418,7 @@ class _Aufnahme:
             or not self.bereit
             or self.countdown_rest is not None
             or self.laeuft_seit is not None
-            or self.seite is not None
+            or self.offen is not None
             or len(self.seiten) >= MAX_SEITEN
         ):
             return
@@ -445,48 +497,161 @@ class _Aufnahme:
             self.flaeche.content = decke
 
     def seite_zeigen(self, daten: bytes) -> None:
-        """Die gerade aufgenommene Seite über der Kamera — behalten oder neu aufnehmen."""
+        """Die eben aufgenommene Seite kommt ins Dokument und liegt über der Kamera — „Neu
+        aufnehmen“ nimmt sie wieder heraus."""
         try:
-            self.seite = seite_bereinigt(daten)
+            seite = seite_bereinigt(daten)
         except NichtBereinigbar as fehler:
             self.status.value = f"Seite nicht lesbar: {fehler}"
             self.zeichnen()
             return
-        self._ueber_die_kamera(ft.Image(src=self.seite, fit=ft.BoxFit.CONTAIN, expand=True))
-        self.status.value = (
-            f"Seite {len(self.seiten) + 1} · {groesse_text(len(self.seite))} · "
-            f"{self.qualitaet.label}"
+        self.seiten.append(seite)
+        self.schnitte.append(OHNE_ZUSCHNITT)
+        self.seite_oeffnen(len(self.seiten) - 1, frisch=True)
+
+    def seite_oeffner(self, nummer: int) -> Callable[[], None]:
+        return lambda: self.seite_oeffnen(nummer)
+
+    def seite_oeffnen(self, nummer: int, *, frisch: bool = False) -> None:
+        """Eine Seite über die Kamera legen: ansehen, verschieben, zuschneiden, löschen."""
+        if not 0 <= nummer < len(self.seiten) or self.daten is not None:
+            return
+        self.offen, self.frisch, self.schneidet = nummer, frisch, False
+        breite, hoehe = gezeigte_masse(self.seiten[nummer])
+        self._blende_setzen()
+        self._ueber_die_kamera(
+            ft.Container(
+                aspect_ratio=breite / hoehe,
+                content=ft.Stack(
+                    fit=ft.StackFit.EXPAND,
+                    controls=[
+                        ft.Image(src=self.seiten[nummer], fit=ft.BoxFit.FILL, expand=True),
+                        self.blende,
+                    ],
+                ),
+            )
         )
+        self.status.value = self.seite_text()
         self.zeichnen()
 
-    def seite_verwerfen(self) -> None:
-        """„Neu aufnehmen“: Die Seite fällt weg, die Kamera ist wieder da."""
-        self.seite = None
+    def seite_text(self) -> str:
+        """„Seite 2 von 3 · 0,4 MB · zugeschnitten“."""
+        if self.offen is None:
+            return self.kamera_text()
+        teile = [
+            f"Seite {self.offen + 1} von {len(self.seiten)}",
+            groesse_text(len(self.seiten[self.offen])),
+        ]
+        if self.schnitte[self.offen] != OHNE_ZUSCHNITT:
+            teile.append("zugeschnitten")
+        return " · ".join(teile)
+
+    def zur_kamera(self) -> None:
+        """„Nächste Seite“: Die Seite bleibt im Dokument, die Kamera ist wieder da."""
+        self.offen, self.frisch, self.schneidet = None, False, False
         self._ueber_die_kamera(None)
         self.status.value = self.kamera_text()
         self.zeichnen()
 
-    def seite_behalten(self) -> None:
-        """„Nächste Seite“: Die Seite kommt ins Dokument, die Kamera ist wieder da."""
-        if self.seite is not None:
-            self.seiten.append(self.seite)
-        self.seite_verwerfen()
+    def seite_loeschen(self) -> None:
+        """Die offene Seite aus dem Dokument nehmen („Neu aufnehmen“ bei der eben
+        aufgenommenen) — zurück zur Kamera."""
+        if self.offen is not None:
+            del self.seiten[self.offen]
+            del self.schnitte[self.offen]
+        self.zur_kamera()
+
+    def seite_schieber(self, schritt: int) -> Callable[[], None]:
+        return lambda: self.seite_schieben(schritt)
+
+    def seite_schieben(self, schritt: int) -> None:
+        """Die offene Seite um einen Platz nach vorn (−1) oder hinten (+1)."""
+        if self.offen is None:
+            return
+        ziel = self.offen + schritt
+        if not 0 <= ziel < len(self.seiten):
+            return
+        a, b = self.offen, ziel
+        self.seiten[a], self.seiten[b] = self.seiten[b], self.seiten[a]
+        self.schnitte[a], self.schnitte[b] = self.schnitte[b], self.schnitte[a]
+        self.offen, self.frisch = ziel, False
+        self.status.value = self.seite_text()
+        self.zeichnen()
+
+    # -- Zuschneiden (P206): ein Rechteck, kein Entzerren -------------------------------
+
+    def schneiden(self) -> None:
+        """Die Regler für Breite und Höhe statt der Knöpfe — der Zuschnitt gilt sofort."""
+        if self.offen is None:
+            return
+        self.schneidet = True
+        links, oben, rechts, unten = self.schnitte[self.offen]
+        self.regler_breite.start_value, self.regler_breite.end_value = (
+            round(links * 100),
+            round((1 - rechts) * 100),
+        )
+        self.regler_hoehe.start_value, self.regler_hoehe.end_value = (
+            round(oben * 100),
+            round((1 - unten) * 100),
+        )
+        self.zeichnen()
+
+    def _schnitt_geaendert(self, _e: object = None) -> None:
+        if self.offen is None:
+            return
+        self.schnitte[self.offen] = zuschnitt_gueltig(
+            (
+                float(self.regler_breite.start_value) / 100,
+                float(self.regler_hoehe.start_value) / 100,
+                1 - float(self.regler_breite.end_value) / 100,
+                1 - float(self.regler_hoehe.end_value) / 100,
+            )
+        )
+        self._blende_setzen()
+        self.status.value = self.seite_text()
+        for c in (self.blende, self.status):
+            with contextlib.suppress(Exception):
+                c.update()
+
+    def schnitt_fertig(self) -> None:
+        self.schneidet = False
+        self.status.value = self.seite_text()
+        self.zeichnen()
+
+    def schnitt_weg(self) -> None:
+        """„Ganze Seite“: der Zuschnitt fällt weg."""
+        if self.offen is not None:
+            self.schnitte[self.offen] = OHNE_ZUSCHNITT
+        self._blende_setzen()
+        self.schnitt_fertig()
+
+    def _blende_setzen(self) -> None:
+        """Die dunklen Ränder nach dem Zuschnitt der offenen Seite — als Anteile (Promille),
+        damit niemand die Pixel der Seite kennen muss."""
+        schnitt = self.schnitte[self.offen] if self.offen is not None else OHNE_ZUSCHNITT
+        links, oben, rechts, unten = (round(x * 1000) for x in schnitt)
+        for teil, anteil in zip(self.blende_teile, (links, oben, rechts, unten), strict=True):
+            teil.visible = anteil > 0
+            teil.expand = max(anteil, 1)
+        self.blende_frei.expand = max(1000 - links - rechts, 1)
+        self.blende_mitte.expand = max(1000 - oben - unten, 1)
+        self.blende_frei.border = (
+            ft.Border.all(1, ft.Colors.WHITE) if schnitt != OHNE_ZUSCHNITT else None
+        )
 
     async def dokument_fertig(self) -> None:
-        """„Fertig“: aus den Seiten (mit der gerade gezeigten) ein PDF bauen — im Thread, die
-        Bytes sind groß — und es wie jede Aufnahme zum Behalten zeigen."""
-        if getattr(self, "_baut", False):
-            return
-        if self.seite is not None:
-            self.seiten.append(self.seite)
-            self.seite = None
-        if not self.seiten:
+        """„Fertig“: aus den Seiten ein PDF bauen — im Thread, die Bytes sind groß — und es wie
+        jede Aufnahme zum Behalten zeigen."""
+        if getattr(self, "_baut", False) or not self.seiten:
             return
         self._baut = True
+        self.offen, self.frisch, self.schneidet = None, False, False
         self.status.value = "Dokument wird gebaut …"
         self.zeichnen()
         try:
-            self.daten = await asyncio.to_thread(pdf_aus_jpegs, list(self.seiten))
+            self.daten = await asyncio.to_thread(
+                pdf_aus_jpegs, list(self.seiten), list(self.schnitte)
+            )
         except NichtBereinigbar as fehler:
             self.status.value = f"Dokument nicht gebaut: {fehler}"
             self.zeichnen()
@@ -495,6 +660,20 @@ class _Aufnahme:
             self._baut = False
         self.frontbild = self.seiten[0]
         self.ergebnis_zeigen()
+
+    def seiten_fragen(self) -> str:
+        """Zurück mit aufgenommenen Seiten (P206): erst fragen — ``""`` heißt für
+        `zurueck_speichert` „selbst gefragt, bleiben“."""
+        self.page.show_dialog(
+            loeschen_rueckfrage(
+                "Seiten verwerfen?",
+                f"{seiten_text(len(self.seiten))} aufgenommen, aber noch nicht als Dokument "
+                "behalten.",
+                lambda: self.page.run_task(self.zurueck),
+                knopf="Verwerfen",
+            )
+        )
+        return ""
 
     async def video_start(self) -> None:
         if self.kamera is None or not self.bereit or self.laeuft_seit is not None:
@@ -571,7 +750,7 @@ class _Aufnahme:
             return
         self.daten = daten
         if self.art == DOKUMENT:
-            self.seiten, self.seite, self.frontbild = [], None, None
+            self.seiten, self.schnitte, self.offen, self.frontbild = [], [], None, None
         if self.art == VIDEO:
             self.frontbild = None  # kein Frontbild ohne Kamera — die Kachel zeigt „fehlt“
             self.dauer_s = None
@@ -610,7 +789,7 @@ class _Aufnahme:
 
     def dokument_weiter(self) -> None:
         """Vom fertigen Dokument zurück zur Kamera — die Seiten bleiben, eine weitere geht."""
-        self.daten, self.frontbild = None, None
+        self.daten, self.frontbild, self.offen = None, None, None
         self._ueber_die_kamera(None)
         self.status.value = self.kamera_text()
         self.zeichnen()
@@ -672,6 +851,7 @@ class _Aufnahme:
             dauer_s=self.dauer_s,
             note=self.notiz.value or "",
             frontbild=self.art == DOKUMENT and self.frontbild is not None,
+            seiten=len(self.seiten) if self.art == DOKUMENT and self.seiten else None,
         )
         daten, frontbild = self.daten, self.frontbild
         try:
@@ -682,6 +862,7 @@ class _Aufnahme:
             self.melden(f"Nicht gespeichert: {fehler}")
             return
         self.daten = None
+        self.seiten, self.schnitte = [], []  # behalten — Zurück fragt nicht mehr
         self.page.show_dialog(ft.SnackBar(ft.Text(f"{TITEL[self.art]} gespeichert")))
         await self.zurueck()
 
@@ -689,7 +870,7 @@ class _Aufnahme:
         """Zurück zur Kamera — sie lief unter dem Ergebnis weiter, ein neuer Versuch geht
         sofort."""
         self.daten, self.frontbild, self.dauer_s = None, None, None
-        self.seiten, self.seite = [], None
+        self.seiten, self.schnitte, self.offen = [], [], None
         if self.kamera is not None and self.bereit:
             self.kamera.content = None
             self.status.value = self.kamera_text()
@@ -728,7 +909,11 @@ class _Aufnahme:
         self.knoepfe.controls = self._knoepfe()
         self.leiste.controls = self._leiste()
         self.notiz.visible = self.daten is not None
+        self._seiten_zeichnen()
         for c in (
+            self.streifen,
+            self.werkzeuge,
+            self.regler,
             self.knoepfe,
             self.leiste,
             self.gross,
@@ -808,31 +993,98 @@ class _Aufnahme:
             ft.Container(width=48),
         ]
 
-    def _knoepfe_dokument(self) -> list[ft.Control]:
-        """Dokument: über einer aufgenommenen Seite „Neu aufnehmen · Nächste Seite · Fertig“,
-        sonst links „PDF wählen“ (solange keine Seite da ist), der Auslöser, rechts „Fertig“."""
-        anzahl = len(self.seiten) + (1 if self.seite is not None else 0)
-        fertig = ft.FilledButton(
-            f"Fertig · {seiten_text(anzahl)}" if self.seite is not None else f"Fertig · {anzahl}",
-            icon=ft.Icons.CHECK,
-            on_click=self.dokument_fertig,
-            style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=10)),
-        )
-        if self.seite is not None:
-            voll = anzahl >= MAX_SEITEN
-            return [
-                ft.IconButton(
-                    ft.Icons.REPLAY, tooltip="Neu aufnehmen", on_click=self.seite_verwerfen
+    def _seiten_zeichnen(self) -> None:
+        """Dokument: der Streifen der Seiten (ein Tipp öffnet eine), die Werkzeuge der offenen
+        Seite und die Regler des Zuschnitts — je nach Zustand sichtbar."""
+        in_arbeit = self.art == DOKUMENT and self.daten is None and bool(self.seiten)
+        self.streifen.visible = in_arbeit and not self.schneidet
+        self.werkzeuge.visible = in_arbeit and self.offen is not None and not self.schneidet
+        self.regler.visible = in_arbeit and self.offen is not None and self.schneidet
+        if not in_arbeit:
+            return
+        self.streifen.controls = [
+            ft.Container(
+                width=38,
+                height=50,
+                border_radius=6,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                border=ft.Border.all(
+                    2, ft.Colors.PRIMARY if i == self.offen else ft.Colors.OUTLINE
                 ),
+                tooltip=f"Seite {i + 1}",
+                on_click=self.seite_oeffner(i),
+                content=ft.Stack(
+                    fit=ft.StackFit.EXPAND,
+                    controls=[
+                        ft.Image(src=seite, fit=ft.BoxFit.COVER, cache_width=114),
+                        ft.Container(
+                            alignment=ft.Alignment.BOTTOM_RIGHT,
+                            padding=2,
+                            content=ft.Text(
+                                str(i + 1),
+                                size=10,
+                                color=ft.Colors.WHITE,
+                                bgcolor=ft.Colors.with_opacity(0.6, ft.Colors.BLACK),
+                            ),
+                        ),
+                    ],
+                ),
+            )
+            for i, seite in enumerate(self.seiten)
+        ]
+        if self.offen is None:
+            return
+        self.werkzeuge.controls = [
+            ft.IconButton(
+                ft.Icons.ARROW_BACK,
+                tooltip="Seite nach vorn",
+                on_click=self.seite_schieber(-1),
+                disabled=self.offen == 0,
+            ),
+            ft.IconButton(
+                ft.Icons.ARROW_FORWARD,
+                tooltip="Seite nach hinten",
+                on_click=self.seite_schieber(1),
+                disabled=self.offen >= len(self.seiten) - 1,
+            ),
+            ft.IconButton(ft.Icons.CROP, tooltip="Zuschneiden", on_click=self.schneiden),
+            ft.IconButton(
+                ft.Icons.REPLAY if self.frisch else ft.Icons.DELETE_OUTLINE,
+                tooltip="Neu aufnehmen" if self.frisch else "Seite löschen",
+                on_click=self.seite_loeschen,
+            ),
+        ]
+
+    def _knoepfe_dokument(self) -> list[ft.Control]:
+        """Dokument: über einer offenen Seite „Nächste Seite · Fertig“ (beim Zuschneiden „Ganze
+        Seite · Übernehmen“), sonst links „PDF wählen“ (solange keine Seite da ist), der
+        Auslöser, rechts „Fertig“."""
+        eng = ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=10))
+        if self.offen is not None and self.schneidet:
+            return [
+                ft.OutlinedButton("Ganze Seite", on_click=self.schnitt_weg, style=eng),
+                ft.FilledButton(
+                    "Übernehmen", icon=ft.Icons.CHECK, on_click=self.schnitt_fertig, style=eng
+                ),
+            ]
+        anzahl = len(self.seiten)
+        voll = anzahl >= MAX_SEITEN
+        if self.offen is not None:
+            return [
                 ft.OutlinedButton(
                     "Nächste Seite",
                     icon=ft.Icons.ADD,
-                    on_click=self.seite_behalten,
+                    on_click=self.zur_kamera,
                     disabled=voll,
                     tooltip=f"Höchstens {MAX_SEITEN} Seiten" if voll else None,
-                    style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=10)),
+                    style=eng,
                 ),
-                fertig,
+                ft.FilledButton(
+                    f"Fertig · {seiten_text(anzahl)}",
+                    icon=ft.Icons.CHECK,
+                    on_click=self.dokument_fertig,
+                    style=eng,
+                ),
             ]
         return [
             ft.IconButton(
@@ -846,9 +1098,16 @@ class _Aufnahme:
                 icon_size=56,
                 tooltip="Seite aufnehmen",
                 on_click=self.ausloesen,
-                disabled=not self.bereit or len(self.seiten) >= MAX_SEITEN,
+                disabled=not self.bereit or voll,
             ),
-            fertig if self.seiten else ft.Container(width=48),
+            ft.FilledButton(
+                f"Fertig · {anzahl}",
+                icon=ft.Icons.CHECK,
+                on_click=self.dokument_fertig,
+                style=eng,
+            )
+            if self.seiten
+            else ft.Container(width=48),
         ]
 
     def _leiste(self) -> list[ft.Control]:
@@ -858,7 +1117,7 @@ class _Aufnahme:
             self.kamera is None
             or not self.kameras
             or self.daten is not None
-            or self.seite is not None
+            or self.offen is not None
         ):
             return []
         frei = self.bereit and self.laeuft_seit is None and self.countdown_rest is None
@@ -948,7 +1207,10 @@ def anhang_aufnahme_view(page: Any, state: AppState, route: str, ziel: Ziel, art
     a.zeichnen()
 
     async def schliessen() -> None:
-        await a.zurueck()
+        if a.seiten:
+            a.seiten_fragen()  # aufgenommene Seiten gehen nicht ohne Rückfrage verloren
+        else:
+            await a.zurueck()
 
     ansicht = ft.View(
         route=route,
@@ -987,6 +1249,9 @@ def anhang_aufnahme_view(page: Any, state: AppState, route: str, ziel: Ziel, art
                                     a.zeit,
                                     a.status,
                                     a.notiz,
+                                    a.streifen,
+                                    a.werkzeuge,
+                                    a.regler,
                                     a.knoepfe,
                                     ft.Text(hinweis, size=11, opacity=0.55),
                                     ft.Container(height=8),
@@ -1002,6 +1267,11 @@ def anhang_aufnahme_view(page: Any, state: AppState, route: str, ziel: Ziel, art
     # Zurück über die Systemtaste: Flutter nimmt die Seite samt Kamera weg, eine laufende
     # Aufnahme ist damit verworfen (H19: die Engine lebt weiter)
     a.ansicht = ansicht
+    if art == DOKUMENT:
+        # Auch die Systemtaste fragt, solange Seiten da sind (P206); ohne Seiten wie bisher
+        return zurueck_speichert(
+            page, ansicht, geaendert=lambda: bool(a.seiten), speichern=a.seiten_fragen, meldung=""
+        )
     return ansicht
 
 

@@ -23,9 +23,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
+from ..core.kursbloecke import TEST, bloecke_lesen, vorlage_anwenden, wert_im_test
 from ..core.kurse import (
     MESSUNG,
     SUMME,
@@ -45,6 +47,7 @@ from ..core.kurse import (
 )
 from ..core.models import Plan, jetzt, lokaler_tag, new_id
 from ..core.pakete import PaketPlan, paketplan_aus, plan_abgleichen, plan_stand
+from ..core.result_spec import FieldType
 from .db import transaktion
 from .repositories import ExerciseRepo, HrvRepo, PlanRepo, SessionRepo
 
@@ -119,8 +122,9 @@ class KursRepo:
                 self.con.execute(
                     """
                     INSERT INTO course_chapter (id, course_id, sort_order, title, body_md,
-                                                gate_json, plans_json, media_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                                gate_json, plans_json, media_json,
+                                                blocks_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         course_id = excluded.course_id,
                         sort_order = excluded.sort_order,
@@ -128,7 +132,8 @@ class KursRepo:
                         body_md = excluded.body_md,
                         gate_json = excluded.gate_json,
                         plans_json = excluded.plans_json,
-                        media_json = excluded.media_json
+                        media_json = excluded.media_json,
+                        blocks_json = excluded.blocks_json
                     """,
                     (
                         k.id,
@@ -139,6 +144,7 @@ class KursRepo:
                         json.dumps(k.bedingung.to_dict(), ensure_ascii=False),
                         json.dumps([p.to_dict() for p in k.plaene], ensure_ascii=False),
                         json.dumps(medien_to_list(k.media), ensure_ascii=False),
+                        json.dumps([b.to_dict() for b in k.bloecke], ensure_ascii=False),
                     ),
                 )
 
@@ -261,11 +267,61 @@ class KursRepo:
                     for p in vorhanden:
                         plaene.aktiv_setzen(p.id, True)
                 return
+            if kapitel.braucht_eingabe:
+                return  # Test oder Auswahl: erst mit „Plan anlegen“ (`plaene_anlegen`)
             da = {u.id for u in ExerciseRepo(self.con).alle(mit_archivierten=True)}
             for vorlage in kapitel.plaene:
                 plan = plan_aus_vorlage(vorlage, kapitel, subject_id, da)
                 if plan.items:
                     plaene.speichern(plan)
+
+    def plaene_anlegen(
+        self,
+        kapitel: Kapitel,
+        subject_id: str,
+        werte: Mapping[str, float],
+        wahl: Mapping[str, Sequence[str]],
+    ) -> list[Plan]:
+        """„Plan anlegen“ in einem Kapitel mit Test oder Auswahl (Ben, 12.11.2026): die
+        Vorlagen mit den Testwerten als Ziel und den gewählten Übungen
+        (`core.kursbloecke.vorlage_anwenden`). Gibt es die Pläne schon, bleiben sie — wer neu
+        wählen will, beginnt den Kurs von vorn oder ändert den Plan von Hand."""
+        vorhanden = self.kapitel_plaene(kapitel.id, subject_id)
+        if vorhanden:
+            return vorhanden
+        plaene = PlanRepo(self.con)
+        da = self._vorhandene_uebungen()
+        katalog = {u.id: u for u in ExerciseRepo(self.con).alle(mit_archivierten=True)}
+
+        def je_satz(uebung_id: str, feld: str) -> bool:
+            """Hält das Feld dieser Übung je Satz einen Wert? Dann ist das Ziel eine Liste."""
+            uebung = katalog.get(uebung_id)
+            return uebung is not None and any(
+                f.key == feld and f.type == FieldType.SET_LIST for f in uebung.result_spec.fields
+            )
+
+        with transaktion(self.con):
+            for vorlage in vorlage_anwenden(kapitel.plaene, kapitel.bloecke, werte, wahl, je_satz):
+                plan = plan_aus_vorlage(vorlage, kapitel, subject_id, da)
+                if plan.items:
+                    plaene.speichern(plan)
+        return self.kapitel_plaene(kapitel.id, subject_id)
+
+    def testwerte(self, kapitel: Kapitel, subject_id: str, seit: datetime) -> dict[str, float]:
+        """Je Test-Block der Wert aus dem jüngsten Eintrag seiner Übung seit ``seit`` (dem
+        Erreichen des Kapitels) — ein gewöhnlicher Eintrag, kein Messwert."""
+        ergebnis: dict[str, float] = {}
+        eintraege = SessionRepo(self.con)
+        for block in kapitel.bloecke:
+            if block.art != TEST:
+                continue
+            letzter = eintraege.letzter_eintrag(subject_id, block.uebung)
+            if letzter is None or letzter.started_at is None or letzter.started_at < seit:
+                continue
+            wert = wert_im_test(letzter.result, block.feld)
+            if wert is not None and wert > 0:
+                ergebnis[block.id] = wert
+        return ergebnis
 
     def kapitel_abschliessen(
         self, kurs: Kurs, kapitel: Kapitel, subject_id: str, uebersprungen: bool = False
@@ -530,6 +586,7 @@ class KursRepo:
                 PlanVorlage.from_dict(p) for p in _json(r["plans_json"], []) if isinstance(p, dict)
             ],
             bedingung=Bedingung.from_dict(_json(r["gate_json"], {})),
+            bloecke=bloecke_lesen(_json(r["blocks_json"], [])),
         )
 
     @staticmethod

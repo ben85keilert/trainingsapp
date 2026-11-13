@@ -53,6 +53,7 @@ from . import ablauf as ab
 from . import links
 from .abgleich import Hinweis, abgleichen, liste_abgleichen
 from .ergaenzungen import ERGAENZBAR, Ergaenzung
+from .kursbloecke import MEDIUM, Block, bloecke_lesen
 from .kurse import (
     BEDINGUNGEN,
     FREISCHALTUNGEN,
@@ -66,7 +67,7 @@ from .kurse import (
     medien_to_list,
     verweise_als_position,
 )
-from .models import Exercise, Media, MediaKind, MediaSource, Plan, jetzt
+from .models import Exercise, Media, MediaKind, MediaSource, Plan, jetzt, medien_zusatz
 from .paketmedien import Paketmedium, ist_paketmedium, medium_aus_paket
 from .paketversion import version_zahl
 from .result_spec import VORLAGEN, ResultSpec, basis_key
@@ -358,6 +359,7 @@ def paketplan_aus(plan: Plan, key: str | None = None) -> PaketPlan:
             [VorlageItem.aus_planitem(i) for i in geordnet], [i.id for i in geordnet]
         ),
         # G4: der gezeichnete Ablauf mit Positionen statt IDs
+        anpassung=dict(plan.anpassung) if plan.anpassung else None,
         ablauf=ab.als_position(plan.ablauf, [i.id for i in geordnet]) or None
         if not plan.ablauf.leer
         else None,
@@ -685,6 +687,7 @@ def ergaenzung_lesen(eintrag: Any, paket: str) -> Ergaenzung:
                         "uri": m.uri,
                         "title": m.title,
                         **({"license": m.license} if m.license else {}),
+                        **m.zusatz(),
                     }
                     for m in medien
                 ]
@@ -754,6 +757,7 @@ def _kurs_lesen(eintrag: Any, paket: str, schluessel: Mapping[str, str]) -> Kurs
             media=medien_from_list(_liste(roh.get("media", []), "media")),
             plaene=[_vorlage_lesen(v, schluessel) for v in _liste(roh.get("plaene", []), "plaene")],
             bedingung=_bedingung_lesen(roh.get("bedingung", {}), schluessel),
+            bloecke=_bloecke_lesen(_liste(roh.get("bloecke", []), "bloecke"), schluessel),
         )
         if k.id in ids:
             raise ValueError(f"Kapitel {nr} („{titel}“) steht doppelt")
@@ -786,6 +790,21 @@ def _vorlage_lesen(roh: Any, schluessel: Mapping[str, str]) -> PlanVorlage:
         }
         _werte_pruefen(item.target, "ziel")
     return vorlage
+
+
+def _bloecke_lesen(roh: list[Any], schluessel: Mapping[str, str]) -> list[Block]:
+    """Die Blöcke eines Kapitels (`core/kursbloecke.py`) — Medien darin wie alle Medien des
+    Pakets: nur erlaubte Links und Paketdateien, nie eine Datei vom Ursprungsgerät."""
+    ergebnis: list[Block] = []
+    for block in bloecke_lesen(roh, schluessel):
+        if block.art == MEDIUM:
+            assert block.medium is not None
+            geprueft = medien_from_list([block.medium.als_dict()])
+            if not geprueft:
+                continue
+            block.medium = geprueft[0]
+        ergebnis.append(block)
+    return ergebnis
 
 
 def _bedingung_lesen(roh: Any, schluessel: Mapping[str, str]) -> Bedingung:
@@ -1007,6 +1026,7 @@ def _medium(roh: Any) -> Media | None:
         uri=uri,
         title=str(roh.get("title") or ""),
         license=str(roh.get("license") or ""),
+        **medien_zusatz(roh),
     )
 
 
@@ -1065,6 +1085,7 @@ def stand(u: Exercise) -> dict[str, Any]:
             "uri": m.uri,
             "title": m.title,
             **({"license": m.license} if m.license else {}),
+            **m.zusatz(),
         }
         for m in u.media
         if m.uri and m.source != MediaSource.LOCAL
@@ -1248,6 +1269,8 @@ def kurs_stand(k: Kurs) -> dict[str, Any]:
             e["media"] = medien
         if kap.plaene:
             e["plaene"] = [p.to_dict() for p in kap.plaene]
+        if kap.bloecke:
+            e["bloecke"] = [b.to_dict() for b in kap.bloecke]
         e["bedingung"] = kap.bedingung.to_dict()
         kapitel.append(e)
     d["kapitel"] = kapitel
@@ -1283,6 +1306,7 @@ def paketmedien_in(
     for k in kurse:
         for kap in k.kapitel:
             medien.extend(kap.media)
+            medien.extend(b.medium for b in kap.bloecke if b.medium is not None)
             vorlagen.extend(kap.plaene)
     medien.extend(m for v in vorlagen for item in v.items for m in item.medien)
     namen = {m.uri for m in medien if ist_paketmedium(m)}

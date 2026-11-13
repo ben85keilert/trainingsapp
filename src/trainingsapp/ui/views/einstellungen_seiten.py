@@ -28,8 +28,9 @@ from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
 from trainingsapp.core.sicherung import Sicherung
 from trainingsapp.core.timer import schnellzeiten_lesen, schnellzeiten_text
 from trainingsapp.data.repositories import PAPIERKORB_TAGE, SettingRepo
+from trainingsapp.ui.components import vorschlag
 from trainingsapp.ui.components.hilfe import THEMEN, hilfe_oeffner
-from trainingsapp.ui.components.karte import info_knopf, karte, titel
+from trainingsapp.ui.components.karte import hinweis, info_knopf, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
@@ -124,6 +125,9 @@ def einstellungen_uebungen(page: ft.Page, state: AppState) -> ft.View:
     def fokus_auto_setzen(e: ft.Event[ft.Switch]) -> None:
         state.fokus_auto_setzen(bool(e.control.value))
 
+    def vorschlaege_setzen(e: ft.Event[ft.Switch]) -> None:
+        vorschlag.an_setzen(state, bool(e.control.value))
+
     typen, regionen = len(state.tags.namen("typ")), len(state.tags.namen("region"))
     return _seite(
         UEBUNGEN,
@@ -147,6 +151,17 @@ def einstellungen_uebungen(page: ft.Page, state: AppState) -> ft.View:
                 label="▶ öffnet den Fokus",
                 value=state.fokus_auto(),
                 on_change=fokus_auto_setzen,
+            ),
+            ft.Switch(
+                label="Vorschläge nach der Belastung",
+                value=vorschlag.an(state),
+                on_change=vorschlaege_setzen,
+                data="plan_vorschlaege",
+            ),
+            hinweis(
+                "Manche Pläne aus Kursen schlagen nach dem Workout ein anderes Zeitziel vor — "
+                "nach der Anstrengung, die du einträgst. Geändert wird nur, wenn du „Übernehmen“ "
+                "tippst."
             ),
         ),
         karte(

@@ -51,6 +51,7 @@ from trainingsapp.core.bedingung import Bedingung
 from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.links import erlaubt as link_erlaubt
 from trainingsapp.core.models import (
+    BEGLEITUNG,
     Exercise,
     Media,
     MediaKind,
@@ -97,6 +98,7 @@ from trainingsapp.ui.components.editor_reiter import editor_reiter
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.material_rolle import gelesen, rollen_zeile, werte_von
 from trainingsapp.ui.components.medienliste import SYMBOLE as MEDIEN_SYMBOLE
 from trainingsapp.ui.components.planstand import schild
 from trainingsapp.ui.components.spec_form import SpecForm
@@ -264,8 +266,11 @@ def plan_einstellen(
     )
     anweisung_anfang = anweisung_editor.text()
     links_stand: list[dict[str, Any]] = [
-        {"medium": m, "titel": m.title, "uri": m.uri, "id": m.id} for m in item.media
+        {"medium": m, "titel": m.title, "uri": m.uri, "id": m.id, "zusatz": werte_von(m)}
+        for m in item.media
     ]
+    #: Was ein Stück der Planübung ersetzen kann: die Stücke der Übung (P200)
+    ersetzbar = [(m.uri, m.title) for m in uebung.media if m.uri and m.source != MediaSource.LOCAL]
     links_spalte = ft.Column(spacing=6, tight=True)
     links_fehler = ft.Text("", size=12, color=ft.Colors.ERROR, visible=False)
 
@@ -282,7 +287,9 @@ def plan_einstellen(
         return handler
 
     def link_hinzufuegen(_e: Any = None) -> None:
-        links_stand.append({"medium": None, "titel": "", "uri": "", "id": new_id()})
+        links_stand.append(
+            {"medium": None, "titel": "", "uri": "", "id": new_id(), "zusatz": werte_von(None)}
+        )
         links_neu()
 
     def links_zeichnen() -> None:
@@ -319,6 +326,7 @@ def plan_einstellen(
                         ],
                     )
                 )
+                zeilen.append(rollen_zeile(z["zusatz"], ersetzbar=ersetzbar, kennung=z["id"]))
                 continue
 
             def titel_aendern(e: Any, z: dict[str, Any] = z) -> None:
@@ -353,6 +361,7 @@ def plan_einstellen(
                     ],
                 )
             )
+            zeilen.append(rollen_zeile(z["zusatz"], ersetzbar=ersetzbar, kennung=z["id"]))
         zeilen += [
             links_fehler,
             ft.Row(
@@ -384,7 +393,9 @@ def plan_einstellen(
             return
         if all(z["uri"] != name for z in links_stand):
             m = paketdatei.medium_fuer(name, pfad.stem)
-            links_stand.append({"medium": m, "titel": m.title, "uri": name, "id": m.id})
+            links_stand.append(
+                {"medium": m, "titel": m.title, "uri": name, "id": m.id, "zusatz": werte_von(m)}
+            )
         links_neu()
 
     async def paketdatei_aufnehmen(art: str) -> None:
@@ -448,10 +459,13 @@ def plan_einstellen(
             uri, titel = str(z["uri"]).strip(), str(z["titel"]).strip()
             if not uri:
                 continue
+            zusatz = gelesen(z["zusatz"])
             if isinstance(z["medium"], Media):
-                medien.append(replace(z["medium"], uri=uri, title=titel))
+                medien.append(replace(z["medium"], uri=uri, title=titel, **zusatz))
             else:
-                medien.append(Media(id=z["id"], kind=MediaKind.VIDEO, uri=uri, title=titel))
+                medien.append(
+                    Media(id=z["id"], kind=MediaKind.VIDEO, uri=uri, title=titel, **zusatz)
+                )
         return medien
 
     def links_pruefen() -> str | None:
@@ -463,6 +477,49 @@ def plan_einstellen(
         links_fehler.value = f"Nur https-Adressen: {falsch[0]}" if falsch else ""
         links_fehler.visible = bool(falsch)
         return links_fehler.value or None
+
+    def aus_der_uebung() -> list[ft.Control]:
+        """Oben im Reiter „Material“: was die Übung mitbringt — nur zum Lesen, mit dem Vermerk,
+        was diese Planübung ersetzt (P200)."""
+        if not ersetzbar:
+            return []
+        weg = {g["ersetzt"] for z in links_stand if (g := gelesen(z["zusatz"]))["ersetzt"]}
+        zeilen: list[ft.Control] = [abschnitt("AUS DER ÜBUNG")]
+        for m in uebung.media:
+            if not m.uri or m.source == MediaSource.LOCAL:
+                continue
+            ersetzt = m.uri in weg
+            rolle = "Begleitung" if m.rolle == BEGLEITUNG else "Erklärung"
+            zeilen.append(
+                ft.Row(
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Icon(MEDIEN_SYMBOLE.get(m.kind, ft.Icons.ATTACH_FILE), size=20),
+                        ft.Text(
+                            f"{m.title or m.uri} · {rolle}",
+                            expand=True,
+                            opacity=0.6 if ersetzt else 1.0,
+                            max_lines=2,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.Text(
+                            "hier ersetzt" if ersetzt else "gilt",
+                            size=11,
+                            opacity=0.7,
+                            data=("material_gilt", m.uri),
+                        ),
+                    ],
+                )
+            )
+        zeilen.append(
+            ft.Text(
+                "Geändert wird es in „Übung bearbeiten“ — „Ersetzt“ gilt nach dem Speichern.",
+                size=12,
+                opacity=0.7,
+            )
+        )
+        return zeilen
 
     links_zeichnen()
     anweisungen_block = ft.Column(
@@ -1140,7 +1197,8 @@ def plan_einstellen(
         ]
         # Anweisungen sind das Material der Planübung (`core/material.py`)
         material: list[ft.Control] = [
-            abschnitt("ANWEISUNGEN", hilfe_knopf(page, thema="anweisungen")),
+            *aus_der_uebung(),
+            abschnitt("NUR IN DIESEM PLAN", hilfe_knopf(page, thema="anweisungen")),
             anweisungen_block,
         ]
         teile: list[ft.Control] = [

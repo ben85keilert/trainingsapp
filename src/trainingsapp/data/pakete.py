@@ -1885,6 +1885,7 @@ def _plan_aus_paketplan(
         description=pp.beschreibung,
         subject_id=subject_id,
         wochentage=list(pp.vorlage.wochentage),
+        anpassung=dict(pp.vorlage.anpassung) if pp.vorlage.anpassung else None,
         timer=dict(pp.timer) if pp.timer else None,
         weiter_automatisch=pp.weiter_automatisch,
         pause_ohne_timer=pp.pause_ohne_timer,

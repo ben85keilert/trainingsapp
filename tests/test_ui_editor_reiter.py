@@ -263,5 +263,5 @@ def test_im_plan_einstellen_hat_dieselben_reiter(page, state) -> None:
     assert "PARAMETER" in _texte(_seite(ansicht, er.PARAMETER))
     assert "UHR" in _texte(_seite(ansicht, er.UHR))
     assert "BESCHLEUNIGUNGSSENSOR" in _texte(_seite(ansicht, er.SENSOR))
-    assert "ANWEISUNGEN" in _texte(_seite(ansicht, er.MATERIAL))
+    assert "NUR IN DIESEM PLAN" in _texte(_seite(ansicht, er.MATERIAL))
     assert _daten(_seite(ansicht, er.SENSOR), "bewegungstyp").value == ""

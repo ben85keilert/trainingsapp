@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, Final
 
-from .models import Media, MediaKind, MediaSource, jetzt, lokaler_tag
+from .models import Media, MediaKind, MediaSource, jetzt, lokaler_tag, medien_zusatz
 
 #: Der Ordner der Medien in der ZIP-Datei
 ORDNER: Final = "medien/"
@@ -137,6 +137,7 @@ def medium_aus_paket(roh: Mapping[str, Any]) -> Media | None:
         uri=uri,
         title=str(roh.get("title") or ""),
         license=str(roh.get("license") or ""),
+        **medien_zusatz(roh),
     )
 
 

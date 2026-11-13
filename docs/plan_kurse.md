@@ -110,3 +110,55 @@ vorgesehen. Die Kurstexte erklären, sie bewerten nicht.
 Tests: `tests/test_kurse.py` (Rechnung, Datenbank, Paketformat, Seed),
 `tests/test_ui_kurse.py` (Liste, Kurs, Kapitel, Weiter, Freischalten, Plan aus
 Kapitel). Noch nicht am Handy geprüft (T13 im Katalog).
+
+## 7. Kapitel aus Blöcken (Ben, 12.11.2026) — gebaut
+
+„Die Kurse werden evtl. recht interaktiv“ (ähnlich brilliant.org). Ein Kapitel kann darum
+statt Text und Medienliste eine Folge von **Blöcken** tragen (`core/kursbloecke.py`,
+`course_chapter.blocks_json`, Migration 059, Paketfeld `kapitel[].bloecke[]`; gezeichnet in
+`ui/components/kursblock.py`):
+
+| Art | Felder im Paket | Was es tut |
+|---|---|---|
+| `text` | `titel`, `text` (Markdown) | Überschrift und Text |
+| `medium` | `medium = {kind, source, uri, title, …}` | eine Zeile wie jedes Medium (Link oder Paketdatei) |
+| `frage` | `titel`, `text`, `antworten[] = {text, richtig, hinweis}` | **erklärt, prüft nicht** — Antippen zeigt den Hinweis; nichts wird gespeichert, keine Bedingung hängt daran |
+| `test` | `uebung`, `feld`, `faktor`, `plan` | der jüngste **Eintrag** der Übung seit dem Erreichen des Kapitels (bei Sätzen der beste Satz) wird ihr Ziel im Kapitelplan (× `faktor`) |
+| `auswahl` | `uebungen[]`, `anzahl`, `nach`, `plan` | die Gewählten kommen hinter Planübung `nach` in den Plan; ab zwei als gleichwertige **Wege** im Ablauf (im Workout: „Wie geht es weiter?“) |
+
+- Ein Kapitel **mit `test` oder `auswahl`** legt seine Pläne nicht beim Erreichen an, sondern
+  mit **„Plan anlegen“** (`KursRepo.plaene_anlegen`, `core.kursbloecke.vorlage_anwenden`).
+  Kapitel ohne solche Blöcke verhalten sich wie bisher. Der Plan ist danach ein gewöhnlicher
+  Plan; die Auswahl ist fest, bis man den Kurs von vorn beginnt.
+- Gerechnet wird aus **Einträgen und der eigenen Wahl**, nie aus Messwerten.
+- Hat die Vorlage schon einen gezeichneten Ablauf, kommen die Gewählten ans Ende und der
+  Ablauf bleibt.
+- `uebung`/`uebungen` nennen wie überall den Paketschlüssel oder die ID. Ältere Apps
+  überlesen `bloecke` und zeigen Text und Medien des Kapitels — wer für beide baut, füllt
+  beides.
+- **Editor** (`ui/views/kurs_bearbeiten.py`, `plan_kurseditor.md` Stufen 1–3): „Kurs anlegen“
+  unter Übungen → Kurse; `/kurse/<id>/bearbeiten` (Name, Freischaltung, Kapitel — speichert
+  sofort) und `/kurse/<id>/<kapitel>/bearbeiten` (Titel, Blöcke, Pläne aus eigenen Plänen,
+  Bedingung — Formular, Zurück speichert). Nur **eigene** Kurse; ein Paketkurs lässt sich als
+  eigener Kurs kopieren (neue IDs, Fortschritt bleibt beim Original). Weitergabe über eigene
+  Pakete.
+- Nicht gebaut: tippbare Grafiken und Animationen als eigener Block, Bilder im Block (heute
+  über Markdown bzw. `medium`), Schritt-für-Schritt-Ansicht mit Fortschrittsbalken.
+
+## 8. Vorschlag nach der Belastung (Ben, 12.11.2026) — gebaut
+
+Ein Plan kann eine **Regel** tragen (`plan.anpassung_json`, Paketfeld `anpassung = {ab, bis,
+prozent}` am Plan bzw. an der Plan-Vorlage; `core/anpassung.py`): Ist in „Workout fertig“ die
+Anstrengung eingetragen und liegt sie bei `ab` oder darüber bzw. bei `bis` oder darunter,
+zeigt die Karte „Vorschlag aus dem Plan“ die **Zeitziele** (Haltezeit, Zeit), die sich um
+`prozent` ändern würden (`ui/components/vorschlag.py`).
+
+- **Nichts ändert sich von selbst** (Ben: „die Änderung muss geklickt werden“): „Übernehmen“
+  setzt die Ziele der Planübungen („nur hier“), „So lassen“ nicht. Je Durchlauf wird einmal
+  gefragt.
+- **Abschaltbar:** „Keine Vorschläge mehr“ an der Karte, Schalter „Vorschläge nach der
+  Belastung“ unter Einstellungen → Übungen.
+- Grundlage ist nur die Selbstauskunft (Skala 0–10) und das Ziel im Plan — **nie ein
+  Messwert**. Einordnung: `docs/recht/00_zweckbestimmung.md` („Vorschlag nach der Belastung“).
+- Die Regel setzt, wer den Kurs baut (Kapitel bearbeiten → Plan → Schalter mit den drei
+  Zahlen). Für freie Pläne gibt es noch keinen Schalter im Plan-Editor.

@@ -33,6 +33,7 @@ _ABFRAGEN: Final = (
     "SELECT package_standard_json FROM course WHERE package_standard_json LIKE '%medien/%'",
     "SELECT media_json FROM course_chapter WHERE media_json LIKE '%medien/%'",
     "SELECT plans_json FROM course_chapter WHERE plans_json LIKE '%medien/%'",
+    "SELECT blocks_json FROM course_chapter WHERE blocks_json LIKE '%medien/%'",
 )
 _NAME: Final = re.compile(r"medien/[0-9a-f]{64}\.[a-z0-9]{2,4}")
 

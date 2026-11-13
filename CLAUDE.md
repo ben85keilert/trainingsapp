@@ -83,6 +83,10 @@ vor dem Schreiben von `ui/`- oder Tutorial-Code dort prüfen statt aus dem Gedä
 Flet hat zwischen 0.28, 0.80 und 1.0 viel umbenannt und entfernt. `flet-mcp` immer in
 derselben Version wie `flet` halten.
 
+**Aussagen über die Oberfläche** (Ben, 12.11.2026) stützen sich auf den Code, der sie baut,
+nicht auf Docstrings oder Plan-Dokumente — die können veraltet sein (ein Docstring nannte den
+Knopf „zählt“ noch in der Uhr-Zeile, er stand seit P148 im Uhr-Blatt).
+
 `TRAININGSAPP_EDITION=praxis uv run pytest …` bzw. `TRAININGSAPP_DATA_DIR=…` setzen
 Edition und Datenpfad zur Laufzeit (siehe `config.py`).
 
@@ -203,6 +207,11 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   „Übung bearbeiten“ und „Im Plan einstellen“ haben fünf Reiter (`components/editor_reiter.py`) —
   **ein Formular**, jede Seite einmal gebaut und nur sichtbar geschaltet, kein Wischen. **Ordnung
   der Parameter** überall aus `FELDVORRAT` (`core.result_spec.geordnet`); Gespeichertes bleibt.
+
+- **Material mit Rollen, Kurse aus Blöcken** (Ben, 12.11.2026, `core/material.py`,
+  `docs/plan_kurse.md` §7/§8): Erklärung oder Begleitung, „gesehen“ nur auf dem Gerät. Test und
+  Auswahl rechnen aus Einträgen und Wahl, nie aus Messwerten. **Ein Vorschlag ändert einen Plan
+  nur auf Tipp** und ist abschaltbar (`core/anpassung.py`).
 
 - **Übungen kommen über Pakete** (Ben, 14.10.2026; Verträge `docs/uebungspakete.md`,
   `docs/plan_paketinhalte.md`; Einzelheiten in `.claude/rules/pakete.md`). Der Katalog ist das

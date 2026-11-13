@@ -58,6 +58,7 @@ from trainingsapp.ui.components.modus_wahl import WORKOUT, modus_wahl
 from trainingsapp.ui.components.srpe import workout_srpe_zeile
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uhr import schluessel as uhr_schluessel
+from trainingsapp.ui.components.vorschlag import vorschlag_karte
 from trainingsapp.ui.plan_ablauf import GRUENDE
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.uebung_lauf import gewaehlte_ausfuehrung
@@ -1400,10 +1401,15 @@ def workout_view(
             async def zum_eintrag(_e: object = None) -> None:
                 await page.push_route(workout_eintrag_route(einheit_id))
 
+            # Vorschlag nach der Belastung (Ben, 12.11.2026): nur mit Regel am Plan, nur auf Tipp
+            vorschlag = vorschlag_karte(page, state, plan, einheit_id)
             return [
                 karte(
                     workout_srpe_zeile(
-                        state, einheit_id, felder=state.plaene.workout_felder(plan.id)
+                        state,
+                        einheit_id,
+                        felder=state.plaene.workout_felder(plan.id),
+                        danach=vorschlag.neu,
                     ),
                     ft.Row(
                         alignment=ft.MainAxisAlignment.END,
@@ -1411,7 +1417,8 @@ def workout_view(
                     ),
                     abstand=4,
                     padding=10,
-                )
+                ),
+                vorschlag.control,
             ]
 
         return [

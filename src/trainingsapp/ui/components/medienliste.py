@@ -34,16 +34,20 @@ def medium_zeile(
     *,
     browser: Any = None,
     uebergeben: Callable[[Callable[[], Awaitable[None]]], None] | None = None,
+    beim_oeffnen: Callable[[], None] | None = None,
 ) -> ft.Control:
     """Die Zeile zu ``medium``. ``browser``: der UrlLauncher der Ansicht (sonst der der App);
     ``uebergeben``: statt selbst zu ``…/paketmedium/…`` zu gehen, bekommt der Aufrufer den
-    Weg (das Material-Blatt schließt sich erst, `components/material.py`)."""
+    Weg (das Material-Blatt schließt sich erst, `components/material.py`); ``beim_oeffnen``:
+    gerufen, sobald das Stück wirklich aufgeht (das Blatt hakt „gesehen“ ab)."""
     symbol = SYMBOLE.get(medium.kind, ft.Icons.PLAY_CIRCLE_OUTLINE)
     if not ist_paketmedium(medium):
 
         async def link(_e: Any = None) -> None:
             dienst = browser if browser is not None else state.browser
             if dienst is not None:
+                if beim_oeffnen is not None:
+                    beim_oeffnen()
                 await link_oeffnen(page, dienst, medium.uri)
 
         return ft.ListTile(
@@ -65,6 +69,8 @@ def medium_zeile(
     async def oeffnen(_e: Any = None) -> None:
         if not da or pfad is None:
             return
+        if beim_oeffnen is not None:
+            beim_oeffnen()
         if medium.kind == MediaKind.PDF:  # zeigt eine App auf dem Gerät
             await datei_weitergeben(page, pfad, f"{titel}.{endung}", MIME.get(endung, ""))
             return

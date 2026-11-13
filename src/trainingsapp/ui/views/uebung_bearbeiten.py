@@ -118,6 +118,7 @@ from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.material_rolle import gelesen, rollen_zeile, werte_von
 from trainingsapp.ui.components.medienliste import SYMBOLE as MEDIEN_SYMBOLE
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.symbol_blatt import symbol_blatt
@@ -1011,6 +1012,21 @@ def uebung_bearbeiten(
 
     medien_zeilen: list[tuple[ft.TextField, ft.TextField]] = []
     medien_spalte = ft.Column(spacing=6)
+    #: Rolle, „von selbst zeigen“ und „ersetzt“ je Stück (P200) — Links nach ihrem Titelfeld,
+    #: Paketdateien nach ihrer Adresse; die Zeilen schreiben hinein (`material_rolle`)
+    link_rollen: dict[int, dict[str, Any]] = {}
+    paket_rollen: dict[str, dict[str, Any]] = {}
+
+    def paket_rolle(m: Media) -> dict[str, Any]:
+        return paket_rollen.setdefault(m.uri, werte_von(m))
+
+    def ersetzbar_ohne(uri: str) -> list[tuple[str, str]]:
+        """Die anderen Stücke der Übung — eines davon kann dieses ersetzen (die Erweiterung
+        ersetzt das Standard-Video)."""
+        alle = [(m.uri, (paket_titelfeld(m).value or "").strip()) for m in paket_medien]
+        alle += [((a.value or "").strip(), (t.value or "").strip()) for t, a in medien_zeilen]
+        return [(u, t) for u, t in alle if u and u != uri]
+
     #: Dateien aus dem Paket (U3) — ohne Adressfeld, nur herausnehmen (ein Update bringt sie
     #: dann nicht zurück, U1); das Bild der Bewegung (lokal) hat seine eigene Karte
     paket_medien: list[Media] = [
@@ -1025,7 +1041,10 @@ def uebung_bearbeiten(
         return paket_titel[m.uri]
 
     def paket_medien_lesen() -> list[Media]:
-        return [replace(m, title=(paket_titelfeld(m).value or "").strip()) for m in paket_medien]
+        return [
+            replace(m, title=(paket_titelfeld(m).value or "").strip(), **gelesen(paket_rolle(m)))
+            for m in paket_medien
+        ]
 
     async def datei_fuers_paket() -> None:
         """Eine Datei vom Gerät (U4): bereinigt in die Ablage, gespeichert mit dem Formular."""
@@ -1114,32 +1133,52 @@ def uebung_bearbeiten(
     def medien_zeichnen() -> None:
         medien_spalte.controls = [
             *(
-                ft.Row(
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ft.Column(
+                    spacing=0,
+                    tight=True,
                     controls=[
-                        ft.Icon(MEDIEN_SYMBOLE.get(m.kind, ft.Icons.ATTACH_FILE), size=20),
-                        ft.Container(content=paket_titelfeld(m), expand=True),
-                        ft.Text("Datei", size=11, opacity=0.6),
-                        ft.IconButton(
-                            ft.Icons.CLOSE,
-                            tooltip="Aus der Übung nehmen",
-                            on_click=paket_entferner(m),
+                        ft.Row(
+                            spacing=8,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            controls=[
+                                ft.Icon(MEDIEN_SYMBOLE.get(m.kind, ft.Icons.ATTACH_FILE), size=20),
+                                ft.Container(content=paket_titelfeld(m), expand=True),
+                                ft.Text("Datei", size=11, opacity=0.6),
+                                ft.IconButton(
+                                    ft.Icons.CLOSE,
+                                    tooltip="Aus der Übung nehmen",
+                                    on_click=paket_entferner(m),
+                                ),
+                            ],
+                        ),
+                        rollen_zeile(
+                            paket_rolle(m), ersetzbar=ersetzbar_ohne(m.uri), kennung=m.uri
                         ),
                     ],
                 )
                 for m in paket_medien
             ),
             *(
-                ft.Row(
-                    spacing=6,
+                ft.Column(
+                    spacing=0,
+                    tight=True,
                     controls=[
-                        ft.Container(content=titel, expand=2),
-                        ft.Container(content=adresse, expand=3),
-                        ft.IconButton(
-                            ft.Icons.CLOSE,
-                            tooltip="Entfernen",
-                            on_click=entferner((titel, adresse)),
+                        ft.Row(
+                            spacing=6,
+                            controls=[
+                                ft.Container(content=titel, expand=2),
+                                ft.Container(content=adresse, expand=3),
+                                ft.IconButton(
+                                    ft.Icons.CLOSE,
+                                    tooltip="Entfernen",
+                                    on_click=entferner((titel, adresse)),
+                                ),
+                            ],
+                        ),
+                        rollen_zeile(
+                            link_rollen.setdefault(id(titel), werte_von(None)),
+                            ersetzbar=ersetzbar_ohne((adresse.value or "").strip()),
+                            kennung=(adresse.value or "").strip(),
                         ),
                     ],
                 )
@@ -1148,9 +1187,11 @@ def uebung_bearbeiten(
         ]
 
     def zeile_anlegen(medium: Media | None = None) -> None:
+        titelfeld = ft.TextField(label="Titel", value=medium.title if medium else "", dense=True)
+        link_rollen[id(titelfeld)] = werte_von(medium)
         medien_zeilen.append(
             (
-                ft.TextField(label="Titel", value=medium.title if medium else "", dense=True),
+                titelfeld,
                 ft.TextField(
                     label="Adresse (https://…)",
                     value=medium.uri if medium else "",
@@ -1810,6 +1851,7 @@ def uebung_bearbeiten(
                 source=MediaSource.URL,
                 uri=(adresse.value or "").strip(),
                 title=(titel.value or "").strip(),
+                **gelesen(link_rollen.get(id(titel), werte_von(None))),
             )
             for titel, adresse in medien_zeilen
             if (adresse.value or "").strip()
@@ -1838,8 +1880,11 @@ def uebung_bearbeiten(
             ziel_werte(),
             bild_stand["key"],
             bild_stand["bild"],
-            [(t.value or "", a.value or "") for t, a in medien_zeilen],
-            [(m.uri, m.title) for m in paket_medien_lesen()],
+            [
+                (t.value or "", a.value or "", sorted(link_rollen.get(id(t), {}).items()))
+                for t, a in medien_zeilen
+            ],
+            [(m.uri, m.title, sorted(m.zusatz().items())) for m in paket_medien_lesen()],
             [p.als_dict() for p in timer_liste],
             bool(uhr_schalter.value),
             bool(zaehlt_schalter.value),

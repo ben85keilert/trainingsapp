@@ -205,8 +205,8 @@ class ExerciseRepo:
             for reihenfolge, m in enumerate(uebung.media):
                 self.con.execute(
                     "INSERT INTO exercise_media "
-                    "(id, exercise_id, kind, source, uri, title, license, sort_order) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(id, exercise_id, kind, source, uri, title, license, sort_order, "
+                    "rolle, zeigen, ersetzt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         m.id,
                         uebung.id,
@@ -216,6 +216,9 @@ class ExerciseRepo:
                         m.title,
                         m.license,
                         reihenfolge,
+                        m.rolle,
+                        int(m.zeigen),
+                        m.ersetzt,
                     ),
                 )
             # Tags: je Name genau eine Zeile in `tag`, Zuordnung komplett ersetzen.
@@ -513,6 +516,9 @@ class ExerciseRepo:
                     uri=r["uri"],
                     title=r["title"],
                     license=r["license"],
+                    rolle=r["rolle"],
+                    zeigen=bool(r["zeigen"]),
+                    ersetzt=r["ersetzt"],
                 )
             )
         for u in uebungen:
@@ -840,6 +846,9 @@ class SettingRepo:
     #: Fokus (7.11.2026): die Trainingsansicht öffnet sich von selbst, wenn die Uhr einer
     #: Übung startet („1“) — Vorgabe aus, kein Zwang
     FOKUS_AUTO = "fokus_auto"
+    #: Vorschläge nach der Belastung (Ben, 12.11.2026, `core/anpassung.py`): „0“ = aus —
+    #: Vorgabe an; die Regel bringt der Plan mit, geändert wird nur auf Tipp
+    PLAN_VORSCHLAEGE = "plan_vorschlaege"
     #: Fokus: welche Ebenen gezeigt werden (`ui.state.FOKUS_EBENEN`, Komma-Liste)
     FOKUS_EBENEN = "fokus_ebenen"
     #: Fokus: welche Reihen die Kurven-Einblendung zeigt (`ui.state.FOKUS_KURVEN`)
@@ -1037,8 +1046,8 @@ class PlanRepo:
                                   active, weekdays_json, course_chapter_id, timer_json,
                                   auto_next, pause_no_timer, package_id, package_key,
                                   package_standard_json, workout, uebergang_hart, takt_json,
-                                  ablauf_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  ablauf_json, anpassung_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
@@ -1057,6 +1066,7 @@ class PlanRepo:
                     uebergang_hart = excluded.uebergang_hart,
                     takt_json = excluded.takt_json,
                     ablauf_json = excluded.ablauf_json,
+                    anpassung_json = excluded.anpassung_json,
                     revision = revision + 1
                 """,
                 (
@@ -1081,6 +1091,7 @@ class PlanRepo:
                     int(plan.uebergang_hart),
                     _takt_json(plan.takt) if plan.takt is not None else None,
                     ablauf_json,
+                    json.dumps(plan.anpassung, ensure_ascii=False) if plan.anpassung else None,
                 ),
             )
             # Versteckte bleiben stehen: Übungen im Papierkorb und aus deaktivierten
@@ -1764,6 +1775,7 @@ class PlanRepo:
             package_id=r["package_id"],
             package_key=r["package_key"],
             package_standard=_json_lesen(r["package_standard_json"], {}) or None,
+            anpassung=_json_lesen(r["anpassung_json"], {}) or None,
         )
 
 

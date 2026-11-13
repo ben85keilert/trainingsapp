@@ -15,11 +15,12 @@ Dieses Modul kennt kein flet.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Final
 
 from .beschreibung import Abschnitt, abschnitte
-from .models import Exercise, Media, MediaKind, MediaSource, PlanItem
+from .models import BEGLEITUNG, Exercise, Media, MediaKind, MediaSource, PlanItem
 
 VIDEO: Final = "video"
 PDF: Final = "pdf"
@@ -67,11 +68,36 @@ class Material:
     dann die Übung)."""
 
     abschnitte: tuple[Abschnitt, ...] = ()
+    #: Was gilt — ohne das Ersetzte
     medien: tuple[Media, ...] = ()
+    #: Stücke der Übung, die ein Stück der Planübung oder einer Ergänzung hier ersetzt
+    #: (`Media.ersetzt`): nicht angeboten, im Blatt erreichbar
+    ersetzt: tuple[Media, ...] = ()
 
     @property
     def leer(self) -> bool:
         return not self.abschnitte and not self.medien
+
+    @property
+    def begleitungen(self) -> tuple[Media, ...]:
+        """Was beim Üben mitläuft — die Uhr läuft weiter."""
+        return tuple(m for m in self.medien if m.rolle == BEGLEITUNG)
+
+    @property
+    def erklaerungen(self) -> tuple[Media, ...]:
+        """Was man ansieht und abhakt — die Uhr steht."""
+        return tuple(m for m in self.medien if m.rolle != BEGLEITUNG)
+
+    def neu(self, gesehen: Collection[str]) -> tuple[Media, ...]:
+        """Erklärungen, die sich beim ersten Mal von selbst zeigen und noch nicht abgehakt sind.
+
+        >>> a = Media(uri="https://x/a", zeigen=True)
+        >>> b = Media(uri="https://x/b")
+        >>> m = Material(medien=(a, b))
+        >>> [x.uri for x in m.neu(set())], m.neu({"https://x/a"})
+        (['https://x/a'], ())
+        """
+        return tuple(m for m in self.erklaerungen if m.zeigen and m.uri not in gesehen)
 
     def kurztext(self) -> str:
         """„Text · 2 Videos · PDF“ — was es gibt.
@@ -112,16 +138,26 @@ def material_von(uebung: Exercise | None, item: PlanItem | None) -> Material:
     >>> bild = Media(kind=MediaKind.IMAGE, source=MediaSource.LOCAL, uri="Medien/b.webp")
     >>> material_von(Exercise(name="leer", media=[bild]), PlanItem()).leer
     True
+
+    Ein Stück der Planübung (oder einer Ergänzung) kann eines der Übung **ersetzen**:
+
+    >>> p = PlanItem(media=[Media(uri="https://x.org/stufe", ersetzt="https://x.org/v")])
+    >>> m = material_von(u, p)
+    >>> [x.uri for x in m.medien], [x.uri for x in m.ersetzt]
+    (['https://x.org/stufe'], ['https://x.org/v'])
     """
     teile = tuple(a for a in abschnitte(item.description) if not a.leer) if item else ()
+    alle = [*(item.media if item is not None else []), *(uebung.media if uebung else [])]
+    weg = {m.ersetzt for m in alle if m.ersetzt and m.ersetzt != m.uri}
     medien: list[Media] = []
-    gesehen: set[str] = set()
-    for m in [*(item.media if item is not None else []), *(uebung.media if uebung else [])]:
-        if not m.uri or m.source == MediaSource.LOCAL or m.uri in gesehen:
+    ersetzt: list[Media] = []
+    schon: set[str] = set()
+    for m in alle:
+        if not m.uri or m.source == MediaSource.LOCAL or m.uri in schon:
             continue
-        gesehen.add(m.uri)
-        medien.append(m)
-    return Material(teile, tuple(medien))
+        schon.add(m.uri)
+        (ersetzt if m.uri in weg else medien).append(m)
+    return Material(teile, tuple(medien), tuple(ersetzt))
 
 
 __all__ = ["BILD", "LINK", "NAMEN", "PDF", "TON", "VIDEO", "Material", "art", "material_von"]

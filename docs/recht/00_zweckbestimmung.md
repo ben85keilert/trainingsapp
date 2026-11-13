@@ -76,6 +76,20 @@ mit oberer und unterer Grenze und zwei Klängen (`HfEinstellungen.ziel_unten_bpm
 `alarm_klang_tief`), gespielt im Fokus (`components/fokus.py`) und in der Live-Sicht; die
 HF-Kachel des Fokus zeigt Zone, Anteil der Reserve und Zeit in der Zone — nur Anzeige.
 
+**Vorschlag nach der Belastung** (Ben, 12.11.2026, `core/anpassung.py`, `docs/plan_kurse.md`
+§8): Ein Plan aus einem Kurs oder Paket kann nach dem Workout ein anderes **Zeitziel**
+vorschlagen — nach der Anstrengung, die die Person selbst einträgt (Skala 0–10), und nach
+einer Regel, die die Autorin des Plans geschrieben hat. Bens Setzung: „Für Änderungen an den
+Plänen gilt grundsätzlich, dass die Änderung geklickt werden muss.“ Bedingungen: Grundlage
+ist nur die **Selbstauskunft**, nie Puls oder HRV; die App nennt die Regel und deutet die Zahl
+nicht („zu schwer“, „überlastet“ kommen nicht vor); geändert wird nur auf Tipp; die
+Vorschläge lassen sich abschalten. **Offen** (nicht geprüft, vor einem Patientenmodus zu
+klären): Im Patientenmodus darf die App „nicht deuten, warnen oder steuern — auch nicht
+lokal“ (Entscheidung 7.11.2026, unten); ob ein Vorschlag nach der Regel der Therapeutin
+darunter fällt, ist nicht entschieden — bis dahin gehört er dort ausgeschaltet. Empfehlungen
+für **Pulsbereiche aus Messdaten** bleiben, was oben steht: nicht erlaubt in Edition A (ein
+Vorschlag aus den Fitness-Zonen ja, nie eine Grenze aus Alter oder Messwerten).
+
 **Tagesfelder** (Ben, 21.10.2026, `docs/plan_tagesfelder.md`): Die Person hält je Tag
 selbst Werte fest — frei benannt, etwa Schmerz auf einer Skala, Einnahmen eines
 Medikaments, Trinkmenge, Texte zur Ernährung. Das ist Dokumentation wie die Notizen

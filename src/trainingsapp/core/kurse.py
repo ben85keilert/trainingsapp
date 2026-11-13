@@ -37,7 +37,9 @@ from typing import Any
 
 from . import ablauf as ab
 from . import links
+from .anpassung import Regel
 from .bedingung import Bedingung as Weiterbedingung
+from .kursbloecke import AUSWAHL, Block, braucht_eingabe
 from .models import (
     Exercise,
     HrvRecording,
@@ -48,6 +50,7 @@ from .models import (
     PlanItem,
     SessionEntry,
     jetzt,
+    medien_zusatz,
     medium_aus_dict,
     new_id,
 )
@@ -359,12 +362,17 @@ class PlanVorlage:
     #: Der gezeichnete Ablauf (G4, `docs/plan_verzweigungen.md` §8): `core.ablauf.als_position`
     #: — Planübungen als ``"#n"``, Fragen als ``"?n"``; ``None`` = Kette
     ablauf: dict[str, Any] | None = None
+    #: Regel für den Vorschlag nach der Belastung (`core.anpassung.Regel.als_dict`, Paketfeld
+    #: ``anpassung``) — ``None`` = keine
+    anpassung: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"name": self.name, "wochentage": list(self.wochentage)}
         d["uebungen"] = [i.to_dict() for i in self.items]
         if self.ablauf:
             d["ablauf"] = dict(self.ablauf)
+        if self.anpassung:
+            d["anpassung"] = dict(self.anpassung)
         return d
 
     @classmethod
@@ -392,6 +400,9 @@ class PlanVorlage:
             wochentage=wochentage,
             items=items,
             ablauf=dict(ablauf) if isinstance(ablauf, Mapping) and ablauf else None,
+            anpassung=regel.als_dict()
+            if (regel := Regel.aus_dict(roh.get("anpassung"))) is not None
+            else None,
         )
         vorlage.zweige_als_ablauf()
         return vorlage
@@ -433,11 +444,21 @@ class Kapitel:
     media: list[Media] = field(default_factory=list)
     plaene: list[PlanVorlage] = field(default_factory=list)
     bedingung: Bedingung = field(default_factory=Bedingung)
+    #: Die Seite des Kapitels als Folge von Blöcken (Ben, 12.11.2026, `core/kursbloecke.py`):
+    #: Text, Medium, Frage, Test, Auswahl — leer = ``text`` und ``media`` wie bisher
+    bloecke: list[Block] = field(default_factory=list)
 
     @property
     def uebungen(self) -> set[str]:
-        """Die Übungen aller Plan-Vorlagen — für die Bedingung ``tage``."""
-        return {i.exercise_id for p in self.plaene for i in p.items}
+        """Die Übungen aller Plan-Vorlagen und der Auswahl-Blöcke — für die Bedingung
+        ``tage``."""
+        aus_wahl = {u for b in self.bloecke if b.art == AUSWAHL for u in b.uebungen}
+        return {i.exercise_id for p in self.plaene for i in p.items} | aus_wahl
+
+    @property
+    def braucht_eingabe(self) -> bool:
+        """Mit Test oder Auswahl entstehen die Pläne erst mit „Plan anlegen“."""
+        return braucht_eingabe(self.bloecke)
 
 
 @dataclass(slots=True)
@@ -776,6 +797,7 @@ def plan_aus_vorlage(
         subject_id=subject_id,
         wochentage=list(vorlage.wochentage),
         kurs_kapitel_id=kapitel.id,
+        anpassung=dict(vorlage.anpassung) if vorlage.anpassung else None,
     )
     positionen: list[int] = []
     for pos, item in enumerate(vorlage.items, start=1):
@@ -807,6 +829,7 @@ def medien_to_list(media: Iterable[Media]) -> list[dict[str, Any]]:
             "uri": m.uri,
             "title": m.title,
             **({"license": m.license} if m.license else {}),
+            **m.zusatz(),
         }
         for m in media
         if m.uri
@@ -851,6 +874,7 @@ def medien_from_list(roh: Any) -> list[Media]:
                 uri=uri,
                 title=str(d.get("title") or ""),
                 license=str(d.get("license") or ""),
+                **medien_zusatz(d),
             )
         )
     return ergebnis

@@ -21,7 +21,7 @@ an); **abgeschlossen** mit „Weiter“. Was man dabei übersprungen hat, bleibt
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
 
 import flet as ft
@@ -52,6 +52,7 @@ from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.core.plaene import erledigte, tage_text
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
+from trainingsapp.ui.components.kursblock import kapitel_bloecke
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
 from trainingsapp.ui.components.medienliste import medium_zeile
@@ -113,14 +114,35 @@ def kurse_liste(page: ft.Page, state: AppState) -> ft.Control:
             on_click=_oeffner(page, f"/kurse/{kurs.id}"),
         )
 
+    async def anlegen(_e: object = None) -> None:
+        from trainingsapp.ui.views.kurs_bearbeiten import kurs_anlegen
+
+        neu = kurs_anlegen(state)
+        await page.push_route(f"/kurse/{neu.id}/bearbeiten")
+
+    anlegen_knopf = ft.Container(
+        padding=ft.Padding.only(left=8, top=4),
+        content=ft.Row(
+            controls=[
+                ft.TextButton(
+                    "Kurs anlegen", icon=ft.Icons.ADD, on_click=anlegen, data="kurs_anlegen"
+                )
+            ]
+        ),
+    )
     if not kurse:
-        return ft.Container(
-            padding=24,
-            content=ft.Text(
-                "Noch kein Kurs. Kurse kommen mit Übungspaketen — ein Kurs führt dich "
-                "Kapitel für Kapitel durch ein Thema.",
-                opacity=0.7,
-            ),
+        return ft.Column(
+            controls=[
+                ft.Container(
+                    padding=24,
+                    content=ft.Text(
+                        "Noch kein Kurs. Kurse kommen mit Übungspaketen — ein Kurs führt dich "
+                        "Kapitel für Kapitel durch ein Thema.",
+                        opacity=0.7,
+                    ),
+                ),
+                anlegen_knopf,
+            ]
         )
     erklaerung = ft.Container(
         padding=ft.Padding.only(left=16, right=16, top=10, bottom=4),
@@ -134,7 +156,7 @@ def kurse_liste(page: ft.Page, state: AppState) -> ft.Control:
     liste = ft.ListView(
         expand=True,
         padding=ft.Padding.only(bottom=88),
-        controls=[erklaerung, *[zeile(k) for k in kurse]],
+        controls=[erklaerung, *[zeile(k) for k in kurse], anlegen_knopf],
     )
     return scroll_merken(page, state, "uebungen_kurse", liste)
 
@@ -281,6 +303,35 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
         kopf.append(hinweis("Alle Kapitel sind offen — die Reihenfolge ist ein Vorschlag."))
 
     aktionen: list[ft.Control] = []
+
+    async def bearbeiten(_e: object = None) -> None:
+        await page.push_route(f"{route}/bearbeiten")
+
+    async def kopieren(_e: object = None) -> None:
+        from trainingsapp.ui.views.kurs_bearbeiten import kurs_kopieren
+
+        kopie = kurs_kopieren(state, kurs)
+        melden("Kopie angelegt — ein eigener Kurs, den du ändern kannst")
+        await page.push_route(f"/kurse/{kopie.id}/bearbeiten")
+
+    if kurs.package_id is None:  # eigene Kurse lassen sich bearbeiten (Ben, 12.11.2026)
+        aktionen.append(
+            ft.IconButton(
+                ft.Icons.EDIT_OUTLINED,
+                tooltip="Kurs bearbeiten",
+                on_click=bearbeiten,
+                data="kurs_bearbeiten",
+            )
+        )
+    else:
+        aktionen.append(
+            ft.IconButton(
+                ft.Icons.COPY_ALL_OUTLINED,
+                tooltip="Als eigenen Kurs kopieren — die Kopie lässt sich bearbeiten",
+                on_click=kopieren,
+                data="kurs_kopieren",
+            )
+        )
     if begonnen(staende):
         aktionen.append(
             ft.PopupMenuButton(
@@ -416,12 +467,45 @@ def kapitel_view(
         ft.Text(f"Kapitel {nummer} von {len(kurs.kapitel)}", size=12, opacity=0.6),
         ft.Text(kapitel.titel, size=22, weight=ft.FontWeight.BOLD),
     ]
-    if kapitel.text.strip():
-        # Bilder laden erst nach Einschalten (S2) — bis dahin sind sie Links
-        text = kapitel.text if state.kapitel_bilder() else bilder_zu_links(kapitel.text)
-        bloecke.append(ft.Markdown(text, selectable=True, on_tap_link=link))
 
-    if medien := [m for m in kapitel.media if m.uri]:
+    def markdown(roh: str) -> ft.Control:
+        # Bilder laden erst nach Einschalten (S2) — bis dahin sind sie Links
+        text = roh if state.kapitel_bilder() else bilder_zu_links(roh)
+        return ft.Markdown(text, selectable=True, on_tap_link=link)
+
+    if kapitel.bloecke:
+        # Die Seite als Folge von Blöcken (Ben, 12.11.2026): Text, Medium, Frage, Test, Auswahl
+        angelegt = bool(state.kurse.kapitel_plaene(kapitel.id, profil))
+        werte = (
+            state.kurse.testwerte(kapitel, profil, stand_hier.erreicht)
+            if stand_hier is not None
+            else {}
+        )
+
+        def plan_anlegen(wahl: Mapping[str, Sequence[str]]) -> None:
+            state.kurse.plaene_anlegen(kapitel, profil, werte, wahl)
+            melden("Plan angelegt — er steht auf „Heute“")
+            state.neu_zeichnen()
+
+        bloecke.extend(
+            kapitel_bloecke(
+                page,
+                state,
+                kapitel.bloecke,
+                katalog=katalog,
+                werte=werte,
+                angelegt=angelegt,
+                offen=s in (AKTUELL, OFFEN),
+                browser=browser,
+                text_bauen=markdown,
+                zur_uebung=lambda uid: _oeffner(page, f"/uebung/{uid}"),
+                anlegen=plan_anlegen,
+            ).controls
+        )
+    elif kapitel.text.strip():
+        bloecke.append(markdown(kapitel.text))
+
+    if not kapitel.bloecke and (medien := [m for m in kapitel.media if m.uri]):
         bloecke.append(
             karte(
                 titel("Zum Ansehen und Anhören"),
@@ -454,8 +538,12 @@ def kapitel_view(
                     content_padding=ft.Padding.only(left=0, right=0),
                 )
             )
-        if not plaene:  # noch nicht erreicht (gesperrt): nur die Namen
+        if not plaene:  # noch nicht erreicht (gesperrt) oder noch nicht angelegt: nur die Namen
             zeilen = [ft.Text("  ·  ".join(v.name for v in kapitel.plaene), opacity=0.7)]
+            if kapitel.braucht_eingabe and s in (AKTUELL, OFFEN):
+                zeilen.append(
+                    hinweis("Entsteht mit „Plan anlegen“ aus deinem Test und deiner Wahl.")
+                )
         bloecke.append(
             karte(
                 titel("Pläne dieses Kapitels"),

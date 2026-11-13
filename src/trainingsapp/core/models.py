@@ -126,6 +126,31 @@ class Media:
     uri: str = ""
     title: str = ""
     license: str = ""
+    #: Wozu das Stück beim Üben dient (Ben, 12.11.2026, `core.material`): leer = **Erklärung**
+    #: (ansehen, abhaken), ``"begleitung"`` = läuft beim Üben mit, die Uhr läuft weiter
+    rolle: str = ""
+    #: Eine Erklärung beim ersten Mal von selbst zeigen — bis sie als gesehen abgehakt ist
+    zeigen: bool = False
+    #: Die Adresse (``uri``) eines Stücks der Übung, das dieses hier ersetzt — an einer
+    #: Planübung oder in einer Ergänzung; das ersetzte wird nicht mehr angeboten
+    ersetzt: str = ""
+
+    def zusatz(self) -> dict[str, Any]:
+        """Rolle, „von selbst zeigen“ und „ersetzt“ — nur, was gesetzt ist.
+
+        >>> Media(uri="https://x.org/v", rolle="begleitung").zusatz()
+        {'rolle': 'begleitung'}
+        >>> Media(uri="https://x.org/v", zeigen=True, ersetzt="https://x.org/alt").zusatz()
+        {'zeigen': True, 'ersetzt': 'https://x.org/alt'}
+        """
+        d: dict[str, Any] = {}
+        if self.rolle:
+            d["rolle"] = self.rolle
+        if self.zeigen:
+            d["zeigen"] = True
+        if self.ersetzt:
+            d["ersetzt"] = self.ersetzt
+        return d
 
     def als_dict(self) -> dict[str, Any]:
         """Wie im Paket (`core.pakete.stand`): Art, Quelle, Adresse, Titel, Lizenz nur gesetzt.
@@ -141,7 +166,31 @@ class Media:
         }
         if self.license:
             d["license"] = self.license
+        d.update(self.zusatz())
         return d
+
+
+#: Die Rolle „läuft beim Üben mit“ (`Media.rolle`); leer = Erklärung
+BEGLEITUNG = "begleitung"
+
+
+def medien_zusatz(roh: Any) -> dict[str, Any]:
+    """Was `Media.zusatz` schreibt, als Argumente für `Media` — Unbekanntes fällt weg.
+
+    >>> medien_zusatz({"rolle": "begleitung", "zeigen": 1, "ersetzt": " https://x.org/alt "})
+    {'rolle': 'begleitung', 'zeigen': True, 'ersetzt': 'https://x.org/alt'}
+    >>> medien_zusatz({"rolle": "tanz"})
+    {'rolle': '', 'zeigen': False, 'ersetzt': ''}
+    """
+    hat = getattr(roh, "get", None)
+    if hat is None:
+        return {}
+    rolle = str(hat("rolle") or "")
+    return {
+        "rolle": rolle if rolle == BEGLEITUNG else "",
+        "zeigen": bool(hat("zeigen")),
+        "ersetzt": str(hat("ersetzt") or "").strip(),
+    }
 
 
 def medium_aus_dict(roh: Any) -> Media | None:
@@ -170,6 +219,7 @@ def medium_aus_dict(roh: Any) -> Media | None:
         uri=uri,
         title=str(roh.get("title") or ""),
         license=str(roh.get("license") or ""),
+        **medien_zusatz(roh),
     )
 
 
@@ -508,6 +558,9 @@ class Plan:
     #: Von welchem Kurskapitel der Plan angelegt wurde (Migration 016, `core/kurse.py`);
     #: beim Abschluss des Kapitels wird er deaktiviert, nicht gelöscht. ``None`` = eigener Plan
     kurs_kapitel_id: str | None = None
+    #: Regel für den Vorschlag nach der Belastung (Ben, 12.11.2026, `core.anpassung.Regel.
+    #: als_dict`) — ``None`` = keine. Kommt aus dem Kurs oder Paket
+    anpassung: dict[str, Any] | None = None
     #: „Timer für alle Übungen“ (Migration 020): ein `core.timer.TimerProfil.als_dict`
     timer: dict[str, Any] | None = None
     #: Nach dem Timer einer Übung automatisch weiter — sonst auf einen Tipp warten
@@ -627,6 +680,7 @@ class Strecke:
 
 
 __all__ = [
+    "BEGLEITUNG",
     "Exercise",
     "HrvRecording",
     "HrvTitel",

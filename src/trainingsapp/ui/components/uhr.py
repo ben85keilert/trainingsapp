@@ -357,6 +357,12 @@ def uhr_teile(
 
     def starten(profil: TimerProfil) -> Callable[[], None]:
         def handler() -> None:
+            # Eine Erklärung, die sich beim ersten Mal von selbst zeigt (P200): erst das
+            # Blatt, die Uhr startet beim nächsten ▶
+            from trainingsapp.ui.components import material
+
+            if material.neu_zeigen(page, state, uebung, item):
+                return
             # „Zuletzt gestartet“ nur, wenn es **nicht** die eingestellte Uhr ist: Wer die
             # Einstellung startet, folgt ihr weiter — ändert sich der Timer danach im Editor,
             # in „Übung bearbeiten“ oder über „Zuordnen“, startet ▶ den neuen (N55)

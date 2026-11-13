@@ -149,6 +149,7 @@ from trainingsapp.ui.views.geraeteprobe import ROUTE as PROBE_ROUTE
 from trainingsapp.ui.views.geraeteprobe import geraeteprobe_view
 from trainingsapp.ui.views.gps_test import gps_test_view
 from trainingsapp.ui.views.heute import heute
+from trainingsapp.ui.views.kurs_bearbeiten import kapitel_bearbeiten, kurs_bearbeiten
 from trainingsapp.ui.views.kurse import kapitel_view, kurs_view
 from trainingsapp.ui.views.leistungen import leistungen_view
 from trainingsapp.ui.views.live_vollbild import live_vollbild_view
@@ -1129,8 +1130,15 @@ def main(page: ft.Page) -> None:
         elif teile[:1] == ["kurse"] and len(teile) >= 2:
             if (kurs := state.kurse.laden(teile[1])) is not None:
                 ablegen(lambda: kurs_view(page, state, kurs))
-                if len(teile) >= 3 and (kapitel := kurs.kapitel_mit(teile[2])) is not None:
-                    ablegen(lambda: kapitel_view(page, state, kurs, kapitel, browser))
+                eigen = kurs.package_id is None  # nur eigene Kurse lassen sich bearbeiten
+                if teile[2:] == ["bearbeiten"] and eigen:
+                    ablegen(lambda: kurs_bearbeiten(page, state, kurs))
+                elif len(teile) >= 3 and (kapitel := kurs.kapitel_mit(teile[2])) is not None:
+                    if teile[3:] == ["bearbeiten"] and eigen:
+                        ablegen(lambda: kurs_bearbeiten(page, state, kurs))
+                        ablegen(lambda: kapitel_bearbeiten(page, state, kurs, kapitel))
+                    else:
+                        ablegen(lambda: kapitel_view(page, state, kurs, kapitel, browser))
         elif teile[:1] == ["live"]:
             ablegen(lambda: live_vollbild_view(page, state))
         elif teile[:1] == [PROBE_ROUTE.strip("/")]:

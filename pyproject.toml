@@ -208,17 +208,13 @@ fullBackupOnly = "true"
 NSCameraUsageDescription = "Fotos und Videos deiner Übungsausführung aufnehmen — sie bleiben auf diesem Gerät."
 NSMicrophoneUsageDescription = "Ton für Videos und Audioaufnahmen zu deinen Übungen und deinem Tag — sie bleiben auf diesem Gerät."
 
-# Die Flet-Vorlage 1.0.3 zwingt jni auf 1.0.0; jni_flutter 1.0.4+1 (über
-# path_provider_android 2.3.1) verlangt jni ^1.1.0 → „Constant evaluation error …
-# expect package:jni ^1.1.0“ beim Build. 1.0.3 passt zu jni 1.0.0 (gleiche Abhilfe
-# wie in praxis_mobil, 2026-10-06). Wegnehmen, sobald eine Flet-Vorlage jni ≥ 1.1 zulässt.
-# Die Vorlage 1.0.5 schreibt jni nicht mehr vor (13.11.2026, Vorlagen verglichen) — die
-# beiden Festlegungen bleiben, bis ein Build ohne sie geprüft ist.
-# Ebenso shared_preferences_android 2.5.0 (erschienen 17.10.2026, verlangt jni ^1.1.0 —
-# der Tag v0.2.2 scheiterte daran); 2.4.28 kommt ohne jni aus.
-[tool.flet.flutter.pubspec.dependency_overrides]
-jni_flutter = "1.0.3"
-shared_preferences_android = "2.4.28"
+# Bis 13.11.2026 standen hier zwei Festlegungen ([tool.flet.flutter.pubspec.dependency_overrides]:
+# jni_flutter 1.0.3, shared_preferences_android 2.4.28), weil die Flet-Vorlage 1.0.3 jni auf
+# 1.0.0 zwang und neuere Plugins jni ^1.1.0 verlangen („Constant evaluation error … expect
+# package:jni ^1.1.0“; der Tag v0.2.2 scheiterte daran). Die Vorlage 1.0.5 schreibt jni nicht
+# mehr vor; ein Probebau ohne beide lief durch (APK-Lauf 43522697024, Zweig
+# versuch/ohne-jni-overrides). Kommt der Fehler mit einer späteren Vorlage wieder: Abschnitt
+# wieder anlegen.
 
 # ---------------------------------------------------------------------------
 # Werkzeuge

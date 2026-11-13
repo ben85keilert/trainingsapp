@@ -401,9 +401,13 @@ def test_verlauf_tage_zeigt_zum_tag(page, state) -> None:
 
     f = _felder(state)
     state.tageswerte.hinzufuegen(f["ibu"], state.heute(), _um(state, 0, 1), wert=1, variante="400")
+    state.tageswerte.einmal_setzen(f["essen"], state.heute(), note="Mittags Gemüse")
     state.verlauf_tab = 0
     texte = _texte(verlauf(page, state))
-    assert "ZUM TAG" in texte and "Ibu" in texte and "400 × 1" in texte
+    # „einmal am Tag“ und Texte oben im Block, „mehrmals“ nach der Uhr (Ben, 12.11.2026)
+    assert "ZUM TAG" in texte and "Ernährung" in texte
+    assert texte.index("ZUM TAG") < texte.index("Ernährung") < texte.index("Ibu")
+    assert "400 × 1" in texte and texte[texte.index("Ibu") - 1] == "00:01"
 
 
 def test_reiter_zum_tag(page, state) -> None:
@@ -448,7 +452,8 @@ def test_feldansicht_je_art(page, state, schluessel) -> None:
 
 def test_tagebuch_nur_texte_der_felder(page, state) -> None:
     """Nur selbst Geschriebenes (Ben, 12.11.2026): Werte stehen im Verlauf, nicht im Tagebuch."""
-    from trainingsapp.ui.views.tagebuch import NOTIZEN, UEBUNGEN, tagebuch
+    from trainingsapp.core.tagebuch import TAGESFELD
+    from trainingsapp.ui.views.tagebuch import tagebuch
 
     f = _felder(state)
     state.tageswerte.hinzufuegen(
@@ -458,16 +463,15 @@ def test_tagebuch_nur_texte_der_felder(page, state) -> None:
     texte = _texte(tagebuch(page, state))
     assert "nach dem Laufen" in texte and "Mittags Gemüse" in texte
     assert not any("×" in t for t in texte)  # keine Wertezeile („Ibu 400 × 1“)
-    # Ein Tag nur mit Werten erscheint nicht — auch nicht im Abschnitt „Notizen“
+    # Ein Tag nur mit Werten erscheint nicht
     gestern = state.heute() - timedelta(days=1)
     state.tageswerte.hinzufuegen(f["ibu"], gestern, _um(state, 0, 1, gestern), wert=1)
-    state.tagebuch_ordnung = NOTIZEN
+    assert not any(t.startswith("Gestern") for t in _texte(tagebuch(page, state)))
+    # Der Filter „Tagesfeld“ zeigt die Texte der Felder, mit dem Feld als Titel
+    state.tagebuch_filter.arten.add(TAGESFELD)
     texte = _texte(tagebuch(page, state))
-    assert not any("Ibu" in t for t in texte) and any(t.startswith("Keine Notizen") for t in texte)
-    state.tagebuch_ordnung = UEBUNGEN
-    texte = _texte(tagebuch(page, state))
-    assert "Ernährung" in texte and "Ibu" in texte
-    assert "Übungen" in texte and "Übungen · Felder" not in texte
+    assert "Ernährung" in texte and "Ibu 400" in texte and "Zum Tag" not in texte
+    state.tagebuch_filter.leeren()
 
 
 # ---------------------------------------------------------------------------
@@ -696,3 +700,28 @@ def test_festes_feld_behaelt_seine_art_auch_ohne_eintraege(page, state) -> None:
     knopf.on_click()
     assert "Die Art bleibt — das ist ein festes Feld der App." in _texte(ansicht)
     assert state.tagesfelder.laden(bd.id).art == tf.MESSWERT
+
+
+def test_buch_symbol_unter_heute_oeffnet_das_tagebuch(page, state) -> None:
+    """P196 (Ben, 12.11.2026: „a+b“): im Block „Zum Tag“ ein Buch-Symbol — ein Tipp vom
+    Startbildschirm öffnet Verlauf → Notizen mit der Schnellwahl „Tagebuch“."""
+    from trainingsapp.ui.components.zum_tag import zum_tag_block
+    from trainingsapp.ui.views.verlauf import TAGEBUCH
+
+    gezeichnet: list[int] = []
+    state.neu_zeichnen = lambda: gezeichnet.append(1)
+    state.tagebuch_suche = "alt"
+    block = zum_tag_block(page, state, state.heute(), [], [], auffrischen=lambda: None)
+    knopf = next(
+        x for x in _alle(block) if isinstance(x, ft.IconButton) and x.icon == ft.Icons.MENU_BOOK
+    )
+    asyncio.run(knopf.on_click())
+    fest = state.notiz_tags.sicherstellen(state.profil.id)
+    assert state.reiter == "verlauf" and state.verlauf_tab == TAGEBUCH
+    assert state.tagebuch_filter.ist_tagebuch(fest.id) and state.tagebuch_suche == ""
+    assert gezeichnet and not page.routen  # auf „Heute“: nur neu zeichnen
+    page.route = "/tag/2026-11-01"
+    asyncio.run(knopf.on_click())
+    assert page.routen[-1] == "/"  # von einem anderen Tag: zurück zur Hauptansicht
+    state.tagebuch_filter.leeren()
+    state.reiter = "heute"

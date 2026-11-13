@@ -3,16 +3,19 @@
 Drei Reiter:
 
 - **Tage**: oben eine Woche (‹ ›, auch wischen), unter jedem Tag Punkte für die Zahl der
-  Übungen, heute mit Ring. Ein Tipp auf einen Tag zeigt darunter seine Übungen —
-  zusammengefasst wie „Gemacht“ in der Tagesansicht: Wert, Sätze, Mini-Kurve.
-  „Tag öffnen“ führt in die Tagesansicht mit Plänen und Notizen.
+  Übungen, heute mit Ring. Ein Tipp auf einen Tag zeigt darunter den Tag **nach der Uhr**
+  (Ben, 12.11.2026, `docs/plan_notizen_reiter.md` §3): Übungen (Wert, Sätze, Mini-Kurve, ihr
+  Plan als Etikett), Tagesfelder „mehrmals“ an ihrer Uhrzeit, Workouts mit dem, was zu ihnen
+  eingetragen ist. Nur Zahlen — Geschriebenes steht im Reiter „Notizen“; hier trägt die Zeile
+  ein Notiz-Zeichen, und „n Notizen zum Tag“ springt dorthin. „Tag öffnen“ führt in die
+  Tagesansicht.
 - **Übungen**: alle Übungen, die zuletzt gemachten zuerst, mit Mini-Kurve, letztem Wert
   und Trend (Mittel der letzten vier Wochen gegen die vier davor); oben Suchfeld und
   Filter wie im Katalog (Typ · Region · Paket, `components/uebungsfilter.py` — Ben,
   12.11.2026: „einheitlich mit der übrigen Übungsauswahl“).
 
-- **Tagebuch** (Ben, 18.10.2026): alle Notizen — zum Tag, zum Plan, zur Übung — nach Tagen
-  (mit Wochenleiste, die beim Scrollen mitgeht) oder nach Übungen (`views/tagebuch.py`).
+- **Notizen** (Ben, 18.10.2026 als „Tagebuch“, seit 12.11.2026 „Notizen“): alles Geschriebene
+  nach Tagen, mit Suche, Filter und der Schnellwahl „Tagebuch“ (`views/tagebuch.py`).
 
 Eine Übung antippen öffnet `/verlauf/<kachel_id>` (`verlauf_kachel.py`): ihre Kurve und
 die Ergebnisse je Tag — jede Übung ist eine Kachel (`core/tagesbilanz`). Gerechnet wird in
@@ -33,13 +36,13 @@ import contextlib
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import flet as ft
 
 from trainingsapp.core import tagesfelder as tf
 from trainingsapp.core import varianten as var
-from trainingsapp.core.models import Exercise, SessionEntry
+from trainingsapp.core.models import Exercise, SessionEntry, lokaler_tag
 from trainingsapp.core.uebungsfilter import paket_wahl
 from trainingsapp.core.verlauf import (
     WOCHENTAGE,
@@ -55,6 +58,7 @@ from trainingsapp.core.verlauf import (
     trend,
     wochen_titel,
 )
+from trainingsapp.core.workout_eintrag import WorkoutZeile
 from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.uebungsfilter import FilterLeiste
@@ -62,6 +66,7 @@ from trainingsapp.ui.components.uebungszeile import abschnitt, grosser_wert, ueb
 from trainingsapp.ui.components.varianten import etikett as varianten_etikett
 from trainingsapp.ui.components.verlaufskurve import mini, mini_saeulen
 from trainingsapp.ui.components.wochenleiste import tageszelle
+from trainingsapp.ui.components.zeitstrahl import zeitpunkt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.tagebuch import tagebuch
 from trainingsapp.ui.views.ziele import tagesfeld_ziele, ziele_fuer
@@ -69,7 +74,7 @@ from trainingsapp.ui.views.ziele import tagesfeld_ziele, ziele_fuer
 #: So viele Werte zeigt eine Mini-Kurve
 MINI_WERTE = 8
 #: Die Reiter (`AppState.verlauf_tab`): 0 Tage, 1 Übungen, 2 Zum Tag (Tagesfelder, Ben
-#: 21.10.2026: „E1 gut“ — eigener Reiter), 3 Tagebuch
+#: 21.10.2026: „E1 gut“ — eigener Reiter), 3 Notizen (bis 12.11.2026 „Tagebuch“)
 ZUM_TAG, TAGEBUCH = 2, 3
 #: „13× in 6 Wochen“ — so weit zählt die Liste der Übungen zurück
 UEBUNGEN_WOCHEN = 6
@@ -89,6 +94,8 @@ class _Daten:
     #: Tagesfelder (auch ausgeschaltete und gelöschte) und alle ihre Werte bis heute
     felder: dict[str, tf.Tagesfeld] = field(default_factory=dict)
     werte: list[tf.Tageswert] = field(default_factory=list)
+    #: Workouts, zu denen etwas eingetragen ist (Anstrengung, Skala, Notiz)
+    workouts: list[WorkoutZeile] = field(default_factory=list)
 
 
 def _daten(state: AppState) -> _Daten:
@@ -103,6 +110,7 @@ def _daten(state: AppState) -> _Daten:
         {},
         {f.id: f for f in state.tagesfelder.alle(state.profil.id, mit_geloeschten=True)},
         state.tageswerte.zwischen(state.profil.id, None, heute),
+        state.einheiten.workout_zeilen(state.profil.id) if state.einheiten is not None else [],
     )
     for tag, e in eintraege:
         daten.je_kachel.setdefault(e.exercise_id, []).append((tag, e))
@@ -130,7 +138,7 @@ def _zeigen(control: ft.Control) -> None:
 
 
 def verlauf(page: ft.Page, state: AppState) -> ft.Control:
-    """Der Reiter „Verlauf“: Tage | Übungen | Zum Tag | Tagebuch."""
+    """Der Reiter „Verlauf“: Tage | Übungen | Zum Tag | Notizen."""
     #: die Daten dieses Aufbaus — gelesen beim ersten Bedarf, neu nur am nächsten Tag
     halter: list[_Daten] = []
 
@@ -172,7 +180,7 @@ def verlauf(page: ft.Page, state: AppState) -> ft.Control:
                         ft.Tab(label="Tage"),
                         ft.Tab(label="Übungen"),
                         ft.Tab(label="Zum Tag"),
-                        ft.Tab(label="Tagebuch"),
+                        ft.Tab(label="Notizen"),
                     ],
                 ),
                 inhalt,
@@ -365,19 +373,48 @@ def _tage_inhalt(
             ft.TextButton("Tag öffnen", on_click=_oeffner(page, f"/tag/{tag.isoformat()}")),
         ),
     ]
-    controls.extend(_tageswerte(page, state, daten, tag))
-    if not zeilen and not any(w.tag == tag for w in daten.werte):
+    werte_des_tags = [w for w in daten.werte if w.tag == tag]
+    workouts = [w for w in daten.workouts if lokaler_tag(w.beginn) == tag]
+    notizen = sum(1 for n in state.tagesnotizen.zum_tag(state.profil.id, tag) if n.text.strip())
+    if notizen:
+        controls.append(_notizen_zeile(state, tag, notizen))
+    # Ohne Uhrzeit oben: was „einmal am Tag“ gilt und die Texte der Felder
+    controls.extend(_tageswerte(page, daten, werte_des_tags, mehrmals=False))
+    if not zeilen and not werte_des_tags and not workouts and not notizen:
         controls.append(
             ft.Container(
                 padding=ft.Padding.only(left=4, top=4),
                 content=ft.Text("An diesem Tag ist nichts eingetragen.", opacity=0.7),
             )
         )
+    #: der Tag nach der Uhr: (Zeit, Zeile) — Übungen, Tagesfelder „mehrmals“, Workouts
+    nach_uhr: list[tuple[datetime | None, ft.Control]] = []
+    plan_namen: dict[str, str] = {}
+
+    def plan_von(e: SessionEntry) -> str:
+        """Der Name des Plans, in dem der Eintrag gemacht wurde — leer ohne Plan."""
+        if e.session_id not in plan_namen:
+            session = state.sitzungen.session_laden(e.session_id)
+            plan = (
+                state.plaene.laden(session.plan_id, mit_geloeschten=True)
+                if session is not None and session.plan_id
+                else None
+            )
+            plan_namen[e.session_id] = plan.name if plan is not None else ""
+        return plan_namen[e.session_id]
+
     for z in zeilen:
         uebung = daten.katalog.get(z.kachel_id)
+        eigene = [
+            e
+            for e in eintraege_des_tags
+            if e.exercise_id == z.kachel_id and var.von(e.result) == z.variante
+        ]
         unter: list[ft.Control] = [ft.Text(z.zeile, size=12, opacity=0.75)]
         if z.zusatz:
             unter.append(ft.Text(z.zusatz, size=11, opacity=0.6))
+        if any(e.note.strip() for e in eigene):
+            unter.append(_notiz_zeichen("Notiz dazu im Reiter „Notizen“"))
         rechts: list[ft.Control] = []
         if z.kennzahl is not None and z.wert is not None:
             # Die Mini-Kurve dieser Variante — 400 kurze sind etwas anderes als 400 lange
@@ -388,28 +425,49 @@ def _tage_inhalt(
             ]
             werte = [w for _, w in tageswerte(bisher, z.kennzahl)][-MINI_WERTE:]
             rechts = [grosser_wert(z.kennzahl.text(z.wert), z.kennzahl.einheit), mini(werte)]
-        controls.append(
-            uebungszeile(
-                symbol_key=uebung.icon_key if uebung else None,
-                titel=uebung.name if uebung else "?",
-                unter=unter,
-                rechts=rechts,
-                on_click=None,
-                variante=_schild(uebung, z.variante),
-                # Tipp = Kurve; Symbol oder Gedrückthalten = alle Wege (Ben, 28.10.2026)
-                ziel=zl.Ziel(zl.VERLAUF, _oeffner(page, f"/verlauf/{z.kachel_id}")),
-                weitere=ziele_fuer(
-                    page,
-                    state,
-                    z.kachel_id,
-                    tag=tag,
-                    hier={zl.VERLAUF},
-                    danach=state.neu_zeichnen,  # das Blatt ändert Einträge: neu lesen
+        plaene = list(dict.fromkeys(name for e in eigene if (name := plan_von(e))))
+        nach_uhr.append(
+            (
+                min((e.started_at for e in eigene if e.started_at), default=None),
+                uebungszeile(
+                    symbol_key=uebung.icon_key if uebung else None,
+                    titel=uebung.name if uebung else "?",
+                    unter=unter,
+                    rechts=rechts,
+                    on_click=None,
+                    etiketten=plaene,
+                    variante=_schild(uebung, z.variante),
+                    # Tipp = Kurve; Symbol oder Gedrückthalten = alle Wege (Ben, 28.10.2026)
+                    ziel=zl.Ziel(zl.VERLAUF, _oeffner(page, f"/verlauf/{z.kachel_id}")),
+                    weitere=ziele_fuer(
+                        page,
+                        state,
+                        z.kachel_id,
+                        tag=tag,
+                        hier={zl.VERLAUF},
+                        danach=state.neu_zeichnen,  # das Blatt ändert Einträge: neu lesen
+                    ),
+                    page=page,
+                    blatt_untertitel=f"{tag:%d.%m.%Y}",
                 ),
-                page=page,
-                blatt_untertitel=f"{tag:%d.%m.%Y}",
             )
         )
+    for _feld, eigene_werte, zeile in _feldzeilen(page, daten, werte_des_tags, mehrmals=True):
+        karte = ft.Container(
+            bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST, border_radius=14, content=zeile
+        )
+        nach_uhr.append((min(w.zeit for w in eigene_werte), karte))
+    nach_uhr.extend((w.beginn, _workout_zeile(page, w)) for w in workouts)
+    nach_uhr.sort(key=lambda x: (x[0] is None, x[0].timestamp() if x[0] else 0.0))
+    controls.append(
+        ft.Column(
+            spacing=0,
+            controls=[
+                zeitpunkt(f"{zeit.astimezone():%H:%M}" if zeit is not None else "", zeile)
+                for zeit, zeile in nach_uhr
+            ],
+        )
+    )
     if any(z.kennzahl is not None for z in zeilen):
         controls.append(
             ft.Text(
@@ -422,19 +480,81 @@ def _tage_inhalt(
     return controls
 
 
-def _tageswerte(page: ft.Page, state: AppState, daten: _Daten, tag: date) -> list[ft.Control]:
-    """Reiter „Tage“: die Tagesfelder des gewählten Tags über den Übungen (Skizze C1) — je
-    Feld eine Zeile; antippen öffnet das Feld im Verlauf."""
-    werte = [w for w in daten.werte if w.tag == tag]
-    if not werte:
-        return []
-    zeilen: list[ft.Control] = []
+def _notiz_zeichen(hinweis: str) -> ft.Control:
+    """Das Zeichen „hierzu ist etwas geschrieben“ — der Text selbst steht in „Notizen“."""
+    return ft.Icon(ft.Icons.EDIT_NOTE, size=16, opacity=0.6, tooltip=hinweis)
+
+
+def _notizen_zeile(state: AppState, tag: date, anzahl: int) -> ft.Control:
+    """„2 Notizen zum Tag“ — der Tipp öffnet den Reiter „Notizen“ an diesem Tag."""
+
+    def oeffnen() -> None:
+        state.verlauf_tab = TAGEBUCH
+        state.tagebuch_filter.leeren()
+        state.tagebuch_suche = ""
+        state.tagebuch_sprung = tag
+        state.neu_zeichnen()
+
+    return ft.Container(
+        ink=True,
+        on_click=oeffnen,
+        border_radius=10,
+        padding=ft.Padding.symmetric(horizontal=12, vertical=7),
+        content=ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Icon(ft.Icons.EDIT_NOTE, size=18, opacity=0.7),
+                ft.Text(
+                    "1 Notiz zum Tag" if anzahl == 1 else f"{anzahl} Notizen zum Tag",
+                    size=13,
+                    expand=True,
+                ),
+                ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, opacity=0.6),
+            ],
+        ),
+    )
+
+
+def _workout_zeile(page: ft.Page, w: WorkoutZeile) -> ft.Control:
+    """Ein Workout des Tags mit dem, was zu ihm eingetragen ist — der Tipp öffnet den
+    Workout-Eintrag (dort „Alle Durchläufe“). Seit 12.11.2026 der Ort für Workouts ohne
+    Notiz, die nicht mehr im Reiter „Notizen“ stehen."""
+    teile: list[ft.Control] = [ft.Text(f"Workout {w.name}".strip(), size=15)]
+    if text := w.werte.werte_text():
+        teile.append(ft.Text(text, size=12, opacity=0.75))
+    return ft.Container(
+        bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,
+        border_radius=14,
+        ink=True,
+        on_click=_oeffner(page, f"/workout/{w.einheit_id}"),
+        padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+        content=ft.Row(
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Icon(ft.Icons.PLAYLIST_PLAY, size=22, opacity=0.8),
+                ft.Column(spacing=0, tight=True, expand=True, controls=teile),
+                *([_notiz_zeichen("Notiz zum Workout")] if w.werte.note.strip() else []),
+                ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, opacity=0.6),
+            ],
+        ),
+    )
+
+
+def _feldzeilen(
+    page: ft.Page, daten: _Daten, werte: list[tf.Tageswert], *, mehrmals: bool
+) -> list[tuple[tf.Tagesfeld, list[tf.Tageswert], ft.Control]]:
+    """Je Tagesfeld mit Werten an diesem Tag eine Zeile (Feld, seine Werte, die Zeile);
+    antippen öffnet das Feld im Verlauf. ``mehrmals``: die Felder mit Uhrzeit (stehen in der
+    Liste nach der Uhr) — sonst die „einmal am Tag“ und die Texte (stehen oben)."""
+    zeilen: list[tuple[tf.Tagesfeld, list[tf.Tageswert], ft.Control]] = []
     for feld in daten.felder.values():
         eigene = [w for w in werte if w.feld_id == feld.id]
-        if not eigene:
+        ist_text = feld.art == tf.TEXT
+        if not eigene or (feld.mehrmals and not ist_text) != mehrmals:
             continue
         stand = tf.stand_text(feld, tf.tagesstand(feld, eigene))
-        ist_text = feld.art == tf.TEXT
         # Bis drei Uhrzeiten, sonst wie oft („6×“) — Trinken hat schnell ein Dutzend
         uhren = ""
         if feld.mehrmals and not ist_text:
@@ -444,39 +564,48 @@ def _tageswerte(page: ft.Page, state: AppState, daten: _Daten, tag: date) -> lis
                 if len(zeiten) <= 3
                 else f"{len(zeiten)}×"
             )
-        zeilen.append(
-            ft.Container(
-                ink=True,
-                on_click=_oeffner(page, f"/verlauf/tagesfeld/{feld.id}"),
-                border_radius=10,
-                padding=ft.Padding.symmetric(horizontal=12, vertical=7),
-                content=ft.Row(
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Column(
-                            spacing=0,
-                            tight=True,
-                            expand=True,
-                            controls=[
-                                ft.Text(feld.name, size=14),
-                                *(
-                                    [ft.Text(stand, size=12, opacity=0.75, max_lines=2)]
-                                    if ist_text
-                                    else []
-                                ),
-                            ],
-                        ),
-                        *([ft.Text(uhren, size=11, opacity=0.65)] if uhren else []),
-                        *(
-                            []
-                            if ist_text
-                            else [ft.Text(stand, size=15, weight=ft.FontWeight.W_700)]
-                        ),
-                    ],
-                ),
-            )
+            if len(zeiten) == 1:
+                uhren = ""  # die eine Uhrzeit steht schon links am Zeitstrahl
+        zeile = ft.Container(
+            ink=True,
+            on_click=_oeffner(page, f"/verlauf/tagesfeld/{feld.id}"),
+            border_radius=10,
+            padding=ft.Padding.symmetric(horizontal=12, vertical=7),
+            content=ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Column(
+                        spacing=0,
+                        tight=True,
+                        expand=True,
+                        controls=[
+                            ft.Text(feld.name, size=14),
+                            *(
+                                [ft.Text(stand, size=12, opacity=0.75, max_lines=2)]
+                                if ist_text
+                                else []
+                            ),
+                        ],
+                    ),
+                    *([ft.Text(uhren, size=11, opacity=0.65)] if uhren else []),
+                    *([] if ist_text else [ft.Text(stand, size=15, weight=ft.FontWeight.W_700)]),
+                ],
+            ),
         )
+        zeilen.append((feld, eigene, zeile))
+    return zeilen
+
+
+def _tageswerte(
+    page: ft.Page, daten: _Daten, werte: list[tf.Tageswert], *, mehrmals: bool
+) -> list[ft.Control]:
+    """Reiter „Tage“: die Tagesfelder ohne Uhrzeit als Block „Zum Tag“ über dem Tag (Skizze
+    C1) — je Feld eine Zeile. Ein Feld mit Notiz am Wert trägt das Notiz-Zeichen nicht: Der
+    Text der Felder steht hier schon in der Zeile."""
+    zeilen = [zeile for *_, zeile in _feldzeilen(page, daten, werte, mehrmals=mehrmals)]
+    if not zeilen:
+        return []
     return [
         ft.Text("ZUM TAG", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
         ft.Container(

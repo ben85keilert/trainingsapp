@@ -262,8 +262,10 @@ CREATE INDEX idx_day_value_feld ON day_value(field_id, date)   WHERE deleted_at 
     Notizen werden auch Felder gelistet wie Medikamente usw. … Eigentlich sollten das nur
     Notizen und Anmerkungen sein, selbst geschriebener Text“): Werte ohne Notiz stehen
     nicht im Tagebuch, nur im Verlauf (Tage, Zum Tag).
-- „Nach Übungen“ bekommt je Tagesfeld eine Gruppe (das Segment heißt seit 12.11.2026 wieder
-  kurz „Übungen“ — mit „Übungen · Felder“ passte das Kalendersymbol nicht mehr in die Zeile).
+- ~~„Nach Übungen“ bekommt je Tagesfeld eine Gruppe.~~ Seit 12.11.2026
+  (`docs/plan_notizen_reiter.md`) gibt es nur eine Liste; die Texte der Felder findet der
+  Filter „Tagesfeld“ oder die Suche nach dem Feldnamen. Die **Werte** stehen in Verlauf →
+  „Tage“: „einmal am Tag“ oben im Block „Zum Tag“, „mehrmals“ nach der Uhr.
 - `zahl_je_tag` zählt Texte und Werte mit Notiz, nicht jeden Tipp auf „+1“.
 
 ## G. Zeitleiste

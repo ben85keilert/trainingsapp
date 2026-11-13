@@ -1,39 +1,38 @@
-"""Das Tagebuch — alle Notizen, nach Tagen oder nach Übungen (Ben, 18.10.2026).
+"""Die Notizen im Verlauf — alles Geschriebene, nach Tagen (Ben, 18.10.2026 als „Tagebuch“).
 
 Ben: „Der für mich wichtigste Teil fehlt, das Tagebuch. Hier wird geschrieben, diktiert,
-reflektiert …“ — als dritter Reiter im Verlauf. Das Tagebuch ist keine eigene Tabelle
-(Migration 003): Es fragt die drei Ebenen der Notizen ab — zum Tag (`day_note`), zum Plan
-an einem Tag (`session.note`) und zur Übung (`session_entry.note`) — und ordnet sie:
+reflektiert …“ Seit 12.11.2026 heißt der Reiter **„Notizen“** (Ben: „In den Notizen gibt es
+eine chronologische Abhandlung von allem, was geschrieben wurde. Mit den Filtern kann man sich
+da durcharbeiten.“, `docs/plan_notizen_reiter.md`); „Tagebuch“ sind die Notizen zum Tag mit
+dem festen Tag „Tagebuch“ — eine Schnellwahl des Filters (`Notizfilter.tagebuch`).
 
-- **nach Tagen** (`nach_tagen`): der neueste Tag oben; im Tag alles nach der Uhr (ein
-  Zeitstrahl wie die Zeitleiste auf „Heute“) — seit 2.11.2026 auch die Notizen zum Tag an
-  ihrer Uhrzeit, denn es sind mehrere je Tag (Ben: „mehrere erstellbar mit einem ‚+‘“), mit
-  Tags (`Notiz.tags`); `nur_tag` ist der dritte Abschnitt „Notizen“ mit Filter und Suche;
-- **nach Übungen** (`nach_uebungen`): je Übung und je Plan eine Gruppe, die zuletzt
-  beschriebene oben, darin die neueste Notiz zuerst; die Notizen zum Tag für sich.
+Keine eigene Tabelle (Migration 003): Abgefragt werden die Ebenen der Notizen — zum Tag
+(`day_note`), zum Plan an einem Tag (`session.note`), zur Übung (`session_entry.note`), zum
+Workout, zu Tagesfeldern — und geordnet **nach Tagen** (`nach_tagen`): der neueste Tag oben,
+im Tag alles nach der Uhr. Eine zweite Ordnung gibt es nicht mehr (bis 12.11.2026 „nach
+Übungen“); stattdessen filtert `filtern` nach Art, Notiz-Tags, Zeitraum, Plan und Übung und
+sucht in Text, Titel und Tags.
 
-Hier steht nur Ordnen; Lesen macht `data` (`SessionRepo.notizen`, `DayNoteRepo.alle`),
-Zeigen `ui/views/tagebuch.py`. **Aufnahmen** (Fotos und Videos an Einträgen, Ben
-19.10.2026, `core/anhaenge.py`) sind eine vierte Art: je Eintrag mit Anhängen eine
-Notiz der Art `AUFNAHME`, deren Text die Anzahl nennt — die Ansicht zeigt dafür die
-Frontbilder, nie ein laufendes Video. Nach Übungen geordnet stehen sie unter der Übung.
-Seit 22.10.2026 auch Audioaufnahmen, und Anhänge am Tag selbst (Notiz zum Tag): je Tag eine
-`AUFNAHME` ohne Übung, nach Übungen geordnet bei den Notizen zum Tag.
+Hier steht nur Ordnen und Filtern; Lesen macht `data` (`SessionRepo.notizen`,
+`DayNoteRepo.alle`), Zeigen `ui/views/tagebuch.py`. **Aufnahmen** (Fotos, Videos und Audio an
+Einträgen oder an einer Notiz zum Tag, `core/anhaenge.py`) sind eine eigene Art: je Eintrag
+bzw. Notiz mit Anhängen eine Notiz `AUFNAHME`, deren Text die Anzahl nennt — die Ansicht zeigt
+dafür die Frontbilder, nie ein laufendes Video; der Filter nennt sie „Anhänge“.
 
 **Nur selbst Geschriebenes** (Ben, 12.11.2026: „Eigentlich sollten das nur Notizen und
 Anmerkungen sein, selbst geschriebener Text aus den Tagen und zu den Übungen“): Was nur ein
 Wert ist, steht nicht im Tagebuch — die Werte der Tagesfelder („Ibu 400 × 2“) gehören in den
 Verlauf (Tage, Zum Tag), ein Workout nur mit Anstrengung auf seine Seite. Von den
 **Tagesfeldern** (`core/tagesfelder.py`) bleiben die Texte der Felder („Ernährung“) und die
-Notiz, die jemand zu einem Wert schreibt — Art `TAGESFELD`, nach der Uhr; nach Übungen
-geordnet hat jedes Tagesfeld seine Gruppe. Ein **Workout** steht da, wenn zu ihm eine Notiz
-geschrieben ist; seine Skalen stehen dann als Zeile darunter (`Notiz.werte`).
+Notiz, die jemand zu einem Wert schreibt — Art `TAGESFELD`, nach der Uhr. Ein **Workout**
+steht da, wenn zu ihm eine Notiz geschrieben ist; seine Skalen stehen dann als Zeile darunter
+(`Notiz.werte`).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from .anhaenge import AnhangMitBezug, zusammenfassung
@@ -93,16 +92,6 @@ class Tagesgruppe:
     """Ein Tag im Tagebuch: alles nach der Uhr (die Notizen zum Tag an ihrer)."""
 
     tag: date
-    notizen: tuple[Notiz, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class Gruppe:
-    """Eine Übung (oder ein Plan, oder „zum Tag“) mit ihren Notizen, die neueste zuerst."""
-
-    art: str
-    #: Übungs- bzw. Plan-ID; ``None`` für die Notizen zum Tag
-    schluessel: str | None
     notizen: tuple[Notiz, ...]
 
 
@@ -286,66 +275,187 @@ def sammeln(
     return ergebnis
 
 
-def nur_tag(notizen: Iterable[Notiz], tag_ids: Iterable[str] = (), suche: str = "") -> list[Notiz]:
-    """Der Abschnitt „Notizen“ (Ben, 2.11.2026): nur die Notizen zum Tag und die Aufnahmen an
-    ihnen. ``tag_ids`` filtert (ODER; `OHNE_TAG` = ohne Tag), ``suche`` verlangt jedes Wort
-    im Text oder in einem Tag-Namen — ohne Groß und klein (P102: „möglichst clever“).
-    Aufnahmen bleiben bei ihrer Notiz, wenn die durch den Filter kommt; die Aufnahme einer
-    Notiz ohne Text (nur Foto/Audio, N90) wird selbst gefiltert — nach ihren Tags.
+#: Zeiträume des Filters: Tage zurück (heute eingeschlossen) und ihr Text
+ZEITRAEUME: tuple[tuple[int, str], ...] = (
+    (7, "7 Tage"),
+    (28, "4 Wochen"),
+    (91, "3 Monate"),
+    (365, "1 Jahr"),
+)
+
+
+@dataclass(slots=True)
+class Notizfilter:
+    """Der Filter des Reiters „Notizen“; leer = alles. Liegt im `AppState` — die Wahl
+    übersteht den Wechsel der Ansicht (wer zuletzt im Tagebuch war, landet wieder dort).
+    Innerhalb eines Bereichs genügt ein Treffer, zwischen den Bereichen müssen alle passen.
+
+    >>> f = Notizfilter()
+    >>> f.tagebuch_setzen("tb")
+    >>> f.arten, f.tags, f.ist_tagebuch("tb"), f.leer
+    ({'tag'}, {'tb'}, True, False)
+    >>> f.leeren()
+    >>> f.leer, f.ist_tagebuch("tb")
+    (True, False)
+    """
+
+    #: `TAG`, `UEBUNG`, `PLAN`, `WORKOUT`, `TAGESFELD`, `AUFNAHME` (= „Anhänge“)
+    arten: set[str] = field(default_factory=set)
+    #: Notiz-Tags (IDs; `OHNE_TAG` = ohne) — gilt für Notizen zum Tag
+    tags: set[str] = field(default_factory=set)
+    #: höchstens ein Wert aus `ZEITRAEUME` (Tage zurück)
+    zeitraum: set[int] = field(default_factory=set)
+    plaene: set[str] = field(default_factory=set)
+    uebungen: set[str] = field(default_factory=set)
+
+    def _mengen(self) -> tuple[set, ...]:
+        return (self.arten, self.tags, self.zeitraum, self.plaene, self.uebungen)
+
+    @property
+    def leer(self) -> bool:
+        return not any(self._mengen())
+
+    def leeren(self) -> None:
+        """„Alles“ — kein Bereich schränkt mehr ein."""
+        for menge in self._mengen():
+            menge.clear()
+
+    def tagebuch_setzen(self, tag_id: str) -> None:
+        """Die Schnellwahl „Tagebuch“: nur Notizen zum Tag mit dem festen Tag."""
+        self.leeren()
+        self.arten.add(TAG)
+        self.tags.add(tag_id)
+
+    def ist_tagebuch(self, tag_id: str) -> bool:
+        return (
+            self.arten == {TAG}
+            and self.tags == {tag_id}
+            and not (self.zeitraum or self.plaene or self.uebungen)
+        )
+
+
+def filtern(
+    notizen: Iterable[Notiz],
+    f: Notizfilter,
+    suche: str = "",
+    *,
+    heute: date | None = None,
+    titel: Callable[[Notiz], str] = lambda n: n.titel,
+) -> list[Notiz]:
+    """Was durch Filter und Suche kommt, in der Reihenfolge von ``notizen``.
+
+    - **Art:** die Art der Notiz; eine Aufnahme zählt als „Anhänge“ (`AUFNAHME`) und zu dem,
+      woran sie hängt (Übung bzw. Notiz zum Tag).
+    - **Tags** gelten für Notizen zum Tag (und die Aufnahmen an ihnen) — wer nach einem Tag
+      filtert, sieht nur sie. `OHNE_TAG` = ohne Tag.
+    - **Zeitraum:** so viele Tage zurück ab ``heute``. **Plan**, **Übung:** der Bezug.
+    - **Suche:** jedes Wort muss vorkommen — im Text, im Titel (``titel``: Name der Übung,
+      des Plans, des Felds) oder in einem Tag-Namen, ohne Groß und klein. „1 Foto“ ist kein
+      Text der Person: Bei Aufnahmen zählen nur Titel und Tags.
+    - Die Aufnahme an einer Notiz zum Tag **mit Text** bleibt bei ihrer Notiz: Sie kommt
+      durch, wenn die Notiz durch Tags und Suche kommt (N90).
 
     >>> a = Notiz(date(2026, 10, 17), TAG, "Kniebeuge schwer", bezug_id="n1",
     ...           tag_ids=("k",), tags=("Kraft",))
     >>> b = Notiz(date(2026, 10, 17), TAG, "müde", bezug_id="n2")
-    >>> f = Notiz(date(2026, 10, 17), AUFNAHME, "1 Foto", bezug_id="n1", anhang_ids=("x",))
-    >>> p = Notiz(date(2026, 10, 17), PLAN, "zäh", plan_id="p")
-    >>> [n.text for n in nur_tag([a, b, f, p])]
-    ['Kniebeuge schwer', 'müde', '1 Foto']
-    >>> [n.text for n in nur_tag([a, b, f, p], ["k"])]
-    ['Kniebeuge schwer', '1 Foto']
-    >>> [n.text for n in nur_tag([a, b, f, p], [OHNE_TAG])]
-    ['müde']
-    >>> [n.text for n in nur_tag([a, b, f, p], suche="KRAFT schwer")]
-    ['Kniebeuge schwer', '1 Foto']
-    >>> nur_tag([a, b, f, p], suche="Gemüse")
+    >>> f = Notiz(date(2026, 10, 17), AUFNAHME, "1 Foto", bezug_id="n1", anhang_ids=("x",),
+    ...           tag_ids=("k",), tags=("Kraft",))
+    >>> p = Notiz(date(2026, 10, 10), PLAN, "zäh", plan_id="p")
+    >>> u = Notiz(date(2026, 10, 16), UEBUNG, "eng", exercise_id="kb", plan_id="p")
+    >>> alle = [a, b, f, p, u]
+    >>> def zeig(f=None, suche="", titel=lambda n: n.titel):
+    ...     return [n.text for n in filtern(alle, f or Notizfilter(), suche,
+    ...                                     heute=date(2026, 10, 17), titel=titel)]
+    >>> zeig()
+    ['Kniebeuge schwer', 'müde', '1 Foto', 'zäh', 'eng']
+    >>> zeig(Notizfilter(arten={TAG})), zeig(Notizfilter(arten={AUFNAHME}))
+    (['Kniebeuge schwer', 'müde', '1 Foto'], ['1 Foto'])
+    >>> zeig(Notizfilter(tags={"k"})), zeig(Notizfilter(tags={OHNE_TAG}))
+    (['Kniebeuge schwer', '1 Foto'], ['müde'])
+    >>> zeig(Notizfilter(zeitraum={7})), zeig(Notizfilter(plaene={"p"}))
+    (['Kniebeuge schwer', 'müde', '1 Foto', 'eng'], ['zäh', 'eng'])
+    >>> zeig(Notizfilter(uebungen={"kb"})), zeig(suche="KRAFT schwer")
+    (['eng'], ['Kniebeuge schwer', '1 Foto'])
+    >>> zeig(suche="knie", titel=lambda n: "Kniebeuge" if n.exercise_id == "kb" else "")
+    ['Kniebeuge schwer', '1 Foto', 'eng']
+    >>> zeig(suche="Gemüse")
     []
+
+    Die Aufnahme einer Notiz ohne Text (nur Foto/Audio) wird selbst gefiltert — nach ihren
+    Tags:
+
     >>> g = Notiz(date(2026, 10, 18), AUFNAHME, "1 Audioaufnahme", bezug_id="n3",
     ...           anhang_ids=("y",), tag_ids=("k",), tags=("Kraft",))
     >>> h = Notiz(date(2026, 10, 19), AUFNAHME, "1 Foto", bezug_id="n4", anhang_ids=("z",))
-    >>> [n.text for n in nur_tag([b, g, h], ["k"])]
+    >>> [n.text for n in filtern([b, g, h], Notizfilter(tags={"k"}))]
     ['1 Audioaufnahme']
-    >>> [n.text for n in nur_tag([b, g, h], suche="kraft")]
+    >>> [n.text for n in filtern([b, g, h], Notizfilter(), "kraft")]
     ['1 Audioaufnahme']
-    >>> [n.text for n in nur_tag([b, g, h], [OHNE_TAG])]
+    >>> [n.text for n in filtern([b, g, h], Notizfilter(tags={OHNE_TAG}))]
     ['müde', '1 Foto']
     """
-    gewollt = set(tag_ids)
     woerter = [w.casefold() for w in suche.split()]
     alle = list(notizen)
-    bleibt: set[str | None] = set()
-    ergebnis: list[Notiz] = []
+    ab = heute - timedelta(days=max(f.zeitraum) - 1) if f.zeitraum and heute is not None else None
 
-    def passt(n: Notiz, text: str) -> bool:
-        if gewollt and not (set(n.tag_ids) & gewollt or (OHNE_TAG in gewollt and not n.tag_ids)):
+    def am_tag(n: Notiz) -> bool:
+        """Notiz zum Tag oder Aufnahme an ihr."""
+        return n.art == TAG or (n.art == AUFNAHME and not n.exercise_id)
+
+    def rahmen(n: Notiz) -> bool:
+        """Art, Zeitraum, Plan, Übung — alles außer Tags und Suche."""
+        if n.art == AUFNAHME:
+            eltern = UEBUNG if n.exercise_id else TAG
+            if f.arten and not ({AUFNAHME, eltern} & f.arten):
+                return False
+        elif f.arten and n.art not in f.arten:
             return False
-        heuhaufen = " ".join((text, *n.tags)).casefold()
+        if ab is not None and n.tag < ab:
+            return False
+        if f.plaene and n.plan_id not in f.plaene:
+            return False
+        return not f.uebungen or n.exercise_id in f.uebungen
+
+    def inhalt(n: Notiz, text: str) -> bool:
+        """Tags und Suche."""
+        if f.tags and not (
+            am_tag(n) and (set(n.tag_ids) & f.tags or (OHNE_TAG in f.tags and not n.tag_ids))
+        ):
+            return False
+        heuhaufen = " ".join((text, titel(n), *n.tags)).casefold()
         return all(w in heuhaufen for w in woerter)
 
-    mit_text = {n.bezug_id for n in alle if n.art == TAG}
+    #: Notizen zum Tag mit Text: kommt sie durch Tags und Suche?
+    mit_text = {n.bezug_id: inhalt(n, n.text) for n in alle if n.art == TAG}
+    ergebnis: list[Notiz] = []
     for n in alle:
-        if n.art == TAG and passt(n, n.text):
-            ergebnis.append(n)
-            bleibt.add(n.bezug_id)
-    for n in alle:
-        if n.art != AUFNAHME or n.exercise_id:
+        if not rahmen(n):
             continue
-        if n.bezug_id in mit_text:
-            if n.bezug_id in bleibt:
-                ergebnis.append(n)
-        # die Notiz hat keinen Text: ihre Aufnahme trägt die Tags (N90) — gesucht wird nur
-        # in den Tag-Namen, „1 Foto“ ist kein Text der Person
-        elif passt(n, ""):
+        if n.art == AUFNAHME and not n.exercise_id and n.bezug_id in mit_text:
+            passt = mit_text[n.bezug_id]
+        else:
+            passt = inhalt(n, "" if n.art == AUFNAHME else n.text)
+        if passt:
             ergebnis.append(n)
     return ergebnis
+
+
+def zuletzt(notizen: Iterable[Notiz], schluessel: Callable[[Notiz], str | None]) -> list[str]:
+    """Die Bezüge (Übung, Plan), zu denen etwas geschrieben ist — der zuletzt beschriebene
+    zuerst. Für die Bereiche „Übung“ und „Plan“ des Filters.
+
+    >>> n = [Notiz(date(2026, 10, 15), UEBUNG, "a", exercise_id="kb"),
+    ...      Notiz(date(2026, 10, 17), UEBUNG, "b", exercise_id="lgs"),
+    ...      Notiz(date(2026, 10, 16), TAG, "c")]
+    >>> zuletzt(n, lambda x: x.exercise_id)
+    ['lgs', 'kb']
+    """
+    juengste: dict[str, tuple[date, float]] = {}
+    for n in notizen:
+        k = schluessel(n)
+        if k:
+            juengste[k] = max(juengste.get(k, (date.min, 0.0)), (n.tag, n.sortierzeit()))
+    return sorted(juengste, key=lambda k: juengste[k], reverse=True)
 
 
 def _reihenfolge(liste: list[AnhangMitBezug]) -> tuple[str, ...]:
@@ -406,49 +516,6 @@ def nach_tagen(notizen: Iterable[Notiz]) -> list[Tagesgruppe]:
         Tagesgruppe(tag, tuple(sorted(je_tag[tag], key=lambda n: n.sortierzeit())))
         for tag in sorted(je_tag, reverse=True)
     ]
-
-
-def nach_uebungen(notizen: Iterable[Notiz]) -> list[Gruppe]:
-    """Je Übung und je Plan eine Gruppe, die zuletzt beschriebene oben; die Notizen zum Tag
-    zusammen am Ende.
-
-    >>> from datetime import UTC
-    >>> def n(tag, art, text, x=None):
-    ...     return Notiz(date(2026, 10, tag), art, text, datetime(2026, 10, tag, 8, tzinfo=UTC),
-    ...                  x if art == UEBUNG else None, x if art == PLAN else None)
-    >>> gruppen = nach_uebungen([n(15, UEBUNG, "eng", "kb"), n(17, UEBUNG, "besser", "kb"),
-    ...                          n(16, PLAN, "zäh", "p"), n(17, TAG, "müde")])
-    >>> [(g.art, g.schluessel, [x.text for x in g.notizen]) for g in gruppen]
-    [('uebung', 'kb', ['besser', 'eng']), ('plan', 'p', ['zäh']), ('tag', None, ['müde'])]
-    """
-    gruppen: dict[tuple[str, str | None], list[Notiz]] = {}
-    for x in notizen:
-        # Aufnahmen stehen unter ihrer Übung, zwischen deren Notizen — die am Tag bei den
-        # Notizen zum Tag
-        art = (UEBUNG if x.exercise_id else TAG) if x.art == AUFNAHME else x.art
-        schluessel = {
-            UEBUNG: x.exercise_id,
-            PLAN: x.plan_id,
-            TAGESFELD: x.feld_id,
-            WORKOUT: x.plan_id,
-        }.get(art)
-        gruppen.setdefault((art, schluessel), []).append(x)
-
-    def neueste(liste: list[Notiz]) -> tuple[date, float]:
-        return max((x.tag, x.sortierzeit()) for x in liste)
-
-    ergebnis = [
-        Gruppe(art, schluessel, tuple(sorted(liste, key=lambda x: (x.tag, x.sortierzeit()))[::-1]))
-        for (art, schluessel), liste in gruppen.items()
-        if art != TAG
-    ]
-    ergebnis.sort(key=lambda g: neueste(list(g.notizen)), reverse=True)
-    tag = gruppen.get((TAG, None))
-    if tag:
-        ergebnis.append(
-            Gruppe(TAG, None, tuple(sorted(tag, key=lambda x: (x.tag, x.sortierzeit()))[::-1]))
-        )
-    return ergebnis
 
 
 def zahl_je_tag(notizen: Iterable[Notiz]) -> dict[date, int]:
@@ -518,15 +585,16 @@ __all__ = [
     "TAGESFELD",
     "UEBUNG",
     "WORKOUT",
-    "Gruppe",
+    "ZEITRAEUME",
     "Notiz",
+    "Notizfilter",
     "Tagesgruppe",
+    "filtern",
     "nach_tagen",
-    "nach_uebungen",
     "naechster_tag_mit",
-    "nur_tag",
     "oben",
     "sammeln",
     "woche",
     "zahl_je_tag",
+    "zuletzt",
 ]

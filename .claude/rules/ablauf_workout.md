@@ -45,8 +45,8 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   Seite, Schlüssel `core.workout_eintrag.feld_key`, die Kopie der Felder am Eintrag hält auch
   entfernte lesbar). Die Seite hat dazu die HF-Kurve mit Schrittgrenzen (Thread, `hf_lesen`),
   den gegangenen Weg im Ablaufbild (nur mit Abzweig, eingeklappt; `Durchlauf.kanten`) und
-  `/workout/<einheit>/alle`; das Tagebuch zeigt Workouts mit Eintrag (`core.tagebuch.WORKOUT`,
-  `EinheitRepo.workout_zeilen`), die Zeitleiste klappt ältere Workout-Blöcke ein. **Ein Workout bleibt ein
+  `/workout/<einheit>/alle`; Verlauf → „Notizen“ zeigt Workouts **mit Notiz** (`core.tagebuch.WORKOUT`), Verlauf → „Tage“
+  jedes Workout mit Eintrag als Zeile nach der Uhr (`EinheitRepo.workout_zeilen`, Ben 12.11.2026), die Zeitleiste klappt ältere Workout-Blöcke ein. **Ein Workout bleibt ein
   Workout:** „Trainieren“ öffnet es immer als Workout (`uebungen.heute_trainieren` nimmt
   `plan_als_plan` zurück), die Liste gibt es nur von Hand.
 

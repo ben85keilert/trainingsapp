@@ -69,6 +69,7 @@ from trainingsapp.core.paketversion import AUTO, UPDATE_MODI
 from trainingsapp.core.sicherung import Sicherung
 from trainingsapp.core.sicherung import setzen as sicherung_setzen
 from trainingsapp.core.sicherung import stand as sicherung_stand
+from trainingsapp.core.tagebuch import Notizfilter
 from trainingsapp.core.tagesfelder import STANDARD_RUHEPULS as TF_RUHEPULS
 from trainingsapp.core.tagesfelder import standardfeld as tf_standardfeld
 from trainingsapp.core.takt import Takt, takte_lesen, takte_schreiben
@@ -306,16 +307,17 @@ class AppState:
     verlauf_tag: date | None = None
     verlauf_suche: str = ""
     verlauf_filter: Uebungsfilter = field(default_factory=Uebungsfilter)
-    #: Reiter „Tagebuch“ (Ben, 18.10.2026; Verlauf-Reiter 2): nach Tagen oder Übungen, mit
-    #: Wochenleiste, wie viele Tage mit Notizen gezeigt werden (`views/tagebuch.py`)
-    tagebuch_ordnung: str = "tage"
+    #: Reiter „Notizen“ im Verlauf (Ben, 18.10.2026 als „Tagebuch“; seit 12.11.2026 eine Liste
+    #: mit Suche und Filter, `views/tagebuch.py`): Wochenleiste an, wie viele Tage gezeigt
+    #: werden, Filter (`core.tagebuch.Notizfilter` — Schnellwahl „Tagebuch“) und Suchtext;
+    #: ``tagebuch_sprung``: der Tag, zu dem die Liste beim nächsten Aufbau springt (von „Tage“
+    #: her); welche Notiz in der Liste bearbeitet wird (``tag:<id>``, ``plan:<session>``,
+    #: ``neu``) und ihr Editor (überlebt den Neubau der Ansicht)
     tagebuch_kalender: bool = True
     tagebuch_anzahl: int = 0
-    #: Abschnitt „Notizen“ (Ben, 2.11.2026): Filter nach Tags (IDs, `core.tagebuch.OHNE_TAG`
-    #: = ohne), Suchtext; welche Notiz in der Liste bearbeitet wird (``tag:<id>``,
-    #: ``plan:<session>``, ``neu``) und ihr Editor (überlebt den Neubau der Ansicht)
-    tagebuch_tags: set[str] = field(default_factory=set)
+    tagebuch_filter: Notizfilter = field(default_factory=Notizfilter)
     tagebuch_suche: str = ""
+    tagebuch_sprung: date | None = None
     tagebuch_bearbeitet: str | None = None
     tagebuch_editor: Any = None
     #: Aufnahmen im Verlauf der Übung (`core.anhaenge.ZEITRAEUME`): gezeigter Zeitraum
@@ -794,7 +796,8 @@ class AppState:
         self.schreiben_beenden = None
         self.tagebuch_bearbeitet = None
         self.tagebuch_editor = None
-        self.tagebuch_tags = set()
+        self.tagebuch_filter.leeren()
+        self.tagebuch_sprung = None
         self.tagebuch_suche = ""
         self.heute_haelt = None
         self.plan_ziel = None

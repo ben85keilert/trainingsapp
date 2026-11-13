@@ -1,7 +1,7 @@
 # Plan: Verlauf → „Notizen“ statt „Tagebuch“, „Tage“ als Zeitleiste
 
-Stand: 12.11.2026 abends — **Entwurf, noch nichts gebaut.** Bens Antworten vom 12.11. sind
-eingearbeitet (§6); offen ist noch P196 (`docs/offene_fragen.md`).
+Stand: 12.11.2026 nachts — **gebaut** (Ben: „P196 a+b — setze alles um“), am Web-Foto bei
+412 px geprüft; Gerätetest T132. Abweichungen vom Entwurf stehen in §7.
 
 > Ben, 12.11.2026: „Der Oberreiter Tagebuch wird zu ‚Notizen‘. In den Notizen gibt es eine
 > chronologische Abhandlung von allem, was geschrieben wurde. Mit den Filtern kann man sich da
@@ -179,4 +179,37 @@ Jeder Schritt ist für sich lauffähig und einzeln zu committen.
   trägt.
 - **Lücke 3, Text am Foto** — bleibt beim Foto. Fotos sind über den Filter „Anhänge“ im
   Reiter „Notizen“ einsehbar (2.4).
+
+## 7. Gebaut am 12.11.2026 — und was anders wurde als im Entwurf
+
+- **Reiter „Notizen“** (`ui/views/tagebuch.py`, Kern `core/tagebuch.py`: `Notizfilter`,
+  `filtern`, `zuletzt`): eine Liste, Suchfeld (Text, Titel, Tags — füllt nur die Liste neu),
+  Filterknopf, Kalender, „+“; Schnellwahl „Tagebuch · Alles“; Labels. Das Filterblatt ist
+  die verallgemeinerte Übungsauswahl (`components/filterblatt.py`, `FilterLeiste` setzt
+  darauf auf): Art · Notiz-Tags · Zeitraum (eine Wahl) · Plan · Übung.
+- **P196 a + b:** die Chips im Kopf und das Buch-Symbol im Block „Zum Tag“
+  (`components/zum_tag.py`) — setzt die Schnellwahl und öffnet Verlauf → Notizen.
+- **„Notizen zu …“** steht im Blatt der Wege einer Karte als **letzter** Eintrag (die
+  gewohnten Wege behalten ihre Reihenfolge): Übung und Plan über den Filter, Tagesfeld über
+  die Suche nach seinem Namen.
+- **„Tage“ nach der Uhr** (`views/verlauf._tage_inhalt`): Übungen, Tagesfelder „mehrmals“,
+  Workouts mit Uhrzeit links; „einmal am Tag“ und Feldtexte oben im Block „Zum Tag“;
+  „n Notizen zum Tag“ springt in den Reiter „Notizen“ zu diesem Tag
+  (`AppState.tagebuch_sprung`).
+
+Abweichungen:
+
+1. **Die Datei heißt weiter `views/tagebuch.py`** (im Entwurf `notizen_verlauf.py`) — der
+   Umzug hätte nur Importe und Tests bewegt.
+2. **Plan als Etikett statt Planblock** in „Tage“: Die Übungszeile trägt den Plannamen wie
+   unter Heute in der Übersicht; ein eigener Block je Plan hätte die Zeilen mit Mini-Kurve
+   verschachtelt.
+3. **Bereich „Übung“ statt „Zuletzt gemacht“:** Er zeigt die zwölf Übungen, zu denen zuletzt
+   etwas **geschrieben** wurde (jüngste zuerst) — gerechnet aus den Notizen selbst; eine
+   Übung ohne Notiz wäre im Filter der Notizen ein leerer Treffer.
+4. **Gerechnet wird „Tage“ in der Ansicht**, nicht in einer neuen Funktion in
+   `core/verlauf.py`: Es ist nur Sortieren fertiger Zeilen nach ihrer Uhrzeit.
+5. Die Art heißt im Filter **„Anhänge“**; an der Karte steht weiter „Aufnahmen · …“.
+
+Offen: Notizen an GPS-Aufzeichnungen (A23), Gerätetest T132.
 

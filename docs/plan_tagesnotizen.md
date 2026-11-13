@@ -169,6 +169,11 @@ nicht angelegt bzw. gelöscht.
 
 ## E. Tagebuch (Punkt 3, 4, 5)
 
+> **Überholt in Teilen (12.11.2026, `docs/plan_notizen_reiter.md`):** Der Reiter heißt
+> „Notizen“ und hat keine Segmente mehr — E1 ist jetzt die Schnellwahl „Tagebuch · Alles“
+> mit Suche und Filterblatt (Notiz-Tags dort). E2 (Kürzen) und E3 (Bearbeiten in der Liste)
+> gelten weiter.
+
 **E1. Dritter Abschnitt „Notizen“** (`state.tagebuch_ordnung = "notizen"`, Konstante `NOTIZEN`):
 - Segment neben „Tage“ und „Übungen und Felder“. Drei Segmente müssen auf 360 px passen;
   sonst „Übungen · Felder“ kürzen (prüfen im Desktop-Vorschau bei 360 px Breite).

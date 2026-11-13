@@ -162,11 +162,32 @@ def zum_tag_block(
             ),
         )
 
+    async def tagebuch_oeffnen() -> None:
+        """Verlauf → Notizen mit der Schnellwahl „Tagebuch“ (Notizen zum Tag mit dem festen
+        Tag) — von der Tagesansicht eines anderen Tags über die Hauptansicht."""
+        fest = state.notiz_tags.sicherstellen(state.profil.id)
+        state.tagebuch_filter.tagebuch_setzen(fest.id)
+        state.tagebuch_suche = ""
+        state.scroll_offsets.pop("tagebuch", None)
+        state.reiter = "verlauf"
+        state.verlauf_tab = 3  # `views/verlauf.TAGEBUCH`
+        if getattr(page, "route", "/") not in ("", "/"):
+            await page.push_route("/")
+        else:
+            state.neu_zeichnen()
+
     inhalt: list[ft.Control] = [
         ft.Row(
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 ft.Text("Zum Tag", size=15, weight=ft.FontWeight.W_600, expand=True),
+                # Das Tagebuch mit einem Tipp vom Startbildschirm (Ben, 12.11.2026, P196)
+                ft.IconButton(
+                    ft.Icons.MENU_BOOK,
+                    tooltip="Tagebuch öffnen",
+                    icon_size=20,
+                    on_click=tagebuch_oeffnen,
+                ),
                 ft.IconButton(
                     ft.Icons.TUNE,
                     tooltip="Tagesfelder wählen",

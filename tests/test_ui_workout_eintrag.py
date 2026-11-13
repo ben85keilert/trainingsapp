@@ -412,3 +412,42 @@ def test_zeitleiste_klappt_aeltere_workouts_ein(page, state) -> None:
     )
     klappe.on_click(None)
     assert _texte(ansicht).count("Kniebeuge") == 2
+
+
+async def test_verlauf_tage_nach_der_uhr_mit_workout(page, state) -> None:
+    """Ben, 12.11.2026 (`docs/plan_notizen_reiter.md` §3): „Tage“ zeigt den Tag nach der Uhr —
+    die Übung mit ihrem Plan als Etikett, das Workout mit seiner Anstrengung (auch ohne Notiz:
+    dafür ist hier der Ort, im Reiter „Notizen“ steht es nicht mehr); Text steht hier nicht,
+    „n Notizen zum Tag“ springt in die Notizen."""
+    from trainingsapp.ui.views.tagebuch import tagebuch
+    from trainingsapp.ui.views.verlauf import TAGEBUCH, verlauf
+
+    plan = _plan(state, "kniebeuge", "wandsitz")
+    _workout(state, plan, "e-1", 60)
+    state.einheiten.workout_eintragen("e-1", result={"srpe": 6})
+    state.tagesnotizen.anlegen(state.profil.id, state.heute(), "Knie ruhig")
+    assert "Workout Beine" not in _texte(tagebuch(page, state))  # nur Zahl, kein Text
+    state.verlauf_tab = 0
+    ansicht = verlauf(page, state)
+    texte = _texte(ansicht)
+    assert "Kniebeuge" in texte and "Beine" in texte  # der Plan als Etikett
+    assert "Workout Beine" in texte and "Anstrengung 6" in texte
+    assert "Knie ruhig" not in texte and "1 Notiz zum Tag" in texte
+    uhr = [t for t in texte if len(t) == 5 and t[2] == ":" and t.replace(":", "").isdigit()]
+    assert len(uhr) >= 2 and uhr == sorted(uhr)  # nach der Uhr
+    zeile = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Container) and x.on_click and _texte(x)[:1] == ["Workout Beine"]
+    )
+    await zeile.on_click()
+    assert page.routen[-1] == "/workout/e-1"
+    sprung = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Container) and x.on_click and "1 Notiz zum Tag" in _texte(x)
+    )
+    sprung.on_click()
+    assert state.verlauf_tab == TAGEBUCH and state.tagebuch_sprung == state.heute()
+    state.verlauf_tab = 0
+    state.tagebuch_sprung = None

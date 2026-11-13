@@ -55,11 +55,33 @@ Der Patientenordner wird von `praxis_gui` abgeleitet, nicht gespeichert:
 <patienten_root>/<ID>_<Nachname>__<Vorname>/
 ```
 
-**Zeitstempel im Namen.** praxis_gui nimmt die *lokale* Uhrzeit beim *Stoppen*
-(`datetime.now()`), das Crash-Backup dagegen die UTC-Startzeit. Wir benennen
-Messdatei und Backup einheitlich nach der **UTC-Startzeit** (`Recording.dateiname()`).
-Erkannt wird eine Messung ausschließlich am Muster, nicht am Zeitpunkt — die
-Abweichung ist für praxis_gui folgenlos.
+**Zeitstempel im Namen: Ortszeit des Starts** (Ben, 13.11.2026). Messdatei, Crash-Backup
+und Streckendatei (`Bewegung/strecke_<ts>.jsonl`) tragen denselben Zeitstempel
+`JJJJ-MM-TT_HHMMSS` in der **Ortszeit des Geräts beim Start** — aus einer Funktion,
+`hrv_core.recording.dateistempel` (`Recording.dateiname()`, `Aufnahme.backup_name()`,
+`data.strecken.dateiname`). Das Beiwerk (`_analyzed`, `_ecg`, `_atem`, `_diagnose.txt`,
+`_mitschnitt.jsonl`, `__cNN`) erbt den Stamm der Messdatei.
+
+- **Warum:** Bis 0.3.91 hieß die Messung nach dem **UTC**-Start, die Strecke nach der
+  Ortszeit — ein Lauf von 15:05 Uhr lag als `strecke_…_150500.jsonl` neben seiner Messung
+  `sensor_…_140500.json`, und eine spätere Messung mit `…_15…` im Namen sah aus wie die
+  vom Lauf. Der Name ist für den Menschen, der in den Ordner schaut.
+- **Die genaue Zeit steht in der Datei:** `start_utc` (UTC) und `datum` (Ortsdatum). Nichts
+  liest die Zeit aus dem Namen; Einheit, Strecke und Sidecars verweisen über gespeicherte
+  Pfade bzw. den Stamm.
+- **Altdateien werden nicht umbenannt** — Messungen bis 0.3.91 tragen weiter UTC im Namen
+  (die Verweise aus Einheiten und Strecken blieben sonst hängen). Um den Tag der Umstellung
+  und in der doppelten Stunde am Ende der Sommerzeit sortieren Namen deshalb nicht streng
+  nach der Zeit; zwei Starts mit gleichem Namen bekommen `_1` (`freier_pfad`).
+- **praxis_gui** benennt seit demselben Tag ebenso: eigener Schreiber, aber der Stempel
+  kommt aus `hrv_core.recording.dateistempel` (Messdatei, Backup, wiederhergestelltes
+  Backup, Sitzungskennung, Generator; davor vom 16.10.2026 an UTC-Start, noch früher die
+  lokale Uhrzeit beim Stoppen). Die Uhrzeit im Titel des Doku-Eintrags liest praxis_gui aus
+  `start_utc`, nicht aus dem Namen — eine ältere Datei von uns mit UTC-Namen bekommt dort
+  trotzdem die richtige Uhrzeit. Erkannt wird eine Messung ausschließlich am Muster, nicht
+  am Zeitpunkt (hrv-core `docs/OFFENE_PUNKTE.md` F24).
+- **Nicht umgestellt:** der Ordner der Geräteprobe `Diagnose/<UTC-Start>_<Modell>/`
+  (`devices/erkundung.py`) — keine Messung, kein Gegenstück in `Bewegung/`.
 
 ### Dateinamensmuster
 
@@ -584,7 +606,7 @@ Während der Aufnahme legt praxis_gui **alle 15 s** eine Sicherung im selben
 Ordner ab wie die spätere Messdatei:
 
 ```
-Messungen/<Geräteordner>/.backup_<YYYY-MM-DD>_<HHMMSS>.json     # UTC-Startzeit
+Messungen/<Geräteordner>/.backup_<YYYY-MM-DD>_<HHMMSS>.json     # Start in Ortszeit, beide Apps (§2)
 ```
 
 - Inhalt bei praxis_gui: derselbe `raw-v1`-Kopf und dieselben `messungen`/`ppi_pakete` wie

@@ -82,7 +82,9 @@ Forschungsexport (`docs/plan_einheit.md` §8) gilt für das neue Format nicht me
 
 **Eine Dateikopie, kein Rechenformat.** Je Training eine `.jsonl` wie die Streckendatei
 der App (`data/strecken.py`: Kopfzeile, dann eine Zeile JSON je Ortung), im ZIP unter
-`Bewegung/<Name der Streckendatei>` — z. B. `Bewegung/strecke_2026-10-18_090507.jsonl`.
+`Bewegung/<Name der Streckendatei>` — z. B. `Bewegung/strecke_2026-10-18_090507.jsonl`
+(Zeitstempel: Ortszeit des Starts, derselbe wie in `sensor_<ts>.json` — seit 13.11.2026,
+`docs/kompatibilitaet.md` §2).
 Eigener Ordner neben `Messungen/`, damit weder praxis_gui noch `ist_messdatei()` sie je
 anfassen; die Messdateien bleiben byteidentisch (Kompatibilitätsvertrag).
 

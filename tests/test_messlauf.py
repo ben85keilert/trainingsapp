@@ -398,7 +398,9 @@ async def test_aufnahme_mit_vorgegebenem_nullpunkt_und_dateiname(tmp_path) -> No
     assert lauf.aufnahme is not None and lauf.aufnahme.start_mono == t0
     assert lauf.aufnahme.start_utc == utc and lauf.jetzt_s() >= 3.0
     datei = lauf.datei_relativ()
-    assert datei == "Generator/sensor_2026-10-17_080000.json"
+    # Zeitstempel im Namen: Ortszeit des Starts (kompatibilitaet.md §2, seit 13.11.2026) —
+    # in Berlin 10:00 Uhr, auf der CI (UTC) 08:00 Uhr
+    assert datei == f"Generator/sensor_{utc.astimezone():%Y-%m-%d_%H%M%S}.json"
     await _bis(lauf, 20)
     marke = {"quelle": "timer", "art": "abschnitt", "spur": "timer"}
     e = lauf.notiz_hinzufuegen("genau", bei=t0 + 10.0, marke=marke)

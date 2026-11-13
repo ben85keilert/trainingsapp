@@ -29,6 +29,8 @@ from types import TracebackType
 from typing import IO, Final
 from xml.sax.saxutils import escape, quoteattr
 
+from hrv_core.recording import dateistempel
+
 from trainingsapp.core.bewegung import FELDER
 from trainingsapp.core.strecke import Punkt, abstand_m
 
@@ -89,12 +91,20 @@ class StreckenSchreiber:
 
 
 def dateiname(start: datetime) -> str:
-    """Name der Datei eines Trainings — wie die Messdateien nach der Startzeit (lokal).
+    """Name der Datei eines Trainings: ``strecke_<Start in Ortszeit>.jsonl``.
 
-    >>> dateiname(datetime(2026, 10, 18, 9, 5, 7, tzinfo=UTC)).startswith("strecke_2026-10-18_")
+    Derselbe Zeitstempel wie die Messdatei ``sensor_<ts>.json`` — beide kommen aus
+    `hrv_core.recording.dateistempel` (Ortszeit; Ben, 13.11.2026: vorher trug die Messung
+    UTC und die Strecke Ortszeit). Die genaue Zeit steht im Kopf (``start_utc``).
+
+    >>> from hrv_core.recording import messdatei_name
+    >>> start = datetime(2026, 10, 18, 9, 5, 7, tzinfo=UTC)
+    >>> dateiname(start)[len("strecke_"):-len(".jsonl")] == dateistempel(start)
+    True
+    >>> dateiname(start)[len("strecke_"):-len(".jsonl")] == messdatei_name(start)[7:-5]
     True
     """
-    return f"strecke_{start.astimezone():%Y-%m-%d_%H%M%S}.jsonl"
+    return f"strecke_{dateistempel(start)}.jsonl"
 
 
 def jsonl_lesen(pfad: Path) -> list[Punkt]:

@@ -56,6 +56,8 @@ from trainingsapp.core.uebung_timer import (
     zaehlt_als,
 )
 from trainingsapp.ui.components.dialoge import Nachher, meldung, obersten_schliessen
+from trainingsapp.ui.components.gps_karte import SYMBOL as GPS_SYMBOL
+from trainingsapp.ui.components.gps_karte import gps_text
 from trainingsapp.ui.components.hilfe import text_dialog
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.medienliste import medium_zeile
@@ -224,6 +226,12 @@ def seitenhilfe(uebung: Exercise, item: PlanItem | None = None, *, stellungen: b
             "**Beschleunigungssensor** (Prototyp): Hat das verbundene Gerät einen, zählt er "
             "beim Üben mit — „Wdh. zählen“ startet, ±1 korrigiert."
         )
+    if uebung.gps.an:
+        teile.append(
+            "**GPS**: Die Übung steht unter „Messung“, Reiter „GPS“, zur Wahl; ein Training "
+            "dort wird bei ihr eingetragen. Rechenart und Tempo-Stufen stehen in „Übung "
+            "bearbeiten“, Reiter „Sensor“."
+        )
     teile += [
         "**In Plänen**: wo die Übung steht — „nur hier“ heißt, der Plan stellt etwas anders "
         "ein als die Übung; ein Tipp öffnet „Im Plan einstellen“. In einen Plan kommt sie über "
@@ -279,6 +287,15 @@ def beschleunigung_zeile(uebung: Exercise, item: PlanItem | None = None) -> ft.C
     if paar is None:
         return None
     return _uhr_zeile(ft.Icons.SENSORS, *paar)
+
+
+def gps_zeile(uebung: Exercise) -> ft.Control | None:
+    """„Rechnet wie Gehen · Tempo-Stufen 3 · 4 · 5 · 6 km/h (mittel)“ (Ben, 13.11.2026,
+    ``docs/plan_gps.md`` §12) — ``None``, wenn GPS an der Übung aus ist."""
+    paar = gps_text(uebung.gps)
+    if paar is None:
+        return None
+    return _uhr_zeile(GPS_SYMBOL, *paar)
 
 
 def aufnahmen_liste(page: Any, state: AppState, uebung: Exercise) -> ft.Control | None:
@@ -740,6 +757,7 @@ def uebung_detail(
             if (zeile := beschleunigung_zeile(uebung, item)) is not None
             else []
         ),
+        *([_abschnitt("GPS", zeile)] if (zeile := gps_zeile(uebung)) is not None else []),
         _abschnitt("In Plänen", ft.Column(spacing=0, controls=verwendungen)),
         *(
             [_abschnitt("Aufnahmen mit dieser Übung", liste_hrv)]

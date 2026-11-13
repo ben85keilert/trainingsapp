@@ -80,7 +80,7 @@ def _ausdauer(state: Any) -> Laufend | None:
     teil = e.teil("gps") if e is not None else None
     if e is None or teil is None:
         return None
-    sport = SPORT_NAMEN.get(getattr(teil, "sportart", ""), "Training")
+    sport = getattr(teil, "name", "") or SPORT_NAMEN.get(getattr(teil, "sportart", ""), "Training")
     zeile = " · ".join(x for x in (lauftext(e, teil), einheit_ui.timer_text(e)) if x)
     seit = e.zeitbasis.anker_utc if e.zeitbasis is not None else None
     return Laufend(sport, zeile, f"{sport} {uhr(max(e.dauer_s(), 0.0))}", seit)

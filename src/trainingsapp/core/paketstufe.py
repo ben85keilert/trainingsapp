@@ -54,6 +54,7 @@ _KLEIN: Final = (
     "zaehlt_als",
     "beschleunigung",
     "takt",
+    "gps",
 )
 
 

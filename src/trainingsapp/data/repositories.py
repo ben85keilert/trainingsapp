@@ -31,6 +31,7 @@ from ..core import eintraege as offene
 from ..core import varianten
 from ..core.ablauf import Ablauf, folgt_der_liste, fuer_plan
 from ..core.bedingung import Bedingung
+from ..core.gps_wahl import GpsWahl
 from ..core.models import (
     EINGABE_CHIPS,
     EINGABE_HAKEN,
@@ -151,8 +152,8 @@ class ExerciseRepo:
                      is_builtin, result_spec_json, limit_spec_json,
                      default_target_json, default_input_mode, archived, created_at, updated_at,
                      default_fields_json, package_id, timer_json, clock_on,
-                     clock_counts_as, clock_counts, acc_json, takt_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
+                     clock_counts_as, clock_counts, acc_json, takt_json, gps_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
@@ -172,6 +173,7 @@ class ExerciseRepo:
                     clock_counts = excluded.clock_counts,
                     acc_json = excluded.acc_json,
                     takt_json = excluded.takt_json,
+                    gps_json = excluded.gps_json,
                     updated_at = excluded.updated_at,
                     revision = revision + 1
                 """,
@@ -197,6 +199,7 @@ class ExerciseRepo:
                     int(uebung.zeit_zaehlt),
                     json.dumps(uebung.beschleunigung.als_dict(), ensure_ascii=False),
                     json.dumps(uebung.takt.als_dict() if uebung.takt else {}, ensure_ascii=False),
+                    json.dumps(uebung.gps.als_dict(), ensure_ascii=False),
                 ),
             )
             # Medien: alle Verweise neu schreiben. Einfacher als Abgleich, und
@@ -549,6 +552,7 @@ class ExerciseRepo:
             zeit_zaehlt=bool(r["clock_counts"]),
             beschleunigung=SensorWahl.aus_dict(_json_lesen(r["acc_json"], {})),
             takt=Takt.aus_dict(_json_lesen(r["takt_json"], {})),
+            gps=GpsWahl.aus_dict(_json_lesen(r["gps_json"], {})),
         )
 
 
@@ -2077,12 +2081,15 @@ class SessionRepo:
             self._eintrag_schreiben(neu, ersetzt=alt.id)
         return neu
 
-    def eintrag_uebung_wechseln(self, alter_eintrag_id: str, uebung: Exercise) -> SessionEntry:
+    def eintrag_uebung_wechseln(
+        self, alter_eintrag_id: str, uebung: Exercise, result: dict[str, Any] | None = None
+    ) -> SessionEntry:
         """Denselben Eintrag einer anderen Übung zuordnen — als Korrektur (neuer Eintrag
-        mit Verweis), weil Einträge unveränderlich sind. Werte, Notiz und Zeiten bleiben;
-        die Kopie der Spezifikation ist die der neuen Übung. Gedacht für die Sportart
-        eines Trainings (Ben, 26.10.2026: „Laufen“ gestartet, Rad gefahren) — Gehen,
-        Laufen und Rad haben dieselben Felder. Wie `eintrag_korrigieren` am gültigen Stand."""
+        mit Verweis), weil Einträge unveränderlich sind. Notiz und Zeiten bleiben, die
+        Werte auch — außer ``result`` nennt die für die neue Übung (ihre Felder können
+        andere sein, seit jede Übung GPS haben kann); die Kopie der Spezifikation ist die
+        der neuen Übung. Gedacht für die Übung eines Trainings (Ben, 26.10.2026: „Laufen“
+        gestartet, Rad gefahren). Wie `eintrag_korrigieren` am gültigen Stand."""
         alt = self.eintrag_aktuell(alter_eintrag_id)
         if alt is None:
             raise KeyError(alter_eintrag_id)
@@ -2094,7 +2101,7 @@ class SessionRepo:
             session_id=alt.session_id,
             exercise_id=uebung.id,
             order=alt.order,
-            result=dict(alt.result),
+            result=dict(alt.result if result is None else result),
             spec_snapshot=uebung.result_spec,
             note=alt.note,
             started_at=alt.started_at,
@@ -3520,8 +3527,8 @@ class StreckeRepo:
         self.con.execute(
             "INSERT INTO strecke (id, subject_id, sportart, started_at, ended_at, file_path, "
             "distanz_m, dauer_s, bewegt_s, hoehe_auf_m, hoehe_ab_m, hrv_recording_id, "
-            "session_entry_id, title, einheit_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "session_entry_id, title, einheit_id, exercise_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 s.id,
                 s.subject_id,
@@ -3538,6 +3545,7 @@ class StreckeRepo:
                 s.session_entry_id,
                 s.title,
                 s.einheit_id,
+                s.exercise_id,
             ),
         )
 
@@ -3609,15 +3617,21 @@ class StreckeRepo:
         ).fetchone()
         return self._zeile(r) if r else None
 
-    def sportart_setzen(
-        self, strecke_id: str, sportart: str, session_entry_id: str | None = None
+    def uebung_setzen(
+        self,
+        strecke_id: str,
+        exercise_id: str | None,
+        sportart: str,
+        session_entry_id: str | None = None,
     ) -> None:
-        """Die Sportart nachträglich ändern (Ben, 26.10.2026) — mit dem Tagebucheintrag,
-        der sie jetzt trägt (`SessionRepo.eintrag_uebung_wechseln`), wenn es einen gibt."""
+        """Die Übung nachträglich ändern (Ben, 26.10.2026: „Laufen“ gestartet, Rad gefahren;
+        seit „GPS je Übung“ jede Übung mit GPS) — mit ihrer Rechenart und dem
+        Tagebucheintrag, der sie jetzt trägt (`SessionRepo.eintrag_uebung_wechseln`), wenn
+        es einen gibt."""
         self.con.execute(
-            "UPDATE strecke SET sportart = ?, session_entry_id = COALESCE(?, session_entry_id) "
-            "WHERE id = ?",
-            (sportart, session_entry_id, strecke_id),
+            "UPDATE strecke SET exercise_id = ?, sportart = ?, "
+            "session_entry_id = COALESCE(?, session_entry_id) WHERE id = ?",
+            (exercise_id, sportart, session_entry_id, strecke_id),
         )
 
     def titel_setzen(self, strecke_id: str, titel: str) -> None:
@@ -3672,6 +3686,7 @@ class StreckeRepo:
             session_entry_id=r["session_entry_id"],
             title=r["title"],
             einheit_id=r["einheit_id"],
+            exercise_id=r["exercise_id"],
         )
 
 

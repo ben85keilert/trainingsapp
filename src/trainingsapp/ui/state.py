@@ -562,7 +562,8 @@ class AppState:
     #: (`devices.strecke_baustein.StreckeBaustein`, ``fertig`` danach) — und seine Vorgaben
     ausdauer: Any = None
     ausdauer_ansicht: int = 0
-    ausdauer_sportart: str = "gehen"
+    #: die unter „Messung → GPS“ gewählte Übung (GPS je Übung) — leer: die erste der Liste
+    ausdauer_uebung_id: str = ""
     ausdauer_gps: bool = True
     #: Karte im Training zeigen — Kacheln kommen online (einmaliger Hinweis, `HINWEIS_KARTE`)
     ausdauer_karte: bool = True

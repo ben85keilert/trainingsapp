@@ -1,12 +1,15 @@
 """Ausdauertraining mit GPS — Reiter „Messung → GPS“ (`ausdauer_inhalt`), Route `/ausdauer`
 (dasselbe als eigene Seite, Ziel der Startleiste) und `/ausdauer/<id>` (Auswertung).
 
-Seit 26.10.2026 steht das Training **direkt im Reiter GPS** — Sportart, GPS an/aus,
+Seit 26.10.2026 steht das Training **direkt im Reiter GPS** — Übung, GPS an/aus,
 „Training starten“, und läuft eines, seine Zahlen und die Karte (Ben: „Jetzt muss man, um an
 GPS ranzukommen, auf ‚Training starten‘ und kommt dann erst zum Menü … Diesen Zwischenschritt
 nimm bitte heraus“). Die Seite `/ausdauer` bleibt für die Startleiste und „Öffnen“.
 
-Gehen, Laufen, Rad (Ben, 14.10.2026: in dieser Reihenfolge) — mit oder ohne
+Zur Wahl stehen die **Übungen mit GPS** (Ben, 13.11.2026, ``docs/plan_gps.md`` §12:
+`Exercise.gps`, eingeschaltet in „Übung bearbeiten“ → „Sensor“; bis drei als Segmente,
+darüber als Liste) — „Gehen“, „Laufen“, „Radfahren“ bringt das Paket „Standard“ mit. Jede
+rechnet wie Gehen, Laufen oder Rad (Ben, 14.10.2026: in dieser Reihenfolge) — mit oder ohne
 GPS (Laufband, Halle), mit oder ohne Gurt. Gerechnet wird in
 `core.strecke.StreckenRechner` (10-m-Schritt, Auto-Pause, Splits), die HRV je
 Kilometer in `core.hrv_training`. Diese Ansicht verbindet nur:
@@ -26,7 +29,7 @@ Kilometer in `core.hrv_training`. Diese Ansicht verbindet nur:
   Zeitleiste der Einheit, mit DFA α1 beim EKG-Gurt.
 - Nach dem Ende: Strecke (Datei unter ``Strecken/``, Zeile `strecke` mit ihrer
   Einheit), HRV-Aufnahme (wie sonst unter ``Messungen/``) und ein
-  **Tagebucheintrag** der Übung „Gehen"/„Laufen"/„Radfahren" (`ui.training`).
+  **Tagebucheintrag** bei der gewählten Übung (`ui.training.training_eintragen`).
 
 **GPS-Daten werden nie geteilt** (`docs/plan_gps.md`, Abschnitt 0): Die
 Ortungen bleiben in ``Strecken/``; hinaus gehen sie nur über „GPX
@@ -66,6 +69,7 @@ from hrv_core.trends import aktuell, reihe
 from trainingsapp.config import datenverzeichnis, streckenverzeichnis
 from trainingsapp.core import atem_auswertung as aa
 from trainingsapp.core.forschung import TEMPO_SCHRITT_S, tempo_reihe
+from trainingsapp.core.gps_wahl import NIVEAU_NAMEN, GpsWahl
 from trainingsapp.core.hf_einstellungen import HfEinstellungen
 from trainingsapp.core.hf_profil import HfProfil, bereiche_fuer, grenzen_bpm, wirksames_modell
 from trainingsapp.core.hrv_training import (
@@ -82,13 +86,12 @@ from trainingsapp.core.intervalle import (
     intervalle,
     strecke_auf_achse,
 )
-from trainingsapp.core.models import HrvRecording, Strecke
+from trainingsapp.core.models import Exercise, HrvRecording, Strecke
 from trainingsapp.core.strecke import (
     GEHEN,
     LAUFEN,
     RAD,
     SPORT_NAMEN,
-    SPORTARTEN,
     STILLSTAND_S,
     Punkt,
     Split,
@@ -125,7 +128,6 @@ from trainingsapp.core.training_einstellungen import (
     HF_WIE_PROFIL,
     KURVE_STRECKE,
     KURVE_ZEIT,
-    NIVEAU_NAMEN,
     SPALTEN,
     TEMPO_FEST,
     TEMPO_RELATIV,
@@ -170,13 +172,17 @@ from trainingsapp.ui.farben import FARBEN, PAUSE_FARBE, TEMPO_SKALEN
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.training import (
     HrvBezug,
+    gps_uebung,
+    gps_uebungen,
     herz_je_ortung,
     hrv_bezug,
     hrv_laden,
     mit_schlaf,
     nachlauf_der_strecke,
     ortung_zu_wand,
-    sportart_aendern,
+    strecke_gps,
+    strecke_name,
+    uebung_aendern,
     verwaiste_uebernehmen,
     zeitleiste_und_versatz,
 )
@@ -190,49 +196,69 @@ SPORT_SYMBOLE = {
     LAUFEN: ft.Icons.DIRECTIONS_RUN,
     RAD: ft.Icons.DIRECTIONS_BIKE,
 }
+#: Bis so viele Übungen mit GPS stehen sie als Segmente nebeneinander, darüber als Liste
+SEGMENTE_MAX = 3
+KEINE_GPS_UEBUNG = (
+    "Keine Übung mit GPS. Einschalten: Übung öffnen, Stift, Reiter „Sensor“, Karte „GPS“."
+)
 
 
-def sportart_dialog(page: ft.Page, aktuell: str, waehlen: Callable[[str], object]) -> None:
-    """Die Sportart wechseln — ein Tipp auf das Symbol im Lauf oder in der Auswertung
-    (Ben, 26.10.2026: als „Laufen“ gestartet, aber Rad gefahren). Drei Zeilen, die
-    gewählte mit Haken; eine andere ruft ``waehlen`` und schließt."""
+def uebung_dialog(
+    page: ft.Page,
+    uebungen: Sequence[Exercise],
+    aktuell: str | None,
+    waehlen: Callable[[Exercise], object],
+) -> None:
+    """Die Übung wechseln — ein Tipp auf das Symbol im Lauf oder in der Auswertung (Ben,
+    26.10.2026: als „Laufen“ gestartet, aber Rad gefahren; seit „GPS je Übung“, 13.11.2026,
+    stehen hier alle Übungen mit GPS). Die gewählte hat einen Haken; eine andere ruft
+    ``waehlen`` und schließt."""
     dialog: ft.AlertDialog
 
-    def wahl(sportart: str) -> Callable[[], None]:
+    def wahl(uebung: Exercise) -> Callable[[], None]:
         def handler() -> None:
             schliessen(dialog)
-            if sportart != aktuell:
-                waehlen(sportart)
+            if uebung.id != aktuell:
+                waehlen(uebung)
 
         return handler
 
+    zeilen: list[ft.Control] = [
+        ft.ListTile(
+            leading=ft.Icon(SPORT_SYMBOLE.get(u.gps.art, ft.Icons.DIRECTIONS_RUN)),
+            title=ft.Text(u.name),
+            trailing=ft.Icon(ft.Icons.CHECK) if u.id == aktuell else None,
+            on_click=wahl(u),
+            data=f"gps_uebung:{u.id}",
+        )
+        for u in uebungen
+    ]
     dialog = ft.AlertDialog(
-        title=ft.Text("Sportart"),
+        title=ft.Text("Übung"),
         content=ft.Column(
             tight=True,
             spacing=0,
-            controls=[
-                ft.ListTile(
-                    leading=ft.Icon(SPORT_SYMBOLE[s]),
-                    title=ft.Text(SPORT_NAMEN[s]),
-                    trailing=ft.Icon(ft.Icons.CHECK) if s == aktuell else None,
-                    on_click=wahl(s),
-                )
-                for s in SPORTARTEN
-            ],
+            scroll=ft.ScrollMode.AUTO,
+            controls=zeilen or [ft.Text(KEINE_GPS_UEBUNG, size=13)],
         ),
         actions=[ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog))],
     )
     page.show_dialog(dialog)
 
 
-def sportart_knopf(page: ft.Page, aktuell: str, waehlen: Callable[[str], object]) -> ft.Control:
-    """Das Sportart-Symbol als Knopf, der `sportart_dialog` öffnet."""
+def uebung_knopf(
+    page: ft.Page,
+    state: AppState,
+    sportart: str,
+    aktuell: str | None,
+    waehlen: Callable[[Exercise], object],
+) -> ft.Control:
+    """Das Symbol der Rechenart als Knopf, der `uebung_dialog` öffnet."""
     return ft.IconButton(
-        SPORT_SYMBOLE.get(aktuell, ft.Icons.DIRECTIONS_RUN),
-        tooltip="Sportart ändern",
+        SPORT_SYMBOLE.get(sportart, ft.Icons.DIRECTIONS_RUN),
+        tooltip="Übung ändern",
         visual_density=ft.VisualDensity.COMPACT,
-        on_click=lambda: sportart_dialog(page, aktuell, waehlen),
+        on_click=lambda: uebung_dialog(page, gps_uebungen(state), aktuell, waehlen),
     )
 
 
@@ -250,7 +276,9 @@ def verwaiste_dialog(page: ft.Page, state: AppState) -> ft.AlertDialog:
 
     def beschriftung(pfad: Path) -> str:
         kopf = kopf_lesen(pfad) or {}
-        sport = SPORT_NAMEN.get(str(kopf.get("sportart") or ""), "Training")
+        art = str(kopf.get("sportart") or "")
+        uebung = gps_uebung(state, str(kopf.get("uebung") or ""), art)
+        sport = uebung.name if uebung is not None else SPORT_NAMEN.get(art, "Training")
         try:
             wann = datetime.fromisoformat(str(kopf["started_at"])).astimezone()
             return f"{sport} vom {wann:%d.%m.%Y %H:%M}"
@@ -390,6 +418,7 @@ async def unterwegs_oeffnen(page: ft.Page, state: AppState) -> None:
         id=UNTERWEGS,
         subject_id=e.subject_id or state.profil.id,
         sportart=teil.sportart,
+        exercise_id=teil.uebung_id or None,
         started_at=start,
         ended_at=ende,
         file_path=datei,
@@ -484,6 +513,15 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
             return False, None
         return True, quelle
 
+    def gewaehlte_uebung() -> Exercise | None:
+        """Die Übung für das nächste Training: die zuletzt gewählte, solange sie GPS hat —
+        sonst die erste der Liste (Gehen, Laufen, Rad, darin nach Namen)."""
+        uebungen = gps_uebungen(state)
+        gewaehlt = next((u for u in uebungen if u.id == state.ausdauer_uebung_id), None)
+        gewaehlt = gewaehlt or next(iter(uebungen), None)
+        state.ausdauer_uebung_id = gewaehlt.id if gewaehlt is not None else ""
+        return gewaehlt
+
     async def bereitstellen() -> bool:
         """Das Training in die Startleiste — ``True``, wenn es dort steht."""
         if not einheit_ui.platz_frei(state):
@@ -491,11 +529,15 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
                 ft.SnackBar(ft.Text("Es läuft schon eine Einheit — erst oben mit ⏹ beenden."))
             )
             return False
+        uebung = gewaehlte_uebung()
+        if uebung is None:
+            page.show_dialog(ft.SnackBar(ft.Text(KEINE_GPS_UEBUNG)))
+            return False
         ok, quelle = await quelle_fuer_start()
         if not ok:
             return False
         try:
-            einheit_ui.ausdauer_bereitstellen(page, state, state.ausdauer_sportart, quelle)
+            einheit_ui.ausdauer_bereitstellen(page, state, uebung, quelle)
         except Exception as fehler:
             page.show_dialog(ft.SnackBar(ft.Text(f"Training nicht bereitgestellt: {fehler}")))
             return False
@@ -509,7 +551,7 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
             await bereitstellen()
 
     async def neu_bereitstellen() -> None:
-        """Sportart oder GPS geändert, während das Training bereitsteht: neu hinein."""
+        """Übung oder GPS geändert, während das Training bereitsteht: neu hinein."""
         if einheit_ui.bereitgestellt(state, "gps"):
             einheit_ui.zuruecknehmen(page, state, "gps")
             await bereitstellen()
@@ -719,12 +761,14 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
             legende_platz.content = _tempo_legende(e_t, teil.sportart, grenzen)
             legende_platz.visible = legende_platz.content is not None
 
-    def sportart_wechseln(sportart: str) -> None:
-        """Mitten im Lauf (Ben, 26.10.2026) — Baustein, Benachrichtigung, Karte."""
+    def uebung_wechseln(uebung: Exercise) -> None:
+        """Mitten im Lauf (Ben, 26.10.2026; seit „GPS je Übung“ die Übung statt der
+        Sportart) — Baustein, Benachrichtigung, Karte."""
         jetzt = _training(state)
         if jetzt is None:
             return
-        jetzt[1].sportart_setzen(sportart)
+        jetzt[1].uebung_setzen(uebung.id, uebung.name, uebung.gps.art)
+        state.ausdauer_uebung_id = uebung.id
         einheit_ui.melden(state)
         zeichnen()
         page.update()
@@ -741,8 +785,10 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
             zahlen_karte = karte(
                 ft.Row(
                     controls=[
-                        sportart_knopf(page, teil.sportart, sportart_wechseln),
-                        titel(f"{SPORT_NAMEN[teil.sportart]} läuft"),
+                        uebung_knopf(
+                            page, state, teil.sportart, teil.uebung_id or None, uebung_wechseln
+                        ),
+                        titel(f"{teil.name} läuft"),
                         pause_text,
                     ],
                 ),
@@ -803,15 +849,34 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
         # nicht, sie kommt mit (`platz_machen`)
         andere = None if einheit_ui.platz_frei(state) else einheit_ui.laeuft(state)
         vorbereitet = einheit_ui.in_vorbereitung(state)
-        sportwahl = ft.SegmentedButton(
-            selected=[state.ausdauer_sportart],
-            show_selected_icon=False,
-            segments=[
-                ft.Segment(value=s, label=ft.Text(SPORT_NAMEN[s]), icon=ft.Icon(SPORT_SYMBOLE[s]))
-                for s in SPORTARTEN
-            ],
-            on_change=sport_gewaehlt,
-        )
+        uebungen = gps_uebungen(state)
+        gewaehlt = gewaehlte_uebung()
+        sportwahl: ft.Control
+        if gewaehlt is None:
+            sportwahl = hinweis(KEINE_GPS_UEBUNG)
+        elif len(uebungen) <= SEGMENTE_MAX:
+            sportwahl = ft.SegmentedButton(
+                selected=[gewaehlt.id],
+                show_selected_icon=False,
+                segments=[
+                    ft.Segment(
+                        value=u.id,
+                        label=ft.Text(u.name),
+                        icon=ft.Icon(SPORT_SYMBOLE.get(u.gps.art, ft.Icons.DIRECTIONS_RUN)),
+                    )
+                    for u in uebungen
+                ],
+                on_change=sport_gewaehlt,
+                data="gps_uebung",
+            )
+        else:  # mehr, als nebeneinander passen: ein Knopf mit dem Namen, dahinter die Liste
+            sportwahl = ft.OutlinedButton(
+                gewaehlt.name,
+                icon=SPORT_SYMBOLE.get(gewaehlt.gps.art, ft.Icons.DIRECTIONS_RUN),
+                tooltip="Übung wählen",
+                on_click=lambda: uebung_dialog(page, uebungen, gewaehlt.id, uebung_gewaehlt),
+                data="gps_uebung",
+            )
         gps_schalter = ft.Switch(
             label="Mit GPS (aus: Laufband, Halle)",
             value=state.ausdauer_gps,
@@ -830,7 +895,7 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
                     "Training starten",
                     icon=ft.Icons.PLAY_ARROW,
                     on_click=starten,
-                    disabled=andere is not None,
+                    disabled=andere is not None or gewaehlt is None,
                     expand=True,
                 ),
                 ft.FilledTonalButton(
@@ -841,7 +906,7 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
                     "Bereitstellen",
                     icon=ft.Icons.HOURGLASS_TOP,
                     on_click=bereitstellen_umschalten,
-                    disabled=andere is not None,
+                    disabled=andere is not None or gewaehlt is None,
                 ),
             ],
         )
@@ -896,8 +961,16 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
 
     def sport_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
         if e.control.selected:
-            state.ausdauer_sportart = str(e.control.selected[0])
+            state.ausdauer_uebung_id = str(e.control.selected[0])
             page.run_task(neu_bereitstellen)
+
+    def uebung_gewaehlt(uebung: Exercise) -> None:
+        """Aus der Liste (mehr als `SEGMENTE_MAX` Übungen mit GPS)."""
+        state.ausdauer_uebung_id = uebung.id
+        page.run_task(neu_bereitstellen)
+        zeichnen()
+        with contextlib.suppress(Exception):
+            page.update()
 
     def gps_gewaehlt(e: ft.Event[ft.Switch]) -> None:
         state.ausdauer_gps = bool(e.control.value)
@@ -965,7 +1038,7 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
     return ft.View(
         route="/ausdauer",
         appbar=ft.AppBar(
-            title=ft.Text(SPORT_NAMEN[jetzt[1].sportart] if jetzt is not None else "Ausdauer"),
+            title=ft.Text(jetzt[1].name if jetzt is not None else "Ausdauer"),
             actions=[timer_knopf(page, state, "ausdauer_seite")],
         ),
         scroll=ft.ScrollMode.AUTO,
@@ -1623,19 +1696,23 @@ def _balken(zeilen: Sequence[tuple[str, float, str]], *, name_px: int = 108) -> 
 
 
 def _tempo_verteilung(
-    teilstuecke: Sequence[Sequence[Punkt]], e: TrainingEinstellungen, sportart: str
+    teilstuecke: Sequence[Sequence[Punkt]],
+    e: TrainingEinstellungen,
+    sportart: str,
+    wahl: GpsWahl | None = None,
 ) -> ft.Control | None:
     """Zeit je Tempo-Stufe, dazu der Stand. Die Stufen richten sich nach diesem Training
-    (dieselben wie auf der Karte) oder nach den **festen Grenzen** der Sportart
-    (`TrainingEinstellungen.tempo_grenzen_kmh`) — nur die festen lassen zwei Trainings
-    vergleichen."""
+    (dieselben wie auf der Karte) oder nach den **festen Grenzen** der Übung (``wahl``,
+    `core.gps_wahl.GpsWahl.grenzen_kmh` — ohne sie die Vorgabe „mittel“ der Rechenart) —
+    nur die festen lassen zwei Trainings vergleichen."""
     st = stuecke(teilstuecke, lambda p: p.tempo_ms)
     farben = TEMPO_SKALEN.get(e.skala) or TEMPO_SKALEN["tempo"]
     n = len(farben)
     if e.tempo_stufen == TEMPO_FEST:
         if not any(not x.pause and x.wert is not None for x in st):
             return None
-        grenzen = [kmh / 3.6 for kmh in e.tempo_grenzen_kmh(sportart)]
+        fest = (wahl or GpsWahl(art=sportart)).grenzen_kmh()
+        grenzen = [kmh / 3.6 for kmh in fest]
         sekunden, pause = zeit_je_stufe(gestuft_fest(st, grenzen), n)
     else:
         spanne_ = spanne(st)
@@ -1664,18 +1741,21 @@ def _tempo_verteilung(
     return _balken(zeilen)
 
 
-def _tempo_stufen_text(e: TrainingEinstellungen, sportart: str) -> str:
+def _tempo_stufen_text(
+    e: TrainingEinstellungen, sportart: str, wahl: GpsWahl | None = None, name: str = ""
+) -> str:
     """Was unter den Balken steht: wonach die Stufen gerade teilen."""
     if e.tempo_stufen != TEMPO_FEST:
         return (
             "Stufen nach diesem Training (wie die Farben der Karte). Zum Vergleichen mit "
             "anderen Trainings: „Fest“."
         )
-    grenzen = " · ".join(zahl_text(g, 1).removesuffix(",0") for g in e.tempo_grenzen_kmh(sportart))
+    wahl = wahl or GpsWahl(art=sportart)
+    grenzen = " · ".join(zahl_text(g, 1).removesuffix(",0") for g in wahl.grenzen_kmh())
     return (
-        f"Feste Stufen „{SPORT_NAMEN.get(sportart, sportart)} · "
-        f"{NIVEAU_NAMEN[e.niveau(sportart)]}“: Grenzen bei {grenzen} km/h — zu ändern unter "
-        "Einstellungen → Training und GPS."
+        f"Feste Stufen „{name or SPORT_NAMEN.get(sportart, sportart)} · "
+        f"{NIVEAU_NAMEN[wahl.niveau()]}“: Grenzen bei {grenzen} km/h — zu ändern in der "
+        "Übung: Stift, Reiter „Sensor“, Karte „GPS“."
     )
 
 
@@ -1849,7 +1929,7 @@ def ausdauer_detail_view(
             herz = herz_je_ortung(punkte, bezug, hrv[0])
         daten = gpx(
             punkte,
-            name=f"{SPORT_NAMEN[strecke.sportart]} {lokal:%d.%m.%Y %H:%M}",
+            name=f"{strecke_name(state, strecke)} {lokal:%d.%m.%Y %H:%M}",
             sportart=strecke.sportart,
             herzfrequenz=herz or None,
         )
@@ -2034,7 +2114,7 @@ def ausdauer_detail_view(
         route=route,
         appbar=ft.AppBar(
             title=ft.Text(
-                f"{SPORT_NAMEN.get(strecke.sportart, '')} {lokal:%d.%m. %H:%M}"
+                f"{strecke_name(state, strecke)} {lokal:%d.%m. %H:%M}"
                 + (" · bis hier" if unterwegs else "")
             ),
             actions=[
@@ -2091,10 +2171,11 @@ def ausdauer_detail_view(
             )
         ]
 
-    def sportart_wechseln(sportart: str) -> None:
-        """Nachträglich (Ben, 26.10.2026): Zeile und Tagebucheintrag, dann die Ansicht neu —
-        Kilometer, Tempo und Kurve rechnen mit der neuen Sportart."""
-        sportart_aendern(state, strecke, sportart)
+    def uebung_wechseln(uebung: Exercise) -> None:
+        """Nachträglich (Ben, 26.10.2026; seit „GPS je Übung“ die Übung): Zeile und
+        Tagebucheintrag, dann die Ansicht neu — Kilometer, Tempo und Kurve rechnen mit der
+        Rechenart der neuen Übung."""
+        uebung_aendern(state, strecke, uebung)
         state.neu_zeichnen()
 
     def fuellen(hrv: tuple[Recording, Korrigiert] | None, fehler: str | None = None) -> None:
@@ -2119,9 +2200,17 @@ def ausdauer_detail_view(
                         *(
                             []
                             if unterwegs
-                            else [sportart_knopf(page, strecke.sportart, sportart_wechseln)]
+                            else [
+                                uebung_knopf(
+                                    page,
+                                    state,
+                                    strecke.sportart,
+                                    strecke.exercise_id,
+                                    uebung_wechseln,
+                                )
+                            ]
                         ),
-                        titel(SPORT_NAMEN.get(strecke.sportart, strecke.sportart)),
+                        titel(strecke_name(state, strecke)),
                     ]
                 ),
                 *(
@@ -2298,15 +2387,22 @@ def ausdauer_detail_view(
         hoehen = _hoehen_teil(r, punkte) if r is not None else None
         if hoehen is not None:
             teile.append(karte(titel("Höhenprofil"), abfahrbar(hoehen)))
+        gps_wahl = strecke_gps(state, strecke)
         tempo_balken = (
-            _tempo_verteilung(r.teilstuecke, e, strecke.sportart) if r is not None else None
+            _tempo_verteilung(r.teilstuecke, e, strecke.sportart, gps_wahl)
+            if r is not None
+            else None
         )
         if tempo_balken is not None:
             teile.append(
                 karte(
                     titel("Zeit je Tempo", tempo_stufenwahl(e)),
                     tempo_balken,
-                    hinweis(_tempo_stufen_text(e, strecke.sportart)),
+                    hinweis(
+                        _tempo_stufen_text(
+                            e, strecke.sportart, gps_wahl, strecke_name(state, strecke)
+                        )
+                    ),
                 )
             )
         if hrv is not None and r is not None:
@@ -2487,7 +2583,7 @@ def strecken_zeilen(page: ft.Page, state: AppState) -> list[ft.Control]:
             )
     for s in strecken:
         lokal = s.started_at.astimezone()
-        teile = [SPORT_NAMEN.get(s.sportart, s.sportart)]
+        teile = [strecke_name(state, s)]
         if s.file_path:
             teile.append(km_text(s.distanz_m))
         teile.append(zeit_text(s.dauer_s))

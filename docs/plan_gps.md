@@ -81,7 +81,7 @@ Was das für den Bau heißt:
 - **DFA-α1-Überblick** (Abschnitt 6) — beschreibend
 - Eintrag im Trainingstagebuch: Übung „Laufen" mit Strecke und Dauer (Felder
   `distance`/`duration` gibt es im Feldvorrat) → Tagesansicht und Verlauf
-  zeigen die Kilometer je Tag
+  zeigen die Kilometer je Tag (seit 13.11.2026 die Übung, die man gewählt hat — Abschnitt 12)
 - **Laufband/Halle:** dasselbe ohne GPS (nur Zeit und HRV) — kein Strom fürs GPS
 
 ---
@@ -148,7 +148,8 @@ Strecke in die HRV-Datei muss (Regel 0).
 
 **Verknüpfung.** Ein Training = Session im Tagebuch (Übung „Laufen") +
 optional HRV-Aufnahme + optional Strecke; verbunden über IDs in der Datenbank,
-nicht über Dateinamen im selben Ordner.
+nicht über Dateinamen im selben Ordner. Seit 13.11.2026 zeigt die Strecke selbst auf
+ihre Übung (`strecke.exercise_id`, Abschnitt 12).
 
 **Eine Benachrichtigung.** `MessDienst` bekommt
 `foregroundServiceType="connectedDevice|location"` und startet mit den Typen,
@@ -359,7 +360,8 @@ Ben, 14.10.2026:
 1. **Karte:** vorerst nur der Zwischenspeicher von flutter_map (OSM online,
    gesehene Gegenden auch offline). Vektor-Erweiterung (Phase 5) später.
 2. **Export:** ja — GPX 1.1 auf ausdrücklichen Knopfdruck (Abschnitt 0, 5b).
-3. **Sportarten in dieser Reihenfolge:** **Gehen → Laufen → Rad.** Gehen zuerst
+3. **Sportarten in dieser Reihenfolge:** **Gehen → Laufen → Rad.** (Seit 13.11.2026 sind das
+   die drei **Rechenarten**; zur Wahl stehen Übungen — Abschnitt 12.) Gehen zuerst
    heißt: Das GPS-Zittern ist so groß wie der Schritt — die Distanzrechnung
    (Mindestabstand oder Doppler-Tempo, Abschnitt 4) muss beim Gehen stimmen;
    der Vorabtest misst genau das.
@@ -546,3 +548,68 @@ Apps: https://doi.org/10.3389/fphys.2022.879071
 GPS-Genauigkeit: https://doi.org/10.1123/ijspp.5.4.448 ·
 https://arxiv.org/abs/1504.04504 · OpenTracks-Vorgaben:
 https://github.com/OpenTracksApp/OpenTracks/blob/main/src/main/res/values/settings.xml
+
+## 12. GPS je Übung (13.11.2026)
+
+Ben: „Setze in Sensor dort das Feld und in einem Menü lassen sich dann auch die Geschwindigkeiten
+definieren. Für Gehen/Laufen/Radfahren werden die Standardgeschwindigkeiten dort mitgegeben.“ Und zur
+Frage, woher die drei Übungen kommen: „Wenn sich die Sprache des Programmes einmal ändern sollte, ändert
+man einfach die Pakete. Wäre das nicht konsistenter und transparenter? Auch mehr Kontrolle, man kann
+alles löschen, was man will, oder sich ein eigenes Standardpaket erstellen.“
+
+Bis dahin hing GPS an der festen Liste `core.strecke.SPORTARTEN`; die App legte je Sportart selbst eine
+Übung an und trug jedes Training dort ein. Jetzt ist GPS eine Eigenschaft der Übung, und der Code kennt
+keine bestimmte Übung mehr.
+
+**Das Feld.** `Exercise.gps` (`core.gps_wahl.GpsWahl`, Spalte `exercise.gps_json`, Migration 062,
+Paketfeld `gps`): die **Rechenart** (`art`: gehen, laufen, rad — leer = GPS aus) und vier
+**Tempo-Grenzen** in km/h (`tempo`, leer = die Vorgabe „mittel“ der Rechenart). An der Rechenart hängen
+Splitlänge (je Kilometer, Rad je fünf), km/h oder min/km und der Typ im GPX; `strecke.sportart` trägt
+sie weiter, ihr CHECK bleibt. Mehr Rechenarten gibt es nicht.
+
+**Wo man es einstellt.** „Übung bearbeiten“ → Reiter „Sensor“ → Karte „GPS“
+(`ui/components/gps_karte.py`): Schalter, „Rechnet wie“, Zeile „Tempo-Stufen“ mit Stift. Der Stift öffnet
+das Blatt „Tempo-Stufen“ (Vorgabe langsam · mittel · schnell oder vier eigene Zahlen; jede gültige
+Eingabe gilt sofort in der Karte, gespeichert wird mit dem Formular). Fehlen der Übung die Felder
+Strecke oder Zeit, sagt die Karte das und legt sie auf Tipp an. Die Karte „Feste Tempo-Stufen“ in den
+Einstellungen (einen Tag alt) ist nur noch ein Hinweis auf diesen Ort.
+
+**Training.** „Messung → GPS“ bietet die Übungen mit GPS an (`ui.training.gps_uebungen`: nach Rechenart,
+dann Name) — bis drei als Segmente, darüber ein Knopf mit Liste; ohne eine steht dort, wo man GPS
+einschaltet. Der Baustein trägt Übung und Namen (`StreckeBaustein.uebung_id`, `.name`), der Kopf der
+Streckendatei die Übung (`uebung`; er verlässt das Gerät nicht). Eingetragen wird bei der gewählten
+Übung: Zeit und Strecke, soweit sie die Felder `duration` und `distance` hat, sonst „gemacht“ — die
+Zahlen stehen ohnehin in `strecke`. `strecke.exercise_id` merkt die Übung; daher kommen Name
+(`strecke_name`) und Tempo-Grenzen (`strecke_gps`) der Auswertung. Aus „Sportart wechseln“ wurde
+„Übung wechseln“, im Lauf (`StreckeBaustein.uebung_setzen`, Notiz „Jetzt <Name>“, in der Zeitleiste
+weiter nur `sportart` und `split_m`) und nachträglich (`ui.training.uebung_aendern`). Eine verwaiste
+Datei geht an die Übung aus ihrem Kopf, sonst an die erste GPS-Übung derselben Rechenart; gibt es
+keine, wird die Strecke ohne Tagebucheintrag gespeichert.
+
+**Gehen, Laufen, Radfahren** stehen im Paket „Standard“ (Version 5, Schlüssel `ausdauer_gehen`,
+`ausdauer_laufen`, `ausdauer_rad` — dieselben IDs wie die früher selbst angelegten Übungen), mit `gps`
+und den Grenzen „mittel“ ausgeschrieben.
+
+**Übergang auf Geräten mit Trainings.**
+1. Migration 062: `gps_json` (leer), `strecke.exercise_id` aus dem Tagebucheintrag jeder Strecke.
+2. Der Import von „Standard“ **übernimmt** eine vorhandene eigene Übung mit einer der drei IDs ins Paket
+   (`data.pakete.PaketRepo._planen`, `Vorschau.uebernommen`): Paketstand ist ihre **Urfassung**
+   (`core.pakete.ausdauer_urfassungen` — so legte die App sie an), dagegen läuft der Drei-Wege-Abgleich.
+   Was die Person geändert hat (Name, Chips, Felder), bleibt; Text, Symbol und `gps` kommen aus dem
+   Paket. Das ist die **einzige Ausnahme** von „eigene Übungen ändert ein Import nie“ — sie gilt nur für
+   diese drei IDs und nur für „Standard“ (`tests/test_gps_je_uebung.py`). Die IDs erzeugte allein die
+   App (`ui.training.uebung_fuer`, bis 0.3.92); Kopien haben eigene IDs.
+3. Datenumstellung Schritt 7 (`data/upgrade.py`, nach dem Seed): die Tempo-Grenzen aus den
+   Einstellungen (`tempo_niveau`, `tempo_eigen`) ziehen an die drei Übungen um; ist „Standard“ entfernt
+   oder deaktiviert, bekommen sie GPS trotzdem — sonst stünde keine Übung mehr zur Wahl.
+
+**Nicht gebaut.** GPS je Planübung („nur hier“) — ein Training startet nicht aus einem Plan. Läuft die
+Uhr derselben Übung in einer Einheit mit ihrem Training, entstehen zwei Einträge an dieser Übung (das
+Training und der Lauf der Uhr).
+
+**Notizen (gleicher Tag).** Ben: „Die zusätzliche Notiz für die Uhr ist störend, wenn ohnehin schon die
+Übung markiert wird.“ Hat die Einheit eine Klammer („Gehen: Start“ … „Gehen: Ende“ — die Messung lief
+schon) und ein Training dabei, bleibt der Abschnitt der Uhr, der mit dem Start zusammenfällt, ohne
+eigene Notiz, ebenso ihr Ende im Augenblick des Endes (`core.einheit.in_klammer`,
+`Einheitslauf._mit_uebung`); die Grenzen auf der Timer-Spur bleiben. Ein Timer allein behält seine
+Notizen (`docs/plan_einheit.md` §4).

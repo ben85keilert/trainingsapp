@@ -256,7 +256,7 @@ def test_migration_060_behaelt_zeilen_und_erlaubt_dokumente(tmp_path) -> None:
             "VALUES ('d', 'p', '2026-11-13', 'document', 'x.pdf', '')"
         )
     con.commit()
-    assert migrieren(con) == 61
+    assert migrieren(con) == 62
     con.execute(
         "INSERT INTO entry_media (id, subject_id, day, kind, uri, recorded_at) "
         "VALUES ('d', 'p', '2026-11-13', 'document', 'x.pdf', '')"

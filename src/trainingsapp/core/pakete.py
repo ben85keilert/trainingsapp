@@ -53,6 +53,7 @@ from . import ablauf as ab
 from . import links
 from .abgleich import Hinweis, abgleichen, liste_abgleichen
 from .ergaenzungen import ERGAENZBAR, Ergaenzung
+from .gps_wahl import GpsWahl
 from .kursbloecke import MEDIUM, Block, bloecke_lesen
 from .kurse import (
     BEDINGUNGEN,
@@ -70,7 +71,8 @@ from .kurse import (
 from .models import Exercise, Media, MediaKind, MediaSource, Plan, jetzt, medien_zusatz
 from .paketmedien import Paketmedium, ist_paketmedium, medium_aus_paket
 from .paketversion import version_zahl
-from .result_spec import VORLAGEN, ResultSpec, basis_key
+from .result_spec import VORLAGEN, Layout, ResultSpec, basis_key, vorrat_feld
+from .strecke import SPORT_NAMEN, SPORTARTEN
 from .takt import Takt
 from .timer import TimerProfil, ohne_verweise
 from .zaehlen import SensorWahl
@@ -873,6 +875,8 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
             beschleunigung=SensorWahl.aus_dict(eintrag.get("beschleunigung")),
             # Ebenso tolerant: ohne brauchbare Phase kein Takt (`core.takt.Takt.aus_dict`)
             takt=Takt.aus_dict(eintrag.get("takt")),
+            # GPS je Übung: ohne brauchbare Rechenart bleibt GPS aus (`core.gps_wahl`)
+            gps=GpsWahl.aus_dict(eintrag.get("gps")),
         ),
         key,
     )
@@ -1076,6 +1080,8 @@ def stand(u: Exercise) -> dict[str, Any]:
         d["beschleunigung"] = beschleunigung
     if u.takt is not None and not u.takt.leer:
         d["takt"] = u.takt.als_dict()
+    if gps := u.gps.als_dict():  # leer fällt weg, wie beim Beschleunigungssensor
+        d["gps"] = gps
     if u.default_target:
         d["default_target"] = u.default_target
     medien = [
@@ -1109,6 +1115,45 @@ def aus_stand(uebung_id: str, paket: str, standard: dict[str, Any]) -> Exercise:
     return _uebung_lesen({**standard, "id": uebung_id}, paket)[0]
 
 
+#: „Gehen“, „Laufen“, „Radfahren“ im Paket „Standard“: Rechenart → Schlüssel. Bis „GPS je
+#: Übung“ (Ben, 13.11.2026) legte die App diese drei beim ersten Training selbst an, als
+#: eigene Übungen mit genau der ID, die der Schlüssel ergibt (`uebung_id`).
+AUSDAUER_SCHLUESSEL: dict[str, str] = {art: f"ausdauer_{art}" for art in SPORTARTEN}
+
+
+def ausdauer_urfassungen() -> dict[str, dict[str, Any]]:
+    """ID → Paketstand der drei Ausdauer-Übungen, wie die App sie früher selbst anlegte.
+
+    Findet ein Import von „Standard“ eine davon als **eigene** Übung vor, gehört sie von da an
+    zum Paket (`data.pakete.PaketRepo`): Diese Urfassung ist dann der Paketstand, gegen den
+    der Drei-Wege-Abgleich rechnet — was die Person an ihrer Übung geändert hat, bleibt, alles
+    andere (Text, ``gps``) kommt aus dem Paket. Ohne Paketstand gewönne das Paket ganz
+    (`zusammenfuehren_mit_hinweisen`).
+
+    >>> u = ausdauer_urfassungen()
+    >>> s = u[uebung_id(GRUNDAUSSTATTUNG, "ausdauer_rad")]
+    >>> len(u), s["name"], s["typen"], [f["key"] for f in s["result_spec"]["fields"]]
+    (3, 'Radfahren', ['Ausdauer'], ['distance', 'duration'])
+    >>> "gps" in s
+    False
+    """
+    felder = [f for f in (vorrat_feld("distance"), vorrat_feld("duration")) if f is not None]
+    return {
+        (uid := uebung_id(GRUNDAUSSTATTUNG, schluessel)): stand(
+            Exercise(
+                id=uid,
+                name=SPORT_NAMEN[art],
+                description=(
+                    "Ausdauer — mit GPS oder ohne aufgezeichnet (Reiter „Messung“, „Ausdauer“)."
+                ),
+                result_spec=ResultSpec(layout=Layout.SINGLE, fields=list(felder)),
+                typen=["Ausdauer"],
+            )
+        )
+        for art, schluessel in AUSDAUER_SCHLUESSEL.items()
+    }
+
+
 #: Feld im Paketstand → wie es in der App heißt (Reihenfolge = Anzeige)
 FELDNAMEN: dict[str, str] = {
     "name": "Name",
@@ -1124,6 +1169,7 @@ FELDNAMEN: dict[str, str] = {
     "zaehlt_als": "Zählt als",
     "beschleunigung": "Beschleunigungssensor",
     "takt": "Takt",
+    "gps": "GPS",
     "media": "Videos",
 }
 

@@ -56,6 +56,7 @@ from typing import Any
 from trainingsapp.config import datenverzeichnis
 from trainingsapp.core.einheit import Ereignis, Rolle, Zustand
 from trainingsapp.core.laufend import uhr
+from trainingsapp.core.models import Exercise
 from trainingsapp.core.strecke import SPORT_NAMEN, STILLSTAND_S
 from trainingsapp.core.timer import TimerLauf, dauer_text
 from trainingsapp.core.zaehlen import ENDE_ANDERE_UEBUNG
@@ -390,19 +391,39 @@ def teil_bereitstellen(page: Any, state: Any, teil: Any, *, zeichnen: bool = Tru
 
 
 def ausdauer_bereitstellen(
-    page: Any, state: Any, sportart: str, quelle: GpsQuelle | None
+    page: Any, state: Any, uebung: Exercise | str, quelle: GpsQuelle | None
 ) -> StreckeBaustein:
-    """Das Ausdauertraining in die Einheit — mit GPS (es sucht schon Empfang) oder ohne.
+    """Das Training einer Übung mit GPS in die Einheit — mit GPS (es sucht schon Empfang)
+    oder ohne (Laufband).
+
+    ``uebung``: die gewählte Übung (GPS je Übung, Ben 13.11.2026) — oder nur eine Rechenart
+    (``"gehen"``): dann die erste GPS-Übung dieser Art, ohne eine solche ein Training ohne
+    Übung (es heißt nach der Rechenart und bekommt keinen Tagebucheintrag).
 
     Ist ein Gurt verbunden oder läuft eine Aufnahme, kommt die HRV mit (wie früher beim
     Training); herausnehmen lässt sie sich in der Startleiste.
     """
-    from trainingsapp.ui.training import Streckendatei
+    from trainingsapp.ui.training import Streckendatei, gps_uebung
 
-    ablage = Streckendatei(sportart, state.profil.id) if quelle is not None else None
+    if isinstance(uebung, str):
+        sportart = uebung
+        gewaehlt = gps_uebung(state, None, sportart)
+    else:
+        sportart, gewaehlt = uebung.gps.art, uebung
+    uebung_id = gewaehlt.id if gewaehlt is not None else ""
+    ablage = (
+        Streckendatei(sportart, state.profil.id, uebung_id=uebung_id)
+        if quelle is not None
+        else None
+    )
     auto_pause = state.training_einstellungen().auto_pause
     teil = StreckeBaustein(
-        quelle, sportart, ablage=ablage, stillstand_s=STILLSTAND_S if auto_pause else math.inf
+        quelle,
+        sportart,
+        ablage=ablage,
+        stillstand_s=STILLSTAND_S if auto_pause else math.inf,
+        uebung_id=uebung_id,
+        name=gewaehlt.name if gewaehlt is not None else "",
     )
     _ersetzen(page, state, teil)
     state.ausdauer = teil
@@ -539,7 +560,9 @@ def titel(e: Einheitslauf) -> str:
     if isinstance(z := e.teil("zaehlen"), ZaehlBaustein) and z.name:
         return z.name  # Zählen ohne Übung — die App baut das nicht, es bleibt lesbar
     if (g := e.teil("gps")) is not None:
-        namen.append(SPORT_NAMEN.get(getattr(g, "sportart", ""), "Training"))
+        namen.append(
+            getattr(g, "name", "") or SPORT_NAMEN.get(getattr(g, "sportart", ""), "Training")
+        )
     if (t := e.timer) is not None:
         namen.append(t.lauf.profil.markenname)  # der Titel wird die Marke „…: Start“
     return " · ".join(namen) or "HRV-Messung"

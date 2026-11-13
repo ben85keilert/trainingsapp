@@ -24,7 +24,11 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   (Ben, 16.10.2026: Drei-Wege-Abgleich je Feld gegen den Paketstand,
   `core/pakete.zusammenfuehren`; seit 9.11.2026 die Beschreibung **je Abschnitt** und Medien
   **je Eintrag**, `core/abgleich.py`, mit Hinweisen und „Mit dem Paket vergleichen“ —
-  `docs/plan_paketinhalte.md`, Stufen U1–U7); eigene Übungen ändert er nie. **Paketpläne je
+  `docs/plan_paketinhalte.md`, Stufen U1–U7); eigene Übungen ändert er nie — **einzige
+  Ausnahme** (Ben, 13.11.2026, `docs/plan_gps.md` §12): „Gehen“, „Laufen“, „Radfahren“, die die
+  App bis 0.3.92 selbst anlegte, übernimmt der Import von „Standard“ ins Paket (Schlüssel
+  `ausdauer_*`, gleiche IDs), abgeglichen gegen ihre Urfassung (`core.pakete.ausdauer_urfassungen`)
+  — was die Person daran geändert hat, bleibt. **Paketpläne je
   Planübung** (U2, 9.11.2026): `core.pakete.plan_abgleichen` (Planübung = Übung + wievieltes
   Vorkommen, IDs bleiben, mit Ablauf/Zweigen und verschobenen Stellen bleibt die eigene Fassung),
   „Neu laden …“ im Plan-Editor (`components/neu_laden.py`: Fehlendes zurückholen · Auf

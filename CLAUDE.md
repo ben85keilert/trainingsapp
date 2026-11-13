@@ -152,6 +152,11 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   Anker) werden in die Messdatei zurückgeschrieben (`hrv_core.ereignisse`), nie die
   Messwerte.
 
+- **GPS je Übung** (Ben, 13.11.2026, Vertrag `docs/plan_gps.md` §12): Der Code kennt keine
+  bestimmte Übung mit GPS — `Exercise.gps` (`core/gps_wahl.py`, Paketfeld `gps`: Rechenart gehen ·
+  laufen · rad und vier Tempo-Grenzen) macht eine Übung unter „Messung → GPS“ wählbar, das Training
+  wird bei ihr eingetragen; „Gehen“, „Laufen“, „Radfahren“ sind Übungen des Pakets „Standard“.
+
 - **GPS-Daten werden nie geteilt** (Ben, 14.10.2026): Sync, Export-ZIP,
   Teilen, Diagnose — keine Koordinaten. Strecken liegen getrennt von
   `Messungen/` (`config.streckenverzeichnis()`). Einzige Ausnahme: der

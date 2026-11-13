@@ -149,24 +149,11 @@ def test_einstellungsseite_baut_und_schreibt(tmp_path) -> None:
         auswahl["Farbskala"].on_select(SimpleNamespace(control=auswahl["Farbskala"]))
         assert state.training_einstellungen().skala == "viridis"
         assert state.training_einstellungen().tempo_mit_pausen  # das Vorige bleibt
-        # feste Tempo-Stufen (Ben, 13.11.2026): Vorgabe wählen, eigene Grenzen eintragen
-        felder = {
-            f.data: f for f in teile if isinstance(f, ft.TextField) and str(f.data).startswith("gr")
-        }
-        niveau = next(d for d in teile if isinstance(d, ft.Dropdown) and d.data == "niveau:rad")
-        assert [felder[f"grenze:rad:{i}"].value for i in range(4)] == ["13", "17", "21", "25"]
-        niveau.value = "schnell"
-        niveau.on_select(SimpleNamespace(control=niveau))
-        assert state.training_einstellungen().tempo_grenzen_kmh("rad") == (20.0, 25.0, 30.0, 35.0)
-        assert felder["grenze:rad:3"].value == "35"
-        felder["grenze:rad:3"].value = "28"  # nicht aufsteigend: nichts gespeichert
-        felder["grenze:rad:3"].on_change(None)
-        assert state.training_einstellungen().niveau("rad") == "schnell"
-        felder["grenze:rad:3"].value = "37,5"
-        felder["grenze:rad:3"].on_change(None)
-        e = state.training_einstellungen()
-        assert e.niveau("rad") == "eigen" and niveau.value == "eigen"
-        assert e.tempo_grenzen_kmh("rad") == (20.0, 25.0, 30.0, 37.5)
-        assert e.tempo_grenzen_kmh("laufen") == (7.0, 9.0, 11.0, 13.0)
+        # Die festen Tempo-Stufen stehen seit „GPS je Übung“ an der Übung
+        # (tests/test_ui_gps_karte.py) — hier nur noch der Hinweis, wo
+        assert not [f for f in teile if isinstance(f, ft.TextField)]
+        assert any(
+            isinstance(t, ft.Text) and "Reiter „Sensor“, Karte „GPS“" in str(t.value) for t in teile
+        )
     finally:
         state.schliessen()

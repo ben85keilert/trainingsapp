@@ -176,6 +176,7 @@ async def _training(
     punkte=None,
     seite=None,
     messung_beenden=False,
+    uebung=None,
 ):
     """Ein Training wie in der App — als Einheit (Startleiste, „Training starten“), auf
     einer Uhr-Attrappe: Gurt und GPS ticken im Takt, ohne zu warten.
@@ -183,7 +184,8 @@ async def _training(
     ``hrv_vorher``: so viele Sekunden lief die HRV-Aufnahme schon vor dem Training (sie
     läuft dann danach weiter, bis nach ``vor_dem_stopp(strecke)``). ``timer``: ein
     Timer-Profil, das mit in der Startleiste steht (Intervalle). Gibt die Strecke und
-    die gezählten Ortungen zurück.
+    die gezählten Ortungen zurück. ``uebung``: die gewählte Übung mit GPS — ohne sie die
+    erste der Rechenart ``sportart`` (aus dem Paket „Standard“).
     """
     from attrappen import Empfaenger, Gurt, Seite, Uhr, ruhe
     from trainingsapp.devices.messlauf import Messlauf
@@ -203,7 +205,7 @@ async def _training(
             await ruhe()
     seite = seite if seite is not None else Seite()
     gps = Empfaenger(uhr)
-    teil = einheit_ui.ausdauer_bereitstellen(seite, state, sportart, gps)
+    teil = einheit_ui.ausdauer_bereitstellen(seite, state, uebung or sportart, gps)
     if timer is not None:
         from trainingsapp.core.timer import TimerLauf
 
@@ -489,6 +491,67 @@ async def test_verwaiste_strecke_wird_erkannt_und_nachgetragen(daten) -> None:
     assert state.sitzungen.eintrag_laden(nach.session_entry_id) is not None
     assert state.verwaiste_strecken == []
     assert verwaiste(streckenverzeichnis(), state.strecken.dateipfade()) == []
+
+
+async def test_verwaiste_strecke_geht_an_ihre_uebung(daten) -> None:
+    """GPS je Übung (Ben, 13.11.2026): Der Kopf der Streckendatei nennt die Übung — nach
+    einem Absturz wird das Training wieder bei ihr eingetragen. Gibt es sie nicht mehr, gilt
+    die erste GPS-Übung derselben Rechenart; ohne jede GPS-Übung bleibt die Strecke, nur
+    ohne Tagebucheintrag."""
+    from datetime import UTC, datetime
+
+    from trainingsapp.config import streckenverzeichnis
+    from trainingsapp.core.gps_wahl import GpsWahl
+    from trainingsapp.core.models import Exercise
+    from trainingsapp.data.strecken import StreckenSchreiber, kopf_lesen
+    from trainingsapp.ui.training import (
+        Streckendatei,
+        gps_uebung,
+        gps_uebungen,
+        strecke_name,
+        verwaiste_uebernehmen,
+    )
+
+    state, _ = daten
+    walken = Exercise(name="Nordic Walking", gps=GpsWahl("gehen"))
+    state.uebungen.speichern(walken)
+    streckenverzeichnis().mkdir(parents=True, exist_ok=True)
+
+    def datei(name: str, uebung: str) -> object:
+        pfad = streckenverzeichnis() / name
+        kopf = {
+            "schema": "strecke-v1",
+            "sportart": "gehen",
+            "uebung": uebung,
+            "subject_id": state.profil.id,
+            "started_at": "2026-11-13T06:00:00+00:00",
+        }
+        with StreckenSchreiber(pfad, kopf=kopf) as s:
+            for p in _gang(300, 1.4):
+                s.schreiben(p)
+        return pfad
+
+    # Die Ablage eines Trainings schreibt die Übung in den Kopf
+    ablage = Streckendatei("gehen", state.profil.id, uebung_id=walken.id)
+    ablage.anlegen(datetime(2026, 11, 13, 5, 0, tzinfo=UTC))
+    assert kopf_lesen(ablage.pfad)["uebung"] == walken.id
+    ablage.schliessen(False)
+
+    nach = verwaiste_uebernehmen(state, datei("strecke_a.jsonl", walken.id))
+    assert nach.exercise_id == walken.id and strecke_name(state, nach) == "Nordic Walking"
+    assert state.sitzungen.eintrag_laden(nach.session_entry_id).exercise_id == walken.id
+    # Übung unbekannt: die erste GPS-Übung der Rechenart („Gehen“ aus dem Paket)
+    nach = verwaiste_uebernehmen(state, datei("strecke_b.jsonl", "gibt-es-nicht"))
+    assert nach.exercise_id == gps_uebung(state, None, "gehen").id
+    assert strecke_name(state, nach) == "Gehen"
+    # Keine Übung mit GPS: die Strecke bleibt, heißt nach der Rechenart, kein Eintrag
+    for u in gps_uebungen(state):
+        u.gps = GpsWahl()
+        state.uebungen.speichern(u)
+    nach = verwaiste_uebernehmen(state, datei("strecke_c.jsonl", ""))
+    assert nach is not None and nach.exercise_id is None and nach.session_entry_id is None
+    assert nach.distanz_m > 300 and strecke_name(state, nach) == "Gehen"
+    assert state.strecken.laden(nach.id) is not None
 
 
 async def test_abbrechen_und_fehler_im_empfang(daten) -> None:
@@ -1024,12 +1087,15 @@ async def test_auswertung_und_liste_zeigen_das_training(daten) -> None:
     achsen[0].on_change(SimpleNamespace(control=SimpleNamespace(selected=["strecke"])))
     assert state.training_einstellungen().kurve_x == "strecke"
     assert "HERZFREQUENZ UND TEMPO" in _texte(view)
-    # Start-Ansicht ohne laufendes Training: Sportarten (Gehen zuerst) und Start
+    # Start-Ansicht ohne laufendes Training: die Übungen mit GPS (Gehen zuerst) und Start
     import flet as ft
+
+    from trainingsapp.ui.training import gps_uebungen
 
     start = ausdauer_view(_seite(), state)
     wahl = next(c for c in _alle(start) if isinstance(c, ft.SegmentedButton))
-    assert [s.value for s in wahl.segments] == ["gehen", "laufen", "rad"]
+    assert [s.label.value for s in wahl.segments] == ["Gehen", "Laufen", "Radfahren"]
+    assert [s.value for s in wahl.segments] == [u.id for u in gps_uebungen(state)]
     assert any(
         isinstance(c, ft.FilledButton) and c.content == "Training starten" for c in _alle(start)
     )
@@ -1349,24 +1415,28 @@ async def test_forschungsexport_aus_der_hrv_auswertung(daten, monkeypatch) -> No
     assert dok["einheit"]["id"] == strecke.einheit_id and name.endswith(".zip")
 
 
-async def test_sportart_nachtraeglich_aendern(daten) -> None:
-    """Ben, 26.10.2026: als „Laufen“ gespeichert, aber Rad gefahren — die Zeile bekommt die
-    neue Sportart, der Tagebucheintrag wandert als Korrektur zur Übung „Radfahren“, Werte
-    und Zeiten bleiben; eine unbekannte oder gleiche Sportart ändert nichts."""
+async def test_uebung_nachtraeglich_aendern(daten) -> None:
+    """Ben, 26.10.2026: als „Gehen“ gespeichert, aber Rad gefahren — die Zeile bekommt die
+    neue Übung und ihre Rechenart, der Tagebucheintrag wandert als Korrektur zu „Radfahren“,
+    Werte und Zeiten bleiben; eine Übung ohne GPS oder dieselbe ändert nichts."""
+    from trainingsapp.core.models import Exercise
     from trainingsapp.core.strecke import RAD
-    from trainingsapp.ui.training import sportart_aendern, uebung_fuer
+    from trainingsapp.ui.training import gps_uebung, strecke_name, uebung_aendern
 
     state, tmp_path = daten
     strecke, _ = await _training(state, tmp_path)
+    gehen, rad = gps_uebung(state, None, strecke.sportart), gps_uebung(state, None, RAD)
     alt = state.sitzungen.eintrag_laden(strecke.session_entry_id)
-    assert alt is not None and alt.exercise_id == uebung_fuer(state, strecke.sportart).id
-    assert sportart_aendern(state, strecke, "schwimmen") is strecke and strecke.sportart != RAD
-    sportart_aendern(state, strecke, RAD)
+    assert alt is not None and alt.exercise_id == gehen.id == strecke.exercise_id
+    ohne_gps = Exercise(name="Kniebeuge")
+    assert uebung_aendern(state, strecke, ohne_gps) is strecke and strecke.sportart != RAD
+    uebung_aendern(state, strecke, rad)
     neu = state.strecken.laden(strecke.id)
     assert neu is not None and neu.sportart == RAD and strecke.sportart == RAD
+    assert neu.exercise_id == rad.id and strecke_name(state, neu) == "Radfahren"
     eintrag = state.sitzungen.eintrag_laden(neu.session_entry_id)
     assert eintrag is not None and eintrag.id != alt.id
-    assert eintrag.exercise_id == uebung_fuer(state, RAD).id
+    assert eintrag.exercise_id == rad.id
     assert (eintrag.result, eintrag.started_at, eintrag.ended_at) == (
         alt.result,
         alt.started_at,
@@ -1374,9 +1444,59 @@ async def test_sportart_nachtraeglich_aendern(daten) -> None:
     )
     assert state.sitzungen.eintrag_laden(alt.id) is not None  # ersetzt, nicht weg
     assert state.strecken.zu_eintraegen([eintrag.id])[eintrag.id].id == strecke.id
-    # Noch einmal dieselbe Sportart: kein weiterer Eintrag
-    sportart_aendern(state, strecke, RAD)
+    # Noch einmal dieselbe Übung: kein weiterer Eintrag
+    uebung_aendern(state, strecke, rad)
     assert state.strecken.laden(strecke.id).session_entry_id == eintrag.id
+
+
+async def test_training_bei_einer_eigenen_uebung_mit_gps(daten) -> None:
+    """GPS je Übung (Ben, 13.11.2026): Eine eigene Übung mit GPS steht zur Wahl, das Training
+    wird bei ihr eingetragen und heißt nach ihr. Hat sie die Felder Strecke und Zeit nicht,
+    steht „gemacht“ im Tagebuch — die Zahlen bleiben in der Strecke; wechselt man danach zu
+    einer Übung mit den Feldern, bekommt der Eintrag sie."""
+    from trainingsapp.core.gps_wahl import GpsWahl
+    from trainingsapp.core.models import Exercise
+    from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+    from trainingsapp.ui.training import (
+        gps_uebung,
+        gps_uebungen,
+        strecke_gps,
+        strecke_name,
+        uebung_aendern,
+    )
+
+    state, tmp_path = daten
+    walken = Exercise(
+        name="Nordic Walking",
+        result_spec=SPEC_SAETZE_WDH,
+        gps=GpsWahl("gehen", (4.0, 5.0, 6.0, 7.0)),
+    )
+    state.uebungen.speichern(walken)
+    assert [u.name for u in gps_uebungen(state)] == [
+        "Gehen",
+        "Nordic Walking",
+        "Laufen",
+        "Radfahren",
+    ]
+    strecke, _ = await _training(state, tmp_path, uebung=walken)
+    assert strecke.exercise_id == walken.id and strecke.sportart == "gehen"
+    assert strecke_name(state, strecke) == "Nordic Walking"
+    assert strecke_gps(state, strecke).grenzen_kmh() == (4.0, 5.0, 6.0, 7.0)
+    eintrag = state.sitzungen.eintrag_laden(strecke.session_entry_id)
+    assert eintrag.exercise_id == walken.id and eintrag.result == {}
+    assert strecke.distanz_m > 100 and strecke.dauer_s > 0
+    # Zu „Gehen“ (Felder Strecke und Zeit): der Eintrag bekommt die Zahlen der Strecke
+    uebung_aendern(state, strecke, gps_uebung(state, None, "gehen"))
+    eintrag = state.sitzungen.eintrag_laden(strecke.session_entry_id)
+    assert eintrag.result == {
+        "duration": round(strecke.dauer_s),
+        "distance": round(strecke.distanz_m),
+    }
+    assert strecke_gps(state, strecke).grenzen_kmh() == (3.0, 4.0, 5.0, 6.0)
+    # GPS an der Übung aus: Sie steht nicht mehr zur Wahl, ihr Training behält den Namen
+    walken.gps = GpsWahl()
+    state.uebungen.speichern(walken)
+    assert "Nordic Walking" not in [u.name for u in gps_uebungen(state)]
 
 
 @pytest.mark.parametrize("zwischenstand_im_training", [False, True])
@@ -1791,9 +1911,10 @@ async def test_auswertung_bestwerte_pausen_verteilung_und_hoehenprofil(daten) ->
 
 
 async def test_auswertung_feste_tempo_stufen_und_hf_bereiche(daten) -> None:
-    """Ben, 13.11.2026: „Zeit je Tempo“ auch nach festen Grenzen der Sportart (zum
-    Vergleichen von Trainings), „Zeit je Herzfrequenz“ nach 3 · 5 · 10 Bereichen des Profils
-    — ohne Ruhe-HF und HFmax bleiben die Schritte von zehn Schlägen."""
+    """Ben, 13.11.2026: „Zeit je Tempo“ auch nach festen Grenzen (zum Vergleichen von
+    Trainings) — sie kommen aus der Übung des Trainings (GPS je Übung) —, „Zeit je
+    Herzfrequenz“ nach 3 · 5 · 10 Bereichen des Profils; ohne Ruhe-HF und HFmax bleiben die
+    Schritte von zehn Schlägen."""
     from datetime import date
 
     import flet as ft
@@ -1820,10 +1941,23 @@ async def test_auswertung_feste_tempo_stufen_und_hf_bereiche(daten) -> None:
     waehlen("tempo_stufen", "fest")
     texte = _texte(view)
     assert state.training_einstellungen().tempo_stufen == "fest"
-    grenzen = state.training_einstellungen().tempo_grenzen_kmh(strecke.sportart)
-    erste = f"{grenzen[0]:.1f}".replace(".", ",").removesuffix(",0")
-    assert any(t.startswith("Feste Stufen „") and f"bei {erste} · " in t for t in texte)
+    assert any(t.startswith("Feste Stufen „Gehen · mittel“") and "bei 3 · 4 · " in t for t in texte)
     assert sum(t.startswith(("schneller als ", "langsamer als ")) for t in texte) == 2
+    # Eigene Grenzen an der Übung: Die Auswertung desselben Trainings teilt danach
+    from trainingsapp.core.gps_wahl import GpsWahl
+    from trainingsapp.ui.training import gps_uebung
+
+    gehen = gps_uebung(state, strecke.exercise_id)
+    gehen.gps = GpsWahl("gehen", (2.5, 4.5, 6.5, 8.5))
+    state.uebungen.speichern(gehen)
+    view = ausdauer_detail_view(seite, state, state.strecken.laden(strecke.id))
+    await asyncio.gather(*seite.aufgaben)
+    texte = _texte(view)
+    assert any(
+        t.startswith("Feste Stufen „Gehen · eigene Werte“") and "bei 2,5 · 4,5 · " in t
+        for t in texte
+    )
+    assert any("Reiter „Sensor“" in t for t in texte)
 
     heute = date.today()
     for groesse, wert in (("ruhe_hf", 60), ("hf_max", 180)):

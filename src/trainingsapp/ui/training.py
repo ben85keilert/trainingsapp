@@ -50,6 +50,7 @@ from trainingsapp.core.bewegung import kopf as bewegung_kopf
 from trainingsapp.core.bewegung import versatz as bewegung_versatz
 from trainingsapp.core.einheit import Ereignis
 from trainingsapp.core.forschung import dokument, forschung_zip, tempo_reihe
+from trainingsapp.core.gps_wahl import GpsWahl
 from trainingsapp.core.hrv_export import zugehoerige_dateien
 from trainingsapp.core.hrv_training import hf_je_zeit
 from trainingsapp.core.laufend import uhr
@@ -64,7 +65,7 @@ from trainingsapp.core.nachlauf import (
     punkte_bis,
     sidecar_kuerzen,
 )
-from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld
+from trainingsapp.core.result_spec import ResultSpec
 from trainingsapp.core.strecke import (
     GEHEN,
     SPORT_NAMEN,
@@ -76,7 +77,6 @@ from trainingsapp.core.strecke import (
 )
 from trainingsapp.core.uhrendrift import Stufen, rest_auf_app_uhr, rest_bei, schlaf_rest
 from trainingsapp.data.db import transaktion
-from trainingsapp.data.seed import seed_id
 from trainingsapp.data.strecken import (
     StreckenSchreiber,
     dateiname,
@@ -92,12 +92,23 @@ from trainingsapp.devices.strecke_baustein import StreckeErgebnis
 class Streckendatei:
     """Die Ablage eines Trainings (`devices.strecke_baustein.Streckenablage`).
 
-    Die Datei entsteht beim Start mit einem Kopf ohne Koordinaten (Sportart, Profil,
-    Beginn) und heißt nach ihrem Beginn — wie bisher ``strecke_<Zeit>.jsonl``.
+    Die Datei entsteht beim Start mit einem Kopf ohne Koordinaten (Rechenart, Übung,
+    Profil, Beginn) und heißt nach ihrem Beginn — wie bisher ``strecke_<Zeit>.jsonl``. Die
+    Übung steht im Kopf, damit ein Training, das ein Absturz unterbrach, wieder bei ihr
+    eingetragen wird (`verwaiste_uebernehmen`); der Kopf verlässt das Gerät nicht — Rohspur
+    und GPX bauen ihren eigenen (`core.bewegung.kopf`, `data.strecken.gpx`).
     """
 
-    def __init__(self, sportart: str, subject_id: str, verzeichnis: Path | None = None) -> None:
+    def __init__(
+        self,
+        sportart: str,
+        subject_id: str,
+        verzeichnis: Path | None = None,
+        *,
+        uebung_id: str = "",
+    ) -> None:
         self.sportart = sportart
+        self.uebung_id = uebung_id
         self.subject_id = subject_id
         self.verzeichnis = verzeichnis
         self.pfad: Path | None = None
@@ -111,6 +122,7 @@ class Streckendatei:
             kopf={
                 "schema": "strecke-v1",
                 "sportart": self.sportart,
+                **({"uebung": self.uebung_id} if self.uebung_id else {}),
                 "subject_id": self.subject_id,
                 "started_at": start_utc.isoformat(),
                 # was der Empfänger liefert (`flet_gps`: über dem Meeresspiegel, seit 26.10.2026)
@@ -158,32 +170,62 @@ def lauftext(e: Any, teil: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def uebung_fuer(state: Any, sportart: str) -> Exercise:
-    """Die Übung „Gehen"/„Laufen"/„Radfahren" — beim ersten Training angelegt.
+def gps_uebungen(state: Any) -> list[Exercise]:
+    """Die Übungen mit eingeschaltetem GPS — die Auswahl unter „Messung → GPS“ (Ben,
+    13.11.2026, ``docs/plan_gps.md`` §12). Nach Rechenart (Gehen, Laufen, Rad), darin nach
+    Namen; Archivierte, Gelöschte und die Übungen deaktivierter Pakete fehlen."""
+    mit_gps = [u for u in state.uebungen.alle() if u.gps.an]
+    return sorted(mit_gps, key=lambda u: (SPORTARTEN.index(u.gps.art), u.name.casefold()))
 
-    Feste ID je Sportart (wie mitgelieferte Übungen), damit alle Trainings
-    einer Sportart im Verlauf zusammenstehen. Felder: Strecke und Zeit.
-    """
-    uid = seed_id(f"ausdauer_{sportart}")
-    vorhanden = state.uebungen.laden(uid, mit_geloeschten=True)
-    if vorhanden is not None:
-        return vorhanden
-    felder = [f for f in (vorrat_feld("distance"), vorrat_feld("duration")) if f is not None]
-    uebung = Exercise(
-        id=uid,
-        name=SPORT_NAMEN[sportart],
-        description="Ausdauer — mit GPS oder ohne aufgezeichnet (Reiter „Messung“, „Ausdauer“).",
-        result_spec=ResultSpec(layout=Layout.SINGLE, fields=felder),
-        typen=["Ausdauer"],
-    )
-    state.uebungen.speichern(uebung)
-    return uebung
+
+def gps_uebung(state: Any, uebung_id: str | None, sportart: str = "") -> Exercise | None:
+    """Die Übung eines Trainings: die mit dieser ID — auch aus dem Papierkorb, ihr Verlauf
+    soll zusammenbleiben —, sonst die erste GPS-Übung derselben Rechenart. ``None``: keine
+    da; das Training wird dann ohne Tagebucheintrag gespeichert."""
+    if uebung_id:
+        uebung = state.uebungen.laden(uebung_id, mit_geloeschten=True)
+        if uebung is not None:
+            return uebung
+    return next((u for u in gps_uebungen(state) if u.gps.art == sportart), None)
+
+
+def strecke_name(state: Any, strecke: Strecke) -> str:
+    """Wie ein Training heißt: nach seiner Übung — ohne sie nach der Rechenart."""
+    if strecke.exercise_id:
+        uebung = state.uebungen.laden(strecke.exercise_id, mit_geloeschten=True)
+        if uebung is not None and uebung.name:
+            return str(uebung.name)
+    return SPORT_NAMEN.get(strecke.sportart, "Training")
+
+
+def strecke_gps(state: Any, strecke: Strecke) -> GpsWahl:
+    """Die GPS-Einstellung, die für ein Training gilt — daher kommen die festen
+    Tempo-Grenzen seiner Auswertung: die seiner Übung, solange sie GPS mit derselben
+    Rechenart hat; sonst die Vorgabe „mittel“ der Rechenart."""
+    if strecke.exercise_id:
+        uebung = state.uebungen.laden(strecke.exercise_id, mit_geloeschten=True)
+        if uebung is not None and uebung.gps.art == strecke.sportart:
+            return uebung.gps
+    return GpsWahl(art=strecke.sportart)
+
+
+def eintragswerte(spec: ResultSpec, dauer_s: float, distanz_m: float) -> dict[str, Any]:
+    """Was ein Training ins Tagebuch schreibt: Zeit und Strecke, soweit die Übung die Felder
+    ``duration`` und ``distance`` hat — sonst zählt der Eintrag als „gemacht“, die Zahlen
+    stehen in der Auswertung des Trainings."""
+    werte: dict[str, Any] = {}
+    if spec.field_by_key("duration") is not None:
+        werte["duration"] = round(dauer_s)
+    if spec.field_by_key("distance") is not None and distanz_m >= 10:
+        werte["distance"] = round(distanz_m)
+    return werte
 
 
 def training_eintragen(
     state: Any,
     *,
     subject_id: str,
+    uebung: Exercise | None,
     sportart: str,
     started_at: datetime,
     ended_at: datetime,
@@ -196,7 +238,10 @@ def training_eintragen(
 ) -> Strecke:
     """Strecke und Tagebucheintrag anlegen — nach dem Training und beim Nachtragen.
 
-    ``rechner`` ``None`` heißt ohne GPS (Laufband): Strecke 0, Bewegungszeit = Dauer.
+    ``uebung``: bei welcher Übung eingetragen wird (`gps_uebung`); ``None`` heißt: keine
+    Übung mit GPS da — die Strecke wird trotzdem gespeichert, nur ohne Tagebucheintrag.
+    ``sportart`` ist die Rechenart. ``rechner`` ``None`` heißt ohne GPS (Laufband):
+    Strecke 0, Bewegungszeit = Dauer.
     """
     r = rechner
     strecke = Strecke(
@@ -213,35 +258,52 @@ def training_eintragen(
         hrv_recording_id=hrv_recording_id,
         title=title,
         einheit_id=einheit_id,
+        exercise_id=uebung.id if uebung is not None else None,
     )
-    ergebnis_feld: dict[str, Any] = {"duration": round(dauer_s)}
-    if strecke.distanz_m >= 10:
-        ergebnis_feld["distance"] = round(strecke.distanz_m)
-    uebung = uebung_fuer(state, sportart)
-    sitzung = state.sitzungen.session_fuer(subject_id, None, lokaler_tag(started_at))
-    eintrag = state.sitzungen.eintrag_anlegen(
-        sitzung, uebung, ergebnis_feld, started_at=started_at, ended_at=ended_at
-    )
-    strecke.session_entry_id = eintrag.id
+    if uebung is not None:
+        sitzung = state.sitzungen.session_fuer(subject_id, None, lokaler_tag(started_at))
+        eintrag = state.sitzungen.eintrag_anlegen(
+            sitzung,
+            uebung,
+            eintragswerte(uebung.result_spec, dauer_s, strecke.distanz_m),
+            started_at=started_at,
+            ended_at=ended_at,
+        )
+        strecke.session_entry_id = eintrag.id
     state.strecken.anlegen(strecke)
     return strecke
 
 
-def sportart_aendern(state: Any, strecke: Strecke, sportart: str) -> Strecke:
-    """Die Sportart eines gespeicherten Trainings ändern (Ben, 26.10.2026: „Laufen“
-    gestartet, Rad gefahren). Die Zeile bekommt die neue Sportart, der Tagebucheintrag
-    wandert als Korrektur zur Übung der neuen Sportart (`eintrag_uebung_wechseln`); die
-    Auswertung rechnet Kilometer, Tempo und Kurve ohnehin aus der Datei mit der Sportart
-    der Zeile. Der Dateikopf behält die Sportart vom Start (`Streckendatei`)."""
-    if sportart not in SPORTARTEN or sportart == strecke.sportart:
+def uebung_aendern(state: Any, strecke: Strecke, uebung: Exercise) -> Strecke:
+    """Die Übung eines gespeicherten Trainings ändern (Ben, 26.10.2026: „Laufen“ gestartet,
+    Rad gefahren; seit „GPS je Übung“ jede Übung mit GPS). Die Zeile bekommt die neue Übung
+    und ihre Rechenart, der Tagebucheintrag wandert als Korrektur zu ihr
+    (`eintrag_uebung_wechseln`) — mit Zeit und Strecke, soweit sie die Felder hat; ein
+    Training ohne Eintrag bekommt jetzt einen. Die Auswertung rechnet Kilometer, Tempo und
+    Kurve ohnehin aus der Datei mit der Rechenart der Zeile. Der Dateikopf behält den Stand
+    vom Start (`Streckendatei`)."""
+    if not uebung.gps.an or uebung.id == strecke.exercise_id:
         return strecke
+    werte = eintragswerte(uebung.result_spec, strecke.dauer_s, strecke.distanz_m)
     eintrag_id = strecke.session_entry_id
-    if eintrag_id and state.sitzungen.eintrag_laden(eintrag_id) is not None:
-        eintrag_id = state.sitzungen.eintrag_uebung_wechseln(
-            eintrag_id, uebung_fuer(state, sportart)
-        ).id
-    state.strecken.sportart_setzen(strecke.id, sportart, eintrag_id)
-    strecke.sportart = sportart
+    with transaktion(state.con):
+        if eintrag_id and (alt := state.sitzungen.eintrag_laden(eintrag_id)) is not None:
+            rest = {k: v for k, v in alt.result.items() if k not in ("duration", "distance")}
+            rest = {k: v for k, v in rest.items() if uebung.result_spec.field_by_key(k)}
+            eintrag_id = state.sitzungen.eintrag_uebung_wechseln(
+                eintrag_id, uebung, {**rest, **werte}
+            ).id
+        else:
+            ende = strecke.ended_at or strecke.started_at + timedelta(seconds=strecke.dauer_s)
+            sitzung = state.sitzungen.session_fuer(
+                strecke.subject_id, None, lokaler_tag(strecke.started_at)
+            )
+            eintrag_id = state.sitzungen.eintrag_anlegen(
+                sitzung, uebung, werte, started_at=strecke.started_at, ended_at=ende
+            ).id
+        state.strecken.uebung_setzen(strecke.id, uebung.id, uebung.gps.art, eintrag_id)
+    strecke.exercise_id = uebung.id
+    strecke.sportart = uebung.gps.art
     strecke.session_entry_id = eintrag_id
     return strecke
 
@@ -270,6 +332,7 @@ def einheit_eintragen(
     return training_eintragen(
         state,
         subject_id=e.subject_id or state.profil.id,
+        uebung=gps_uebung(state, ergebnis.uebung_id, ergebnis.sportart),
         sportart=ergebnis.sportart,
         started_at=started_at,
         ended_at=started_at + timedelta(seconds=ende_s),
@@ -439,10 +502,10 @@ def _kuerzen_eintragen(state: Any, strecke: Strecke, schnitt: _Schnitt) -> None:
             if neu.session_entry_id and (
                 alt := state.sitzungen.eintrag_laden(neu.session_entry_id)
             ):
-                ergebnis = {k: v for k, v in alt.result.items() if k != "distance"}
-                ergebnis["duration"] = round(neu.dauer_s)
-                if neu.distanz_m >= 10:
-                    ergebnis["distance"] = round(neu.distanz_m)
+                ergebnis = {
+                    k: v for k, v in alt.result.items() if k not in ("distance", "duration")
+                }
+                ergebnis.update(eintragswerte(alt.spec_snapshot, neu.dauer_s, neu.distanz_m))
                 korrektur = state.sitzungen.eintrag_korrigieren(
                     alt.id, ergebnis, ended_at=neu.ended_at
                 )
@@ -546,9 +609,11 @@ def _hrv_fertig(state: Any, auftrag: _HrvAuftrag, ergebnis: tuple[str, bool]) ->
 
 def verwaiste_uebernehmen(state: Any, pfad: Path) -> Strecke | None:
     """Eine Streckendatei ohne Zeile als Training nachtragen (Ben, 15.10.2026: beim
-    Start erkennen und anbieten). Sportart, Profil und Start kommen aus dem Kopf der
-    Datei; ohne Kopf gilt „Gehen", das aktive Profil und die erste Ortung. Eine Datei
-    ohne Ortung wird gelöscht, nicht eingetragen (``None``).
+    Start erkennen und anbieten). Rechenart, Übung, Profil und Start kommen aus dem Kopf
+    der Datei; ohne Kopf gilt „Gehen", das aktive Profil und die erste Ortung. Nennt der
+    Kopf keine Übung (ältere Dateien) oder gibt es sie nicht mehr, gilt die erste GPS-Übung
+    derselben Rechenart (`gps_uebung`). Eine Datei ohne Ortung wird gelöscht, nicht
+    eingetragen (``None``).
 
     Lief das Training als Einheit, nennt deren Zeitleiste die Datei — das Training
     bekommt die Einheit, und über sie findet die Auswertung die HRV-Aufnahme, die nach
@@ -581,6 +646,7 @@ def verwaiste_uebernehmen(state: Any, pfad: Path) -> Strecke | None:
     strecke = training_eintragen(
         state,
         subject_id=subject_id,
+        uebung=gps_uebung(state, str(kopf.get("uebung") or ""), sportart),
         sportart=sportart,
         started_at=started_at,
         ended_at=ended_at,
@@ -974,6 +1040,8 @@ class GpxAuftrag:
     pfad: Path
     bezug: HrvBezug | None
     vorgabe: Korrekturregeln
+    #: Wie das Training heißt (`strecke_name`) — aus der Datenbank, das Packen läuft im Thread
+    name: str = ""
 
 
 def gpx_vorbereiten(state: Any, strecken: Iterable[Strecke]) -> list[GpxAuftrag]:
@@ -994,6 +1062,7 @@ def gpx_vorbereiten(state: Any, strecken: Iterable[Strecke]) -> list[GpxAuftrag]
                 pfad,
                 hrv_bezug(state, s),
                 vorgabe,
+                strecke_name(state, s),
             )
         )
     return aus
@@ -1014,7 +1083,7 @@ def gpx_packen(auftraege: Iterable[GpxAuftrag]) -> dict[str, bytes]:
         lokal = a.strecke.started_at.astimezone()
         aus[a.zip_pfad] = gpx(
             punkte,
-            name=f"{SPORT_NAMEN[a.strecke.sportart]} {lokal:%d.%m.%Y %H:%M}",
+            name=f"{a.name or SPORT_NAMEN[a.strecke.sportart]} {lokal:%d.%m.%Y %H:%M}",
             sportart=a.strecke.sportart,
             herzfrequenz=herz or None,
         )
@@ -1033,7 +1102,10 @@ __all__ = [
     "bewegung_packen",
     "bewegung_vorbereiten",
     "einheit_eintragen",
+    "eintragswerte",
     "forschung_export",
+    "gps_uebung",
+    "gps_uebungen",
     "gpx_packen",
     "gpx_vorbereiten",
     "herz_je_ortung",
@@ -1044,12 +1116,13 @@ __all__ = [
     "mit_schlaf",
     "nachlauf_der_strecke",
     "ortung_zu_wand",
-    "sportart_aendern",
+    "strecke_gps",
+    "strecke_name",
     "strecken_punkte",
     "training_eintragen",
     "training_kuerzen",
     "training_kuerzen_async",
-    "uebung_fuer",
+    "uebung_aendern",
     "verwaiste_uebernehmen",
     "zeitleiste_und_versatz",
 ]

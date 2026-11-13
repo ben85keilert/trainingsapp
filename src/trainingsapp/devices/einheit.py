@@ -56,6 +56,7 @@ from ..core.einheit import (
     Zeitbasis,
     Zustand,
     daten_pruefen,
+    in_klammer,
     in_uebung,
     projektion,
     uebung_ende_text,
@@ -1033,12 +1034,24 @@ class Einheitslauf:
             return True
         return self.ende_wenn_alles_fertig and not any(self._aktiv(t) for t in self.teile)
 
-    def _mit_uebung(self, liste: list[Ereignis]) -> list[Ereignis]:
+    def _mit_uebung(self, liste: list[Ereignis], ende_t_s: float | None = None) -> list[Ereignis]:
         """Läuft eine Übung mit ihrem Timer (Uhr der Übung), nennen die Timer-Ereignisse sie
-        (`core.einheit.in_uebung`, P54). Der Plan-Ablauf macht das selbst je Übung."""
+        (`core.einheit.in_uebung`, P54). Der Plan-Ablauf macht das selbst je Übung.
+
+        Ohne diesen Teil, aber mit einem Training, dessen Übung die Klammer nennt („Gehen:
+        Start“ … „Gehen: Ende“, `_einheit_spur`): Was die Uhr im Augenblick der Klammer
+        meldet, wird still (`core.einheit.in_klammer`, Ben 13.11.2026: „Die zusätzliche Notiz
+        für die Uhr ist störend, wenn ohnehin schon die Übung markiert wird“) — ihr Anfang
+        mit dem Start der Einheit und ihr Ende, wenn die Einheit dort endet (``ende_t_s``,
+        oder weil sie mit dem Timer endet). Ein Timer allein behält seine Notizen: Dort ist
+        er selbst, was die Klammer nennt, und sein erster Abschnitt sagt, womit er beginnt."""
         teil = self.teil("plan")
         if not isinstance(teil, UebungBaustein):
-            return liste
+            if not self._einheit_klammer or self.teil("gps") is None:
+                return liste
+            return [
+                in_klammer(e, ende_t_s=e.t_s if self.ende_mit_timer else ende_t_s) for e in liste
+            ]
         # Der Anfang der Uhr fällt mit „Wadenheben: Start“ (t_s = 0) zusammen und wird still
         # (Ben, 26.10.2026); was die Uhr vorhat, trägt dafür die Startnotiz der Übung
         timer = self.timer
@@ -1211,7 +1224,7 @@ class Einheitslauf:
                 gesammelt.extend(self._sicher(teil, teil.beenden, jetzt))
         grund = "abgebrochen" if self.zustand is Zustand.COUNTDOWN else ""
         gesammelt.sort(key=lambda e: e.t_s)
-        gesammelt = self._mit_uebung(gesammelt)
+        gesammelt = self._mit_uebung(gesammelt, ende_t_s=max(t, 0.0))
         self._beobachten(self.teile, gesammelt)
         self._takt_verteilen()
         ende = Ereignis(

@@ -16,6 +16,8 @@
 - **Beschleunigungssensor** (`BESCHLEUNIGUNG_MD`, Ben 4.11.2026, `docs/plan_beschleunigung.md`
   §3.4): was gemessen wird, welche Geräte es können, dass es ein Prototyp ist, dass im Alltag
   nur Ergebnisse gespeichert werden — und warum „Wiederholungen“ ausgegraut sein kann.
+- **GPS** (`GPS_MD`, Ben 13.11.2026, `docs/plan_gps.md` §12): was die Karte „GPS“ einer Übung
+  einschaltet, was die Rechenart bestimmt und wofür die Tempo-Stufen da sind.
 """
 
 from __future__ import annotations
@@ -483,6 +485,26 @@ Kommt der Plan aus einem Paket, bekommt eine Planübung, die du nicht geändert 
 nächsten Update die neue Fassung; deine eigene bleibt.
 """
 
+GPS_MD = """\
+**Was das einschaltet.** Mit GPS steht die Übung unter „Messung“, Reiter „GPS“, zur Wahl.
+Ein Training dort wird bei dieser Übung eingetragen: Strecke und Zeit, soweit die Übung
+diese Felder hat (Reiter „Parameter“).
+
+**Rechnet wie.** Gehen und Laufen: Zwischenzeiten je Kilometer, Tempo in min/km. Rad: je
+fünf Kilometer, Tempo in km/h. Die Rechenart steht auch als Typ in der GPX-Datei.
+
+**Tempo-Stufen.** Vier Grenzen in km/h; darunter, dazwischen und darüber liegen fünf
+Stufen. Die Auswertung zeigt damit „Zeit je Tempo“, wenn dort „Fest“ gewählt ist. So
+lassen sich Trainings derselben Übung vergleichen. Die Vorgaben langsam · mittel · schnell
+sind Setzungen zum Einteilen; die Stufen heißen nach ihren Zahlen und werten nichts.
+
+**Ohne Empfang.** Unter „Messung → GPS“ lässt sich GPS für ein einzelnes Training
+ausschalten (Laufband, Halle): Dann zählt die Zeit.
+
+**Wo die Strecke bleibt.** Die Ortungen liegen nur auf diesem Gerät. In einem Paket reist
+nur die Einstellung dieser Karte mit, nie eine Strecke.
+"""
+
 THEMEN: dict[str, tuple[str, str, str]] = {
     "ablauf": ("Ablauf", ABLAUF_MD, "Liste oder Workout, Wege und Bedingungen"),
     "timer_editor": ("Timer bearbeiten", TIMER_EDITOR_MD, "Zeiten, Klänge, Teile, Runden"),
@@ -499,6 +521,7 @@ THEMEN: dict[str, tuple[str, str, str]] = {
         BESCHLEUNIGUNG_MD,
         "Was misst der Beschleunigungssensor?",
     ),
+    "gps": ("GPS", GPS_MD, "Was schaltet GPS an der Übung ein?"),
     "symbol": ("Symbol oder Bild", SYMBOL_MD, "Symbol oder eigenes Bild"),
     "uebungen": ("Varianten und Pakete", UEBUNGEN_MD, "Varianten und Pakete"),
     "atmung": ("Atemfrequenz und Atemübung", ATMUNG_MD, "Was heißt „Atemübung“?"),
@@ -570,6 +593,7 @@ def hilfe_oeffner(page: ft.Page, thema: str = "notation") -> Callable[[], None]:
 __all__ = [
     "ATMUNG_MD",
     "BESCHLEUNIGUNG_MD",
+    "GPS_MD",
     "NOTATION_MD",
     "TAKT_MD",
     "THEMEN",

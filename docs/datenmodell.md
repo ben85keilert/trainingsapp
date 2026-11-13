@@ -157,6 +157,13 @@ aus Übung und Zählen. Was der Sensor zählte, steht nur als Ergebnis in der Ze
 `reps` im Eintrag — **keine Rohdaten der Beschleunigung** in der Datenbank (P123; die gibt es
 nur im Mitschnitt des Diagnosemodus).
 
+**GPS an der Übung** (Migration 062, Ben 13.11.2026, `docs/plan_gps.md` §12): `exercise.gps_json` =
+die Karte „GPS“ (`core.gps_wahl.GpsWahl.als_dict`: `art` = Rechenart gehen · laufen · rad, `tempo` =
+vier Grenzen in km/h; `{}` = GPS aus). Reist im Paket als `gps`. `strecke.exercise_id` nennt die
+Übung, bei der ein Training eingetragen wurde — daher sein Name und seine Tempo-Grenzen;
+`strecke.sportart` bleibt die Rechenart (CHECK unverändert). Vorhandene Strecken bekamen die Übung
+ihres Tagebucheintrags. Die Tabelle wird weiter nie synchronisiert.
+
 **Der Tag ist die Bezugsgröße.** Zeitstempel sind UTC, aber „heute" ist ein
 lokaler Kalendertag. `core.models.tagesgrenzen()` rechnet die lokale
 Mitternacht nach UTC um; alle Tagesabfragen (Tagesansicht, Kalender,

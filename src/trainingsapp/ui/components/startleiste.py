@@ -74,7 +74,9 @@ def _teil_titel(teil: Any) -> str:
     if teil.art == "timer":
         return ablauf.timer_titel(teil.lauf)
     if teil.art == "gps":
-        sport = SPORT_NAMEN.get(getattr(teil, "sportart", ""), "Training")
+        sport = getattr(teil, "name", "") or SPORT_NAMEN.get(
+            getattr(teil, "sportart", ""), "Training"
+        )
         return f"{sport} · GPS" if getattr(teil, "quelle", None) is not None else sport
     if teil.art == "plan" and getattr(teil, "name", ""):
         return f"{'Plan-Ablauf' if hasattr(teil, 'schritte') else 'Übung'} · {teil.name}"

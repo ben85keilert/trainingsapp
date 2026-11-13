@@ -293,6 +293,52 @@ def test_uebernehmen_schreibt_beschleunigung_als_inline_tabelle(tmp_path) -> Non
     assert "beschleunigung" not in datei.read_text("utf-8")
 
 
+def test_gps_im_werkzeug_pruefen_und_uebernehmen(tmp_path) -> None:
+    """Die Karte „GPS“ (Paketfeld ``gps``, Ben 13.11.2026): Die App liest tolerant (Unsinn =
+    GPS aus bzw. Vorgabe), das Werkzeug sagt es vorher — fehlende Rechenart und unbrauchbare
+    Grenzen als Fehler, eine unbekannte Rechenart als Hinweis. `uebernehmen` schreibt die Wahl
+    aus der App als eine Zeile zurück ins TOML."""
+    from trainingsapp.core.gps_wahl import GpsWahl
+
+    datei = tmp_path / "x.toml"
+    datei.write_text(
+        QIGONG.replace(
+            'spec = "halten"\nicon_key = "fitness_center"',
+            'spec = "halten"\nicon_key = "fitness_center"\ngps = {tempo = [6, 5, 4, 3]}',
+        ).replace(
+            'icon_key = "self_improvement"',
+            'icon_key = "self_improvement"\ngps = {art = "schwimmen"}',
+        ),
+        encoding="utf-8",
+    )
+    fehler, hinweise = pruefen(datei, symbole=None)
+    assert fehler == [
+        "Übung „Baum“: gps: „art“ fehlt (gehen, laufen, rad) — GPS bleibt aus",
+        "Übung „Baum“: gps: „tempo“ braucht vier aufsteigende Zahlen in km/h (bis 120), "
+        "nicht [6, 5, 4, 3]",
+    ]
+    assert [h for h in hinweise if "gps" in h] == [
+        "Übung „Lotus“: gps: unbekannte Rechenart „schwimmen“ — GPS bleibt aus "
+        "(bekannt: gehen, laufen, rad)"
+    ]
+    gelesen = paket_lesen(tomllib.loads(datei.read_text("utf-8")))
+    assert [u.gps for u in gelesen.uebungen] == [GpsWahl(), GpsWahl()]
+
+    def aendern(roh):
+        roh["exercises"][0]["gps"] = {"art": "gehen", "tempo": [4.0, 5.0, 6.0, 7.0]}
+
+    export, datei = _export(tmp_path, QIGONG, aendern)
+    assert uebernehmen(export, datei) == (["Baum: GPS"], [])
+    text = datei.read_text("utf-8")
+    assert 'gps = {art = "gehen", tempo = [4.0, 5.0, 6.0, 7.0]}' in text
+    assert pruefen(datei, symbole=None)[0] == []
+    gelesen = paket_lesen(tomllib.loads(text))
+    assert [u.gps for u in gelesen.uebungen] == [
+        GpsWahl("gehen", (4.0, 5.0, 6.0, 7.0)),
+        GpsWahl(),
+    ]
+
+
 def test_pruefen_meldet_unsinn_in_beschleunigung(tmp_path) -> None:
     """Die App liest ``beschleunigung`` tolerant (Unsinn = Vorgabe) — das Werkzeug sagt es
     vorher: ein falscher Typ ist ein Fehler (die Wahl ginge verloren), ein unbekannter

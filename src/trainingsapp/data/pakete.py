@@ -78,11 +78,13 @@ from ..core.kurse import (
 from ..core.models import TAG_REGION, TAG_TYP, Exercise, MediaSource, Plan, PlanItem, jetzt, new_id
 from ..core.pakete import (
     FELDNAMEN,
+    GRUNDAUSSTATTUNG,
     Paket,
     PaketFehler,
     Paketinhalt,
     PaketPlan,
     aus_stand,
+    ausdauer_urfassungen,
     kurs_aus_stand,
     kurs_stand,
     paketplan_aus,
@@ -184,6 +186,9 @@ class Vorschau:
     ergaenzung_wartet: list[str] = field(default_factory=list)
     #: Übung → Paketstand des Grundpakets, wo Ergänzungen anderer Pakete wirken (intern)
     basis_staende: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Eigene Übungen, die mit diesem Import zum Paket gehören — nur „Gehen“, „Laufen“,
+    #: „Radfahren“ in „Standard“ (`core.pakete.ausdauer_urfassungen`)
+    uebernommen: list[str] = field(default_factory=list)
 
     def anzahl(self, *stati: Status) -> int:
         return sum(1 for s in self.status.values() if s in stati)
@@ -1245,6 +1250,8 @@ class PaketRepo:
                 kurse.speichern(kurs, package_standard=kurs_stand(kurs))
             for u in ziele:
                 repo.speichern(u, neue_tags_oben=neue_tags_oben)
+            for uebung_id in vorschau.uebernommen:  # mitgeliefert wie die anderen des Pakets
+                self.con.execute("UPDATE exercise SET is_builtin = 1 WHERE id = ?", (uebung_id,))
             for plan in plan_ziele:  # nach den Übungen: die Planpositionen verweisen auf sie
                 plaene.speichern(plan)
             for plan_id_, standard_ in vorschau.plan_staende.items():
@@ -1554,6 +1561,12 @@ class PaketRepo:
                 and i not in im_paket
             ]
 
+        # „Gehen“, „Laufen“, „Radfahren“ legte die App früher selbst an (GPS je Übung, Ben
+        # 13.11.2026): Bringt „Standard“ sie mit, gehören die vorhandenen von da an zum Paket
+        # — die einzige Ausnahme von „eigene Übungen ändert ein Import nie“. Abgeglichen wird
+        # gegen ihre Urfassung, so bleibt, was die Person an ihnen geändert hat.
+        urfassungen = ausdauer_urfassungen() if paket.id == GRUNDAUSSTATTUNG else {}
+
         # 1. Wem gehört die ID hier? Was nicht geschrieben werden kann, steht fest.
         kandidaten: list[Exercise] = []
         eigenes_paket: list[Exercise] = []  # Übungen, deren Paketstand dieses Paket festlegt
@@ -1565,6 +1578,9 @@ class PaketRepo:
                 s = Status.ZURUECK
             elif r["purged_at"] is not None:
                 s = Status.GELOESCHT
+            elif r["package_id"] is None and u.id in urfassungen:
+                s = Status.GEAENDERT  # wird übernommen, auch ohne ``aktualisieren``
+                vorschau.uebernommen.append(u.id)
             elif r["package_id"] is None:
                 s = Status.EIGENE
             elif r["package_id"] != paket.id:
@@ -1576,7 +1592,7 @@ class PaketRepo:
             vorschau.status[u.id] = s
             if s in SCHREIBT:
                 kandidaten.append(u)
-            if r is None or r["package_id"] == paket.id:
+            if r is None or r["package_id"] == paket.id or u.id in vorschau.uebernommen:
                 eigenes_paket.append(u)
 
         # 2. Zielstand bauen; was gleich bleibt, muss nicht geschrieben werden.
@@ -1628,9 +1644,10 @@ class PaketRepo:
                 and r["purged_at"] is None
                 and self.standard(u.id) is not None
             )
+            uebernahme = u.id in vorschau.uebernommen
             if vorschau.status[u.id] == Status.GEAENDERT or zurueck:
                 alt = repo.laden(u.id, mit_geloeschten=True)
-                if alt is not None and stand(alt) == soll and not zurueck:
+                if alt is not None and stand(alt) == soll and not zurueck and not uebernahme:
                     vorschau.status[u.id] = Status.UNVERAENDERT
                     continue
                 if alt is not None:
@@ -1638,7 +1655,9 @@ class PaketRepo:
                     # hat, bleibt; der Paketstand (``staende``) wird trotzdem der neue —
                     # „geändert“ zeigt danach, wo „Auf Paketstand“ Neues brächte.
                     gemischt, hinweise = zusammenfuehren_mit_hinweisen(
-                        self.standard(u.id), stand(alt), soll
+                        urfassungen[u.id] if uebernahme else self.standard(u.id),
+                        stand(alt),
+                        soll,
                     )
                     if hinweise:
                         vorschau.hinweise[u.id] = hinweise
@@ -1651,7 +1670,7 @@ class PaketRepo:
                             ziel = gemischt_ziel
                             _tags_angleichen(ziel, bekannte)
                             ziel.archived = alt.archived
-                    if stand(ziel) == stand(alt) and not zurueck:
+                    if stand(ziel) == stand(alt) and not zurueck and not uebernahme:
                         vorschau.status[u.id] = Status.UNVERAENDERT
                         continue
                     _lokales_behalten(ziel, alt)

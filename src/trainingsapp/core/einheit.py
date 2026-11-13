@@ -628,6 +628,33 @@ def in_uebung(
     return replace(e, text=text, daten=daten)
 
 
+def in_klammer(e: Ereignis, *, ende_t_s: float | None = None) -> Ereignis:
+    """Ein Timer-Ereignis in einer Einheit mit **Klammer** („Gehen: Start“ … „Gehen: Ende“,
+    wenn die Messung schon lief): Was mit der Klammer zusammenfällt, wird still (Ben,
+    13.11.2026: „Die zusätzliche Notiz für die Uhr ist störend, wenn ohnehin schon die Übung
+    markiert wird“ — dieselbe Regel wie `in_uebung`, dort für die Uhr einer Übung). Der
+    Abschnitt der Uhr, der mit der Einheit beginnt, und ihr Ende im Augenblick ``ende_t_s``
+    (die Einheit endet dort) behalten ihre Grenze auf der Timer-Spur, aber keine Notiz;
+    spätere Abschnitte, Pause und Weiter bleiben, wie sie sind.
+
+    >>> in_klammer(Ereignis(0.1, "timer", "abschnitt", "Stoppuhr")).daten
+    {'still': True}
+    >>> in_klammer(Ereignis(30.0, "timer", "abschnitt", "Pause")).daten
+    {}
+    >>> in_klammer(Ereignis(90.0, "timer", "ende", "Timer beendet"), ende_t_s=90.2).daten
+    {'still': True}
+    >>> in_klammer(Ereignis(60.0, "timer", "ende", "Timer fertig"), ende_t_s=90.0).daten
+    {}
+    >>> in_klammer(Ereignis(0.0, "gps", "start", "")).daten
+    {}
+    """
+    if e.quelle != "timer":
+        return e
+    am_anfang = e.art == "abschnitt" and abs(e.t_s) < UHR_TOLERANZ_S
+    am_ende = e.art == "ende" and ende_t_s is not None and abs(e.t_s - ende_t_s) < UHR_TOLERANZ_S
+    return replace(e, daten={**e.daten, "still": True}) if am_anfang or am_ende else e
+
+
 #: Wie die Art einer Marke unter der Notiz heißt (`marke_angaben`)
 _ART_TEXT: dict[str, str] = {
     "start": "Start",
@@ -820,6 +847,7 @@ __all__ = [
     "Zustand",
     "beginnt_abschnitt",
     "daten_pruefen",
+    "in_klammer",
     "in_uebung",
     "marke_angaben",
     "projektion",

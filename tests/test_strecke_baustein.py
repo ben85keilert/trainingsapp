@@ -308,3 +308,95 @@ async def test_sportwechsel_gilt_fuer_das_ganze_training() -> None:
     await e.abschliessen()
     km = [x.text for x in e.ereignisse if x.quelle == "gps" and x.art == "km"]
     assert km == ["km 4"]
+
+
+async def test_uhr_im_training_setzt_keine_notiz_neben_der_klammer(aufbau) -> None:
+    """Ben, 13.11.2026: „Die zusätzliche Notiz für die Uhr ist störend, wenn ohnehin schon die
+    Übung markiert wird.“ Die Messung läuft schon, das Training einer Übung und ein Timer
+    starten gemeinsam: „Gehen: Start“ steht da — der erste Abschnitt des Timers im selben
+    Augenblick und sein Ende mit dem Ende der Einheit bekommen keine eigene Notiz. Ihre
+    Grenzen bleiben (die Abschnitte der Auswertung), spätere Abschnitte behalten die Notiz."""
+    uhr, gurt, lauf = aufbau.uhr, aufbau.gurt, aufbau.lauf
+    lauf.aufnahme_starten()
+    for _ in range(30):
+        uhr.t += 1
+        gurt.schlag(1000)
+        await ruhe()
+    gps = Empfaenger(uhr)
+    e = Einheitslauf(
+        uhr=lauf.uhr, jetzt_utc=uhr.utc, senke=aufbau.repo, subject_id=aufbau.profil, titel="Gehen"
+    )
+    e.hinzufuegen(HrvBaustein(lauf, basis=aufbau.pfad))
+    intervall = TimerProfil(
+        name="I", abschnitte=[Abschnitt("Belastung", 60), Abschnitt("Pause", 30)], runden=2
+    )
+    e.hinzufuegen(TimerBaustein(TimerLauf(intervall)))
+    e.hinzufuegen(StreckeBaustein(gps, "gehen", uebung_id="u-gehen", name="Gehen"))
+    await e.vorbereiten()
+    gps.ortung(0)
+    await ruhe()
+    e.starten()
+    for _ in range(80):  # endet mitten in „Pause (Runde 1/2)“: der Timer läuft noch
+        uhr.t += 1
+        gurt.schlag(1000)
+        gps.ortung()
+        await ruhe()
+        e.takt()
+    e.beenden()
+    await e.abschliessen()
+    ergebnis = lauf.aufnahme_stoppen(aufbau.pfad)
+    assert ergebnis is not None
+    texte = [x["text"] for x in laden(ergebnis.pfad).ereignisse]
+    ohne_km = [t for t in texte if not t.startswith("km ")]
+    assert ohne_km == ["Gehen: Start", "Pause (Runde 1/2)", "Gehen: Ende"]
+    # Die Zeitleiste und die Abschnitte behalten alles
+    arten = [(x.art, x.daten.get("still")) for x in aufbau.repo.ereignisse(e.id)]
+    assert ("abschnitt", True) in arten and ("ende", True) in arten
+    _, teile = zusatz_lesen(ergebnis.pfad, float)
+    spannen = {a.name: (round(a.von_s, 1), round(a.bis_s, 1)) for a in teile}
+    assert spannen["Belastung (Runde 1/2)"] == (30.0, 90.0)
+    assert spannen["Gehen"] == (30.0, 110.0)
+
+
+async def test_uebung_im_lauf_wechseln() -> None:
+    """GPS je Übung (Ben, 13.11.2026): Mitten im Lauf eine andere Übung — rechnet sie gleich,
+    bleibt die Splitlänge; in der Zeitleiste steht „Jetzt <Name>“ nur mit der Rechenart (keine
+    Übungs-ID), und das Ergebnis nennt die Übung, bei der eingetragen wird."""
+    from trainingsapp.core.strecke import RAD
+
+    uhr = Uhr()
+    gps = Empfaenger(uhr)
+    strecke = StreckeBaustein(gps, "gehen", jetzt_utc=uhr.utc, uebung_id="u1", name="Gehen")
+    assert strecke.name == "Gehen" and StreckeBaustein(None, RAD).name == "Radfahren"
+    e = Einheitslauf(uhr=uhr, jetzt_utc=uhr.utc, titel="Gehen")
+    e.hinzufuegen(strecke)
+    await e.vorbereiten()
+    gps.ortung(0, genauigkeit_m=8)
+    await ruhe()
+    e.starten()
+    for _ in range(30):
+        uhr.t += 1
+        gps.ortung()
+        await ruhe()
+        e.takt()
+    strecke.uebung_setzen("u1", "Gehen", "gehen")  # dieselbe: nichts
+    strecke.uebung_setzen("u2", "Nordic Walking", "gehen")
+    assert strecke.split_m == 1000.0 and strecke.name == "Nordic Walking"
+    uhr.t += 1
+    gps.ortung()
+    await ruhe()
+    e.takt()
+    strecke.uebung_setzen("u3", "Rennrad", RAD)
+    assert strecke.split_m == strecke.rechner.split_m == 5000.0
+    uhr.t += 1
+    gps.ortung()
+    await ruhe()
+    e.takt()
+    e.beenden()
+    ergebnis = (await e.abschliessen()).teile["gps"]
+    assert (ergebnis.uebung_id, ergebnis.sportart) == ("u3", RAD)
+    wechsel = [(x.text, x.daten) for x in e.ereignisse if x.art == "sportart"]
+    assert wechsel == [
+        ("Jetzt Nordic Walking", {"sportart": "gehen", "split_m": 1000.0}),
+        ("Jetzt Rennrad", {"sportart": RAD, "split_m": 5000.0}),
+    ]

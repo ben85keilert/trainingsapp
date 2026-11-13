@@ -47,6 +47,7 @@ from typing import Any
 from trainingsapp.core.ablauf import ablauf_pruefen
 from trainingsapp.core.bedingung import bedingung_pruefen
 from trainingsapp.core.ergaenzungen import ERGAENZBAR
+from trainingsapp.core.gps_wahl import gps_pruefen
 from trainingsapp.core.kurse import Kapitel, Kurs, PlanVorlage, VorlageItem
 from trainingsapp.core.links import erlaubt as links_erlaubt
 from trainingsapp.core.models import Exercise, Plan
@@ -226,7 +227,9 @@ def pruefen(
     „Beschleunigungssensor“) ist ein falscher Typ ein Fehler, ein unbekannter Schlüssel ein
     Hinweis (`core.zaehlen.wahl_pruefen`) — die App läse beides still als Vorgabe. Für ``takt``
     (`core.takt.takt_pruefen`) ebenso: unbrauchbare Dauer oder Tempo ein Fehler, unbekannte
-    Art, Klang oder Schlüssel ein Hinweis. Beides auch **je Planübung** in
+    Art, Klang oder Schlüssel ein Hinweis. In ``gps`` (Karte „GPS“, `core.gps_wahl.gps_pruefen`)
+    sind eine fehlende Rechenart und unbrauchbare Tempo-Grenzen Fehler, eine unbekannte
+    Rechenart ein Hinweis. Sensor und Takt auch **je Planübung** in
     ``plaene[].uebungen[]`` und ``kurse[].kapitel[].plaene[].uebungen[]`` (A6) — mit dem Weg
     dorthin; ein unlesbarer Takt heißt dort „die Planübung folgt der Übung“."""
     fehler: list[str] = []
@@ -268,6 +271,10 @@ def pruefen(
             f_takt, h_takt = takt_pruefen(e["takt"])
             fehler.extend(f"{wo}: takt: {x}" for x in f_takt)
             hinweise.extend(f"{wo}: takt: {x}" for x in h_takt)
+        if "gps" in e:
+            f_gps, h_gps = gps_pruefen(e["gps"])
+            fehler.extend(f"{wo}: gps: {x}" for x in f_gps)
+            hinweise.extend(f"{wo}: gps: {x}" for x in h_gps)
         if "bedingung" in e:
             f_bed, h_bed = bedingung_pruefen(e["bedingung"])
             fehler.extend(f"{wo}: bedingung: {x}" for x in f_bed)

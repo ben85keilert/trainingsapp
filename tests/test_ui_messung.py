@@ -118,7 +118,8 @@ def test_messung_ohne_geraet(daten) -> None:
     assert "TRAINING" in _baum_texte(gps)
     assert _knopf(gps, "Training starten") is not None
     wahl = next(c for c in _alle_controls(gps) if isinstance(c, ft.SegmentedButton))
-    assert [s.value for s in wahl.segments] == ["gehen", "laufen", "rad"]
+    # die Übungen mit GPS aus dem Paket „Standard“ (GPS je Übung, 13.11.2026)
+    assert [s.label.value for s in wahl.segments] == ["Gehen", "Laufen", "Radfahren"]
     assert any(  # die Timer-Pille steht in der Karte — der Reiter hat keine Titelleiste
         isinstance(c, ft.Container) and c.tooltip == "Timer öffnen" for c in _alle_controls(gps)
     )

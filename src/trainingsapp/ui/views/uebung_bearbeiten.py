@@ -54,6 +54,7 @@ from trainingsapp.core import varianten as var
 from trainingsapp.core.anhaenge import BILD, VIDEO, Ziel
 from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.bewegungsbild import bewegungsbild, mit_bewegungsbild
+from trainingsapp.core.gps_wahl import GpsWahl
 from trainingsapp.core.models import (
     TAG_REGION,
     TAG_TYP,
@@ -115,6 +116,7 @@ from trainingsapp.ui.components.editor_reiter import (
     vergessen,
 )
 from trainingsapp.ui.components.formular import formular_leiste
+from trainingsapp.ui.components.gps_karte import GpsKarte
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL
 from trainingsapp.ui.components.layout import sicher
@@ -1408,8 +1410,10 @@ def uebung_bearbeiten(
             uhr_text.value = "Jeder Lauf zählt als Zeit im offenen Eintrag."
         with contextlib.suppress(Exception):  # noch nicht auf der Seite
             uhr_spalte.update()
-        # Die Karte „Beschleunigungssensor“ folgt den Wiederholungsfeldern
+        # Die Karte „Beschleunigungssensor“ folgt den Wiederholungsfeldern, die Karte „GPS“
+        # den Feldern Strecke und Zeit
         acc_neu()
+        gps_karte.neu()
 
     def zaehlt_als_lesen() -> str:
         """Die Vorgabe (Haltezeit) bleibt leer, solange nie etwas anderes gewählt war — eine
@@ -1670,6 +1674,25 @@ def uebung_bearbeiten(
             atmung_bewegung=atem_typ_lesen(),
         )
 
+    # -- GPS (Ben, 13.11.2026, `docs/plan_gps.md` §12): mit einer Rechenart steht die Übung
+    # unter „Messung → GPS“ zur Wahl, das Training wird bei ihr eingetragen — in die Felder
+    # Strecke und Zeit, soweit sie sie hat ---------------------------------------------------
+    def gps_felder_fehlen() -> list[str]:
+        return [n for art, n in (("distance", "Strecke"), ("duration", "Zeit")) if not an(art)]
+
+    def gps_felder_anlegen() -> None:
+        for art in ("distance", "duration"):
+            if not an(art):
+                parameter_umschalter(art)(None)
+
+    gps_karte = GpsKarte(
+        page,
+        uebung.gps if uebung is not None else GpsWahl(),
+        karte_farbe=KARTE,
+        felder_fehlen=gps_felder_fehlen,
+        felder_anlegen=gps_felder_anlegen,
+    )
+
     async def wechseln(
         ziel: str | Callable[[str], str] | None = None, profil_id: str | None = None
     ) -> None:
@@ -1845,6 +1868,7 @@ def uebung_bearbeiten(
         ziel.zaehlt_als = zaehlt_als_lesen()
         ziel.beschleunigung = acc_lesen()
         ziel.takt = takt_stand["takt"]
+        ziel.gps = gps_karte.lesen()
         videos = [
             Media(
                 kind=MediaKind.VIDEO,
@@ -1890,6 +1914,7 @@ def uebung_bearbeiten(
             bool(zaehlt_schalter.value),
             zaehlt_als_lesen(),
             acc_lesen().als_dict(),
+            gps_karte.lesen().als_dict(),
             takt_stand["takt"].als_dict() if takt_stand["takt"] is not None else None,
             bewegung_stand["bild"],
             [(v.name, v.symbol, v.kuerzel, v.text) for v in varianten_liste],
@@ -2208,6 +2233,8 @@ def uebung_bearbeiten(
                     ),
                 ),
                 acc_karte,
+                abschnitt("GPS", hilfe_knopf(page, thema="gps")),
+                gps_karte.control,
             ],
             MATERIAL: [
                 abschnitt("VIDEOS, LINKS UND DATEIEN"),

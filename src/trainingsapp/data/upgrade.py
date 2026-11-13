@@ -38,6 +38,12 @@ einmal, in Reihenfolge.
   trägt (W3, 7./8.11.2026), sind jetzt Kanten im gezeichneten Ablauf. Ein Plan ohne Ablauf
   bekommt ihn (`core.ablauf.aus_bedingungen`, eingeschaltet), die Bedingungen behalten Art,
   Zahl, Pflicht und Inhalt — so läuft jeder Plan wie zuvor.
+- **Schritt 7** — GPS je Übung (Ben, 13.11.2026, ``docs/plan_gps.md`` §12): „Gehen“, „Laufen“
+  und „Radfahren“, die die App bis dahin selbst anlegte, bekommen GPS mit ihrer Rechenart
+  (`core.gps_wahl.GpsWahl`) — auch dort, wo „Standard“ entfernt ist und sie eigene Übungen
+  bleiben. Die festen Tempo-Grenzen aus den Einstellungen (``tempo_niveau``, ``tempo_eigen``;
+  einen Tag lang geräteweit) ziehen dabei an diese Übungen um und verschwinden dort. Läuft
+  nach dem Seed, der die drei ins Paket übernimmt (`data.pakete.PaketRepo`).
 """
 
 from __future__ import annotations
@@ -46,7 +52,7 @@ import json
 import sqlite3
 from datetime import datetime
 
-from ..core.models import REGIONEN, TAG_TYP, iso_utc, new_id
+from ..core.models import REGIONEN, TAG_TYP, iso_utc, jetzt, new_id
 from ..core.result_spec import (
     FieldType,
     ResultSpec,
@@ -59,7 +65,7 @@ from .db import transaktion
 from .repositories import SettingRepo
 
 SCHLUESSEL = "datenformat"
-AKTUELL = 6
+AKTUELL = 7
 
 #: Alte Seed-Kategorien (Region) → Typ und Region als Tag
 _KATEGORIEN_ALT: dict[str, tuple[str, str | None]] = {
@@ -95,6 +101,8 @@ def datenformat_aktualisieren(con: sqlite3.Connection) -> int:
             geaendert += _schritt_5_zeitstempel_utc(con)
         if stand < 6:
             geaendert += _schritt_6_zweige_als_ablauf(con)
+        if stand < 7:
+            geaendert += _schritt_7_gps_je_uebung(con)
         einstellungen.setzen(SCHLUESSEL, str(AKTUELL))
     return geaendert
 
@@ -324,6 +332,52 @@ def _schritt_3_kopien_reparieren(con: sqlite3.Connection) -> int:
         con.execute(
             "UPDATE session_entry SET spec_snapshot_json = ? WHERE id = ?",
             (json.dumps(neu.to_dict(), ensure_ascii=False), r["id"]),
+        )
+        geaendert += 1
+    return geaendert
+
+
+def _schritt_7_gps_je_uebung(con: sqlite3.Connection) -> int:
+    """GPS und Tempo-Grenzen an „Gehen“, „Laufen“, „Radfahren“ (siehe Modulkopf)."""
+    from ..core.gps_wahl import NIVEAU_EIGEN, NIVEAUS, GpsWahl, grenzen_gueltig, vorgabe_kmh
+    from ..core.pakete import AUSDAUER_SCHLUESSEL, GRUNDAUSSTATTUNG, uebung_id
+
+    einstellungen = SettingRepo(con)
+    alt = _json_oder_nichts(einstellungen.lesen(SettingRepo.TRAINING_EINSTELLUNGEN))
+    alt = alt if isinstance(alt, dict) else {}
+    niveaus = alt.get("tempo_niveau")
+    niveaus = niveaus if isinstance(niveaus, dict) else {}
+    eigene = alt.get("tempo_eigen")
+    eigene = eigene if isinstance(eigene, dict) else {}
+    geaendert = 0
+    for art, schluessel in AUSDAUER_SCHLUESSEL.items():
+        uid = uebung_id(GRUNDAUSSTATTUNG, schluessel)
+        zeile = con.execute(
+            "SELECT gps_json FROM exercise WHERE id = ? AND purged_at IS NULL", (uid,)
+        ).fetchone()
+        if zeile is None:
+            continue
+        vorher = GpsWahl.aus_dict(_json_oder_nichts(zeile["gps_json"]))
+        tempo = vorher.tempo
+        niveau = niveaus.get(art)
+        if niveau == NIVEAU_EIGEN:
+            grenzen = grenzen_gueltig(eigene.get(art))
+            tempo = tuple(grenzen) if grenzen is not None else tempo
+        elif niveau in NIVEAUS:
+            tempo = vorgabe_kmh(vorher.art or art, niveau)
+        neu = GpsWahl(art=vorher.art or art, tempo=tempo)
+        if neu == vorher:
+            continue
+        con.execute(
+            "UPDATE exercise SET gps_json = ?, updated_at = ?, revision = revision + 1 "
+            "WHERE id = ?",
+            (json.dumps(neu.als_dict(), ensure_ascii=False), jetzt().isoformat(), uid),
+        )
+        geaendert += 1
+    if "tempo_niveau" in alt or "tempo_eigen" in alt:
+        rest = {k: v for k, v in alt.items() if k not in ("tempo_niveau", "tempo_eigen")}
+        einstellungen.setzen(
+            SettingRepo.TRAINING_EINSTELLUNGEN, json.dumps(rest, ensure_ascii=False)
         )
         geaendert += 1
     return geaendert

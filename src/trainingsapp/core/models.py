@@ -20,6 +20,7 @@ from typing import Any
 
 from .ablauf import Ablauf
 from .bedingung import Bedingung
+from .gps_wahl import GpsWahl
 from .result_spec import ResultSpec
 from .takt import Takt
 from .zaehlen import SensorWahl
@@ -280,6 +281,9 @@ class Exercise:
     #: `docs/plan_taktgeber.md`): Phasen für Atmung oder Bewegung, die überall gelten, wo die
     #: Übung geübt wird — ein Timer-Abschnitt und die Uhr „für jetzt“ gehen vor
     takt: Takt | None = None
+    #: Die Karte „GPS“ (Migration 062, ``gps_json``; Paketfeld ``gps``; `core.gps_wahl`): mit
+    #: einer Rechenart steht die Übung im Reiter „Messung → GPS“ zur Wahl — leer = GPS aus
+    gps: GpsWahl = field(default_factory=GpsWahl)
 
     def __post_init__(self) -> None:
         # Wer nur `category` angibt (Altbestand, Tutorial), bekommt sie als Typ.
@@ -653,7 +657,11 @@ class HrvTitel:
 
 @dataclass(slots=True)
 class Strecke:
-    """Ein Ausdauertraining (Gehen, Laufen, Rad) — nur Ortsfreies (Migration 012).
+    """Ein Training mit Strecke — nur Ortsfreies (Migration 012).
+
+    ``sportart`` ist die **Rechenart** (gehen, laufen, rad: Splitlänge, km/h oder min/km),
+    ``exercise_id`` die Übung, bei der es eingetragen wurde (Migration 062, „GPS je Übung“ —
+    ``None``: Übung unbekannt, dann heißt das Training nach der Rechenart).
 
     Die Ortungen liegen als Datei unter ``Strecken/`` (``file_path`` relativ
     dazu; leer = ohne GPS). **GPS-Daten werden nie geteilt** (`docs/plan_gps.md`,
@@ -677,6 +685,7 @@ class Strecke:
     #: Die Einheit, als die das Training lief (Migration 019) — über sie findet die
     #: Auswertung auch eine HRV-Aufnahme, die schon vorher lief und weiterlief
     einheit_id: str | None = None
+    exercise_id: str | None = None
 
 
 __all__ = [

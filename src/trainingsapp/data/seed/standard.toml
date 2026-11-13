@@ -34,6 +34,11 @@
 #   beschleunigung { wiederholungen = false, atmung = true, vorlage = "kniebeuge" } —
 #                nur, was von der Vorgabe abweicht (Wdh. bei Feld reps, Atmung bei
 #                Typ Atmung, Bewegung „auto“); Vorlagen: auto, kniebeuge, liegestuetz
+#   gps          { art = "gehen", tempo = [3.0, 4.0, 5.0, 6.0] } — die Übung steht unter
+#                „Messung → GPS“ zur Wahl. art: gehen, laufen, rad (wie gerechnet wird:
+#                je Kilometer, beim Rad je fünf; km/h oder min/km). tempo: vier
+#                aufsteigende Grenzen in km/h für „Zeit je Tempo“, fehlt = mittel.
+#   result_spec  eigene Felder statt spec — siehe „Ausdauer mit GPS“
 
 format = "trainingsapp-uebungspaket"
 version = 1
@@ -44,8 +49,8 @@ version = 1
 id = "2c1194ea-67ba-536d-aa7d-bf74bc3c73d4"
 name = "Standard"
 beschreibung = "Die wichtigsten Übungen zum Einstieg: Atmung, Mobilisation, Dehnung, Kräftigung, Gleichgewicht und Messwerte zum Vergleichen."
-version = 4
-neuigkeiten = "Kniebeuge und Liegestützen zählen mit ihrer Vorlage für den Beschleunigungssensor (Bewegung: Kniebeuge bzw. Liegestütz, Umkehrpunkt oben)."
+version = 5
+neuigkeiten = "Gehen, Laufen und Radfahren gehören jetzt zum Paket: Übungen mit GPS stehen unter „Messung“, Reiter „GPS“, zur Wahl, die Tempo-Stufen stellt man an der Übung ein."
 
 
 # ── Atmung ──────────────────────────────────────────────────────────────────
@@ -466,6 +471,86 @@ name = "Stehen"
 dauer_s = 60
 zaehlt = false
 
+
+# ── Ausdauer mit GPS ────────────────────────────────────────────────────────
+# Übungen mit `gps` stehen unter „Messung → GPS“ zur Wahl; das Training wird bei der
+# gewählten Übung eingetragen (Strecke und Zeit). Die Schlüssel dieser drei nie ändern:
+# Bis Version 4 legte die App sie selbst an, vorhandene Trainings hängen an ihren IDs.
+
+[[exercises]]
+key = "ausdauer_gehen"
+name = "Gehen"
+typen = ["Ausdauer"]
+icon_key = "directions_walk"
+gps = { art = "gehen", tempo = [3.0, 4.0, 5.0, 6.0] }
+description = "Spaziergang, Wanderung oder zügiges Gehen. Draußen mit GPS zeichnet die App Strecke, Zeit und Tempo auf, drinnen oder auf dem Laufband ohne GPS nur die Zeit. Starten unter „Messung“, Reiter „GPS“."
+
+[exercises.result_spec]
+layout = "single"
+
+[[exercises.result_spec.fields]]
+key = "distance"
+type = "distance"
+label = "Strecke"
+unit = "m"
+quick = [500, 1000, 2000]
+
+[[exercises.result_spec.fields]]
+key = "duration"
+type = "duration"
+label = "Zeit"
+unit = "s"
+quick = [300, 600, 1200]
+
+[[exercises]]
+key = "ausdauer_laufen"
+name = "Laufen"
+typen = ["Ausdauer"]
+icon_key = "directions_run"
+gps = { art = "laufen", tempo = [7.0, 9.0, 11.0, 13.0] }
+description = "Dauerlauf, Intervalle oder Laufband. Draußen mit GPS zeichnet die App Strecke, Zeit und Tempo auf, drinnen ohne GPS nur die Zeit. Starten unter „Messung“, Reiter „GPS“."
+
+[exercises.result_spec]
+layout = "single"
+
+[[exercises.result_spec.fields]]
+key = "distance"
+type = "distance"
+label = "Strecke"
+unit = "m"
+quick = [500, 1000, 2000]
+
+[[exercises.result_spec.fields]]
+key = "duration"
+type = "duration"
+label = "Zeit"
+unit = "s"
+quick = [300, 600, 1200]
+
+[[exercises]]
+key = "ausdauer_rad"
+name = "Radfahren"
+typen = ["Ausdauer"]
+icon_key = "directions_bike"
+gps = { art = "rad", tempo = [13.0, 17.0, 21.0, 25.0] }
+description = "Fahrrad draußen oder Ergometer. Draußen mit GPS zeichnet die App Strecke, Zeit und Tempo auf und rechnet je fünf Kilometer, drinnen ohne GPS nur die Zeit. Starten unter „Messung“, Reiter „GPS“."
+
+[exercises.result_spec]
+layout = "single"
+
+[[exercises.result_spec.fields]]
+key = "distance"
+type = "distance"
+label = "Strecke"
+unit = "m"
+quick = [500, 1000, 2000]
+
+[[exercises.result_spec.fields]]
+key = "duration"
+type = "duration"
+label = "Zeit"
+unit = "s"
+quick = [300, 600, 1200]
 
 # ── Kurse ───────────────────────────────────────────────────────────────────
 #

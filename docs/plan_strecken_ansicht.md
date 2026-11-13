@@ -237,6 +237,10 @@ in entweder die 3, 5 oder 10 Zonen.“
   Einstellungen → Training und GPS → „Feste Tempo-Stufen“: je Sportart die Vorgabe und die vier Zahlen;
   wer eine Zahl ändert, hat „eigene Werte“ (gespeichert, sobald alle vier aufsteigend sind). Die Karte
   und ihre Legende färben weiter nach dem Training — das ist dort die Lesart, die beide Enden ausfärbt.
+  **Noch am selben Tag umgezogen** (GPS je Übung, `docs/plan_gps.md` §12): Die vier Grenzen gehören zur
+  Übung (`core.gps_wahl.GpsWahl.tempo`, „Übung bearbeiten“ → „Sensor“ → „GPS“ → Stift); die Tabelle der
+  Vorgaben steht jetzt in `core/gps_wahl.py`, in den Einstellungen bleibt ein Hinweis auf den Ort. Was
+  dort eingestellt war, trägt die Datenumstellung Schritt 7 an „Gehen“, „Laufen“ und „Radfahren“.
 - **Zeit je Herzfrequenz:** Umschalter „3 · 5 · 10 · bpm“ (gemerkt, `hf_bereiche`). Die Bereiche sind die
   des HF-Profils (`core.hf_profil.bereiche_fuer`: drei Bereiche nach Schwellen, fünf Stufen ACSM, zehn
   Cluster der Reserve) — dieselben Grenzen, Namen und Farbstufen wie in der Herzfrequenz-Sicht; ohne

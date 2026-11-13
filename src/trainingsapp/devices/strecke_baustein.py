@@ -88,6 +88,9 @@ class StreckeErgebnis:
     datei: str = ""
     #: Zeit einer Ortung (``Punkt.t``) + Versatz = ``t_s`` der Einheit
     versatz_s: float | None = None
+    #: die Übung, bei der das Training eingetragen wird (GPS je Übung) — leer: unbekannt,
+    #: dann sucht die Oberfläche eine Übung derselben Rechenart
+    uebung_id: str = ""
 
 
 class StreckeBaustein:
@@ -105,9 +108,16 @@ class StreckeBaustein:
         max_genauigkeit_m: float = MAX_GENAUIGKEIT_M,
         takt_s: float = GPS_TAKT_S,
         stillstand_s: float = STILLSTAND_S,
+        uebung_id: str = "",
+        name: str = "",
     ) -> None:
         self.quelle = quelle
+        #: Rechenart: gehen, laufen, rad (`core.gps_wahl`) — Splitlänge, km/h oder min/km
         self.sportart = sportart
+        #: Die Übung, die hier läuft (Ben, 13.11.2026, GPS je Übung), und ihr Name für Titel,
+        #: Startleiste und Benachrichtigung — leer: wie die Rechenart heißt
+        self.uebung_id = uebung_id
+        self._name = name
         self.ablage = ablage
         self._jetzt_utc = jetzt_utc
         self.max_genauigkeit_m = max_genauigkeit_m
@@ -133,8 +143,29 @@ class StreckeBaustein:
         self.beteiligung: Beteiligung | None = None
         #: aufgeräumt (GPS aus, Datei zu) — auch, wenn der Teil nie startete
         self.fertig = False
-        #: Sportartwechsel, die der nächste Takt in die Zeitleiste schreibt
-        self._wechsel: list[str] = []
+        #: Wechsel (Rechenart, Name), die der nächste Takt in die Zeitleiste schreibt
+        self._wechsel: list[tuple[str, str]] = []
+
+    @property
+    def name(self) -> str:
+        """Wie das Training heißt: nach seiner Übung, sonst nach der Rechenart."""
+        return self._name or SPORT_NAMEN.get(self.sportart, "Training")
+
+    def uebung_setzen(self, uebung_id: str, name: str, sportart: str) -> None:
+        """Mitten im Lauf eine andere Übung wählen (GPS je Übung, Ben 13.11.2026) — wie
+        `sportart_setzen`, nur dass jetzt die Übung wechselt: Das ganze Training gehört
+        dann zu ihr. Rechnet sie anders (Rad statt Laufen), werden die Splits neu
+        geschnitten; in die Zeitleiste kommt „Jetzt <Name>“ mit der Rechenart — die Übung
+        selbst steht dort nicht (`core.einheit.DATEN_SCHLUESSEL`)."""
+        if uebung_id == self.uebung_id and sportart == self.sportart:
+            return
+        self.uebung_id = uebung_id
+        self._name = name
+        if sportart != self.sportart:
+            self.sportart = sportart
+            self.split_m = split_laenge_m(sportart)
+            self.rechner.split_laenge_setzen(self.split_m)
+        self._wechsel.append((sportart, self.name))
 
     def sportart_setzen(self, sportart: str) -> None:
         """Die Sportart mitten im Lauf wechseln (Ben, 26.10.2026: als „Laufen“ gestartet,
@@ -155,7 +186,7 @@ class StreckeBaustein:
         self.sportart = sportart
         self.split_m = split_laenge_m(sportart)
         self.rechner.split_laenge_setzen(self.split_m)
-        self._wechsel.append(sportart)
+        self._wechsel.append((sportart, SPORT_NAMEN.get(sportart, sportart)))
 
     # -- Zustand -----------------------------------------------------------------
 
@@ -271,9 +302,8 @@ class StreckeBaustein:
             return []
         t0 = self._t0
         out: list[Ereignis] = []
-        for sportart in self._wechsel:
+        for sportart, name in self._wechsel:
             daten = {"sportart": sportart, "split_m": split_laenge_m(sportart)}
-            name = SPORT_NAMEN.get(sportart, sportart)
             out.append(Ereignis(max(jetzt - t0, 0.0), "gps", "sportart", f"Jetzt {name}", daten))
         self._wechsel.clear()
         while self._puffer:
@@ -362,6 +392,7 @@ class StreckeBaustein:
             geschrieben=self.geschrieben,
             datei=datei,
             versatz_s=self._versatz(),
+            uebung_id=self.uebung_id,
         )
 
 

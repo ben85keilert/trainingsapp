@@ -154,6 +154,66 @@ def test_wortliste(tmp_path, monkeypatch) -> None:
     assert main(["pruefen", str(datei), "--wortliste", str(liste), "--streng"]) == 1
 
 
+def test_wortliste_gepruefte_stellen(tmp_path, capsys) -> None:
+    """Eine geprüfte Stelle (Ben, 14.11.2026: „Auswertung“ als Bildschirmname) meldet sich
+    nicht mehr einzeln und ist auch mit ``--streng`` kein Fehler — bis sich ihr Text ändert."""
+    from trainingsapp.paket_werkzeug import geprueft_lesen, textkennung
+
+    liste = tmp_path / "wortliste.txt"
+    liste.write_text("Analyse\n", "utf-8")
+    satz = "Die Analyse zeigt es."
+    datei = tmp_path / "q.toml"
+    datei.write_text(QIGONG.replace("Knie weich.", satz), "utf-8")
+    roh = tomllib.loads(datei.read_text("utf-8"))
+    uebung = next(e for e in roh["exercises"] if satz in e["description"])
+    stelle = f"Übung „{uebung['name']}“, Beschreibung"
+    kennung = textkennung(uebung["description"])
+    geprueft = tmp_path / "geprueft.txt"
+    geprueft.write_text(
+        f"# Kommentar\n\nq.toml | {stelle} | Analyse | {kennung} | Name eines Bildschirms\n",
+        "utf-8",
+    )
+    assert geprueft_lesen(geprueft) == {("q.toml", stelle, "analyse", kennung)}
+
+    # Ohne die Datei: der Treffer wie bisher; mit leerer Menge nennt er seine Kennung
+    _, hinweise = pruefen(datei, None, ["Analyse"])
+    assert hinweise[-1] == f"Wortliste: {stelle}: „Analyse“"
+    _, hinweise = pruefen(datei, None, ["Analyse"], geprueft=set())
+    assert hinweise[-1] == f"Wortliste: {stelle}: „Analyse“ (Kennung {kennung})"
+
+    aufruf = ["pruefen", str(datei), "--wortliste", str(liste), "--geprueft", str(geprueft)]
+    assert main([*aufruf, "--streng"]) == 0
+    ausgabe = capsys.readouterr().out
+    assert "Wortliste: 1 geprüfte Stelle" in ausgabe and stelle not in ausgabe
+
+    # Der Text ändert sich: Die Prüfung gilt nicht mehr, die Stelle sagt warum
+    datei.write_text(QIGONG.replace("Knie weich.", "Die Analyse ist auffällig."), "utf-8")
+    assert main([*aufruf, "--streng"]) == 1
+    assert "geprüft war ein anderer Text" in capsys.readouterr().out
+
+    # Eine Zeile ohne Begründung gilt nicht — das Werkzeug bricht ab, statt sie zu überlesen
+    geprueft.write_text(f"q.toml | {stelle} | Analyse | {kennung}\n", "utf-8")
+    assert main(aufruf) == 2
+    assert "geprueft.txt, Zeile 1" in capsys.readouterr().out
+
+
+def test_eigener_typ_ein_hinweis_je_typ(tmp_path, capsys) -> None:
+    """Typen außerhalb des Standardpakets: ein Hinweis je Typ mit der Zahl der Übungen, bei
+    einer einzelnen mit ihrem Namen (so fällt ein Tippfehler auf); Urteil je Datei zuerst."""
+    datei = tmp_path / "q.toml"
+    datei.write_text(QIGONG, "utf-8")
+    roh = tomllib.loads(QIGONG)
+    anzahl = sum("Qigong" in e.get("typen", []) for e in roh["exercises"])
+    _, hinweise = pruefen(datei)
+    zu_typ = [h for h in hinweise if "Typ „Qigong“" in h]
+    wo = f"{anzahl} Übungen" if anzahl > 1 else f"Übung „{roh['exercises'][0]['name']}“"
+    assert zu_typ == [f"Typ „Qigong“ ist nicht im Standardpaket ({wo} — gewollt?)"]
+    assert main(["pruefen", str(datei)]) == 0
+    zeilen = capsys.readouterr().out.splitlines()
+    assert zeilen[0] == f"{datei}: in Ordnung"
+    assert all(z.startswith("    Hinweis: ") for z in zeilen[1:] if not z.startswith("("))
+
+
 def test_quelle_pruefen_wie_die_app(tmp_path, monkeypatch) -> None:
     import trainingsapp.core.paketquelle as pq
 

@@ -4,7 +4,7 @@ Das Werkzeug für das Inhalte-Repo (`docs/uebungspakete.md`, „Inhalte pflegen�
 Pakete werden als TOML von Hand gepflegt, die App liest sie beim Start direkt
 (``TRAININGSAPP_PAKETE``) — fürs Handy und für Paketquellen braucht es JSON.
 
-    trainingsapp-paket pruefen pakete/*.toml [--wortliste DATEI] [--streng]
+    trainingsapp-paket pruefen pakete/*.toml [--wortliste DATEI [--geprueft DATEI]] [--streng]
     trainingsapp-paket bauen pakete/*.toml --ziel dist/
     trainingsapp-paket index dist/*.json --ziel dist/index.json --basis-url https://…/pakete/
     trainingsapp-paket quelle https://…/pakete/index.json   # wie die App: Index + Prüfsummen
@@ -20,7 +20,9 @@ Werkzeug).
 
 Die Wortliste (Sprachregelung der Praxis-Website, Zone 3: erklären, nicht bewerten)
 liegt im privaten Repo der Homepage; das Werkzeug liest nur die Datei, die man
-ihm gibt — eine Zeile je Begriff, ``#`` leitet Kommentare ein.
+ihm gibt — eine Zeile je Begriff, ``#`` leitet Kommentare ein. Stellen, die ein Mensch
+geprüft hat (ein Treffer, aber keine Bewertung), stehen in einer zweiten Datei
+(``--geprueft``, `geprueft_lesen`) — sie gelten nur, solange der Text derselbe ist.
 
 Es importiert kein flet (die Symbolprüfung läuft nur, wenn flet da ist) und
 liegt in der trainingsapp, nicht im privaten Inhalte-Repo: Öffentliche Repos
@@ -38,7 +40,7 @@ import sys
 import tempfile
 import tomllib
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -199,6 +201,33 @@ def _plaene_mit_ort(roh: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     return out
 
 
+def textkennung(text: str) -> str:
+    """Acht Zeichen, die sich mit jedem geänderten Buchstaben ändern — daran hängt eine
+    geprüfte Stelle der Wortliste (`geprueft_lesen`).
+
+    >>> textkennung("Die Auswertung bietet …"), textkennung("Die Auswertung zeigt …")
+    ('e6a6b7af', '17d92cf6')
+    """
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+
+
+def wortliste_treffer(roh: dict[str, Any], begriffe: Iterable[str]) -> list[tuple[str, str, str]]:
+    """``(Wo, Begriff, Kennung des Textes)`` je Treffer der Wortliste — Groß/klein egal.
+
+    >>> wortliste_treffer({"exercises": [{"name": "A", "description": "Die Analyse zeigt …"}]},
+    ...                   ["Analyse"])
+    [('Übung „A“, Beschreibung', 'Analyse', 'c620fb80')]
+    """
+    treffer: list[tuple[str, str, str]] = []
+    begriffe = list(begriffe)
+    for wo, text in _texte(roh):
+        klein = text.casefold()
+        for begriff in begriffe:
+            if begriff.casefold() in klein:
+                treffer.append((wo, begriff, textkennung(text)))
+    return treffer
+
+
 def wortliste_pruefen(roh: dict[str, Any], begriffe: Iterable[str]) -> list[str]:
     """Treffer der Wortliste in den Texten — Groß/klein egal, je Stelle ein Satz.
 
@@ -206,13 +235,36 @@ def wortliste_pruefen(roh: dict[str, Any], begriffe: Iterable[str]) -> list[str]
     ...                   ["Analyse"])
     ['Übung „A“, Beschreibung: „Analyse“']
     """
-    treffer: list[str] = []
-    for wo, text in _texte(roh):
-        klein = text.casefold()
-        for begriff in begriffe:
-            if begriff.casefold() in klein:
-                treffer.append(f"{wo}: „{begriff}“")
-    return treffer
+    return [f"{wo}: „{begriff}“" for wo, begriff, _ in wortliste_treffer(roh, begriffe)]
+
+
+#: Eine geprüfte Stelle: (Paketdatei, Stelle, Begriff klein, Kennung des Textes)
+Geprueft = tuple[str, str, str, str]
+
+
+def geprueft_lesen(datei: Path) -> set[Geprueft]:
+    """Geprüfte Stellen der Wortliste — Treffer, die ein Mensch angesehen hat und die keine
+    Bewertung sind („Auswertung“ als Name eines Bildschirms). Eine Zeile je Stelle, fünf
+    Spalten, mit `` | `` getrennt; ``#`` am Zeilenanfang ist ein Kommentar::
+
+        standard.toml | Übung „Ruhe-HF“, Beschreibung | Auswertung | e6a6b7af | Warum (wer, wann)
+
+    Die Kennung (`textkennung`) steht am Treffer, den ``pruefen --geprueft`` meldet. Sie bindet
+    die Prüfung an den Text: Ändert er sich, meldet sich die Stelle wieder. Ohne Begründung
+    gilt eine Zeile nicht — ``ValueError`` nennt sie.
+    """
+    stellen: set[Geprueft] = set()
+    for nummer, zeile in enumerate(datei.read_text(encoding="utf-8").splitlines(), 1):
+        if not zeile.strip() or zeile.lstrip().startswith("#"):
+            continue
+        spalten = [s.strip() for s in zeile.split(" | ", 4)]
+        if len(spalten) != 5 or not all(spalten):
+            raise ValueError(
+                f"{datei.name}, Zeile {nummer}: erwartet "
+                "„Paketdatei | Stelle | Begriff | Kennung | Begründung“"
+            )
+        stellen.add((spalten[0], spalten[1], spalten[2].casefold(), spalten[3]))
+    return stellen
 
 
 def pruefen(
@@ -220,12 +272,15 @@ def pruefen(
     symbole: Iterable[str] | None = None,
     wortliste: Iterable[str] = (),
     streng: bool = False,
+    geprueft: Collection[Geprueft] | None = None,
 ) -> tuple[list[str], list[str]]:
     """``(Fehler, Hinweise)`` zu einer Paketdatei — dieselben Regeln wie der Test des
     Standardpakets: Schlüssel klein und ohne Umlaute, eindeutig; Beschreibung da; Symbol
     aus der Auswahl (``symbole``, sonst ungeprüft).
-    Typen und Regionen außerhalb des Standardpakets sind Hinweise, keine Fehler; Treffer der
-    ``wortliste`` ebenso — mit ``streng`` werden sie Fehler. In ``beschleunigung`` (Karte
+    Typen und Regionen außerhalb des Standardpakets sind Hinweise, keine Fehler — einer je
+    Typ, nicht je Übung; Treffer der ``wortliste`` ebenso — mit ``streng`` werden sie Fehler.
+    Mit ``geprueft`` (`geprueft_lesen`) nennt jeder Treffer seine Kennung, und die geprüften
+    Stellen schrumpfen auf einen Hinweis mit ihrer Zahl. In ``beschleunigung`` (Karte
     „Beschleunigungssensor“) ist ein falscher Typ ein Fehler, ein unbekannter Schlüssel ein
     Hinweis (`core.zaehlen.wahl_pruefen`) — die App läse beides still als Vorgabe. Für ``takt``
     (`core.takt.takt_pruefen`) ebenso: unbrauchbare Dauer oder Tempo ein Fehler, unbekannte
@@ -253,6 +308,7 @@ def pruefen(
     for k in sorted(doppelt):
         fehler.append(f"key {k!r} kommt mehrfach vor")
     symbolmenge = set(symbole) if symbole is not None else None
+    eigene: dict[tuple[str, str], list[str]] = {}  # (Typ|Region, Name) → Übungen
     for e in eintraege:
         if not isinstance(e, dict):
             continue
@@ -261,10 +317,10 @@ def pruefen(
             fehler.append(f"{wo}: Beschreibung fehlt")
         if symbolmenge is not None and e.get("icon_key") not in symbolmenge:
             fehler.append(f"{wo}: Symbol {e.get('icon_key')!r} ist nicht in der Auswahl")
-        for typ in set(e.get("typen", [])) - STANDARD_TYPEN:
-            hinweise.append(f"{wo}: Typ „{typ}“ ist nicht im Standardpaket (gewollt?)")
-        for region in set(e.get("regionen", [])) - STANDARD_REGIONEN:
-            hinweise.append(f"{wo}: Region „{region}“ ist nicht im Standardpaket (gewollt?)")
+        for typ in sorted(set(e.get("typen", [])) - STANDARD_TYPEN):
+            eigene.setdefault(("Typ", typ), []).append(wo)
+        for region in sorted(set(e.get("regionen", [])) - STANDARD_REGIONEN):
+            eigene.setdefault(("Region", region), []).append(wo)
         if "beschleunigung" in e:
             f_acc, h_acc = wahl_pruefen(e["beschleunigung"])
             fehler.extend(f"{wo}: beschleunigung: {x}" for x in f_acc)
@@ -281,6 +337,11 @@ def pruefen(
             f_bed, h_bed = bedingung_pruefen(e["bedingung"])
             fehler.extend(f"{wo}: bedingung: {x}" for x in f_bed)
             hinweise.extend(f"{wo}: bedingung: {x}" for x in h_bed)
+    # Ein Hinweis je eigenem Typ, nicht je Übung (Ben, 14.11.2026: vier Zeilen „Qigong“) —
+    # ein Tippfehler fällt als eigener Typ mit einer einzelnen Übung weiter auf
+    for (art, wert), bei in eigene.items():
+        wo = bei[0] if len(bei) == 1 else f"{len(bei)} Übungen"
+        hinweise.append(f"{art} „{wert}“ ist nicht im Standardpaket ({wo} — gewollt?)")
     for wo, pl in _plaene_mit_ort(roh):
         if "ablauf" in pl:
             f_ab, h_ab = ablauf_pruefen(pl["ablauf"])
@@ -339,8 +400,20 @@ def pruefen(
             )
     if inhalt.paket.version is None:
         hinweise.append("Kopf ohne `version` — ohne sie erkennt kein Gerät ein Update")
-    for treffer in wortliste_pruefen(roh, wortliste):
-        (fehler if streng else hinweise).append(f"Wortliste: {treffer}")
+    angenommen = 0
+    for wo, begriff, kennung in wortliste_treffer(roh, wortliste):
+        text = f"Wortliste: {wo}: „{begriff}“"
+        if geprueft is not None:
+            stelle = (datei.name, wo, begriff.casefold())
+            if (*stelle, kennung) in geprueft:
+                angenommen += 1
+                continue
+            anders = any(g[:3] == stelle for g in geprueft)
+            text += f" (Kennung {kennung}{'; geprüft war ein anderer Text' if anders else ''})"
+        (fehler if streng else hinweise).append(text)
+    if angenommen:
+        stellen = "1 geprüfte Stelle" if angenommen == 1 else f"{angenommen} geprüfte Stellen"
+        hinweise.append(f"Wortliste: {stellen} (Text unverändert)")
     return fehler, hinweise
 
 
@@ -927,6 +1000,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--wortliste", type=Path, help="Begriffe, die in Texten nichts verloren haben")
     p.add_argument("--streng", action="store_true", help="Treffer der Wortliste sind Fehler")
+    p.add_argument(
+        "--geprueft",
+        type=Path,
+        help="geprüfte Stellen der Wortliste (Paketdatei | Stelle | Begriff | Kennung | Warum)",
+    )
     b = sub.add_parser("bauen", help="Paketdateien schreiben (JSON, mit Dateien ZIP)")
     b.add_argument("dateien", nargs="+", type=Path)
     b.add_argument("--ziel", type=Path, default=Path("dist"))
@@ -949,22 +1027,29 @@ def main(argv: list[str] | None = None) -> int:
     if args.befehl == "pruefen":
         symbole = _symbole()
         begriffe = wortliste_lesen(args.wortliste) if args.wortliste else []
+        geprueft: set[Geprueft] | None = None
+        if args.geprueft:
+            try:
+                geprueft = geprueft_lesen(args.geprueft)
+            except (OSError, ValueError) as lese_fehler:
+                print(f"FEHLER: {lese_fehler}")
+                return 2
         schlecht = 0
         for datei in args.dateien:
             if zugangsdatei(datei):
                 print(f"{datei}: übersprungen — Zugang eines privaten Pakets, kein Paket")
                 continue
-            fehler, hinweise = pruefen(datei, symbole, begriffe, args.streng)
+            fehler, hinweise = pruefen(datei, symbole, begriffe, args.streng, geprueft)
             if args.gegen and not fehler:
                 f_gegen, h_gegen = gegen_pruefen(datei, args.gegen)
                 fehler, hinweise = fehler + f_gegen, hinweise + h_gegen
-            for text in hinweise:
-                print(f"{datei}: Hinweis: {text}")
+            # Erst das Urteil je Datei, darunter eingerückt das Warum (Ben, 14.11.2026)
+            print(f"{datei}: " + (f"{len(fehler)} FEHLER" if fehler else "in Ordnung"))
             for text in fehler:
-                print(f"{datei}: FEHLER: {text}")
+                print(f"    FEHLER: {text}")
+            for text in hinweise:
+                print(f"    Hinweis: {text}")
             schlecht += bool(fehler)
-            if not fehler:
-                print(f"{datei}: in Ordnung")
         if symbole is None:
             print("(Symbole ungeprüft — flet nicht installiert)")
         return 1 if schlecht else 0
@@ -983,12 +1068,12 @@ def main(argv: list[str] | None = None) -> int:
                     # Protokolldatei) stünden sie sonst in einem Log, das andere lesen
                     if sys.stdout.isatty():
                         print(pfad)
-                        print(karte)
+                        print("\n".join(f"    {zeile}" for zeile in karte.splitlines()))
                     else:
                         kurz = pfad.parent.with_name(pfad.parent.name[:4] + "…") / pfad.name
                         print(kurz)
                         print(
-                            "Zugangskarte: "
+                            "    Zugangskarte: "
                             f"{datei.with_name(datei.stem + '.zugangskarte.txt')}"
                             " (Link und Code stehen nur dort, nicht in dieser Ausgabe)"
                         )

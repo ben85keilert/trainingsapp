@@ -540,13 +540,18 @@ uv run --project ../trainingsapp trainingsapp-paket uebernehmen .daten/trainings
 
 `pruefen` wendet die Regeln des Standardpakets an (Schlüssel, Beschreibung, Variante,
 Symbol — Symbole nur mit flet); Typen und Regionen außerhalb des Standardpakets sind
-Hinweise. In `beschleunigung` ist ein falscher Typ ein Fehler (die App läse ihn still als
+Hinweise — einer je Typ mit der Zahl der Übungen, bei einer einzelnen mit ihrem Namen. Die
+Ausgabe nennt je Datei erst das Urteil, darunter eingerückt Fehler und Hinweise. In `beschleunigung` ist ein falscher Typ ein Fehler (die App läse ihn still als
 Vorgabe), ein unbekannter Schlüssel ein Hinweis — an Übungen wie an Planübungen
 (`plaene[].uebungen[]`, auch in Kurskapiteln; seit Prüfrunde A6). In `gps` sind eine fehlende
 Rechenart und unbrauchbare Tempo-Grenzen Fehler, eine unbekannte Rechenart ein Hinweis. `--wortliste DATEI` sucht Begriffe, die in Pakettexten nichts verloren haben
 (Sprachregelung der Praxis-Website: erklären, nicht bewerten — die Liste liegt im privaten
 Repo der Homepage, `docs/wortliste-zone3.txt`); Treffer sind Hinweise, mit `--streng`
-Fehler. `index` schreibt den Index einer Paketquelle (ID, Name, Version, URL, SHA-256,
+Fehler. `--geprueft DATEI` nennt Stellen, die ein Mensch angesehen hat und die keine Bewertung
+sind (Ben, 14.11.2026) — je Zeile `Paketdatei | Stelle | Begriff | Kennung | Begründung`; sie
+schrumpfen auf einen Hinweis mit ihrer Zahl und sind auch mit `--streng` kein Fehler. Die
+Kennung steht am offenen Treffer und hängt am Text: Ändert er sich, meldet sich die Stelle
+wieder. `index` schreibt den Index einer Paketquelle (ID, Name, Version, URL, SHA-256,
 Größe, Neuigkeiten, reserviertes Feld `signatur`) — das Format, das die App für Updates
 liest. `quelle URL` liest einen veröffentlichten Index wie die App und prüft jede
 Paketdatei samt Prüfsumme. Wie die Dateien auf den Server kommen: Homepage,

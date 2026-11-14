@@ -44,6 +44,19 @@ def alle(wurzel):
                 yield from alle(k)
 
 
+def klick(control) -> None:
+    """``on_click`` aufrufen wie Flet (`BaseControl._trigger_event`): mit dem Ereignis, sobald
+    der Handler einen Parameter hat — auch einen mit Vorgabe. Ein Aufruf ohne Argument
+    verdeckt genau das (Ben, 14.11.2026: „Paket entfernen“ bekam das Ereignis als Übungsliste)."""
+    from flet.utils.object_model import get_param_count
+
+    handler = control.on_click
+    if get_param_count(handler) == 0:
+        handler()
+    else:
+        handler(SimpleNamespace(control=control))
+
+
 def texte(ansicht) -> list[str]:
     gefunden: list[str] = []
     for c in (c for v in ansicht.controls for c in alle(v)):
@@ -238,7 +251,7 @@ def test_paketmanager_auf_standard_entfernen_wieder_installieren(page, state) ->
     )
     entfernen.on_click()
     frage = dialoge[-1]
-    frage.actions[1].on_click()
+    klick(frage.actions[1])
     assert state.pakete.alle() == [] and state.uebungen.alle() == []
     asyncio.run(frage.on_dismiss(None))  # Flutter meldet: Dialog zu — erst dann zurück
     assert page.route == "/pakete"
@@ -284,7 +297,7 @@ def test_paket_entfernen_fragt_bei_planbezug_und_kopiert(page, state) -> None:
     kaestchen = [c for c in alle(frage.content) if isinstance(c, ft.Checkbox)]
     assert len(kaestchen) == 1 and "Teil von Plan „Rücken“" in kaestchen[0].label
     assert kaestchen[0].value is True
-    frage.actions[1].on_click()
+    klick(frage.actions[1])
     assert state.pakete.alle() == []
     items = state.plaene.laden(plan.id).items
     assert len(items) == 1 and items[0].exercise_id != wade.id

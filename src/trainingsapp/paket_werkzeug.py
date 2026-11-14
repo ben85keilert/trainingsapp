@@ -86,11 +86,13 @@ from trainingsapp.core.paketstufe import STUFE_TEXT, mindestens, stufen_text, ve
 from trainingsapp.core.paketstufe import stufe as paket_stufe
 from trainingsapp.core.paketversion import version_text
 from trainingsapp.core.privat import (
+    ZUGANG_ENDUNG,
     code_neu,
     code_text,
     datei_verschluesseln,
     ist_privat,
     ordner_neu,
+    zugangsdatei,
 )
 from trainingsapp.core.result_spec import VORLAGEN
 from trainingsapp.core.takt import takt_pruefen
@@ -445,20 +447,6 @@ def quelle_pruefen(
             "Prüfsumme in Ordnung"
         )
     return zeilen, fehler
-
-
-ZUGANG_ENDUNG = ".zugang.json"
-
-
-def zugangsdatei(datei: Path) -> bool:
-    """``<name>.zugang.json`` neben einer privaten TOML (U7) ist kein Paket. Wer
-    ``pakete/*.json`` einsammelt (``veroeffentlichen.sh``, CI des Inhalte-Repos), bekommt sie
-    mit — ``pruefen``, ``bauen`` und ``index`` lassen sie aus.
-
-    >>> zugangsdatei(Path("pakete/max.zugang.json")), zugangsdatei(Path("pakete/max.json"))
-    (True, False)
-    """
-    return datei.name.endswith(ZUGANG_ENDUNG)
 
 
 def _zugang(datei: Path) -> dict[str, str]:

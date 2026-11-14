@@ -751,7 +751,11 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
             "es im Paketmanager mit „Wieder installieren“ oder mit einem neuen Import."
         )
         if not verwendungen:
-            fragen(f"„{paket.name}“ entfernen?", text, "Entfernen", entfernen, warnend=True)
+            # Nicht `entfernen` selbst: Flet gibt einem Handler mit Parameter das Ereignis mit,
+            # es landete in ``kopieren`` (Ben, 14.11.2026: „'Event' object is not iterable“)
+            fragen(
+                f"„{paket.name}“ entfernen?", text, "Entfernen", lambda: entfernen(), warnend=True
+            )
             return
         plaene_je_uebung: dict[str, tuple[Exercise, list[str]]] = {}
         for plan, _item, uebung in verwendungen:

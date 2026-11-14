@@ -47,6 +47,20 @@ _BLOCK: Final = 1 << 20
 #: Die Zeichen eines Codes — ohne 0/O und 1/I, nur Großbuchstaben
 ALPHABET: Final = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 CODE_LAENGE: Final = 8
+#: ``<name>.zugang.json`` neben einer privaten TOML: Ordner und Code, kein Paket
+ZUGANG_ENDUNG: Final = ".zugang.json"
+
+
+def zugangsdatei(datei: Path) -> bool:
+    """``<name>.zugang.json`` neben einer privaten TOML (U7) ist kein Paket. Wer
+    ``pakete/*.json`` einsammelt (``veroeffentlichen.sh``, CI des Inhalte-Repos, der
+    Entwicklungs-Loader ``TRAININGSAPP_PAKETE``), bekommt sie mit — ``pruefen``, ``bauen``,
+    ``index`` und der Loader lassen sie aus.
+
+    >>> zugangsdatei(Path("pakete/max.zugang.json")), zugangsdatei(Path("pakete/max.json"))
+    (True, False)
+    """
+    return datei.name.endswith(ZUGANG_ENDUNG)
 
 
 class CodeFalsch(Exception):
@@ -246,6 +260,7 @@ __all__ = [
     "ALPHABET",
     "CODE_LAENGE",
     "MAGIC",
+    "ZUGANG_ENDUNG",
     "CodeFalsch",
     "PrivatNichtMoeglich",
     "code_neu",
@@ -258,4 +273,5 @@ __all__ = [
     "moeglich",
     "ordner_neu",
     "verschluesseln",
+    "zugangsdatei",
 ]

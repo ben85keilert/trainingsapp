@@ -93,10 +93,15 @@ def test_paketordner_spielt_pakete_wie_einen_import_ein(tmp_path, monkeypatch) -
         encoding="utf-8",
     )
     (ordner / "kaputt.toml").write_text('[paket]\nname = "X\n', encoding="utf-8")
+    # Die Zugangsdatei eines privaten Pakets ist kein Paket (Ben, 14.11.2026: „Das Paket
+    # enthält keine Übungen.“ ohne Dateinamen); eine leere JSON-Datei meldet sich mit Namen
+    (ordner / "qigong.zugang.json").write_text('{"ordner": "abc", "code": "K7QM9XA2"}', "utf-8")
+    (ordner / "leer.json").write_text('{"exercises": []}', "utf-8")
     monkeypatch.setenv("TRAININGSAPP_PAKETE", str(ordner))
     s = AppState.starten(tmp_path / "app.db")
     assert [p.name for p, _ in s.pakete.alle()] == ["Standard", "Qigong"]
-    assert s.paketfehler and "kaputt.toml" in s.paketfehler[0]
+    assert len(s.paketfehler) == 2 and "kaputt.toml" in s.paketfehler[0]
+    assert s.paketfehler[1] == "leer.json: Das Paket enthält keine Übungen."
     assert s.entfallene == []
     s.schliessen()
 

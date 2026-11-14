@@ -44,6 +44,7 @@ from ..core.pakete import (
     paket_lesen,
     uebung_id,
 )
+from ..core.privat import zugangsdatei
 from ..core.result_spec import VORLAGEN, ResultSpec
 from .db import transaktion
 from .pakete import PaketRepo, Status
@@ -120,7 +121,8 @@ def pakete_aus_ordner(
 ) -> list[str]:
     """Entwicklungs-Loader (``TRAININGSAPP_PAKETE``, `config.paketordner`).
 
-    Jede ``.toml``/``.json`` im Ordner wird beim Start wie ein Import eingespielt —
+    Jede ``.toml``/``.json``/``.zip`` im Ordner (außer ``<name>.zugang.json``) wird beim
+    Start wie ein Import eingespielt —
     immer auf den Stand der Datei, auch das Paket „Standard“. So startet das
     Inhalte-Repo die App direkt mit seinen Paketen. Entfernte und deaktivierte
     Pakete bleiben unangetastet; was aus einer Datei fiel, wird markiert wie bei
@@ -135,8 +137,11 @@ def pakete_aus_ordner(
         return [f"Paketordner nicht gefunden: {ordner}"]
     pakete = PaketRepo(con, ablage)
     meldungen: list[str] = []
+    # Die Zugangsdatei eines privaten Pakets (``<name>.zugang.json``, U7) ist kein Paket
     dateien = sorted(
-        p for p in ordner.iterdir() if p.is_file() and p.suffix in (".toml", ".json", ".zip")
+        p
+        for p in ordner.iterdir()
+        if p.is_file() and p.suffix in (".toml", ".json", ".zip") and not zugangsdatei(p)
     )
     for datei in dateien:
         # Mit Ablage nimmt eine TOML ihre Dateien mit (``datei = "…"``, bereinigt — U3)
@@ -149,7 +154,9 @@ def pakete_aus_ordner(
                 else:
                     inhalt = seed_inhalt(datei)
             except PaketFehler as fehler:
-                meldungen.append(str(fehler))
+                # TOML-Fehler nennen die Datei schon; JSON und ZIP nicht — ohne Namen sucht man
+                text = str(fehler)
+                meldungen.append(text if datei.name in text else f"{datei.name}: {text}")
                 continue
             vorher = pakete.laden(inhalt.paket.id)
             if vorher is not None and not vorher.aktiv:

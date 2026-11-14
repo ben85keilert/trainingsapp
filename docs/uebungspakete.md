@@ -513,7 +513,8 @@ verwenden dürfen.
 Eigene Pakete entstehen im privaten Repo `trainingsapp-inhalte` als TOML wie
 `standard.toml`, eine Datei je Paket. Die App liest sie am Rechner **direkt**: Mit der
 Umgebungsvariable `TRAININGSAPP_PAKETE=<ordner>` spielt jeder Start alle `.toml`/`.json`
-darin wie einen Import ein — immer auf den Stand der Datei, auch für die ID von
+darin wie einen Import ein (die Zugangsdatei eines privaten Pakets, `<name>.zugang.json`,
+bleibt aus) — immer auf den Stand der Datei, auch für die ID von
 „Standard“ (`data/seed.pakete_aus_ordner`). Entfernte und deaktivierte Pakete bleiben
 unangetastet; was aus einer Datei fiel, fragt der Start wie bei jedem Update. Ging eine
 Datei nicht (Tippfehler), steht die Meldung mit Zeile oben auf „Heute“.

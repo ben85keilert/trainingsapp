@@ -27,7 +27,7 @@ INDEX = """<!DOCTYPE html>
 <html><head>
   <base href="/app/x/">
   <script>
-    var flet = { noCdn: true, pyodideUrl: "/app/x/pyodide/pyodide.mjs" };
+    var flet = { noCdn: true, routeUrlStrategy: "hash", pyodideUrl: "/app/x/pyodide/pyodide.mjs" };
   </script>
   <script src="python.js"></script>
   <script id="splash-screen-script">
@@ -69,10 +69,13 @@ def test_befunde_inline_skript_fremde_adresse_fehlende_schrift(web_bauen, tmp_pa
     ordner = _ordner(tmp_path)
     texte = " | ".join(web_bauen.befunde(ordner))
     assert "Inline-Skript" in texte and "Ersatzschrift fehlt" in texte
+    assert "route-url-strategy" not in texte  # INDEX baut seine Adressen mit „#“
     fremd = INDEX.replace('"/app/x/pyodide/pyodide.mjs"', '"https://cdn.jsdelivr.net/pyodide.mjs"')
     assert any("fremde Adresse" in t for t in web_bauen.befunde(_ordner(tmp_path, fremd)))
     ohne = INDEX.replace("noCdn: true", "noCdn: false")
     assert any("--no-cdn" in t for t in web_bauen.befunde(_ordner(tmp_path, ohne)))
+    pfad = INDEX.replace('routeUrlStrategy: "hash"', 'routeUrlStrategy: "path"')
+    assert any("route-url-strategy hash" in t for t in web_bauen.befunde(_ordner(tmp_path, pfad)))
 
 
 def test_schrift_nur_mit_passender_pruefsumme(web_bauen, tmp_path) -> None:

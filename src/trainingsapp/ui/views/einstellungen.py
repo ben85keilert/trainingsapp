@@ -40,12 +40,13 @@ from dataclasses import dataclass
 
 import flet as ft
 
-from trainingsapp.config import app_version, ist_aktiv
+from trainingsapp.config import app_version, ist_aktiv, web_verweise
 from trainingsapp.core.anhaenge import groesse_text
 from trainingsapp.core.darstellung import HELLIGKEITEN
 from trainingsapp.core.eintraege import OFFEN_WAHL
 from trainingsapp.ui.components.karte import karte, titel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.links import oeffnen as link_oeffnen
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.timer import timer_knopf
@@ -161,6 +162,7 @@ UEBEN = "Üben"
 MESSEN = "Messen"
 INHALTE = "Inhalte und Daten"
 APP = "App"
+RECHTLICHES = "Rechtliches"
 
 #: Das Menü in seiner Reihenfolge: erst wer, dann was man täglich tut, dann die Messung,
 #: dann Inhalte und Daten, zuletzt die App selbst
@@ -229,6 +231,24 @@ def menuezeile(
     )
 
 
+def verweiszeile(page: ft.Page, browser: ft.UrlLauncher, titel_text: str, url: str) -> ft.ListTile:
+    """Eine Zeile, die eine Adresse außerhalb der App öffnet (Web-Fassung, „Rechtliches“)."""
+
+    async def oeffnen() -> None:
+        await link_oeffnen(page, browser, url)
+
+    return ft.ListTile(
+        leading=ft.Icon(ft.Icons.GAVEL_OUTLINED),
+        title=ft.Text(titel_text),
+        subtitle=ft.Text(url, size=12, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+        trailing=ft.Icon(ft.Icons.OPEN_IN_NEW, opacity=0.5),
+        on_click=oeffnen,
+        content_padding=ft.Padding.only(left=0, right=0),
+        dense=True,
+        data=url,  # wohin die Zeile führt — für Tests und zum Wiederfinden
+    )
+
+
 def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.View:
     gruppen: dict[str, list[ft.Control]] = {}
     for zeile in MENUE:
@@ -236,6 +256,10 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
             gruppen.setdefault(zeile.gruppe, []).append(
                 menuezeile(page, zeile.titel, zeile.untertitel(state), zeile.symbol, zeile.route)
             )
+    # Web-Fassung: Impressum, Datenschutzerklärung, Quelltext (`config.WEB.verweise`) — in der
+    # App leer, die Karte entfällt.
+    for titel_text, url in web_verweise():
+        gruppen.setdefault(RECHTLICHES, []).append(verweiszeile(page, browser, titel_text, url))
 
     ansicht = ft.View(
         route="/einstellungen",
@@ -259,4 +283,4 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
     return scroll_merken(page, state, "/einstellungen", ansicht)
 
 
-__all__ = ["MENUE", "Zeile", "einstellungen", "menuezeile"]
+__all__ = ["MENUE", "RECHTLICHES", "Zeile", "einstellungen", "menuezeile", "verweiszeile"]

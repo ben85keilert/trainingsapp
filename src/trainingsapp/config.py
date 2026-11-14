@@ -17,8 +17,10 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Final
 
 
 class Edition(StrEnum):
@@ -102,18 +104,49 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
 # Dieselbe App als statische Seite: Flutter zeichnet, Python läuft über Pyodide im
 # Browser (`scripts/web_bauen.py`). Sie ist als Demo und für das schnelle Üben eines
 # Hausaufgabenprogramms gedacht (Ben, 13.11.2026) — ohne Konten, die Daten bleiben im
-# Browser. Was dort nicht geht oder nicht sein soll, schaltet diese Liste ab.
+# Browser.
+#
+# **Das Web-Profil** (`WEB`) ist die eine Stelle, an der steht, was die Web-Fassung anders
+# hält als die App: welche Funktionen es dort nicht gibt und welche Verweise sie zeigt. Was
+# sich als Wert ausdrücken lässt (eine Vorgabe, ein Text, eine Liste), gehört hierher — nicht
+# als ``if im_browser()`` in eine Ansicht. Jede Stelle, an der der Quelltext trotzdem für den
+# Browser abzweigt, steht mit ihrem Test in `docs/web_abzweigungen.toml`;
+# `tests/test_web_abzweigungen.py` schlägt fehl, sobald eine dazukommt, die dort fehlt
+# (Ben, 14.11.2026: „Abzweigungen streng dokumentiert und getrackt, damit sie wirklich
+# getestet werden“; `docs/plan_web.md` §2).
 
-#: Funktionen, die es im Browser nicht gibt — unabhängig von der Edition:
-#: - ``update_pruefung``: fragte GitHub, einen fremden Server; eine Seite braucht kein Update.
-#: - ``paket_quellen``: der Netzzugriff der App (`urllib`) geht im Browser-Python nicht.
-#: - ``hrv_bewertung``: Die Web-Fassung steht unter dem Namen der Praxis und dient dem
-#:   Hausaufgabenprogramm — dort gilt die Grenze des Patientenmodus: Zahlen und Kurven,
-#:   keine Deutung (`docs/recht/00_zweckbestimmung.md`, Entscheidung 7.11.2026).
-#: - ``geraete_sicherung``: Androids Geräte-Backup gibt es dort nicht.
-NICHT_IM_BROWSER: frozenset[str] = frozenset(
-    {"update_pruefung", "paket_quellen", "hrv_bewertung", "geraete_sicherung"}
+
+@dataclass(frozen=True)
+class WebProfil:
+    """Was die Web-Fassung anders hält als die App."""
+
+    #: Funktionen (`ist_aktiv`), die es im Browser nicht gibt — unabhängig von der Edition
+    ohne: frozenset[str]
+    #: Verweise in den Einstellungen (Titel, Adresse), Karte „Rechtliches“
+    verweise: tuple[tuple[str, str], ...]
+
+
+WEB: Final[WebProfil] = WebProfil(
+    # - ``update_pruefung``: fragte GitHub, einen fremden Server; eine Seite braucht kein Update.
+    # - ``paket_quellen``: der Netzzugriff der App (`urllib`) geht im Browser-Python nicht.
+    # - ``hrv_bewertung``: Die Web-Fassung steht unter dem Namen der Praxis und dient dem
+    #   Hausaufgabenprogramm — dort gilt die Grenze des Patientenmodus: Zahlen und Kurven,
+    #   keine Deutung (`docs/recht/00_zweckbestimmung.md`, Entscheidung 7.11.2026).
+    # - ``geraete_sicherung``: Androids Geräte-Backup gibt es dort nicht.
+    ohne=frozenset({"update_pruefung", "paket_quellen", "hrv_bewertung", "geraete_sicherung"}),
+    # Die Seite steht unter `trainingsapp.osteo-ebert.de`: Wer die Adresse direkt öffnet, kommt
+    # an keiner anderen Seite der Praxis vorbei — Impressum und Datenschutzerklärung müssen von
+    # hier aus erreichbar sein (Ben, 14.11.2026). Wer die App unter eigenem Namen ins Netz
+    # stellt, trägt hier die eigenen Adressen ein.
+    verweise=(
+        ("Impressum", "https://www.osteo-ebert.de/impressum/"),
+        ("Datenschutzerklärung", "https://www.osteo-ebert.de/datenschutzerklaerung/"),
+        ("Quelltext bei GitHub", "https://github.com/ben85keilert/trainingsapp"),
+    ),
 )
+
+#: Funktionen, die es im Browser nicht gibt (`WEB.ohne`, der Name von vor dem Web-Profil)
+NICHT_IM_BROWSER: frozenset[str] = WEB.ohne
 
 
 def im_browser() -> bool:
@@ -124,6 +157,15 @@ def im_browser() -> bool:
     False
     """
     return sys.platform == "emscripten" or os.environ.get("TRAININGSAPP_WEB") == "1"
+
+
+def web_verweise() -> tuple[tuple[str, str], ...]:
+    """Die Verweise der Karte „Rechtliches“ — nur im Browser, sonst leer.
+
+    >>> web_verweise()
+    ()
+    """
+    return WEB.verweise if im_browser() else ()
 
 
 def ist_aktiv(funktion: str) -> bool:

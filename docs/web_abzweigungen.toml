@@ -1,0 +1,65 @@
+# Register der Abzweigungen für die Web-Fassung (Ben, 14.11.2026; Regel: docs/plan_web.md §2)
+#
+# Jede Datei, in der der Quelltext für den Browser etwas anderes tut als in der App, steht hier
+# — mit der Zahl der Stellen, mit dem, was dort anders ist, und mit dem, was es prüft.
+# `tests/test_web_abzweigungen.py` zählt die Stellen im Quelltext nach und schlägt fehl, wenn
+#
+#   - eine Datei abzweigt, die hier fehlt,
+#   - die Zahl der Stellen nicht mehr stimmt (eine kam dazu oder fiel weg),
+#   - ein Eintrag weder einen Test noch einen Gerätetest nennt,
+#   - der genannte Test oder Gerätetest nicht existiert.
+#
+# Als Stelle zählt eine Zeile (ohne reine Kommentarzeilen) mit einer dieser Marken:
+#   Python:  im_browser(   "emscripten"   _web   web_verweise(   TRAININGSAPP_WEB
+#   Dart:    kIsWeb
+#
+# Wer eine Abzweigung baut: zuerst prüfen, ob sie sich als Wert im Web-Profil ausdrücken lässt
+# (`config.WEB`) — dann braucht es hier keine neue Zeile. Sonst die Zahl anheben, `was`
+# ergänzen und einen Test nennen, der genau diese Stelle im Web-Zweig durchläuft. `geraetetest`
+# ist für das, was nur im echten Browser oder am Gerät zu sehen ist (docs/offene_fragen.md).
+
+[[abzweigung]]
+datei = "src/trainingsapp/config.py"
+stellen = 10
+was = """Das Web-Profil selbst: `im_browser()` (Pyodide oder TRAININGSAPP_WEB=1), \
+`web_verweise()` (nur im Browser), `ist_aktiv` ohne die Funktionen aus `WEB.ohne`; dazu die \
+Zeilen der Doctests."""
+test = [
+    "tests/test_web_abzweigungen.py::test_web_profil_schaltet_funktionen_ab_und_zeigt_verweise",
+]
+
+[[abzweigung]]
+datei = "src/trainingsapp/ui/app.py"
+stellen = 1
+was = """Start der App: Bluetooth-Transport auch im Browser (dort Web Bluetooth), keine \
+Ortungsquelle (GPS und Karte nur in der App). Erkannt an Pyodide selbst, nicht an \
+TRAININGSAPP_WEB — als Flet-Web-Server am Rechner hat die App die Erweiterungen nicht."""
+geraetetest = "T139"
+
+[[abzweigung]]
+datei = "src/trainingsapp/ui/geraete/flet_ble_transport.py"
+stellen = 4
+was = """Web Bluetooth: Die Suche ist das Auswahlfenster des Browsers und wartet so lange, \
+wie die Person braucht (`FRIST_AUSWAHL_WEB_S`); `seit_ms` der Benachrichtigung ist 0, weil \
+Zahlen über 0xFFFFFFFF nicht zu Dart gelangen."""
+test = [
+    "tests/test_web_abzweigungen.py::test_transport_im_browser_lange_frist_und_keine_grosse_zahl",
+]
+geraetetest = "T139"
+
+[[abzweigung]]
+datei = "src/trainingsapp/ui/views/einstellungen.py"
+stellen = 1
+was = """Karte „Rechtliches“ mit Impressum, Datenschutzerklärung und Quelltext \
+(`config.WEB.verweise`) — in der App gibt es sie nicht."""
+test = [
+    "tests/test_web_abzweigungen.py::test_einstellungen_zeigen_rechtliches_nur_im_browser",
+]
+
+[[abzweigung]]
+datei = "erweiterungen/flet_ble/src/flutter/flet_ble/lib/src/ble_service.dart"
+stellen = 5
+was = """Web Bluetooth in der Erweiterung: kein Scan, sondern Geräteauswahl mit den Diensten \
+aus `_webDienste`; Abonnieren am Kern von flutter_blue_plus vorbei; Zeitstempel als Kommazahl \
+(dart2js); kein Vordergrunddienst. Dart-Tests gibt es in diesem Repository nicht."""
+geraetetest = "T139"

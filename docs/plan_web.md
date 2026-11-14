@@ -1,7 +1,8 @@
 # Web-Fassung — die App als statische Seite im Browser
 
-Stand 14.11.2026. Vertrag für `scripts/web_bauen.py`, `config.NICHT_IM_BROWSER` und den
-Web-Weg von `erweiterungen/flet_ble`.
+Stand 14.11.2026. Vertrag für `scripts/web_bauen.py`, das Web-Profil (`config.WEB`), das
+Register der Abzweigungen (`docs/web_abzweigungen.toml`) und den Web-Weg von
+`erweiterungen/flet_ble`.
 
 ## 0. Wozu
 
@@ -24,7 +25,7 @@ Wo sie liegt und wie sie dorthin kommt, steht nicht hier, sondern beim Server de
 
 ```bash
 uv run python scripts/web_bauen.py --basis /                 # lokal: uv run flet serve dist/web
-uv run python scripts/web_bauen.py --basis /app/<ordner>/    # für einen Server
+uv run python scripts/web_bauen.py --basis /app/<ordner>/    # für einen Unterordner eines Servers
 ```
 
 Ergebnis `dist/web/` mit `stand.json` (Version, Commit, `sauber`, `gepusht`, Basisadresse,
@@ -36,6 +37,7 @@ Ergebnis `dist/web/` mit `stand.json` (Version, Commit, `sauber`, `gepusht`, Bas
 | Basisadresse (`--base-url`) | die Seite findet CanvasKit und Pyodide nicht |
 | Inline-Skripte der `index.html` nach `start-<n>.js` | eine strenge Content-Security-Policy blockiert sie, die Seite bleibt weiß |
 | Ersatzschriften einlegen (`SCHRIFTEN`, mit Prüfsumme, beim Bauen geladen) | Flutter fragt die fehlende Schrift in Dauerschleife an (gemessen: über 1400 Anfragen je Minute und Tab); „→“ erscheint als Kästchen |
+| Adressen mit „#“ (`--route-url-strategy hash`) | ein statischer Server kennt die Ansichten nicht: Neuladen in einer Unteransicht ist 404, und die aufgerufene Ansicht stünde im Protokoll des Servers |
 | App-Archiv gegen das Repository prüfen (`archiv_befunde`; dazu `[tool.flet.app] exclude` in `pyproject.toml`) | `flet build` packt ganz `src/` ein — auch den Datenordner der Desktop-Vorschau (`src/trainingsapp/ui/.flet/`: Datenbank, Messungen, GPS-Strecken, Anhänge dieses Rechners). So am 14.11.2026 hochgeladen und wieder gesperrt |
 
 Braucht die App ein Zeichen aus einer weiteren Schrift, nennt die Konsole des Browsers die
@@ -47,8 +49,12 @@ Browser sieht, prüft das zuerst.
 
 ## 2. Was im Browser anders ist
 
-`config.im_browser()` (`sys.platform == "emscripten"`; am Rechner `TRAININGSAPP_WEB=1`) und
-`config.NICHT_IM_BROWSER` — `ist_aktiv` liefert dort für diese Funktionen `False`:
+**Das Web-Profil** (`config.WEB`, Ben, 14.11.2026) ist die eine Stelle, an der steht, was die
+Web-Fassung anders hält als die App. Es gilt, wenn `config.im_browser()` wahr ist
+(`sys.platform == "emscripten"`; am Rechner und in Tests `TRAININGSAPP_WEB=1`).
+
+`WEB.ohne` (alter Name `config.NICHT_IM_BROWSER`) — `ist_aktiv` liefert dort für diese
+Funktionen `False`:
 
 | Funktion | Warum nicht |
 |---|---|
@@ -57,8 +63,35 @@ Browser sieht, prüft das zuerst.
 | `hrv_bewertung` | die Web-Fassung dient dem Hausaufgabenprogramm — Grenze des Patientenmodus: Zahlen und Kurven, keine Deutung (`docs/recht/00_zweckbestimmung.md`) |
 | `geraete_sicherung` | Androids Geräte-Backup gibt es dort nicht |
 
+`WEB.verweise` — die Karte „Rechtliches“ am Ende der Einstellungen: Impressum,
+Datenschutzerklärung, Quelltext. Wer die Adresse der Web-Fassung direkt öffnet, kommt an keiner
+anderen Seite der Praxis vorbei; das Impressum muss von der App aus erreichbar sein. In der
+installierten App gibt es die Karte nicht.
+
 Dazu in `ui/app.py`: Bluetooth auch im Browser, **GPS nicht** (Kartenkacheln wären Anfragen an
 fremde Server).
+
+### Regel: Abzweigungen sind dokumentiert, gezählt und getestet
+
+Ben, 14.11.2026: „Abzweigungen streng dokumentiert und getrackt, damit diese wirklich getestet
+werden.“ Jeder Unterschied zwischen Web-Fassung und App muss in beiden Fassungen stimmen — und
+niemand klickt beide bei jeder Änderung durch. Deshalb:
+
+1. **Erst das Web-Profil.** Was sich als Wert ausdrücken lässt (eine Funktion aus, eine Vorgabe,
+   ein Text, eine Liste), kommt nach `config.WEB` — nicht als `if im_browser()` in eine Ansicht.
+2. **Sonst ins Register.** Jede Datei, die für den Browser abzweigt, steht in
+   `docs/web_abzweigungen.toml`: Zahl der Stellen, was dort anders ist, und der Test, der den
+   Web-Zweig durchläuft — oder der Gerätetest, wenn es nur im echten Browser zu sehen ist.
+3. **Der Test zählt nach.** `tests/test_web_abzweigungen.py` vergleicht das Register mit dem
+   Quelltext (Marken: `im_browser(`, `"emscripten"`, `_web`, `web_verweise(`, `TRAININGSAPP_WEB`,
+   in Dart `kIsWeb`). Eine neue Abzweigung ohne Eintrag, eine falsche Zahl, ein Eintrag ohne Test
+   oder ein Test, den es nicht gibt: Der Lauf scheitert, lokal und in der CI.
+4. **Wer eine neue Marke erfindet** (eine andere Art, den Browser zu erkennen), trägt sie im Test
+   und im Kopf des Registers nach — sonst zählt niemand sie.
+
+Was das Register nicht kann: Es beweist, dass es einen Test gibt, nicht, dass er gut ist. Und was
+nur über einen Schalter aus `WEB.ohne` läuft, zählt es nicht als Abzweigung — dafür steht die
+Tabelle oben (der Test prüft, dass jede Funktion aus `WEB.ohne` dort steht).
 
 **Was noch fehlt** (Stand 14.11.2026, alles vor einem öffentlichen Start):
 
@@ -66,7 +99,11 @@ fremde Server).
   Einträge, Messungen und Einstellungen weg. Gebraucht: Abgleich mit IndexedDB und ein Knopf
   „Alles löschen“ für fremde Geräte.
 - **`hrv_bewertung` wird in der Oberfläche noch nirgends abgefragt** — der Schalter ist aus,
-  die Deutungen sind trotzdem zu sehen. Das ist dieselbe Arbeit wie der Patientenmodus.
+  was er verbergen soll, ist trotzdem zu sehen. Ben, 14.11.2026: Was eine Messung ausgibt und
+  die Person selbst übernimmt (Ruhe-HF, HFmax), und Zahlen ohne Schwelle (Wochenlast, Tests)
+  sind keine Deutung und bleiben; DFA α1 bleibt in Web-Fassung und App sichtbar und wird als
+  „experimentell“ gekennzeichnet. Dazu wird `docs/recht/00_zweckbestimmung.md` (Tabelle zum
+  Patientenmodus) nachgezogen, dann der Code — beides vor dem ersten Upload an die feste Adresse.
 - **Pakete laden:** ein Netzadapter für den Browser; für private Pakete fehlt der Laufzeit
   `hashlib.scrypt` (`core/privat.moeglich()` meldet es).
 - Kamera, Mikrofon und Ortung hängen am Server: Eine `Permissions-Policy` kann sie sperren.

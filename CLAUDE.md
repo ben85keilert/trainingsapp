@@ -185,8 +185,12 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
 
 - **Web-Fassung** (Ben, 13.11.2026, Vertrag `docs/plan_web.md`): dieselbe App als statische Seite,
   Python im Browser (Pyodide) — nur über `scripts/web_bauen.py` bauen (`--no-cdn`, Basisadresse).
-  `config.NICHT_IM_BROWSER` schaltet ab, was dort nicht geht. **Keine Zahl über 0xFFFFFFFF zwischen
-  Dart und Python** (dart2js: das Ereignis geht still verloren) — gilt für jede Erweiterung.
+  Was dort anders ist, steht im Web-Profil (`config.WEB`: Funktionen aus, Verweise). **Jede
+  weitere Abzweigung für den Browser gehört mit ihrem Test ins Register
+  `docs/web_abzweigungen.toml`** — `tests/test_web_abzweigungen.py` zählt nach und scheitert sonst
+  (Ben, 14.11.2026; Regel: `docs/plan_web.md` §2). Adressen mit „#“ (`--route-url-strategy hash`).
+  **Keine Zahl über 0xFFFFFFFF zwischen Dart und Python** (dart2js: das Ereignis geht still
+  verloren) — gilt für jede Erweiterung.
 
 - **Zwei Editionen aus einem Quelltext.** `config.ist_aktiv("funktion")` beantwortet
   „darf ich X?" statt „bin ich Edition B?". Ein Schalter je Fähigkeit, nicht je

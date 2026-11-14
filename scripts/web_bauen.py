@@ -33,6 +33,10 @@ Was dieses Skript über ``flet build web`` hinaus tut — jeder Punkt hat einmal
    GPS-Strecken). ``pyproject.toml`` schließt ihn aus (``[tool.flet.app] exclude``), und
    dieses Skript bricht ab, wenn im Archiv etwas liegt, das nicht im Repository steht
    (`archiv_befunde`; so am 14.11.2026 hochgeladen und wieder gesperrt).
+6. **Adressen mit „#“** (``--route-url-strategy hash``): ``/#/einstellungen`` statt
+   ``/einstellungen``. Ein statischer Server kennt die Ansichten der App nicht — mit „path“ ist
+   ein Neuladen in einer Unteransicht 404, und die aufgerufene Ansicht (``/messung/<id>``) stünde
+   im Protokoll des Servers. Was hinter „#“ steht, schickt der Browser nie mit.
 
 **Zahlen über 0xFFFFFFFF** gehen im Browser nicht zwischen Dart und Python hin und her (die
 Web-Fassung ist dart2js; ``erweiterungen/flet_ble``, ``_zeit``). Wer einer Erweiterung ein Feld
@@ -79,6 +83,10 @@ APP_ARCHIV = Path("assets") / "app" / "app.zip"
 
 _SKRIPT = re.compile(r"<script(?P<attr>[^>]*)>(?P<inhalt>.*?)</script>", re.S)
 _FREMD = re.compile(r'(?:src|href)="https?://|Url: "https?://')
+
+
+#: So steht die Adressstrategie in Flets Startseite (nach dem Auslagern in ``start-<n>.js``)
+ADRESSEN_MIT_RAUTE = 'routeUrlStrategy: "hash"'
 
 
 def basis_pruefen(basis: str) -> str:
@@ -233,6 +241,11 @@ def befunde(ordner: Path) -> list[str]:
         liste.append("Die Seite ist nicht mit --no-cdn gebaut (noCdn: true fehlt)")
     if fremd := _FREMD.search(text):
         liste.append(f"Die Seite nennt eine fremde Adresse: {fremd.group(0)}…")
+    if ADRESSEN_MIT_RAUTE not in text:
+        liste.append(
+            "Die App baut ihre Adressen nicht mit „#“ (--route-url-strategy hash) — ein Neuladen "
+            "in einer Unteransicht wäre 404, und die Ansicht stünde im Protokoll des Servers"
+        )
     for pfad, _quelle, _sha in SCHRIFTEN:
         if not (ordner / "assets" / "fonts" / pfad).is_file():
             liste.append(f"Ersatzschrift fehlt: assets/fonts/{pfad}")
@@ -329,6 +342,7 @@ def main() -> None:
             encoding="utf-8",
         )
         befehl = ["flet", "build", "web", "--no-cdn", "--yes", "--no-rich-output"]
+        befehl += ["--route-url-strategy", "hash"]
         befehl += ["--base-url", basis, "--build-number", nummer, "-o", str(ausgabe)]
         print(f"Baue Web-Fassung {version()} (Build {nummer}) für {basis}")
         subprocess.run(befehl, cwd=PROJEKT, check=True)

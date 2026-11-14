@@ -106,7 +106,7 @@ def test_einstellungsseiten_bauen_und_schalten(tmp_path) -> None:
         chip = next(
             c
             for c in controls
-            if isinstance(c, ft.Chip) and getattr(c.label, "value", "") == "DFA α1"
+            if isinstance(c, ft.Chip) and getattr(c.label, "value", "") == "DFA α1 (exp.)"
         )
         chip.on_click()
         assert state.hrv_einstellungen().kacheln[-1] == "dfa_alpha1"

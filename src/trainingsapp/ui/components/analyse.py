@@ -68,6 +68,7 @@ from hrv_core.frequency import Fensterspektrum, fensterspektrum
 from hrv_core.trends import aktuell, verlauf
 
 from trainingsapp.core import atem_auswertung as aa
+from trainingsapp.core.experimentell import DFA_KURZ, mit_hinweis
 from trainingsapp.ui.components.kacheln import zahl
 from trainingsapp.ui.components.karte import info_knopf, karte, titel
 from trainingsapp.ui.components.notizen import senkrechte
@@ -128,9 +129,11 @@ HINWEISE = {
     "LF orange (0,04–0,15 Hz), "
     "HF türkis (0,15–0,40 Hz), Punkt = stärkster Gipfel. Atmet man ruhig 6-mal je "
     "Minute, liegt der Gipfel bei 0,1 Hz — im LF-Band.",
-    "nichtlinear": "Poincaré: jeder Punkt ein Intervall gegen das nächste; die Breite der "
-    "Wolke ist SD1, die Länge SD2. DFA α1 braucht mindestens 100 Schläge im Fenster. "
-    "Bei 130-Hz-EKG und erst recht optisch nur als Trend lesbar.",
+    "nichtlinear": mit_hinweis(
+        "Poincaré: jeder Punkt ein Intervall gegen das nächste; die Breite der "
+        "Wolke ist SD1, die Länge SD2. DFA α1 braucht mindestens 100 Schläge im Fenster. "
+        "Bei 130-Hz-EKG und erst recht optisch nur als Trend lesbar."
+    ),
 }
 
 
@@ -581,7 +584,7 @@ class Analyse:
             ("SD1", zahl(sd1, 1), "ms", FARBEN["sd1"]),
             ("SD2", zahl(sd2, 1), "ms", FARBEN["sd2"]),
             ("SD1/SD2", zahl(sd1 / sd2 if sd1 is not None and sd2 else None, 2), "", None),
-            ("DFA α1", zahl(dfa, 2), "", FARBEN["dfa_alpha1"]),
+            (DFA_KURZ, zahl(dfa, 2), "", FARBEN["dfa_alpha1"]),
             ("Punkte", str(n), "", None),
         ]
         return ft.Row(

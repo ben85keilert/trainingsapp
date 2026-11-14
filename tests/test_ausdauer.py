@@ -1075,7 +1075,7 @@ async def test_auswertung_und_liste_zeigen_das_training(daten) -> None:
     achsen = [c for c in _alle(view) if isinstance(c, ft.SegmentedButton)]
     assert [s.value for s in achsen[0].segments] == ["zeit", "strecke"]
     i = texte.index("/km")  # der Tabellenkopf (das erste „km“ ist die Einheit im Überblick)
-    assert texte[i - 2 : i + 4] == ["km", "Zeit", "/km", "Ø HF", "DFA α1", "↑ m"]
+    assert texte[i - 2 : i + 4] == ["km", "Zeit", "/km", "Ø HF", "DFA α1 (exp.)", "↑ m"]
     chip = next(c for c in _alle(view) if isinstance(c, ft.Chip))
     assert chip.label.value == "ohne Pausen"
     chip.on_click()  # umschalten: Einstellung gemerkt, Ansicht neu gefüllt
@@ -1236,7 +1236,7 @@ async def test_intervalle_und_kilometer_als_tabellen(daten) -> None:
     detail = ausdauer_detail_view(seite, state, strecke)
     await asyncio.gather(*seite.aufgaben)  # die HRV-Aufnahme liest ein Thread (H39)
     kopf, *runden = zeilen(detail, "INTERVALLE (VOM TIMER)")
-    assert kopf == ["Runde · Abschnitt", "km", "/km", "Ø HF", "DFA α1"]
+    assert kopf == ["Runde · Abschnitt", "km", "/km", "Ø HF", "DFA α1 (exp.)"]
     assert len(runden) == 8 and runden[-1][0] == "4 Pause 1:00"
     assert runden[2][1:4] == gesehen["intervalle"][3][1:4]  # dieselbe Rechnung wie live
 

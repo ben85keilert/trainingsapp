@@ -206,9 +206,45 @@ eingebaute Überwachungsfunktion.
 | HF-Zonen anzeigen (HRR %, Zeit in Zone) | ja | ja, als Anzeige | nein |
 | Zielbereich-Ton (selbst gesetzt, Entscheidung C) | ja | **ja** — die Person setzt die Grenzen selbst, nie die Praxis (Ben, 13.11.2026; bis dahin „nein“) | — |
 | HF-Zone als Alarm der App oder Workout-Bedingung | nein (Steuerung) | nein | — |
-| HRV-Auswertung mit Schwellen und Hinweisen (DFA-α1-Schwellen, Atemlage-Hinweis, HF-Auswertung) | ja, als Fitness-Information formuliert, keine Gesundheitsurteile | **nein** — ausblenden, nur Rohwerte (`config.ist_aktiv("hrv_bewertung")`) | nein |
+| HF-Auswertung als Anzeige: was eine Messung ausgibt und die Person selbst ins Profil übernimmt (Ruhe-HF, HFmax als Vorschlag „übernehmen“), und Zahlen ohne Schwelle (Wochenlast: TRIMP, sRPE-Last, Monotonie, Strain; Tests) | ja | **ja** — Anzeige, keine Deutung (Ben, 14.11.2026; bis dahin „nein“, als Teil der Zeile „HRV-Auswertung mit Schwellen und Hinweisen“) | nein |
+| DFA α1: die Kennzahl, Schwellen-Vorschläge daraus, Atemlage-Hinweis dazu | ja, überall als „experimentell“ gekennzeichnet | **ja**, überall als „experimentell“ gekennzeichnet: nicht gesichert, keine Grundlage für Entscheidungen (Ben, 14.11.2026; bis dahin „nein — ausblenden, nur Rohwerte“) | nein |
+| Jede weitere Auswertung, die Messwerte einordnet (Schwellen, Ampeln, bewertete Trends) | nur als Fitness-Information formuliert, keine Gesundheitsurteile | **nein** — ausblenden (`config.ist_aktiv("hrv_bewertung")`) | nein |
 | Diagnosemodus, Mitschnitt, Export der Messdatei | ja | ja | nur als bewusste Handlung der Person, nicht über die Anbindung |
 | „Praxis sieht den Verlauf der Patientin“ als Funktion | — | **nein** | — |
+
+**HF-Auswertung und DFA α1** (Ben, 14.11.2026 — löst die Zeile „HRV-Auswertung mit Schwellen
+und Hinweisen (DFA-α1-Schwellen, Atemlage-Hinweis, HF-Auswertung): im Patientenmodus nein —
+ausblenden, nur Rohwerte“ vom 7.11. ab). Die alte Zeile nahm die ganze HF-Auswertung aus dem
+Patientenmodus; die Grenze oben in diesem Dokument ist feiner (anzeigen ja, bewerten und
+Handlungen ableiten nein). Ben: „Ruhe-HF und HFmax ist doch einfach eine Ausgabe einer
+Messung“, „Es geht ja erstmal um Fitnesswerte, nicht therapieweisende Empfehlungen“ und „DFA a1
+dagegen ist sehr experimentell“, dann: „DFA a1 kennzeichnen mit experimentell“. Daraus:
+
+- **Anzeige, keine Deutung** — in Solo, im Patientenmodus und in der Web-Fassung: was eine
+  Messung ausgibt und die Person **selbst** ins eigene Profil übernimmt (Ruhe-HF, HFmax; nie von
+  selbst gesetzt, nie von der Praxis), und Zahlen ohne Schwelle (Wochenlast mit TRIMP,
+  sRPE-Last, Monotonie und Strain; die Werte der Tests über die Zeit). Bedingung: Es bleibt bei
+  Zahlen — keine Schwelle, keine Ampel, kein „zu viel“, kein Pfeil mit Wertung.
+- **DFA α1 bleibt sichtbar und ist überall als „experimentell“ gekennzeichnet** — die Kennzahl,
+  die Schwellen-Vorschläge daraus und der Atemlage-Hinweis dazu, in App und Web-Fassung, in Solo
+  und im Patientenmodus. „Experimentell“ heißt: nicht gesichert, keine Grundlage für
+  Entscheidungen. Gekennzeichnet ist jeder Name, unter dem die Oberfläche den Wert zeigt —
+  kurz „DFA α1 (exp.)“ an Kachel, Spaltenkopf, Tabellenzeile, Legende und Achse, ausgeschrieben
+  „DFA α1 (experimentell)“ in Einstellungen, Überschriften, Schwellen-Vorschlägen und an der
+  Quelle eines Profilwerts; jeder Erklärtext endet mit dem Satz „Experimentell: DFA α1 und
+  alles, was die App daraus vorschlägt, ist nicht gesichert.“ Fließtext unter einem
+  gekennzeichneten Namen wiederholt die Marke nicht. Eine Ausnahme aus Platzgründen: die
+  Wertzeile auf der Uhr („RR … · α1 …“, 20 Zeichen) — dort trägt der Name der Seite in den
+  Einstellungen die Marke. Die Kennzeichnung kommt aus **einer** Stelle
+  (`core/experimentell.py`; `tests/test_experimentell.py` scheitert an einem Namen ohne sie);
+  wer DFA α1 an einer neuen Stelle anzeigt, nimmt den Namen von dort. Die Kennzeichnung ersetzt
+  keine der Regeln oben: Auch ein experimenteller Wert wird nicht bewertet und steuert nichts.
+- **`hrv_bewertung`** bleibt der Schalter für alles, was Messwerte künftig einordnen würde;
+  Stand 14.11.2026 hängt in der Oberfläche nichts daran.
+
+**Offen** (Einschätzung Claude, von Ben nicht entschieden): Ob die Kennzeichnung für die
+Schwellen-Vorschläge aus DFA α1 im Patientenmodus genügt, gehört in die anwaltliche Prüfung der
+Zweckbestimmung, bevor die Messfunktion der Web-Fassung öffentlich beworben wird.
 
 **Die zweite App (Praxisanbindung)** darf Daten übertragen, auch physiologische, unter drei
 Bedingungen (MDCG 2019-11: Übertragen ohne Verarbeitung ist keine Medizinprodukte-Software):

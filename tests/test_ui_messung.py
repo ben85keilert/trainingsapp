@@ -157,7 +157,7 @@ async def test_messung_live_mit_simulator(daten) -> None:
         a.modus = {"rmssd": "block", "lf_power": "block"}
         state.ansicht_setzen(a)
         texte = _baum_texte(messung(seite, state))
-        assert "DFA α1 2 min" in texte and "LF-Band 2 min" in texte  # Kacheln
+        assert "DFA α1 (exp.) 2 min" in texte and "LF-Band 2 min" in texte  # Kacheln
     # Ein anderer Reiter: die alte Live-Ansicht rechnet nicht weiter
     nummer = state.live_ansicht
     state.messung_tab = 2
@@ -999,7 +999,7 @@ def test_detailansicht_alle_bereiche_und_kacheln(daten) -> None:
     for bereich, erwartet in (
         ("zeit", "pNN50"),
         ("frequenz", "LF 0,04–0,15 Hz"),
-        ("nichtlinear", "DFA α1"),
+        ("nichtlinear", "DFA α1 (exp.)"),
     ):
         a = state.ansicht()
         a.bereich = bereich
@@ -1071,7 +1071,7 @@ def test_aufzeichnung_bereich_und_poincare_im_blatt(daten) -> None:
     assert state.ansicht().bereich == "nichtlinear"
     # Das Blatt zeigt jetzt die Chips dieses Bereichs und den Schalter der Wolke
     chips = [c.label.value for c in _alle_controls(blatt) if isinstance(c, ft.Chip)]
-    assert "DFA α1" in chips and "RMSSD" not in chips
+    assert "DFA α1 (exp.)" in chips and "RMSSD" not in chips
     schalter = next(
         c for c in _alle_controls(blatt) if isinstance(c, ft.Switch) and c.data == "poincare"
     )

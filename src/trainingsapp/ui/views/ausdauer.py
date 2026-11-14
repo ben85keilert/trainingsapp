@@ -68,6 +68,7 @@ from hrv_core.trends import aktuell, reihe
 
 from trainingsapp.config import datenverzeichnis, streckenverzeichnis
 from trainingsapp.core import atem_auswertung as aa
+from trainingsapp.core.experimentell import DFA, DFA_KURZ, DFA_LANG, KURZ, mit_hinweis
 from trainingsapp.core.forschung import TEMPO_SCHRITT_S, tempo_reihe
 from trainingsapp.core.gps_wahl import NIVEAU_NAMEN, GpsWahl
 from trainingsapp.core.hf_einstellungen import HfEinstellungen
@@ -703,7 +704,7 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
                 _gross("Herzfrequenz", zahl_text(_hf(e)), einheit="bpm", farbe=ft.Colors.RED_400)
             ]
             if _ekg(e):
-                hf_zeile.append(_gross("DFA α1 (Schätzwert)", zahl_text(dfa["wert"], 2)))
+                hf_zeile.append(_gross(f"{DFA} ({KURZ}, Schätzwert)", zahl_text(dfa["wert"], 2)))
             reihen.append(ft.Row(spacing=8, controls=hf_zeile))
         zahlen.controls = reihen
         pause_text.visible = teil.mit_gps and r.pausiert and r.distanz_m > 0
@@ -957,7 +958,7 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
                 f"{name}: Die HRV-Messung läuft schon — sie bekommt Marken je km und "
                 "läuft nach dem Training weiter."
             )
-        return hinweis(f"{name}: Herzfrequenz, HRV und DFA α1 laufen mit.")
+        return hinweis(f"{name}: Herzfrequenz, HRV und {DFA_LANG} laufen mit.")
 
     def sport_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
         if e.control.selected:
@@ -1100,7 +1101,7 @@ def _hf_legende(e: TrainingEinstellungen, grenzen: tuple[float, float] | None) -
 _SPALTEN_KOPF = {
     "zeit": "Zeit",
     "hf": "Ø HF",
-    "dfa": "DFA α1",
+    "dfa": DFA_KURZ,
     "hoehe_auf": "↑ m",
     "hoehe_ab": "↓ m",
     "pause": "Pause",
@@ -1843,7 +1844,7 @@ def _dfa_teil(
         controls=[
             kurve(
                 reihen,
-                einheit="DFA α1",
+                einheit=DFA_KURZ,
                 hoehe=180,
                 y_spanne_min=0.5,
                 y_schritt_min=0.1,
@@ -1861,10 +1862,12 @@ def _dfa_teil(
             ),
             *([ft.Text(lage, size=12, color=FARBEN["atemfrequenz"])] if lage else []),
             hinweis(
-                "DFA α1 beschreibt, wie gleichmäßig sich die Herzschlag-Abstände verändern — "
-                "ein Schätzwert, nur mit EKG-Gurt. Fenster mit 3 % oder mehr korrigierten "
-                "Schlägen bleiben leer. Die App gibt keine Zonen oder Empfehlungen; x-Achse: "
-                "Minuten seit dem Start."
+                mit_hinweis(
+                    "DFA α1 beschreibt, wie gleichmäßig sich die Herzschlag-Abstände verändern — "
+                    "ein Schätzwert, nur mit EKG-Gurt. Fenster mit 3 % oder mehr korrigierten "
+                    "Schlägen bleiben leer. Die App gibt keine Zonen oder Empfehlungen; x-Achse: "
+                    "Minuten seit dem Start."
+                )
             ),
         ],
     )
@@ -2449,7 +2452,7 @@ def ausdauer_detail_view(
         if hrv is not None and ekg:
             dfa = _dfa_teil(hrv, strecke.started_at, bezug.beginn_s if bezug else None)
             if dfa is not None:
-                teile.append(karte(titel("DFA α1 — Überblick"), dfa))
+                teile.append(karte(titel(f"{DFA_LANG} — Überblick"), dfa))
         if zwischen_stand and not unterwegs:
             # Die Messung läuft noch, gezeigt wird ihr Zwischenstand (A21)
             teile.append(

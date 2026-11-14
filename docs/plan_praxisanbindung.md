@@ -36,7 +36,9 @@ heißt das:
 - **Keine Deutung**, weder hier noch auf der Empfängerseite: Kurven und Summen ja,
   Schwellen, Ampeln, bewertete Trends nein.
 - **Patientenmodus in der Solo-App** (Profil mit zugewiesenen Plänen): HRV-Bewertungen aus
-  (`config.ist_aktiv("hrv_bewertung")`), Zielbereich-Ton aus, Messdateien bleiben beim
+  (`config.ist_aktiv("hrv_bewertung")` — seit 14.11.2026 genauer: HF-Auswertung als Anzeige
+  bleibt, DFA α1 bleibt als „experimentell“ gekennzeichnet, `docs/recht/00_zweckbestimmung.md`),
+  Zielbereich-Ton aus (seit 13.11.2026 erlaubt, ebenda), Messdateien bleiben beim
   Patienten; Rückkanal nur für Leistungen und Selbstauskünfte.
 - **Praxisseite:** anzeigen und ablegen (Patientenakte, § 630f BGB). Die HRV-**Analyse**
   übermittelter Dateien mit `praxis_gui` wäre Medizinprodukte-Software (Regel 11) — nur als

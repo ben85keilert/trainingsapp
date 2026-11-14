@@ -33,8 +33,9 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import flet as ft
-from hrv_core.trends import KENNZAHLEN, titel, treppe
+from hrv_core.trends import KENNZAHLEN, treppe
 
+from trainingsapp.core.experimentell import titel
 from trainingsapp.core.hrv_ansicht import BLOCK, LINKS, RECHTS, ROH, Ansicht
 from trainingsapp.ui.components.kacheln import zahl
 from trainingsapp.ui.components.kurve import ACHSE_PX, RR_SPANNE_MIN_MS, Reihe, Skala, kurve
@@ -176,9 +177,7 @@ def doppelkurve(
             spanne = max(spanne, kz.spanne_min)
             kennzahlen.append(k)
         erste = kurven[0] if kurven else ROH
-        einheit = (
-            roh_einheit if erste == ROH else KENNZAHLEN[erste].einheit or KENNZAHLEN[erste].titel
-        )
+        einheit = roh_einheit if erste == ROH else KENNZAHLEN[erste].einheit or titel(erste)
         schritt = schritt_min(kennzahlen) if kennzahlen and ROH not in kurven else 1.0
         return reihen, einheit, spanne, schritt, farbe(erste) if len(kurven) == 1 else None
 

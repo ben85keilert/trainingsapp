@@ -163,11 +163,11 @@ async def test_live_vollbild_zwei_achsen_ablesen_und_notizen(daten) -> None:
     assert state.ansicht().rechts == ["sdnn"]
     _waehlen(ansicht, "Rechte Achse: Kurven wählen", "RMSSD 30 s")  # gleiche Skala: dazu
     assert state.ansicht().rechts == ["sdnn", "rmssd"]
-    _waehlen(ansicht, "Rechte Achse: Kurven wählen", "DFA α1 2 min")  # andere Skala: ersetzt
+    _waehlen(ansicht, "Rechte Achse: Kurven wählen", "DFA α1 (exp.) 2 min")  # andere Skala: ersetzt
     _waehlen(ansicht, "Linke Achse: Kurven wählen", "RMSSD 30 s")  # Rohdaten raus
     assert (state.ansicht().links, state.ansicht().rechts) == (["rmssd"], ["dfa_alpha1"])
     kurve = next(c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart))
-    assert kurve.right_axis.title.value == "DFA α1" and kurve.left_axis.title.value == "ms"
+    assert kurve.right_axis.title.value == "DFA α1 (exp.)" and kurve.left_axis.title.value == "ms"
     _waehlen(ansicht, "Linke Achse: Kurven wählen", "Seiten tauschen")
     assert (state.ansicht().links, state.ansicht().rechts) == (["dfa_alpha1"], ["rmssd"])
     _waehlen(ansicht, "Linke Achse: Kurven wählen", "RR-Tachogramm")
@@ -392,10 +392,10 @@ def test_auswertung_vollbild_etiketten_seitenleiste_ablesen(daten) -> None:
     _symbol(view, ft.Icons.CLOSE, "Ablesen beenden").on_click()
 
     # Achsen: DFA α1 rechts — über die Bereiche hinweg
-    _waehlen(view, "Rechte Achse: Kurven wählen", "DFA α1 2 min")
+    _waehlen(view, "Rechte Achse: Kurven wählen", "DFA α1 (exp.) 2 min")
     assert state.ansicht().rechts == ["dfa_alpha1"]
     kurve = next(c for c in _alle_controls(view) if isinstance(c, fc.LineChart))
-    assert kurve.right_axis.title.value == "DFA α1"
+    assert kurve.right_axis.title.value == "DFA α1 (exp.)"
 
     # Zurück hochkant: Notiz und Abschnitt stehen wieder in ihren Karten
     _symbol(view, ft.Icons.FULLSCREEN_EXIT).on_click()

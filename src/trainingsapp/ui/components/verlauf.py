@@ -31,8 +31,9 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 import flet as ft
-from hrv_core.trends import KENNZAHLEN, im_bereich, titel, treppe
+from hrv_core.trends import KENNZAHLEN, im_bereich, treppe
 
+from trainingsapp.core.experimentell import titel
 from trainingsapp.core.hrv_ansicht import BLOCK, GLEITEND, PNN_WAHL, Ansicht
 from trainingsapp.core.hrv_einstellungen import PUFFER_S, HrvEinstellungen
 from trainingsapp.core.zeitangabe import breite_lesen
@@ -209,7 +210,7 @@ def diagramme(
         out.append(
             kurve(
                 [*reihen, *marken],
-                einheit=KENNZAHLEN[gruppe[0]].einheit or KENNZAHLEN[gruppe[0]].titel,
+                einheit=KENNZAHLEN[gruppe[0]].einheit or titel(gruppe[0]),
                 hoehe=hoehe,
                 x_von=x_von,
                 x_bis=x_bis,

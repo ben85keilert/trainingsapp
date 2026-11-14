@@ -70,11 +70,13 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
     "physiologische_steuerung": {Edition.PRAXIS},
     # Zugriff auf die Rohdaten einer HRV-Messung
     "hrv_rohdaten": {Edition.SOLO, Edition.PRAXIS},
-    # Deutungen der HRV-Auswertung (Schwellen aus DFA α1, Atemlage-Hinweis, HF-Auswertung) —
-    # in Solo als Fitness-Information erlaubt; im **Patientenmodus** (Profil mit Plänen
-    # von der Praxis, Weg A, 7.11.2026) aus: dort zeigt die App nur Rohwerte und Kurven.
-    # Der Modus selbst ist noch nicht gebaut — der Schalter benennt die Stelle, an der er
-    # greift (docs/recht/00_zweckbestimmung.md, „Entscheidung 7.11.2026“).
+    # Auswertung, die Messwerte einordnet (Schwellen, Ampeln, bewertete Trends) — in Solo nur
+    # als Fitness-Information; im **Patientenmodus** (Profil mit Plänen von der Praxis, Weg A,
+    # 7.11.2026) und in der Web-Fassung aus. Stand 14.11.2026 hängt in der Oberfläche nichts
+    # daran: Die HF-Auswertung zeigt Zahlen (Anzeige, keine Deutung), und DFA α1 bleibt überall
+    # sichtbar, gekennzeichnet als „experimentell“ (`core/experimentell.py`; Ben, 14.11.2026,
+    # docs/recht/00_zweckbestimmung.md, „HF-Auswertung und DFA α1“). Der Schalter benennt die
+    # Stelle, an der Künftiges dieser Art greift; der Patientenmodus selbst ist nicht gebaut.
     "hrv_bewertung": {Edition.SOLO, Edition.PRAXIS},
     "export": {Edition.SOLO, Edition.PRAXIS},
     # Geräte-Backup (Android Auto Backup) einschaltbar — Vorgabe aus (`core/sicherung.py`,
@@ -130,8 +132,9 @@ WEB: Final[WebProfil] = WebProfil(
     # - ``update_pruefung``: fragte GitHub, einen fremden Server; eine Seite braucht kein Update.
     # - ``paket_quellen``: der Netzzugriff der App (`urllib`) geht im Browser-Python nicht.
     # - ``hrv_bewertung``: Die Web-Fassung steht unter dem Namen der Praxis und dient dem
-    #   Hausaufgabenprogramm — dort gilt die Grenze des Patientenmodus: Zahlen und Kurven,
-    #   keine Deutung (`docs/recht/00_zweckbestimmung.md`, Entscheidung 7.11.2026).
+    #   Hausaufgabenprogramm — dort gilt die Grenze des Patientenmodus: anzeigen ja, Messwerte
+    #   einordnen nein (`docs/recht/00_zweckbestimmung.md`). Stand 14.11.2026 hängt nichts
+    #   daran; DFA α1 bleibt sichtbar und ist als „experimentell“ gekennzeichnet.
     # - ``geraete_sicherung``: Androids Geräte-Backup gibt es dort nicht.
     ohne=frozenset({"update_pruefung", "paket_quellen", "hrv_bewertung", "geraete_sicherung"}),
     # Die Seite steht unter `trainingsapp.osteo-ebert.de`: Wer die Adresse direkt öffnet, kommt

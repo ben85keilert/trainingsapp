@@ -266,10 +266,10 @@ async def test_alpha1_schwelle_uebernehmen(daten) -> None:
     seite = _seite()
     ansicht = await _hf_sicht(seite, state, eintrag)
     texte = _texte(ansicht)
-    assert any(
-        t.startswith("Schwelle 1 aus DFA α1 = 0.75: 142 bpm (30 Fenster, r² 0.91)") for t in texte
-    )
-    assert any("Schwelle 2 aus DFA α1 = 0.5: 168 bpm" in t and "zu wenige" in t for t in texte)
+    eins = "Schwelle 1 aus DFA α1 = 0.75 (experimentell): 142 bpm (30 Fenster, r² 0.91)"
+    assert any(t.startswith(eins) for t in texte)
+    zwei = "Schwelle 2 aus DFA α1 = 0.5 (experimentell): 168 bpm"
+    assert any(zwei in t and "zu wenige" in t for t in texte)
     knopf2 = _knopf(ansicht, "Als Schwelle 2 übernehmen")
     assert knopf2.disabled
     _knopf(ansicht, "Als Schwelle 1 übernehmen").on_click()

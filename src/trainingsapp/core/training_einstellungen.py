@@ -23,6 +23,8 @@ from typing import Any, Final
 
 from hrv_core import herzfrequenz as hz
 
+from trainingsapp.core.experimentell import DFA_LANG
+
 #: Wonach die Strecke auf der Karte eingefärbt wird
 FAERBUNG_TEMPO: Final[str] = "tempo"
 FAERBUNG_HF: Final[str] = "hf"
@@ -36,7 +38,7 @@ SPALTEN_TEXT: Final[dict[str, str]] = {
     "zeit": "Zeit (gesamt)",
     "tempo": "Tempo",
     "hf": "Ø HF",
-    "dfa": "DFA α1",
+    "dfa": DFA_LANG,
     "hoehe_auf": "Höhe hinauf",
     "hoehe_ab": "Höhe hinab",
     "pause": "Pause",

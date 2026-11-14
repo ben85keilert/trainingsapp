@@ -42,6 +42,8 @@ from dataclasses import dataclass, field
 
 from hrv_core.live import LiveKennzahlen
 
+from trainingsapp.core.experimentell import DFA_KURZ
+
 #: So weit reicht der Verlauf zurück, den die Uhr als Kurve bekommt (s)
 VERLAUF_S = 150.0
 #: Zeichen je Zeile, die das schwächste Gerät (Fit3) ohne Laufschrift zeigt
@@ -80,7 +82,7 @@ SEITEN: tuple[str, ...] = (
 SEITEN_VORGABE: tuple[str, ...] = tuple(s for s in SEITEN if s != SEITE_BEREICH)
 #: Was die Einstellung je Seite zeigt
 SEITEN_NAMEN: dict[str, str] = {
-    SEITE_HF: "HF, RR, DFA α1",
+    SEITE_HF: f"HF, RR, {DFA_KURZ}",
     SEITE_BEREICH: "Bereich und % der Reserve (Einstellungen → Herzfrequenz)",
     SEITE_ATMUNG: "Atemfrequenz, RMSSD (Atemübungen)",
     SEITE_INTERVALL: "Gipfel und Tal der HF — ⏯ beginnt neu",

@@ -106,7 +106,7 @@ from hrv_core.ppi import ppi_verworfen, schlagzeiten
 from hrv_core.regeln import Korrekturregeln
 from hrv_core.segments import filter_rr
 from hrv_core.time_domain import compute_time_domain
-from hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
+from hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core import abschnitte as eigene_abschnitte
@@ -114,6 +114,7 @@ from trainingsapp.core import atem_auswertung as aa
 from trainingsapp.core import atem_protokoll
 from trainingsapp.core import diagnose as dg
 from trainingsapp.core.aufnahme_bezug import RAND_S, Bezug
+from trainingsapp.core.experimentell import DFA_KURZ, titel
 from trainingsapp.core.hf_auswertung import (
     AbschnittWand,
     achse_zu_wand,
@@ -4200,7 +4201,7 @@ def _aufbauen(
         if hinweis_lf:
             zeilen.append(
                 ft.Text(
-                    f"{hinweis_lf}: LF/HF und DFA α1 mit Hinweis, HF-Power nicht ausgewiesen.",
+                    f"{hinweis_lf}: LF/HF und {DFA_KURZ} mit Hinweis, HF-Power nicht ausgewiesen.",
                     size=12,
                     color=FARBEN["atemfrequenz"],
                 )
@@ -4605,7 +4606,7 @@ def _nichtlinear_tabelle(
         ("SD1", [f"{zahl(n.get('sd1'), 1)} ms"]),
         ("SD2", [f"{zahl(n.get('sd2'), 1)} ms"]),
         ("SD1/SD2", [zahl(n.get("sd1_sd2"), 2)]),
-        ("DFA α1", [zahl(n.get("dfa_alpha1"), 2)]),
+        (DFA_KURZ, [zahl(n.get("dfa_alpha1"), 2)]),
         ("SampEn", [zahl(n.get("sampen"), 2)]),
     ]
     text = "Bei optischen Pulsintervallen nicht belastbar." if optisch else ""

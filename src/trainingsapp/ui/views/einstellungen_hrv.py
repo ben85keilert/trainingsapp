@@ -34,6 +34,7 @@ from hrv_core.regeln import Korrekturregeln
 
 from trainingsapp import config
 from trainingsapp.core import diagnose as dg
+from trainingsapp.core.experimentell import DFA, WORT, mit_hinweis
 from trainingsapp.core.hrv_ansicht import PNN_WAHL, Ansicht
 from trainingsapp.core.hrv_einstellungen import (
     ACHSEN_NAMEN,
@@ -848,8 +849,10 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                 ),
                 schalter(
                     "nichtlinear",
-                    "Nichtlinear (Poincaré, DFA α1)",
-                    "Braucht genaue Schlagzeiten — mit dem Brustgurt als Trend lesbar.",
+                    f"Nichtlinear (Poincaré; {DFA} {WORT})",
+                    mit_hinweis(
+                        "Braucht genaue Schlagzeiten — mit dem Brustgurt als Trend lesbar."
+                    ),
                 ),
                 schalter(
                     "nichtlinear_optisch",

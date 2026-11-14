@@ -26,6 +26,8 @@ from collections.abc import Callable
 
 import flet as ft
 
+from trainingsapp.core.experimentell import DFA, HINWEIS, WORT
+
 NOTATION_MD = """\
 **Je Satz** (Wiederholungen, Haltezeit)
 
@@ -303,7 +305,7 @@ spürbare Schwankung, mindestens drei Herzschläge je Atemzug und ein Puls unter
 eine falsche — die Werte beschreiben, sie bewerten nicht.
 """
 
-HERZFREQUENZ_MD = """\
+HERZFREQUENZ_MD = f"""\
 **Herzfrequenz-Sicht** (Ben, 29.10.2026). Die große Zahl ist die Herzfrequenz aus den
 Schlagabständen — bei reinen Pulsgebern die des Geräts. Daneben der Anteil an deiner
 **Herzfrequenzreserve**: Ruhe-HF = 0 %, HFmax = 100 %.
@@ -318,8 +320,8 @@ Schlagabständen — bei reinen Pulsgebern die des Geräts. Daneben der Anteil a
 - **Zeit je Bereich** zählt für den Bezug Aufnahme, Abschnitt oder 5 min.
 - **Erholung (HRR):** HF am Ende der Belastung minus HF nach 30 / 60 / 120 s. Woran und in
   welcher Haltung — nur gleiche Paare sind vergleichbar.
-- **Schwellen** kommen aus Labor, Laktat, DFA α1 (EKG-Gurt: HF, bei der α1 in einer Rampe
-  durch 0,75 bzw. 0,5 geht) oder dem Talk-Test — sonst geschätzt.
+- **Schwellen** kommen aus Labor, Laktat, {DFA} ({WORT}; EKG-Gurt: HF, bei der α1 in einer
+  Rampe durch 0,75 bzw. 0,5 geht) oder dem Talk-Test — sonst geschätzt. {HINWEIS}
 
 **Wann die App dir Werte vorschlägt — und wann nicht.** Nie beim Üben, nie als Dialog. Nach
 einer Aufnahme stehen in ihrer Auswertung unter „Vorschläge fürs Profil“ nur Zeilen mit

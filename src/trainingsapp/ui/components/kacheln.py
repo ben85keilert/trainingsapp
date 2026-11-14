@@ -25,8 +25,9 @@ from typing import Any
 
 import flet as ft
 from hrv_core.atmung import ATEMUEBUNG, RUHE, kurzgrund
-from hrv_core.trends import KENNZAHLEN, aktuell, atmung_aktuell, titel
+from hrv_core.trends import KENNZAHLEN, aktuell, atmung_aktuell
 
+from trainingsapp.core.experimentell import EXPERIMENTELL, anzeigename, mit_hinweis, titel
 from trainingsapp.core.hrv_ansicht import Ansicht
 from trainingsapp.core.hrv_einstellungen import HrvEinstellungen
 from trainingsapp.devices.base import Verbindung
@@ -54,7 +55,9 @@ class KachelArt:
 
 def _aus_kurve(kennzahl: str) -> KachelArt:
     k = KENNZAHLEN[kennzahl]
-    return KachelArt(k.titel, kennzahl=kennzahl, erklaerung=k.erklaerung)
+    # Experimentelles (DFA α1) trägt die Marke im Titel und den Hinweissatz in der Erklärung
+    erklaerung = mit_hinweis(k.erklaerung) if kennzahl in EXPERIMENTELL else k.erklaerung
+    return KachelArt(anzeigename(kennzahl, k.titel), kennzahl=kennzahl, erklaerung=erklaerung)
 
 
 #: Alle Werte. Schlüssel bleiben stabil — sie stehen in den Einstellungen.

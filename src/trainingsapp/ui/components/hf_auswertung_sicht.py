@@ -32,6 +32,7 @@ from hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
 from hrv_core.recording import Recording
 
 from trainingsapp.core import tagesfelder as tf
+from trainingsapp.core.experimentell import DFA, WORT
 from trainingsapp.core.hf_auswertung import (
     NACHT_FENSTER,
     AbschnittWand,
@@ -694,7 +695,7 @@ class HfAuswertungSicht:
             grund = "" if d.get("gueltig") else " · " + "; ".join(d.get("gruende") or [])
             zeilen.append(
                 zeile(
-                    f"{name} aus DFA α1 = {float(d.get('ziel') or 0):g}: {w:.0f} bpm "
+                    f"{name} aus {DFA} = {float(d.get('ziel') or 0):g} ({WORT}): {w:.0f} bpm "
                     f"({int(d.get('n') or 0)} Fenster"
                     + (f", r² {float(r2):.2f}" if r2 is not None else "")
                     + f"){grund}",

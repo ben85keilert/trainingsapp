@@ -60,7 +60,7 @@ Funktionen `False`:
 |---|---|
 | `update_pruefung` | fragte GitHub; eine Seite braucht kein Update |
 | `paket_quellen` | der Netzzugriff der App (`urllib`) geht im Browser-Python nicht |
-| `hrv_bewertung` | die Web-Fassung dient dem Hausaufgabenprogramm — Grenze des Patientenmodus: Zahlen und Kurven, keine Deutung (`docs/recht/00_zweckbestimmung.md`) |
+| `hrv_bewertung` | die Web-Fassung dient dem Hausaufgabenprogramm — Grenze des Patientenmodus: anzeigen ja, Messwerte einordnen nein (`docs/recht/00_zweckbestimmung.md`). Stand 14.11.2026 hängt in der Oberfläche nichts an dem Schalter |
 | `geraete_sicherung` | Androids Geräte-Backup gibt es dort nicht |
 
 `WEB.verweise` — die Karte „Rechtliches“ am Ende der Einstellungen: Impressum,
@@ -98,12 +98,13 @@ Tabelle oben (der Test prüft, dass jede Funktion aus `WEB.ohne` dort steht).
 - **Nichts bleibt.** Die Datenbank liegt im Arbeitsspeicher des Tabs; nach dem Neuladen sind
   Einträge, Messungen und Einstellungen weg. Gebraucht: Abgleich mit IndexedDB und ein Knopf
   „Alles löschen“ für fremde Geräte.
-- **`hrv_bewertung` wird in der Oberfläche noch nirgends abgefragt** — der Schalter ist aus,
-  was er verbergen soll, ist trotzdem zu sehen. Ben, 14.11.2026: Was eine Messung ausgibt und
-  die Person selbst übernimmt (Ruhe-HF, HFmax), und Zahlen ohne Schwelle (Wochenlast, Tests)
-  sind keine Deutung und bleiben; DFA α1 bleibt in Web-Fassung und App sichtbar und wird als
-  „experimentell“ gekennzeichnet. Dazu wird `docs/recht/00_zweckbestimmung.md` (Tabelle zum
-  Patientenmodus) nachgezogen, dann der Code — beides vor dem ersten Upload an die feste Adresse.
+- **`hrv_bewertung` wird in der Oberfläche nirgends abgefragt — und muss es derzeit nicht.**
+  Ben, 14.11.2026 (`docs/recht/00_zweckbestimmung.md`, „HF-Auswertung und DFA α1“): Was eine
+  Messung ausgibt und die Person selbst übernimmt (Ruhe-HF, HFmax), und Zahlen ohne Schwelle
+  (Wochenlast, Tests) sind Anzeige, keine Deutung, und bleiben. DFA α1 bleibt in Web-Fassung
+  und App sichtbar und ist überall als „experimentell“ gekennzeichnet (`core/experimentell.py`
+  — keine Abzweigung für den Browser). Der Schalter bleibt für alles, was Messwerte künftig
+  einordnen würde.
 - **Pakete laden:** ein Netzadapter für den Browser; für private Pakete fehlt der Laufzeit
   `hashlib.scrypt` (`core/privat.moeglich()` meldet es).
 - Kamera, Mikrofon und Ortung hängen am Server: Eine `Permissions-Policy` kann sie sperren.

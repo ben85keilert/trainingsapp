@@ -33,6 +33,7 @@ from typing import Any
 import flet as ft
 from hrv_core import herzfrequenz as hz
 
+from trainingsapp.core.experimentell import DFA_KURZ, DFA_LANG
 from trainingsapp.core.hf_einstellungen import MESSEN_BIS_S
 from trainingsapp.core.hf_profil import bereich_von
 from trainingsapp.core.hf_training import BEZUEGE, BEZUG_ABSCHNITT, BEZUG_NAMEN
@@ -575,7 +576,7 @@ def hf_vollbild(
                     ziel_anteil_text(drin, gesamt) if (oben or unten) else "–",
                 ),
                 ("Drift", "–" if drift is None else f"{drift:+.0f} bpm".replace("-", "−")),
-                ("DFA α1", "–" if dfa is None else f"{dfa:.2f}".replace(".", ",")),
+                (DFA_KURZ, "–" if dfa is None else f"{dfa:.2f}".replace(".", ",")),
             ]
         for (name, wert), (name_t, wert_t) in zip(zeilen, wert_zeilen, strict=True):
             name_t.value, wert_t.value = name, wert
@@ -941,7 +942,7 @@ def hf_vollbild(
     dfa_zeile = ft.Container(
         ink=zur_hrv is not None,
         on_click=(lambda _=None: zur_hrv()) if zur_hrv is not None else None,
-        tooltip="DFA α1 der letzten zwei Minuten — zur HRV-Ansicht" if zur_hrv else None,
+        tooltip=f"{DFA_LANG} der letzten zwei Minuten — zur HRV-Ansicht" if zur_hrv else None,
         content=ft.Row(spacing=4, controls=list(wert_zeilen[4])),
     )
     werte_spalte = ft.Container(

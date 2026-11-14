@@ -431,7 +431,7 @@ async def test_kacheln_tabelle_und_bandleiste_zeigen_das_atemband(
     assert hf_atem.wert not in ("–", "") and hf_atem.grund == "0,07–0,15 Hz"
     assert lf_hf_atem.wert not in ("–", "") and lf_hf_atem.grund == "0,07–0,15 Hz"
     assert nach_titel["HF-Band"].wert == "–"  # das feste Band bleibt nicht ausgewiesen (B1)
-    assert nach_titel["DFA α1"].grund == "Atmung < 9/min, spontan — liegt im LF-Band"
+    assert nach_titel["DFA α1 (exp.)"].grund == "Atmung < 9/min, spontan — liegt im LF-Band"
     # Frequenztabelle: die beiden Zeilen hinter LF/HF
     assert "HF Atemband 0,07–0,15 Hz" in alles and "LF/HF (Atemband)" in alles
     hf_zeile = next(t for t in alles if t.endswith(" ms²") and not t.startswith("–"))
@@ -482,7 +482,7 @@ async def test_atemband_kacheln_ohne_rate(page, state, tmp_path, monkeypatch) ->
     assert nach_titel["HF (Atemband)"].wert == "–"
     assert nach_titel["HF (Atemband)"].grund == aa.KEINE_RATE
     assert nach_titel["LF/HF (Atemband)"].wert == "–"
-    assert nach_titel["DFA α1"].grund == ""
+    assert nach_titel["DFA α1 (exp.)"].grund == ""
     assert "HF Atemband" in alles and f"– ({aa.KEINE_RATE})" in alles
     assert "HF (Atemband)" not in _bandleiste(ansicht)
     assert not any(t.startswith("Atemband ") for t in alles)

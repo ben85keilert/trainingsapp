@@ -23,6 +23,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+from trainingsapp.core.experimentell import DFA_LANG
 from trainingsapp.core.uhr_seiten import SEITEN as UHR_SEITEN
 from trainingsapp.core.uhr_seiten import SEITEN_VORGABE as UHR_SEITEN_VORGABE
 
@@ -110,7 +111,7 @@ ACHSEN_NAMEN: Final[dict[str, tuple[str, str]]] = {
     "rsa": ("Atemschwankung", "bpm"),
     "ms2": ("Spektrale Leistung (VLF, LF, HF)", "ms²"),
     "ratio": ("LF/HF", ""),
-    "alpha": ("DFA α1", ""),
+    "alpha": (DFA_LANG, ""),
 }
 #: Eigene Breiten: so viele höchstens, zwischen `FENSTER_MIN_S` und einem Tag (eine Nacht
 #: braucht 6-h-Fenster; live begrenzt der Puffer ohnehin)

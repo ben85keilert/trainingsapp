@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import flet as ft
 
+from trainingsapp.core.experimentell import DFA_KURZ
 from trainingsapp.core.intervalle import (
     HerzQuelle,
     HfReihe,
@@ -101,7 +102,7 @@ def intervall_tabelle(
     if hf:
         kopf.append(_zelle("Ø HF", kopf=True))
     if dfa:
-        kopf.append(_zelle("DFA α1", kopf=True))
+        kopf.append(_zelle(DFA_KURZ, kopf=True))
     reihen: list[ft.Control] = [ft.Row(spacing=4, controls=kopf)]
     for z in zeilen:
         name = f"{z.runde} {z.name}"

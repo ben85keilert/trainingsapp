@@ -20,6 +20,7 @@ from typing import Any, Final
 
 from hrv_core import herzfrequenz as hz
 
+from trainingsapp.core.experimentell import DFA, WORT
 from trainingsapp.core.hf_einstellungen import MODELL_AUTO, HfEinstellungen
 from trainingsapp.core.models import Subject, jetzt, new_id
 
@@ -47,7 +48,7 @@ QUELLEN: Final[dict[str, str]] = {
     "formel_tanaka": "Formel Tanaka",
     "formel_gulati": "Formel Gulati",
     "talk_test": "Talk-Test",
-    "dfa_alpha1": "DFA α1 (Rogers 2021)",
+    "dfa_alpha1": f"{DFA} (Rogers 2021, {WORT})",
     "schaetzung_milani": "Schätzung (Milani)",
     "prozent_hrr": "% der Reserve (42/77)",
 }

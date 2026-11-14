@@ -77,6 +77,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import date
@@ -514,13 +515,21 @@ def main(page: ft.Page) -> None:
 
     # Bluetooth nur in der App auf Android — am Rechner gibt es die Erweiterung
     # nicht (flet run nutzt einen fertigen Client ohne eigene Erweiterungen).
-    if page.platform == ft.PagePlatform.ANDROID:
+    # Auch in der gebauten Web-Fassung (Web Bluetooth über dieselbe Erweiterung,
+    # `docs/plan_web.md`), dort auf jedem Betriebssystem — ob der Browser es kann, sagt
+    # die Suche. Erkannt daran, dass Python selbst im Browser läuft: Als Flet-Web-Server
+    # (Skill web-fotos) hat die App einen fertigen Client ohne die eigenen Erweiterungen.
+    im_browser = sys.platform == "emscripten"
+    if page.platform == ft.PagePlatform.ANDROID or im_browser:
         try:
             from trainingsapp.ui.geraete.flet_ble_transport import FletBleTransport
 
             state.ble_transport = FletBleTransport(page)
         except ImportError:
             state.ble_transport = None
+    # GPS nur in der App: Im Browser sperrt der Server die Ortung (Permissions-Policy),
+    # und Kartenkacheln wären Anfragen an fremde Server.
+    if page.platform == ft.PagePlatform.ANDROID and not im_browser:
         try:
             from trainingsapp.ui.geraete.flet_gps import FletGpsQuelle
 

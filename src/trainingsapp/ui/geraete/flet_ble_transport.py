@@ -37,6 +37,21 @@ def _schluessel(device_id: str, service: str, characteristic: str) -> tuple[str,
     return device_id, service.lower(), characteristic.lower()
 
 
+def _ganz(wert: Any) -> Any:
+    """Zeitstempel der Dart-Seite als ganze Mikrosekunden.
+
+    Im Browser schickt Dart Zahlen über 0xFFFFFFFF als Kommazahl (`_zeit` in
+    ``ble_service.dart`` — die Web-Fassung kann 64-Bit-Ganzzahlen nicht verpacken).
+
+    >>> _ganz(1794609744000000.5), _ganz(123), _ganz(None)
+    (1794609744000000, 123, None)
+    """
+    return int(wert) if isinstance(wert, float) else wert
+
+
+#: Im Browser: so lange darf die Geräteauswahl des Browsers offen bleiben
+FRIST_AUSWAHL_WEB_S = 120.0
+
 #: Zwecke ohne Gurt und GPS — sie halten den Dienst mit Typ ``health`` (P26)
 GESUNDHEIT = frozenset({"einheit", "timer"})
 
@@ -48,6 +63,10 @@ class FletBleTransport:
     _inhalt: Benachrichtigung | None = None
     #: Steht die gewöhnliche Benachrichtigung (ohne Dienst) gerade da?
     _einfach: bool = False
+    #: Läuft die App im Browser? Dann ist es Web Bluetooth statt Android-BLE: Die Suche ist
+    #: das Auswahlfenster des Browsers, und Zahlen über 0xFFFFFFFF gehen nicht zwischen
+    #: Dart und Python hin und her (dart2js, `ble_service.dart`, `_zeit`).
+    _web: bool = False
     #: Folgenummer und Zeiten der Dart-Seite zum zuletzt zugestellten Paket
     letzte_meta: dict[str, Any] | None = None
 
@@ -65,6 +84,7 @@ class FletBleTransport:
             on_connection_state=self._verbindung,
         )
         page.services.append(self.ble)
+        self._web = bool(getattr(page, "web", False))
 
     # -- Ereignisse aus Dart ------------------------------------------------------
 
@@ -84,8 +104,8 @@ class FletBleTransport:
         # Die Empfänger laufen synchron, er liest so genau die Werte dieses Pakets
         self.letzte_meta = {
             "seq": getattr(e, "seq", None),
-            "t_mono_us": getattr(e, "t_mono_us", None),
-            "t_wall_us": getattr(e, "t_wall_us", None),
+            "t_mono_us": _ganz(getattr(e, "t_mono_us", None)),
+            "t_wall_us": _ganz(getattr(e, "t_wall_us", None)),
         }
         t = self._uhr.umrechnen(e.t_mono_us / 1e6, time.monotonic())
         ziel(bytes(e.value), t)
@@ -106,6 +126,10 @@ class FletBleTransport:
             return "unknown"
 
     async def scan(self, timeout_s: float = 8.0) -> list[DeviceInfo]:
+        # Im Browser wählt die Person das Gerät im Fenster des Browsers — das dauert so
+        # lange, wie sie braucht; die Frist des Aufrufs darf nicht vorher enden.
+        if self._web:
+            timeout_s = FRIST_AUSWAHL_WEB_S
         treffer = await self.ble.scan(timeout_s=timeout_s)
         return [
             DeviceInfo(id=t.id, name=t.name or "", rssi=t.rssi, services=tuple(t.services))
@@ -221,7 +245,7 @@ class FletBleTransport:
                 standort=standort,
                 gesundheit=gesundheit,
                 lang=b.lang,
-                seit_ms=b.seit_ms,
+                seit_ms=self._seit_ms(b),
             )
             self._einfach = False  # der Dienst ersetzt die gewöhnliche Benachrichtigung
         except Exception as fehler:
@@ -258,16 +282,24 @@ class FletBleTransport:
         with suppress(Exception):
             if self._zwecke:
                 b = self._inhalt or self._aus_zwecken()
-                await self.ble.hintergrund_text(b.titel, b.text, lang=b.lang, seit_ms=b.seit_ms)
+                await self.ble.hintergrund_text(
+                    b.titel, b.text, lang=b.lang, seit_ms=self._seit_ms(b)
+                )
             elif self._inhalt is not None:
                 b = self._inhalt
                 await self.ble.benachrichtigung_zeigen(
-                    b.titel, b.text, lang=b.lang, seit_ms=b.seit_ms
+                    b.titel, b.text, lang=b.lang, seit_ms=self._seit_ms(b)
                 )
                 self._einfach = True
             elif self._einfach:
                 await self.ble.benachrichtigung_verbergen()
                 self._einfach = False
+
+    def _seit_ms(self, b: Benachrichtigung) -> int:
+        """Beginn der Stoppuhr für die Android-Benachrichtigung — im Browser 0: Dort gibt
+        es sie nicht, und Epochen-Millisekunden kämen bei Dart nicht an (über 0xFFFFFFFF,
+        siehe `_ganz`) — der ganze Aufruf scheiterte."""
+        return 0 if self._web else b.seit_ms
 
     async def akku(self) -> dict[str, Any] | None:
         """Akkustand für Strommessungen (siehe `flet_ble.FletBle.akku`); ``None`` bei Fehler."""

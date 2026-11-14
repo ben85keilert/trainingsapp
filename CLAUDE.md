@@ -183,6 +183,11 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   `components/uebungsbild.uebungsbild` statt `ft.Icon(symbol(…))`, quadratisch mit runden
   Ecken (P109, auch PNG) — ebenfalls nie in Paket, Export oder Sync.
 
+- **Web-Fassung** (Ben, 13.11.2026, Vertrag `docs/plan_web.md`): dieselbe App als statische Seite,
+  Python im Browser (Pyodide) — nur über `scripts/web_bauen.py` bauen (`--no-cdn`, Basisadresse).
+  `config.NICHT_IM_BROWSER` schaltet ab, was dort nicht geht. **Keine Zahl über 0xFFFFFFFF zwischen
+  Dart und Python** (dart2js: das Ereignis geht still verloren) — gilt für jede Erweiterung.
+
 - **Zwei Editionen aus einem Quelltext.** `config.ist_aktiv("funktion")` beantwortet
   „darf ich X?" statt „bin ich Edition B?". Ein Schalter je Fähigkeit, nicht je
   Bildschirm. `physiologische_steuerung` ist in `solo` **rechtlich** gesperrt (eine

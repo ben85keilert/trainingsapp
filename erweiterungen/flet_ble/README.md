@@ -25,6 +25,13 @@ if verfuegbar(page):                   # nur in der gebauten Android-App
     await ble.subscribe(treffer[0].id, "180d", "2a37")
 ```
 
+**Im Browser** (Web-Fassung, `docs/plan_web.md` §3): derselbe Dienst über Web Bluetooth — nur Chrome
+und Edge, nur über HTTPS oder `localhost`. `scan` öffnet dort das Auswahlfenster des Browsers und
+liefert höchstens ein Gerät; die Dienste, die die App anspricht, stehen in `_webDienste`
+(`ble_service.dart`) — ein neuer Dienst gehört dorthin, sonst gibt der Browser ihn nicht frei.
+Zahlen über 0xFFFFFFFF gehen im Browser nicht zwischen Dart und Python hin und her (`_zeit`);
+Vordergrunddienst, Kopplung und MTU gibt es dort nicht.
+
 **Messen im Hintergrund:** `await ble.hintergrund_starten("HRV-Messung läuft", "Verbunden mit …")`
 startet einen Android-Vordergrunddienst (`android/…/MessDienst.java`, Typ `connectedDevice`) mit
 dauerhafter Benachrichtigung und Wake-Lock; `hintergrund_beenden()` stoppt ihn, erneutes

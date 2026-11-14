@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import sys
 from enum import StrEnum
 from pathlib import Path
 
@@ -95,8 +96,39 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Web-Fassung
+# ---------------------------------------------------------------------------
+# Dieselbe App als statische Seite: Flutter zeichnet, Python läuft über Pyodide im
+# Browser (`scripts/web_bauen.py`). Sie ist als Demo und für das schnelle Üben eines
+# Hausaufgabenprogramms gedacht (Ben, 13.11.2026) — ohne Konten, die Daten bleiben im
+# Browser. Was dort nicht geht oder nicht sein soll, schaltet diese Liste ab.
+
+#: Funktionen, die es im Browser nicht gibt — unabhängig von der Edition:
+#: - ``update_pruefung``: fragte GitHub, einen fremden Server; eine Seite braucht kein Update.
+#: - ``paket_quellen``: der Netzzugriff der App (`urllib`) geht im Browser-Python nicht.
+#: - ``hrv_bewertung``: Die Web-Fassung steht unter dem Namen der Praxis und dient dem
+#:   Hausaufgabenprogramm — dort gilt die Grenze des Patientenmodus: Zahlen und Kurven,
+#:   keine Deutung (`docs/recht/00_zweckbestimmung.md`, Entscheidung 7.11.2026).
+#: - ``geraete_sicherung``: Androids Geräte-Backup gibt es dort nicht.
+NICHT_IM_BROWSER: frozenset[str] = frozenset(
+    {"update_pruefung", "paket_quellen", "hrv_bewertung", "geraete_sicherung"}
+)
+
+
+def im_browser() -> bool:
+    """Läuft Python im Browser (Pyodide)? Für Tests und die Vorschau am Rechner lässt sich
+    das Web-Profil mit ``TRAININGSAPP_WEB=1`` einschalten.
+
+    >>> im_browser()
+    False
+    """
+    return sys.platform == "emscripten" or os.environ.get("TRAININGSAPP_WEB") == "1"
+
+
 def ist_aktiv(funktion: str) -> bool:
-    """Ob eine Funktion in der laufenden Edition verfügbar ist.
+    """Ob eine Funktion in der laufenden Edition verfügbar ist — im Browser ohne das,
+    was `NICHT_IM_BROWSER` nennt.
 
     >>> import os
     >>> os.environ["TRAININGSAPP_EDITION"] = "solo"
@@ -108,7 +140,13 @@ def ist_aktiv(funktion: str) -> bool:
     >>> ist_aktiv("sync")
     True
     >>> del os.environ["TRAININGSAPP_EDITION"]
+    >>> os.environ["TRAININGSAPP_WEB"] = "1"
+    >>> ist_aktiv("update_pruefung"), ist_aktiv("plaene")
+    (False, True)
+    >>> del os.environ["TRAININGSAPP_WEB"]
     """
+    if funktion in NICHT_IM_BROWSER and im_browser():
+        return False
     return edition() in _FUNKTIONEN.get(funktion, set())
 
 

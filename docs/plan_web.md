@@ -28,7 +28,7 @@ uv run python scripts/web_bauen.py --basis /app/<ordner>/    # für einen Server
 ```
 
 Ergebnis `dist/web/` mit `stand.json` (Version, Commit, `sauber`, `gepusht`, Basisadresse,
-`ohne_cdn`). Was das Skript über `flet build web` hinaus tut, steht in seinem Kopf; kurz:
+`ohne_cdn`, `archiv_geprueft`). Was das Skript über `flet build web` hinaus tut, steht in seinem Kopf; kurz:
 
 | Schritt | Ohne ihn |
 |---|---|
@@ -36,6 +36,7 @@ Ergebnis `dist/web/` mit `stand.json` (Version, Commit, `sauber`, `gepusht`, Bas
 | Basisadresse (`--base-url`) | die Seite findet CanvasKit und Pyodide nicht |
 | Inline-Skripte der `index.html` nach `start-<n>.js` | eine strenge Content-Security-Policy blockiert sie, die Seite bleibt weiß |
 | Ersatzschriften einlegen (`SCHRIFTEN`, mit Prüfsumme, beim Bauen geladen) | Flutter fragt die fehlende Schrift in Dauerschleife an (gemessen: über 1400 Anfragen je Minute und Tab); „→“ erscheint als Kästchen |
+| App-Archiv gegen das Repository prüfen (`archiv_befunde`; dazu `[tool.flet.app] exclude` in `pyproject.toml`) | `flet build` packt ganz `src/` ein — auch den Datenordner der Desktop-Vorschau (`src/trainingsapp/ui/.flet/`: Datenbank, Messungen, GPS-Strecken, Anhänge dieses Rechners). So am 14.11.2026 hochgeladen und wieder gesperrt |
 
 Braucht die App ein Zeichen aus einer weiteren Schrift, nennt die Konsole des Browsers die
 Datei (`assets/fonts/…`) — in `SCHRIFTEN` eintragen.

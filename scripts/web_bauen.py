@@ -28,6 +28,12 @@ Was dieses Skript über ``flet build web`` hinaus tut — jeder Punkt hat einmal
    Prüfsumme und legt sie an den Ort, an dem Flutter sie sucht. Braucht die App ein Zeichen aus
    einer weiteren Schrift: Die Konsole des Browsers nennt die Datei — hier eintragen.
 
+5. **Das App-Archiv prüfen.** `flet build` packt den ganzen Ordner ``src/`` ein — auch den
+   Datenordner der Desktop-Vorschau (``src/trainingsapp/ui/.flet/``: Datenbank, Messungen,
+   GPS-Strecken). ``pyproject.toml`` schließt ihn aus (``[tool.flet.app] exclude``), und
+   dieses Skript bricht ab, wenn im Archiv etwas liegt, das nicht im Repository steht
+   (`archiv_befunde`; so am 14.11.2026 hochgeladen und wieder gesperrt).
+
 **Zahlen über 0xFFFFFFFF** gehen im Browser nicht zwischen Dart und Python hin und her (die
 Web-Fassung ist dart2js; ``erweiterungen/flet_ble``, ``_zeit``). Wer einer Erweiterung ein Feld
 gibt, das so groß werden kann (Zeitstempel!), verliert dort still jede Nachricht.
@@ -47,6 +53,7 @@ import subprocess
 import sys
 import tomllib
 import urllib.request
+import zipfile
 from pathlib import Path
 
 PROJEKT = Path(__file__).resolve().parent.parent
@@ -66,6 +73,9 @@ SCHRIFTEN: tuple[tuple[str, str, str], ...] = (
         "08202e258ea583254c036cff46a7077bb5af4f82c41a6c0a6775f6e44d99f1aa",
     ),
 )
+
+#: Das App-Archiv im Web-Ordner: der Inhalt von ``src/`` und die Python-Pakete
+APP_ARCHIV = Path("assets") / "app" / "app.zip"
 
 _SKRIPT = re.compile(r"<script(?P<attr>[^>]*)>(?P<inhalt>.*?)</script>", re.S)
 _FREMD = re.compile(r'(?:src|href)="https?://|Url: "https?://')
@@ -151,6 +161,63 @@ def ohne_cdn(ordner: Path) -> bool:
     return "noCdn: true" in text and _FREMD.search(text) is None
 
 
+#: Was im App-Archiv außerhalb der Pakete liegen darf, ohne versioniert zu sein
+_ARCHIV_ERLAUBT = ("trainingsapp/_build.py", "main.py")
+_ARCHIV_ERLAUBT_ORDNER = ("trainingsapp.egg-info/",)
+
+
+def versionierte_dateien() -> set[str] | None:
+    """Die versionierten Dateien unter ``src/`` (relativ dazu) — ``None`` ohne git."""
+    ausgabe = _git("ls-files", "-z", "src")
+    if ausgabe is None:
+        return None
+    return {name.removeprefix("src/") for name in ausgabe.split("\0") if name}
+
+
+def archiv_befunde(archiv: Path, versioniert: set[str] | None) -> list[str]:
+    """Liegt im App-Archiv nur, was im Repository steht?
+
+    `flet build` packt den ganzen Ordner ``src/`` ein — auch, was dort nur auf diesem Rechner
+    liegt. Am 14.11.2026 war das der Datenordner der Desktop-Vorschau
+    (``src/trainingsapp/ui/.flet/``, von `flet run` angelegt): Datenbank, Messdateien,
+    GPS-Strecken und eine Audioaufnahme standen im Archiv einer hochgeladenen Seite. Darum:
+    Außerhalb von ``__pypackages__/`` muss jede Datei versioniert sein (``.pyc`` zählt als
+    ihr ``.py``), und kein Ordner oder Dateiname darf mit einem Punkt beginnen.
+
+    Ohne git (``versioniert`` ist ``None``) lässt sich das nicht prüfen — das ist selbst
+    ein Befund.
+    """
+    if not archiv.is_file():
+        return [f"{archiv} fehlt"]
+    with zipfile.ZipFile(archiv) as z:
+        namen = [n for n in z.namelist() if not n.endswith("/")]
+    eigene = [n for n in namen if not n.startswith("__pypackages__/")]
+    fremd = []
+    for name in eigene:
+        if any(teil.startswith(".") for teil in name.split("/")):
+            fremd.append(name)
+            continue
+        if versioniert is None:
+            continue
+        quelle = name[:-1] if name.endswith(".pyc") else name
+        if quelle in versioniert or quelle in _ARCHIV_ERLAUBT:
+            continue
+        if not quelle.startswith(_ARCHIV_ERLAUBT_ORDNER):
+            fremd.append(name)
+    liste = []
+    if fremd:
+        zeigen = ", ".join(fremd[:5]) + (
+            f" … und {len(fremd) - 5} weitere" if len(fremd) > 5 else ""
+        )
+        liste.append(
+            f"Im App-Archiv liegen {len(fremd)} Datei(en), die nicht im Repository stehen "
+            f"(Daten dieses Rechners?): {zeigen}"
+        )
+    if versioniert is None:
+        liste.append("Das App-Archiv ließ sich nicht gegen das Repository prüfen (kein git)")
+    return liste
+
+
 def befunde(ordner: Path) -> list[str]:
     """Was an einem fertigen Web-Ordner nicht stimmt (leer = in Ordnung)."""
     index = ordner / "index.html"
@@ -169,6 +236,7 @@ def befunde(ordner: Path) -> list[str]:
     for pfad, _quelle, _sha in SCHRIFTEN:
         if not (ordner / "assets" / "fonts" / pfad).is_file():
             liste.append(f"Ersatzschrift fehlt: assets/fonts/{pfad}")
+    liste += archiv_befunde(ordner / APP_ARCHIV, versionierte_dateien())
     return liste
 
 
@@ -207,6 +275,9 @@ def stand(basis: str, ordner: Path | None = None) -> dict[str, object]:
         "gepusht": bool(_git("branch", "-r", "--contains", "HEAD")),
         "basis": basis,
         "ohne_cdn": ohne_cdn(ordner) if ordner is not None else False,
+        # Nur was im Repository steht — das Upload-Skript der Praxis verlangt True.
+        "archiv_geprueft": ordner is not None
+        and archiv_befunde(ordner / APP_ARCHIV, versionierte_dateien()) == [],
         "gebaut": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
         "schwestern": schwestern,
     }

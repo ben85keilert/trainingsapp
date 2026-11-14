@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,16 @@ INDEX = """<!DOCTYPE html>
 def _ordner(tmp_path: Path, html: str = INDEX) -> Path:
     (tmp_path / "index.html").write_text(html, encoding="utf-8")
     return tmp_path
+
+
+def _archiv(ordner: Path, namen: list[str]) -> Path:
+    """Ein App-Archiv mit diesen (leeren) Dateien, wie `flet build web` es ablegt."""
+    datei = ordner / "assets" / "app" / "app.zip"
+    datei.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(datei, "w") as z:
+        for name in namen:
+            z.writestr(name, b"")
+    return datei
 
 
 def test_inline_skripte_werden_dateien_und_die_reihenfolge_bleibt(web_bauen, tmp_path) -> None:
@@ -93,6 +104,10 @@ def test_fertiger_ordner_ohne_befund(web_bauen, tmp_path, monkeypatch) -> None:
         (ablage / summe).write_bytes(inhalt)
         schriften.append((pfad, quelle, summe))
     monkeypatch.setattr(web_bauen, "SCHRIFTEN", tuple(schriften))
+    _archiv(ordner, ["main.pyc", "trainingsapp/config.pyc", "__pypackages__/flet/app.pyc"])
+    monkeypatch.setattr(
+        web_bauen, "versionierte_dateien", lambda: {"main.py", "trainingsapp/config.py"}
+    )
     web_bauen.skripte_auslagern(ordner)
     assert web_bauen.schriften_einlegen(ordner, ablage) == len(schriften)
     assert web_bauen.befunde(ordner) == []
@@ -112,3 +127,59 @@ def test_ohne_cdn_liest_auch_die_ausgelagerten_skripte(web_bauen, tmp_path) -> N
     assert web_bauen.stand("/app/x/", ordner)["ohne_cdn"] is True
     (ordner / "start-1.js").write_text("var flet = { noCdn: false };", encoding="utf-8")
     assert not web_bauen.ohne_cdn(ordner)
+
+
+VERSIONIERT = {"main.py", "trainingsapp/config.py", "trainingsapp/data/seed/standard.toml"}
+
+
+def test_archiv_nur_versioniertes_ist_in_ordnung(web_bauen, tmp_path) -> None:
+    archiv = _archiv(
+        tmp_path,
+        [
+            "main.pyc",
+            "trainingsapp/config.pyc",  # .pyc zählt als sein .py
+            "trainingsapp/data/seed/standard.toml",
+            "trainingsapp/_build.pyc",  # schreibt das Bauskript, bewusst nicht versioniert
+            "trainingsapp.egg-info/PKG-INFO",
+            "__pypackages__/numpy/.libs/irgendwas.so",  # Pakete prüft diese Regel nicht
+        ],
+    )
+    assert web_bauen.archiv_befunde(archiv, VERSIONIERT) == []
+
+
+def test_archiv_meldet_den_datenordner_der_vorschau(web_bauen, tmp_path) -> None:
+    """14.11.2026: `src/trainingsapp/ui/.flet/` stand im Archiv einer hochgeladenen Seite."""
+    archiv = _archiv(
+        tmp_path,
+        [
+            "trainingsapp/config.pyc",
+            "trainingsapp/ui/.flet/storage/data/trainingsapp.db",
+            "trainingsapp/ui/.flet/storage/data/Strecken/strecke_2026-10-17_140241.jsonl",
+        ],
+    )
+    (befund,) = web_bauen.archiv_befunde(archiv, VERSIONIERT)
+    assert "2 Datei(en)" in befund and "trainingsapp.db" in befund
+
+
+def test_archiv_meldet_unversioniertes_und_verstecktes(web_bauen, tmp_path) -> None:
+    archiv = _archiv(tmp_path, ["trainingsapp/notiz_von_heute.txt", "trainingsapp/.env"])
+    (befund,) = web_bauen.archiv_befunde(archiv, VERSIONIERT)
+    assert "2 Datei(en)" in befund
+    # Verstecktes fällt auch auf, wenn es versioniert wäre
+    assert web_bauen.archiv_befunde(archiv, VERSIONIERT | {"trainingsapp/.env"})
+
+
+def test_archiv_ohne_git_ist_ein_befund(web_bauen, tmp_path) -> None:
+    archiv = _archiv(tmp_path, ["trainingsapp/config.pyc"])
+    assert any("kein git" in b for b in web_bauen.archiv_befunde(archiv, None))
+    assert any("fehlt" in b for b in web_bauen.archiv_befunde(tmp_path / "nichts.zip", VERSIONIERT))
+
+
+def test_stand_haelt_die_archivpruefung_fest(web_bauen, tmp_path, monkeypatch) -> None:
+    ordner = _ordner(tmp_path)
+    monkeypatch.setattr(web_bauen, "versionierte_dateien", lambda: VERSIONIERT)
+    _archiv(ordner, ["trainingsapp/config.pyc"])
+    assert web_bauen.stand("/app/x/", ordner)["archiv_geprueft"] is True
+    _archiv(ordner, ["trainingsapp/config.pyc", "trainingsapp/ui/.flet/storage/data/x.db"])
+    assert web_bauen.stand("/app/x/", ordner)["archiv_geprueft"] is False
+    assert web_bauen.stand("/app/x/")["archiv_geprueft"] is False  # ohne Ordner ungeprüft

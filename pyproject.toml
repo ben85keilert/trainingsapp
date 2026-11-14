@@ -148,6 +148,13 @@ copyright = "Copyright (C) 2026 Benjamin Ebert"
 # vom Build nicht als Abhängigkeit installiert.
 [tool.flet.app]
 path = "src"
+# Nie mit einpacken: den Datenordner der Desktop-Vorschau. `flet run src/trainingsapp/ui/app.py`
+# legt ihn neben das Skript (Datenbank, Messungen, GPS-Strecken, Anhänge dieses Rechners) —
+# er ist nicht versioniert, fehlt also in der CI, läge aber in jedem lokal gebauten Paket.
+# Von selbst lässt `flet build` versteckte Ordner nur auf der obersten Ebene von `src/` weg.
+# Am 14.11.2026 stand er im App-Archiv einer hochgeladenen Web-Fassung; `scripts/web_bauen.py`
+# prüft das Archiv seitdem gegen das Repository (`archiv_befunde`).
+exclude = ["trainingsapp/ui/.flet", "trainingsapp.egg-info"]
 
 [tool.flet.dev_packages]
 # `flet build` nimmt Python- und Flutter-Teil der Erweiterung von hier (statt aus PyPI).

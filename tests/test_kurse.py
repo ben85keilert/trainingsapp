@@ -194,6 +194,36 @@ def test_starten_legt_plaene_an_und_abschliessen_deaktiviert_sie(con, profil) ->
     assert [p.id for p in wieder] == [plan.id] and wieder[0].aktiv
 
 
+def test_kurs_entfernen_deaktiviert_kapitelplaene_aller_profile(con, profil) -> None:
+    """Ben, 14.11.2026: Ein eigener Kurs lässt sich löschen — seine Kapitelpläne werden
+    deaktiviert, bei allen Profilen, und bleiben in der Planliste zum einzelnen Löschen."""
+    repo, plaene = KursRepo(con), PlanRepo(con)
+    zweite = Subject(name="Zweite")
+    SubjectRepo(con).speichern(zweite)
+    k = kurs_mit_plan(seed_id("liegestuetzen"))
+    repo.speichern(k)
+    lesen, ueben, _ende = k.kapitel
+    for person in (profil, zweite):
+        repo.starten(k, person.id)
+        repo.kapitel_abschliessen(k, lesen, person.id)
+    (meiner,) = repo.kapitel_plaene(ueben.id, profil.id)
+    (ihrer,) = repo.kapitel_plaene(ueben.id, zweite.id)
+    assert meiner.aktiv and ihrer.aktiv
+    # Ein Plan im Papierkorb zählt nicht mit
+    plaene.loeschen(ihrer.id)
+
+    assert repo.entfernen(k) == 1
+    assert repo.laden(k.id) is None and k.id not in [x.id for x in repo.alle()]
+    assert repo.laden(k.id, mit_geloeschten=True) is not None  # weich gelöscht
+    danach = plaene.laden(meiner.id)
+    assert danach is not None and not danach.aktiv
+    assert meiner.id in [p.id for p in plaene.alle(profil.id)]  # bleibt in der Planliste
+    assert set(repo.staende(profil.id, k.id)) == {lesen.id, ueben.id}  # Fortschritt bleibt
+    # … und lässt sich dort einzeln löschen
+    plaene.loeschen(meiner.id)
+    assert meiner.id not in [p.id for p in plaene.alle(profil.id)]
+
+
 def test_stand_summe_zaehlt_ab_kapitelstart_nur_die_eigene_uebung(con, profil) -> None:
     """Eine Kopie ist eine eigene Übung — ihre Einträge zählen nicht für die Bedingung
     (seit 26.10.2026 ohne „Im Verlauf zusammen mit“)."""

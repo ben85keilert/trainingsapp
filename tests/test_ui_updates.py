@@ -76,6 +76,26 @@ def test_seite_baut_und_markiert_gesehen(page, state) -> None:
     assert any("Keine Quelle" in t for t in texte(ansicht))
 
 
+def test_jede_paketzeile_nennt_woher_updates_kommen(page, state) -> None:
+    """Ben, 14.11.2026: „Eigentlich sollte doch angegeben werden, von welcher Adresse aus das
+    Update erfolgt“ — je Paket eine Zeile, auch für das mitgelieferte „Standard“."""
+    from trainingsapp.core.pakete import GRUNDAUSSTATTUNG
+    from trainingsapp.core.paketquelle import QUELLE_VORGABE
+
+    def zeile() -> str:
+        ansicht = updates.updates_view(page, state, ft.UrlLauncher())
+        return next(
+            c.value
+            for v in ansicht.controls
+            for c in alle(v)
+            if getattr(c, "data", None) == ("updates_von", GRUNDAUSSTATTUNG)
+        )
+
+    assert zeile() == f"Updates von: {QUELLE_VORGABE}"  # ohne Einstellung gilt die Vorgabe
+    state.paketquellen_setzen([])
+    assert zeile() == f"keine Updates — die Quelle {QUELLE_VORGABE} ist nicht eingetragen"
+
+
 def test_pruefung_auto_und_manuell(page, state, monkeypatch) -> None:
     """Modus auto spielt gleich ein; manuell merkt vor, die Seite bietet den Pfeil."""
     inhalt_v1 = paket_lesen(qigong(1))

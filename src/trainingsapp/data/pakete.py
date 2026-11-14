@@ -765,13 +765,7 @@ class PaketRepo:
             for kurs in kurse.des_pakets(paket_id):
                 # Pläne aus Kapiteln des Kurses enden mit ihm — sonst stünde ein
                 # leerer Plan (Übungen im Papierkorb) weiter als Tagesplan (K22).
-                for kapitel in kurs.kapitel:
-                    self.con.execute(
-                        "UPDATE plan SET active = 0, updated_at = ?, revision = revision + 1 "
-                        "WHERE course_chapter_id = ? AND active = 1",
-                        (jetzt().isoformat(), kapitel.id),
-                    )
-                kurse.loeschen(kurs.id)
+                kurse.entfernen(kurs)
             self.con.execute(
                 "UPDATE package SET removed_at = ? WHERE id = ?", (jetzt().isoformat(), paket_id)
             )

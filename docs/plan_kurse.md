@@ -141,7 +141,10 @@ statt Text und Medienliste eine Folge von **Blöcken** tragen (`core/kursbloecke
   sofort) und `/kurse/<id>/<kapitel>/bearbeiten` (Titel, Blöcke, Pläne aus eigenen Plänen,
   Bedingung — Formular, Zurück speichert). Nur **eigene** Kurse; ein Paketkurs lässt sich als
   eigener Kurs kopieren (neue IDs, Fortschritt bleibt beim Original). Weitergabe über eigene
-  Pakete.
+  Pakete. **Kurs löschen** (Ben, 14.11.2026) unten im Kurseditor, nach Rückfrage: Der Kurs
+  verschwindet aus der Liste (weich, bei allen Profilen), seine Kapitelpläne werden deaktiviert
+  und bleiben in der Planliste — gelöscht werden sie dort einzeln (`KursRepo.entfernen`);
+  Fortschritt und Einträge bleiben. Ein Paketkurs geht nur mit seinem Paket.
 - Nicht gebaut: tippbare Grafiken und Animationen als eigener Block, Bilder im Block (heute
   über Markdown bzw. `medium`), Schritt-für-Schritt-Ansicht mit Fortschrittsbalken.
 

@@ -231,6 +231,48 @@ def test_eigener_kurs_kapitel_anlegen_umordnen_loeschen(page, state) -> None:
     assert [k.titel for k in state.kurse.laden(kurs.id).kapitel] == ["Kapitel 1"]
 
 
+def test_eigenen_kurs_loeschen_fragt_und_deaktiviert_plaene(page, state) -> None:
+    """„Kurs löschen“ im Kurseditor (Ben, 14.11.2026): Rückfrage, dann ist der Kurs aus der
+    Liste, sein Kapitelplan deaktiviert und noch da; danach zurück zur Startseite."""
+    import asyncio
+
+    from flet.utils.object_model import get_param_count
+
+    from trainingsapp.ui.views.kurs_bearbeiten import kurs_anlegen, kurs_bearbeiten
+
+    def klick(control) -> None:  # wie Flet: mit Ereignis, sobald der Handler einen Parameter hat
+        handler = control.on_click
+        handler() if get_param_count(handler) == 0 else handler(SimpleNamespace(control=control))
+
+    planke = Exercise(name="Planke", result_spec=ResultSpec(fields=[vorrat_feld("hold")]))
+    state.uebungen.speichern(planke)
+    kurs = kurs_anlegen(state)
+    kurs.name = "Mein Kurs"
+    kurs.kapitel[0].plaene = [PlanVorlage("Kurs: Planke", [0], [VorlageItem(planke.id)])]
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    state.kurse.starten(kurs, state.profil.id)
+    (plan,) = state.kurse.kapitel_plaene(kurs.kapitel[0].id, state.profil.id)
+    assert plan.aktiv
+
+    ansicht = kurs_bearbeiten(page, state, kurs)
+    klick(_daten(ansicht, "kurs_loeschen"))
+    frage = page.dialoge[-1]
+    assert frage.title.value == "„Mein Kurs“ löschen?"
+    assert state.kurse.laden(kurs.id) is not None  # erst die Rückfrage
+    klick(_daten(frage, "kurs_loeschen_ja"))
+    assert state.kurse.laden(kurs.id) is None
+    danach = state.plaene.laden(plan.id)
+    assert danach is not None and not danach.aktiv
+    assert plan.id in [p.id for p in state.plaene.alle(state.profil.id)]
+    page.route = f"/kurse/{kurs.id}/bearbeiten"
+    asyncio.run(frage.on_dismiss(None))  # Flutter meldet: Dialog zu — erst dann zurück
+    assert page.route == "/"
+    meldung = page.dialoge[-1]
+    assert isinstance(meldung, ft.SnackBar)
+    assert meldung.content.value == "„Mein Kurs“ gelöscht — 1 Plan deaktiviert"
+
+
 def test_kapitel_bearbeiten_bloecke_plan_und_bedingung(page, state) -> None:
     from trainingsapp.core.kurse import TAGE
     from trainingsapp.core.models import Plan

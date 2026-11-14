@@ -1251,10 +1251,42 @@ den je Aufbau neuen `ScrollKey` im Tagebuch. Sichtbare Texte ohne Bewertung aus 
 Heute, Tageswechsel und Plan bauen in 30–60 ms. Die veralteten Ortsangaben nach dem Umbau
 der Einstellungen (Hilfetexte, Docstrings, Regel-Dateien) sind nachgezogen.
 
+## 12. Durchsicht vor dem Release 0.3.95 (14.11.2026, Fable)
+
+Schmale Durchsicht (Skill `release-durchsicht`), Anlass: Ben meldet vom Telefon (v0.3.94)
+„'Event' object is not iterable“ beim Entfernen eines Pakets. Bereich `v0.3.94..be84f57`: drei
+Commits zur Web-Fassung, die Kennzeichnung von DFA α1, die Korrektur am Paket-Entfernen, das
+Paketwerkzeug (`--geprueft`). `hrv-core.ref` und `hrv-watch.ref` unverändert.
+
+Geprüft: die Diffs von `config.py`, `ui/app.py`, `ui/geraete/flet_ble_transport.py`,
+`ble_service.dart`, `pyproject.toml`, `docs/recht/00_zweckbestimmung.md` und der Stellen, die
+DFA α1 zeigen; ganz gelesen `core/experimentell.py`, `core/privat.py`, der Loader in
+`data/seed.py`. Im Android-Weg ändert sich am Bluetooth nichts (`kIsWeb` falsch: `_zeit` gibt
+die Zahl unverändert weiter, `_abonnieren` ruft `setNotifyValue` wie bisher; `im_browser`
+falsch). Suche nach `eval`, `exec`, `pickle`, `shell=True` im Bereich: nur `subprocess.run` mit
+Liste in `scripts/web_bauen.py` (kein Teil der APK). Workflows unverändert. Homepage seit dem
+Tag: Caddy-Block für die Web-Fassung außerhalb von `/pakete/` (37072a7, 3cff635) — betrifft
+die APK nicht. CI zu `6e26a54` grün; voller Lauf lokal auf dem Stand von `be84f57`: 2090
+bestanden, Doctests 897; Dependabot: 0 offene Warnungen.
+
+| # | Stelle | Befund | Schwere |
+|---|---|---|---|
+| K46 | `ui/views/pakete.py:754` (Stand v0.3.94) | „Paket entfernen“ ohne Planbezug: Die Rückfrage bekam `entfernen` selbst als Handler; Flet gibt einem Handler mit Parameter das Ereignis mit, es landete in `kopieren` → `TypeError`, nichts wird entfernt, am Telefon die Fehlerseite. Seit 15.10.2026 (4fd7a54) in jeder APK; mit Planbezug ging es. T2 (offen) hätte es gefunden. | hoch — **behoben** `6e26a54`, Test klickt wie Flet |
+| N168 | `tests/test_ui_*.py` | Die Tests der Oberfläche rufen `on_click()` ohne Argument; Flet übergibt das Ereignis, sobald der Handler einen Parameter hat (auch mit Vorgabe). So blieb K46 einen Monat grün. Einmal per Skript über `ui/` gesucht (Funktionen, deren Parameter alle eine Vorgabe haben und die als Name weitergereicht werden): keine weitere Stelle, die als Handler an Flet geht. Die Hilfe `klick()` steht nur in `tests/test_ui_pakete.py`. | niedrig — offen |
+
+Ungeprüft: der Android-Build mit dem geänderten `ble_service.dart` (direkter Import von
+`flutter_blue_plus_platform_interface`, im `pubspec.yaml` der Erweiterung nicht genannt — der
+Web-Build löste ihn auf, eine APK ist aus diesem Stand noch nicht gebaut) und mit
+`exclude` in `[tool.flet.app]`; `scripts/web_bauen.py` nur auf Shell-Aufrufe angesehen; die
+übrigen berührten Dateien als Diff, nicht ganz gelesen. Gerätetests zum Bereich: T2, T8
+(Paket entfernen), T113 (privates Paket per Link und Code), T137, T138 (erste APK nach
+v0.3.91), T139 (Web-Fassung, kein Teil der APK).
+
 ## Entschieden
 
 | Datum | Frage | Entscheidung |
 |---|---|---|
+| 14.11.2026 | Eigene Kurse löschen; Herkunft der Updates | Ben: „Kurse löschen ist nicht möglich. Woran liegt das?“ — es gab keinen Knopf (`KursRepo.loeschen` rief nur das Entfernen eines Pakets). Ben: „Pläne deaktivieren. Kapitelpläne müssen separat gelöscht werden.“ → „Kurs löschen“ unten im Kurseditor, nur für eigene Kurse: Rückfrage, der Kurs verschwindet aus der Liste (weich, bei allen Profilen), seine Kapitelpläne werden deaktiviert und bleiben in der Planliste (`KursRepo.entfernen`, auch vom Entfernen eines Pakets genutzt); Fortschritt und Einträge bleiben. Ben: „Eigentlich sollte doch angegeben werden, von welcher Adresse aus das Update erfolgt, damit sich das nachverfolgen lässt“ → Seite Updates: je Paket eine Zeile „Updates von: …“ (`views/pakete.updates_von`); „Standard“ zeigt im Paketmanager „mitgeliefert · Updates von …“. Offen: Tutorial-Kurse als eigenes Paket, Kursverweise auf Übungen anderer Pakete nur per ID (kein `paket = "…"` wie bei Ergänzungen; fehlende Übungen fallen still aus dem Plan), Paket per Link in der Web-Fassung. |
 | 14.11.2026 | Web-Fassung der App | Ben, 13.11.: „Wie aufwendig wäre es, trainingsapp als Webanwendung für den Smartphonebrowser oder den Laptop … zum Laufen zu bringen“ — ohne Konten, als Demo und für das schnelle Üben eines Hausaufgabenprogramms; nach dem Probe-Build: „läuft im Laptopbrowser und auf dem Smartphone super flüssig“; Bluetooth: „Nur wenn die Messdatei auf dem Telefon abgelegt wird, macht es Sinn“ — sie bleibt im Browser. 14.11.: „Bluetooth gleich mit“. Gebaut: statische Seite (`flet build web --no-cdn`, Python über Pyodide), `scripts/web_bauen.py` (Basisadresse, Inline-Skripte ausgelagert, Ersatzschrift, `stand.json`), Web-Profil `config.NICHT_IM_BROWSER` (keine Update-Prüfung, keine Paketquellen, keine Deutung, kein Geräte-Backup; GPS aus), Web Bluetooth über `flet_ble` mit drei Umgehungen (Geräteauswahl statt Scan, Abonnieren am Kern vorbei, keine Zahlen über 0xFFFFFFFF zwischen Dart und Python). Am Verity Sense in Chromium geprüft: Puls und Pulsintervalle. Offen: Speichern im Browser, Pakete laden, `hrv_bewertung` in der Oberfläche; T139. Vertrag `docs/plan_web.md`; der Ort auf dem Server steht im privaten Repository der Homepage (ADR-0024). |
 | 13.11.2026 | Zielbereich-Ton im Patientenmodus | Ben: „Zieltöne werden vom Patient manuell eingestellt. Dazu gibt es ein Briefing, user müssen das aber alleine machen“, „Zieh die Tabelle nach. Ein selbst gesetzter Ton sollte kein Problem sein?“ — Anlass: die Frage, ob eine Web-Fassung für das Hausaufgabenprogramm den Ton tragen darf. Der Ton bleibt im Patientenmodus erlaubt (löst „im Patientenmodus aus“ vom 7.11. ab); Bedingungen wie Entscheidung C, dazu: die Grenzen kommen nie von der Praxis (Paketformat ohne Pulsgrenzen, geprüft). Offen: was das Briefing sagen darf (Bedienung ja, Werte für die einzelne Person nein — Einschätzung Claude). `docs/recht/00_zweckbestimmung.md`, „Zielbereich-Ton im Patientenmodus“, Grenz-Tabelle; `docs/plan_workout.md` W4. Nur Doku, kein Code — der Patientenmodus ist nicht gebaut. |
 | 13.11.2026 | Zeitstempel in Dateinamen: Messung und Strecke einheitlich | Ben: „Gleiche die Messungs- und Streckendatei vom Speichern aneinander an. Es muss einheitlich sein, nimm Ortszeit und dokumentiere das.“ — Anlass: Eine Messdatei (Name in UTC) wurde für die Messung zu einem Lauf gehalten, dessen Streckendatei (Name in Ortszeit) fast dieselbe Uhrzeit trug; die richtige Messung hieß eine Stunde früher. → `sensor_<ts>.json`, `.backup_<ts>.json` samt Beiwerk und `strecke_<ts>.jsonl` tragen den **Start in Ortszeit** aus einer Funktion (`hrv_core.recording.dateistempel`); `start_utc` in der Datei bleibt die genaue Zeit; Altdateien behalten ihren UTC-Namen. Hebt „Dateinamen bleiben UTC-Start“ (16.10.2026) auf. Ben, gleicher Tag: „vereinheitliche trainingsapp und praxis_gui“ → praxis_gui nimmt denselben Stempel (hrv-core F24, erledigt; hrv-core 0.15.0). Vertrag: `docs/kompatibilitaet.md` §2. |

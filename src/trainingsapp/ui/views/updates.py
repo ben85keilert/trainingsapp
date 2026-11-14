@@ -60,6 +60,7 @@ from trainingsapp.ui.views.pakete import (
     import_rueckfrage,
     uebungen_zahl,
     update_modus_wahl,
+    updates_von,
 )
 
 ROUTE = "/einstellungen/updates"
@@ -431,6 +432,8 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
         data="paket_updates_alle",
     )
 
+    quellen = state.paketquellen()
+
     def paket_zeile(p: Paket) -> ft.Control:
         teile = ["deaktiviert"] if p.deaktiviert else []
         stufe = None
@@ -479,6 +482,15 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
                             size=11,
                             opacity=0.8 if p.verfuegbar is not None else 0.6,
                             color=ft.Colors.PRIMARY if p.verfuegbar is not None else None,
+                        ),
+                        # Von welcher Adresse das Update kommt — nachverfolgbar, zum Kopieren
+                        # (Ben, 14.11.2026)
+                        ft.Text(
+                            updates_von(p, quellen),
+                            size=11,
+                            opacity=0.6,
+                            selectable=True,
+                            data=("updates_von", p.id),
                         ),
                     ],
                 ),

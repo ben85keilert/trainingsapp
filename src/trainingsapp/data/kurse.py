@@ -155,6 +155,33 @@ class KursRepo:
             (jetzt().isoformat(), jetzt().isoformat(), kurs_id),
         )
 
+    def entfernen(self, kurs: Kurs) -> int:
+        """Kurs löschen und die Pläne seiner Kapitel deaktivieren — bei allen Profilen, denn
+        Kurse gelten für alle. Die Pläne bleiben bestehen: Sie stehen nicht mehr auf „Heute“
+        und lassen sich in der Planliste einzeln löschen (Ben, 14.11.2026: „Pläne
+        deaktivieren. Kapitelpläne müssen separat gelöscht werden“). Aktiv stünde ein Plan
+        ohne Kurs weiter als Tagesplan (K22). Fortschritt und Einträge bleiben.
+
+        Returns:
+            Wie viele Pläne (ohne die im Papierkorb) dabei deaktiviert wurden.
+        """
+        stempel = jetzt().isoformat()
+        n = 0
+        with transaktion(self.con):
+            for kapitel in kurs.kapitel:
+                n += self.con.execute(
+                    "SELECT COUNT(*) FROM plan WHERE course_chapter_id = ? AND active = 1 "
+                    "AND deleted_at IS NULL",
+                    (kapitel.id,),
+                ).fetchone()[0]
+                self.con.execute(
+                    "UPDATE plan SET active = 0, updated_at = ?, revision = revision + 1 "
+                    "WHERE course_chapter_id = ? AND active = 1",
+                    (stempel, kapitel.id),
+                )
+            self.loeschen(kurs.id)
+        return n
+
     def wiederherstellen(self, kurs_id: str) -> None:
         self.con.execute(
             "UPDATE course SET deleted_at = NULL, updated_at = ? WHERE id = ?",

@@ -4,7 +4,9 @@ Zwei Ansichten:
 
 - ``/kurse/<id>/bearbeiten`` — der Kurs: Name, Beschreibung, Freischaltung, die Kapitel
   (anlegen, umordnen, löschen). Jede Änderung wird sofort gespeichert — es ist eine Liste,
-  kein Formular.
+  kein Formular. Unten „Kurs löschen“ (Ben, 14.11.2026): Der Kurs verschwindet aus der Liste,
+  seine Kapitelpläne werden deaktiviert und bleiben zum einzelnen Löschen
+  (`KursRepo.entfernen`).
 - ``/kurse/<id>/<kapitel>/bearbeiten`` — ein Kapitel: Titel, **Blöcke** (Text, Medium, Frage,
   Test, Auswahl — `core/kursbloecke.py`), die Pläne (aus den eigenen Plänen übernommen) und
   die Bedingung. Ein Formular mit „Speichern“; Zurück speichert.
@@ -50,7 +52,7 @@ from trainingsapp.core.kurse import (
 from trainingsapp.core.models import Exercise, Media, new_id
 from trainingsapp.core.pakete import paketplan_aus
 from trainingsapp.core.result_spec import basis_key
-from trainingsapp.ui.components.dialoge import schliessen
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
@@ -230,6 +232,43 @@ def kurs_bearbeiten(page: Any, state: Any, kurs: Kurs) -> ft.View:
         sichern()
         neu()
 
+    def kurs_loeschen_fragen(_e: Any = None) -> None:
+        """Den ganzen Kurs löschen — nach Rückfrage; danach zurück zur Liste."""
+        nachher = Nachher()
+        dialog: ft.AlertDialog
+
+        def ausfuehren(_e: Any = None) -> None:
+            n = state.kurse.entfernen(kurs)
+            text = f"„{kurs.name}“ gelöscht"
+            if n:
+                text += " — 1 Plan deaktiviert" if n == 1 else f" — {n} Pläne deaktiviert"
+            # Erst wenn der Dialog zu ist: Die Ansicht dieses Kurses gibt es dann nicht mehr
+            nachher.danach(lambda: page.push_route("/"))
+            nachher.danach(lambda: page.show_dialog(ft.SnackBar(ft.Text(text))))
+            schliessen(dialog)
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            on_dismiss=nachher.bei_schliessen,
+            title=ft.Text(f"„{kurs.name}“ löschen?"),
+            content=ft.Text(
+                "Der Kurs verschwindet aus der Liste — bei allen Profilen. Die Pläne, die seine "
+                "Kapitel angelegt haben, werden deaktiviert: Sie stehen nicht mehr auf „Heute“, "
+                "bleiben aber in der Planliste und lassen sich dort einzeln löschen. Einträge "
+                "im Verlauf bleiben."
+            ),
+            actions=[
+                ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
+                ft.FilledButton(
+                    "Löschen",
+                    on_click=ausfuehren,
+                    style=ft.ButtonStyle(bgcolor=ft.Colors.ERROR, color=ft.Colors.ON_ERROR),
+                    data="kurs_loeschen_ja",
+                ),
+            ],
+        )
+        page.show_dialog(dialog)
+
     def zeichnen() -> None:
         letzte = len(kurs.kapitel) - 1
         spalte.controls = [
@@ -319,6 +358,17 @@ def kurs_bearbeiten(page: Any, state: Any, kurs: Kurs) -> ft.View:
                         hinweis(
                             "Änderungen hier gelten sofort. Weitergeben lässt sich der Kurs über "
                             "ein eigenes Paket (Einstellungen → Pakete)."
+                        ),
+                        ft.Row(
+                            controls=[
+                                ft.TextButton(
+                                    "Kurs löschen",
+                                    icon=ft.Icons.DELETE_OUTLINE,
+                                    on_click=kurs_loeschen_fragen,
+                                    style=ft.ButtonStyle(color=ft.Colors.ERROR),
+                                    data="kurs_loeschen",
+                                )
+                            ]
                         ),
                     ],
                 )

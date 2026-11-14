@@ -630,7 +630,12 @@ kann (`core/paketquelle.py`).
   Rückfrage, und die Adresse bleibt am Paket (`package.source_url`, `source_kind =
   'datei'`) — beim Start lädt die App die Datei und prüft die Version wie bei einem Index
   (`paketquelle.datei_eintrag`). Wo ein Paket herkommt, steht in Liste und Paketseite
-  („Quelle: …“, „Quelle (Paketdatei): …“, „aus Datei importiert“, „mitgeliefert“).
+  („Quelle: …“, „Quelle (Paketdatei): …“, „aus Datei importiert“, „mitgeliefert“ — bei
+  „Standard“ mit „· Updates von <Vorgabe>“, solange die Vorgabe unter Quellen steht). Auf der
+  Seite **Updates** nennt jede Paketzeile, von welcher Adresse das Update kommt (Ben,
+  14.11.2026, `views/pakete.updates_von`): „Updates von: …“, „Updates von (Paketdatei): …“
+  (privat: gekürzt), „keine Updates — aus Datei importiert“ oder „keine Updates — die Quelle …
+  ist nicht eingetragen“.
 - **Quellenbindung** (Sicherheitsdurchsicht S3, Ben, 20.10.2026): Ein Paket bekommt
   Updates nur aus der Quelle, die es zuletzt lieferte — `package.source_url` hält die
   Adresse ihres Index (seit Migration 026; die Bindung entsteht beim ersten Einspielen

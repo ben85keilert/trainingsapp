@@ -34,14 +34,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import sqlite3
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import flet as ft
 
-from trainingsapp.config import datenverzeichnis, importverzeichnis, medienverzeichnis
+from trainingsapp.config import datenverzeichnis, importverzeichnis, ist_aktiv, medienverzeichnis
 from trainingsapp.core.kurse import Kurs
 from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.core.paketdatei import (
@@ -63,7 +63,7 @@ from trainingsapp.core.pakete import (
     paketplaene_aus,
     paketplan_aus,
 )
-from trainingsapp.core.paketquelle import DATEI, fremde_identitaet
+from trainingsapp.core.paketquelle import DATEI, QUELLE_VORGABE, fremde_identitaet, gebundene_quelle
 from trainingsapp.core.paketstufe import GROSS, KEINE, STUFE_TEXT, stufen_text
 from trainingsapp.core.paketversion import MODUS_TEXT, UPDATE_MODI, version_text
 from trainingsapp.core.privat import code_text
@@ -340,9 +340,15 @@ def plan_geaendert(plan: Plan) -> bool:
     return plan_stand(paketplan_aus(plan)) != plan.package_standard
 
 
-def quelle_text(paket: Paket) -> str:
+def quelle_text(paket: Paket, quellen: Collection[str] | None = None) -> str:
     """Woher das Paket kommt — die Adresse, damit man weiß, wo ein Paket hinführt (Ben,
     28.10.2026); ohne Adresse „aus Datei“ bzw. „mitgeliefert“.
+
+    ``quellen``: die eingetragenen Paketquellen (`AppState.paketquellen`; ``None`` = ohne
+    Quellen, etwa Edition B oder Web-Fassung). „Standard“ bekommt Updates aus der Vorgabe,
+    auch solange es noch die mitgelieferte Fassung ist — dann steht die Adresse dabei (Ben,
+    14.11.2026: „von welcher Adresse aus das Update erfolgt, damit sich das nachverfolgen
+    lässt“).
 
     >>> quelle_text(Paket(id="p", name="Q", quelle="https://x/i.json"))
     'Quelle: https://x/i.json'
@@ -350,6 +356,11 @@ def quelle_text(paket: Paket) -> str:
     'Quelle (Paketdatei): https://x/q.json'
     >>> quelle_text(Paket(id="p", name="Q")), quelle_text(Paket(id=GRUNDAUSSTATTUNG, name="S"))
     ('aus Datei importiert', 'mitgeliefert')
+    >>> quelle_text(Paket(id=GRUNDAUSSTATTUNG, name="S"), [QUELLE_VORGABE]) == (
+    ...     f"mitgeliefert · Updates von {QUELLE_VORGABE}")
+    True
+    >>> quelle_text(Paket(id=GRUNDAUSSTATTUNG, name="S"), [])
+    'mitgeliefert'
     """
     if paket.privat:  # U7: der Link nur gekürzt — „Zugang anzeigen“ zeigt ihn ganz
         fuer = f" · für {paket.fuer}" if paket.fuer else ""
@@ -357,7 +368,48 @@ def quelle_text(paket: Paket) -> str:
     if paket.quelle:
         art = " (Paketdatei)" if paket.quelle_art == DATEI else ""
         return f"Quelle{art}: {paket.quelle}"
-    return "mitgeliefert" if paket.id == GRUNDAUSSTATTUNG else "aus Datei importiert"
+    if paket.id != GRUNDAUSSTATTUNG:
+        return "aus Datei importiert"
+    if quellen is not None and QUELLE_VORGABE in quellen:
+        return f"mitgeliefert · Updates von {QUELLE_VORGABE}"
+    return "mitgeliefert"
+
+
+def updates_von(paket: Paket, quellen: Collection[str]) -> str:
+    """Von welcher Adresse das Paket Updates bekommt — eine Zeile je Paket auf der Seite
+    „Updates“ (Ben, 14.11.2026). ``quellen``: die eingetragenen Paketquellen.
+
+    Ein Paket ist an die Quelle gebunden, aus der es zuletzt kam
+    (`paketquelle.gebundene_quelle`); eine Paketdatei hinter einem Link fragt die App direkt,
+    ein Index nur, solange er unter „Quellen“ steht. Der Link eines privaten Pakets steht
+    gekürzt da, wie im Paketmanager.
+
+    >>> updates_von(Paket(id="p", name="Q", quelle="https://x/i.json"), ["https://x/i.json"])
+    'Updates von: https://x/i.json'
+    >>> updates_von(Paket(id="p", name="Q", quelle="https://x/i.json"), [])
+    'keine Updates — die Quelle https://x/i.json ist nicht eingetragen'
+    >>> updates_von(Paket(id="p", name="Q", quelle="https://x/q.json", quelle_art="datei"), [])
+    'Updates von (Paketdatei): https://x/q.json'
+    >>> updates_von(Paket(id="p", name="Q"), ["https://x/i.json"])
+    'keine Updates — aus Datei importiert'
+    >>> updates_von(Paket(id=GRUNDAUSSTATTUNG, name="S"), [QUELLE_VORGABE]) == (
+    ...     f"Updates von: {QUELLE_VORGABE}")
+    True
+    >>> privat = Paket(id="p", name="Q", quelle_art="datei", zugangscode="K7QM9XA2",
+    ...                quelle="https://x.de/pakete/p/7Hq3vX9aBcDeFgHiJkLmNo/paket.json")
+    >>> updates_von(privat, [])
+    'Updates von (Paketdatei, privat): x.de/pakete/p/7Hq3…/paket.json'
+    """
+    quelle = gebundene_quelle(paket)
+    if quelle is None:
+        return "keine Updates — aus Datei importiert"
+    if paket.quelle_art == DATEI:
+        if paket.privat:
+            return f"Updates von (Paketdatei, privat): {link_kurz(quelle)}"
+        return f"Updates von (Paketdatei): {quelle}"
+    if quelle not in quellen:
+        return f"keine Updates — die Quelle {quelle} ist nicht eingetragen"
+    return f"Updates von: {quelle}"
 
 
 def link_kurz(url: str) -> str:
@@ -494,6 +546,9 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
 
     # -- Liste -------------------------------------------------------------------
 
+    # Eingetragene Quellen — für „Standard“ steht dabei, woher seine Updates kommen
+    quellen = state.paketquellen() if ist_aktiv("paket_quellen") else None
+
     def zeile(paket: Paket, n: int) -> ft.Control:
         staende = state.pakete.uebersicht(paket.id)
         geaendert = sum(1 for z in staende if z.geaendert)
@@ -515,7 +570,7 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
         ]
         if paket.beschreibung:
             texte.append(ft.Text(paket.beschreibung, size=12, opacity=0.75))
-        texte.append(ft.Text(quelle_text(paket), size=11, opacity=0.6, max_lines=1))
+        texte.append(ft.Text(quelle_text(paket, quellen), size=11, opacity=0.6, max_lines=1))
         return ft.Container(
             ink=True,
             border_radius=10,
@@ -1000,7 +1055,9 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
         kopf.append(ft.Text(paket.beschreibung))
     kopf.append(ft.Text("  ·  ".join(teile), size=12, opacity=0.7))
     # Woher das Paket kommt — zur Sicherheit (Ben, 28.10.2026), auswählbar zum Kopieren
-    quelle_zeile = [quelle_text(paket)]
+    quelle_zeile = [
+        quelle_text(paket, state.paketquellen() if ist_aktiv("paket_quellen") else None)
+    ]
     if paket.quelle and paket.geprueft is not None:
         quelle_zeile.append(f"zuletzt geprüft {_datum(paket.geprueft)}")
     kopf.append(ft.Text("  ·  ".join(quelle_zeile), size=12, opacity=0.7, selectable=True))

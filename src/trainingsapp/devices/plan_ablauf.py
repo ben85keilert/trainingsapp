@@ -42,6 +42,14 @@ sobald es reicht (`_weiter_wenn_frei`). Linear gibt es nur noch die Bedingung �
 Planfolge. Im Workout bekommt jeder Schritt ohne Timer eine **Stoppuhr** (`core.timer.stoppuhr`):
 so zeigt er den Fokus mit Kurven wie jeder andere — eingetragen wird wie bisher (die Zeit nur
 mit Zeitfeld, sonst „gemacht“); „Zeit ab“ heißt dort: „Fertig“ ist getippt.
+
+**Fertig heißt: die Uhr steht** (Ben, 14.11.2026): Ist die Übung fertig und es fehlt nur noch
+eine Entscheidung — „Fertig“ getippt, oder der Timer ist im harten Übergang ab und mehrere
+gleichwertige Wege stehen offen —, hält die Uhr des Schritts an (`steht`). Was bis dahin über
+der Zeit lag, bleibt für den Eintrag stehen (`ueber_s`), danach kommt nichts mehr dazu: Das
+Wählen des Wegs ist kein Training. Über die Zeit läuft die Uhr nur noch, solange die Person
+weitertrainiert — weich bis „Weiter“, hart, solange die Bedingung fehlt —, und „Fertig“ beendet
+auch das.
 """
 
 from __future__ import annotations
@@ -146,6 +154,11 @@ class PlanAblaufBaustein:
         #: die Uhr des Schritts ist ab, aber die Bedingung nicht erfüllt bzw. kein Weg frei —
         #: die Person bleibt bei der Übung (Ben, 8.11.2026)
         self.wartet = False
+        #: die Übung ist fertig, ihre Uhr steht — es fehlt nur noch eine Entscheidung (Weg
+        #: wählen, Bedingung nachtragen); über der Zeit kommt nichts mehr dazu (Ben, 14.11.2026)
+        self.steht = False
+        #: was bis zum Anhalten über der Zeit lag — bleibt für den Eintrag stehen
+        self._ueber_fest = 0.0
         #: mit diesem Grund endet der wartende Schritt, wenn es weitergeht
         self._grund_wartend = "fertig"
         #: das Ende des Workouts ist über eine Kante gewählt
@@ -229,7 +242,7 @@ class PlanAblaufBaustein:
         if self.timer is None or self.ohne_timer:
             return self.seit_s()
         lauf = self.timer.lauf
-        return lauf.vergangen_s() + lauf.ueber_s()
+        return lauf.vergangen_s() + (self._ueber_fest if self.steht else lauf.ueber_s())
 
     def stand(self) -> bd.Stand:
         """Was der Schritt bisher geleistet hat — für Bedingung und Kanten."""
@@ -289,6 +302,19 @@ class PlanAblaufBaustein:
         else:
             self.wartet = True
             self._grund_wartend = grund
+            self._uhr_anhalten()
+
+    def _uhr_anhalten(self) -> None:
+        """Die Übung ist fertig, nur die Entscheidung fehlt: Die Uhr des Schritts steht (Ben,
+        14.11.2026: „Wenn die Übung fertig ist, zählt sie weiter, bis man geklickt hat“). Was
+        bis hier über der Zeit lag, bleibt für den Eintrag; die gelaufene Zeit ändert sich nicht
+        (`TimerLauf.pause` hält sie am Ende fest)."""
+        if self.steht:
+            return
+        self._ueber_fest = self.ueber_s()
+        self.steht = True
+        if self.timer is not None:
+            self.timer.lauf.pause()
 
     def _weiter_wenn_frei(self) -> None:
         """Hart: wartet der Schritt und reicht es jetzt, geht es von selbst weiter; Kanten mit
@@ -481,7 +507,7 @@ class PlanAblaufBaustein:
         """Sekunden über dem Timer-Ende in der Überzeit (weicher Übergang) — sonst 0."""
         if self.phase != UEBERZEIT or self.timer is None:
             return 0.0
-        return self.timer.lauf.ueber_s()
+        return self._ueber_fest if self.steht else self.timer.lauf.ueber_s()
 
     async def vorbereiten(self) -> None:
         return None
@@ -519,10 +545,15 @@ class PlanAblaufBaustein:
                 elif self.uebergang is None:
                     self._beenden(t_ende, grund)
                 elif (
-                    not self._fertig_gewollt and self._weiter_trainierbar() and not self._weg_frei()
+                    not self._fertig_gewollt
+                    and self._weiter_trainierbar()
+                    and not self._weg_frei()
+                    and not self.wahl_noetig
                 ):
                     # Hart, aber noch nicht erfüllt: der Timer läuft über, die Person bleibt bei
-                    # der Übung — es geht von selbst weiter, sobald es reicht
+                    # der Übung — es geht von selbst weiter, sobald es reicht. Fehlt nur die Wahl
+                    # zwischen gleichwertigen Wegen, ist die Übung fertig: die Uhr steht
+                    # (`_ende_versuchen`, Ben 14.11.2026)
                     self.phase = UEBERZEIT
                     self.wartet = True
                     self._grund_wartend = grund
@@ -645,7 +676,8 @@ class PlanAblaufBaustein:
 
     def gemacht(self) -> None:
         """Die laufende Übung ist fertig — mit Timer: jetzt ans Ende (die gelaufene Zeit
-        zählt), ohne Timer: abgehakt."""
+        zählt), ohne Timer: abgehakt. In der Überzeit endet das Nachtrainieren: Geht es noch
+        nicht weiter (Wahl, Bedingung), steht die Uhr mit der Überzeit bis hier (`steht`)."""
         if self._t0 is None:
             return
         if self.phase == UEBUNG and self.timer is not None and self.timer.lauf.fertig:
@@ -797,6 +829,8 @@ class PlanAblaufBaustein:
         self._wdh_bei = []
         self._wdh_hand_bei = []
         self.wartet = False
+        self.steht = False
+        self._ueber_fest = 0.0
         self._grund_wartend = "fertig"
         s = self.schritt
         self.timer = None
@@ -854,6 +888,7 @@ class PlanAblaufBaustein:
                 # gleichwertige: bleiben, bis die Person wählt
                 self.wartet = True
                 self._grund_wartend = grund
+                self._uhr_anhalten()
                 return
             naechster = self.kante_ziel(st.kante) if st is not None else None
             kante = st.kante if st is not None else None

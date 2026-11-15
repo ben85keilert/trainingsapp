@@ -33,9 +33,16 @@ from trainingsapp.config import (
     paketmedienverzeichnis,
     paketordner,
     streckenverzeichnis,
+    web_vorgabe,
 )
 from trainingsapp.core.anhaenge import ZEITRAUM_VORGABE as ANHAENGE_ZEITRAUM_VORGABE
-from trainingsapp.core.darstellung import Darstellung, darstellung_lesen, darstellung_schreiben
+from trainingsapp.core.darstellung import (
+    HELLIGKEITEN,
+    PALETTEN,
+    Darstellung,
+    darstellung_lesen,
+    darstellung_schreiben,
+)
 from trainingsapp.core.einheit import Zustand
 from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
 from trainingsapp.core.hf_einstellungen import HfEinstellungen
@@ -135,6 +142,16 @@ from trainingsapp.devices.bekannte import (
 )
 
 STANDARD_PROFILNAME = "Ich"
+
+
+def _darstellung_vorgabe() -> Darstellung:
+    """Was gilt, solange ein Profil nichts gewählt hat — in der Web-Fassung hell und blau
+    (`config.WEB.vorgaben`), sonst die Vorgabe aus `core/darstellung.py`."""
+    d = Darstellung()
+    wahl = Darstellung(
+        web_vorgabe("palette", d.palette), web_vorgabe("helligkeit", d.helligkeit), d.verlauf
+    )
+    return wahl if wahl.palette in PALETTEN and wahl.helligkeit in HELLIGKEITEN else d
 
 
 #: Die Ebenen des Fokus (Trainingsansicht, 7.11.2026): Takt-Animation, Bild der Bewegung,
@@ -576,6 +593,8 @@ class AppState:
     gps_test_wach: bool = False
     #: App sichtbar? Display aus oder andere App → False (Lebenszyklus in `app.py`)
     im_vordergrund: bool = True
+    #: Web-Fassung: der Speicher im Browser (`ui/browserspeicher.py`); in der App ``None``
+    browserspeicher: Any = None
     #: Wer erfährt, dass der Timer Notizen in die laufende Messung geschrieben hat
     notiz_beobachter: dict[str, Callable[[], None]] = field(default_factory=dict)
     #: Wer bei jedem Tick des Timers aufgefrischt wird (Name → Funktion);
@@ -739,7 +758,8 @@ class AppState:
         if vorhandene:
             profil = vorhandene[0]
         else:
-            profil = Subject(name=STANDARD_PROFILNAME)
+            # in der Web-Fassung „Gast“ (`config.WEB.vorgaben`)
+            profil = Subject(name=web_vorgabe("profilname", STANDARD_PROFILNAME))
             profile.speichern(profil)
         einstellungen.setzen(SettingRepo.AKTIVES_PROFIL, profil.id)
         return profil
@@ -919,7 +939,7 @@ class AppState:
     def darstellung(self, profil_id: str | None = None) -> Darstellung:
         """Farbprofil, Hell/Dunkel und Verlauf eines Profils (Vorgabe: das aktive)."""
         schluessel = f"{SettingRepo.DARSTELLUNG}:{profil_id or self.profil.id}"
-        return darstellung_lesen(self.einstellungen.lesen(schluessel))
+        return darstellung_lesen(self.einstellungen.lesen(schluessel), _darstellung_vorgabe())
 
     def darstellung_setzen(self, d: Darstellung) -> None:
         """Gilt für das aktive Profil."""

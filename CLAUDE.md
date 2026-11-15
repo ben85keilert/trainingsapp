@@ -189,6 +189,10 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   weitere Abzweigung für den Browser gehört mit ihrem Test ins Register
   `docs/web_abzweigungen.toml`** — `tests/test_web_abzweigungen.py` zählt nach und scheitert sonst
   (Ben, 14.11.2026; Regel: `docs/plan_web.md` §2). Adressen mit „#“ (`--route-url-strategy hash`).
+  **Gespeichert wird im Browser** (`ui/browserspeicher.py`, `docs/plan_web.md` §5; Ben, 15.11.2026):
+  das Datenverzeichnis liegt auf IDBFS und gleicht sich mit der IndexedDB ab; geholt wird **vor**
+  dem Öffnen der Datenbank (`ui/app.py:einstieg`). Vorgaben der Web-Fassung (Gast, hell,
+  Nachtblau): `config.WEB.vorgaben`.
   **Keine Zahl über 0xFFFFFFFF zwischen Dart und Python** (dart2js: das Ereignis geht still
   verloren) — gilt für jede Erweiterung.
 

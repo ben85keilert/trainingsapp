@@ -126,6 +126,8 @@ class WebProfil:
     ohne: frozenset[str]
     #: Verweise in den Einstellungen (Titel, Adresse), Karte „Rechtliches“
     verweise: tuple[tuple[str, str], ...]
+    #: Vorgaben, die im Browser anders sind (Name, Wert) — was hier fehlt, gilt wie in der App
+    vorgaben: tuple[tuple[str, str], ...]
 
 
 WEB: Final[WebProfil] = WebProfil(
@@ -145,6 +147,15 @@ WEB: Final[WebProfil] = WebProfil(
         ("Impressum", "https://www.osteo-ebert.de/impressum/"),
         ("Datenschutzerklärung", "https://www.osteo-ebert.de/datenschutzerklaerung/"),
         ("Quelltext bei GitHub", "https://github.com/ben85keilert/trainingsapp"),
+    ),
+    # Wer die Seite öffnet, ist zu Gast und sieht sie hell und blau (Ben, 15.11.2026) — bis die
+    # Person es unter Profil und Darstellung ändert. Die Werte sind die Schlüssel aus
+    # `core/darstellung.py` (`PALETTEN`, `HELLIGKEITEN`); `tests/test_web_abzweigungen.py` prüft,
+    # dass es sie gibt.
+    vorgaben=(
+        ("profilname", "Gast"),
+        ("palette", "nachtblau"),
+        ("helligkeit", "hell"),
     ),
 )
 
@@ -169,6 +180,15 @@ def web_verweise() -> tuple[tuple[str, str], ...]:
     ()
     """
     return WEB.verweise if im_browser() else ()
+
+
+def web_vorgabe(name: str, sonst: str) -> str:
+    """Die Vorgabe der Web-Fassung für ``name`` (`WEB.vorgaben`) — in der App ``sonst``.
+
+    >>> web_vorgabe("profilname", "Ich")
+    'Ich'
+    """
+    return dict(WEB.vorgaben).get(name, sonst) if im_browser() else sonst
 
 
 def ist_aktiv(funktion: str) -> bool:

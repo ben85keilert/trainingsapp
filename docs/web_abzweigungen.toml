@@ -10,7 +10,8 @@
 #   - der genannte Test oder Gerätetest nicht existiert.
 #
 # Als Stelle zählt eine Zeile (ohne reine Kommentarzeilen) mit einer dieser Marken:
-#   Python:  im_browser(   "emscripten"   _web   web_verweise(   TRAININGSAPP_WEB
+#   Python:  im_browser(   "emscripten"   _web   web_verweise(   web_vorgabe(   TRAININGSAPP_WEB
+#            browserspeicher (als Wort: der Speicher im Browser, `ui/browserspeicher.py`)
 #   Dart:    kIsWeb
 #
 # Wer eine Abzweigung baut: zuerst prüfen, ob sie sich als Wert im Web-Profil ausdrücken lässt
@@ -20,21 +21,32 @@
 
 [[abzweigung]]
 datei = "src/trainingsapp/config.py"
-stellen = 10
+stellen = 13
 was = """Das Web-Profil selbst: `im_browser()` (Pyodide oder TRAININGSAPP_WEB=1), \
-`web_verweise()` (nur im Browser), `ist_aktiv` ohne die Funktionen aus `WEB.ohne`; dazu die \
-Zeilen der Doctests."""
+`web_verweise()` und `web_vorgabe()` (nur im Browser), `ist_aktiv` ohne die Funktionen aus \
+`WEB.ohne`; dazu die Zeilen der Doctests."""
 test = [
     "tests/test_web_abzweigungen.py::test_web_profil_schaltet_funktionen_ab_und_zeigt_verweise",
+    "tests/test_web_abzweigungen.py::test_vorgaben_der_web_fassung_gast_hell_blau",
 ]
 
 [[abzweigung]]
 datei = "src/trainingsapp/ui/app.py"
-stellen = 1
+stellen = 14
 was = """Start der App: Bluetooth-Transport auch im Browser (dort Web Bluetooth), keine \
 Ortungsquelle (GPS und Karte nur in der App). Erkannt an Pyodide selbst, nicht an \
-TRAININGSAPP_WEB — als Flet-Web-Server am Rechner hat die App die Erweiterungen nicht."""
-geraetetest = "T139"
+TRAININGSAPP_WEB — als Flet-Web-Server am Rechner hat die App die Erweiterungen nicht. \
+Speicher im Browser (`ui/browserspeicher.py`, das ganze Modul gibt es nur dort): `einstieg` \
+holt vor `main` das Gespeicherte, `main` startet den Schreibtakt, schreibt beim Wechsel in \
+den Hintergrund und sagt beim Start, wenn nicht gespeichert wird; `notausgang`, wenn die App \
+mit dem Gespeicherten nicht startet."""
+test = [
+    "tests/test_browserspeicher.py::test_einstieg_in_der_app_ist_main_im_browser_die_huelle",
+    "tests/test_browserspeicher.py::test_huelle_holt_erst_und_bietet_bei_kaputtem_stand_das_loeschen_an",
+    "tests/test_browserspeicher.py::test_takt_schreibt_nur_bei_aenderung_und_nie_in_einer_transaktion",
+    "tests/test_browserspeicher.py::test_hinweis_beim_start_wenn_nicht_gespeichert_wird",
+]
+geraetetest = "T140"
 
 [[abzweigung]]
 datei = "src/trainingsapp/ui/geraete/flet_ble_transport.py"
@@ -46,6 +58,26 @@ test = [
     "tests/test_web_abzweigungen.py::test_transport_im_browser_lange_frist_und_keine_grosse_zahl",
 ]
 geraetetest = "T139"
+
+[[abzweigung]]
+datei = "src/trainingsapp/ui/state.py"
+stellen = 3
+was = """Vorgaben aus dem Web-Profil (`config.WEB.vorgaben`): Das erste Profil heißt „Gast“, \
+und solange ein Profil nichts gewählt hat, ist die Darstellung hell und Nachtblau. Dazu das \
+Feld `browserspeicher` (in der App `None`)."""
+test = [
+    "tests/test_web_abzweigungen.py::test_vorgaben_der_web_fassung_gast_hell_blau",
+]
+
+[[abzweigung]]
+datei = "src/trainingsapp/ui/views/einstellungen_seiten.py"
+stellen = 4
+was = """Seite „Daten und Sicherung“: Karte „Speicher im Browser“ mit dem Zustand des \
+Speichers und „Alles löschen“ (mit Rückfrage) — in der App gibt es sie nicht."""
+test = [
+    "tests/test_browserspeicher.py::test_karte_nur_mit_speicher_und_loeschen_fragt_erst",
+]
+geraetetest = "T140"
 
 [[abzweigung]]
 datei = "src/trainingsapp/ui/views/einstellungen.py"

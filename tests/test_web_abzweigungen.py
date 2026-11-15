@@ -26,7 +26,10 @@ PROJEKT = Path(__file__).resolve().parents[1]
 REGISTER = PROJEKT / "docs" / "web_abzweigungen.toml"
 
 #: Woran eine Abzweigung im Quelltext zu erkennen ist (dieselbe Liste steht im Register)
-MARKE_PY = re.compile(r'\bim_browser\(|"emscripten"|\b_web\b|\bweb_verweise\(|TRAININGSAPP_WEB')
+MARKE_PY = re.compile(
+    r'\bim_browser\(|"emscripten"|\b_web\b|\bweb_verweise\(|\bweb_vorgabe\(|TRAININGSAPP_WEB'
+    r"|\bbrowserspeicher\b"
+)
 MARKE_DART = re.compile(r"\bkIsWeb\b")
 
 
@@ -114,6 +117,39 @@ def test_web_profil_schaltet_funktionen_ab_und_zeigt_verweise(monkeypatch) -> No
     titel = [t for t, _ in config.web_verweise()]
     assert titel == ["Impressum", "Datenschutzerklärung", "Quelltext bei GitHub"]
     assert all(erlaubt(url) for _, url in config.web_verweise())  # nur https, sonst öffnet nichts
+
+
+def test_vorgaben_der_web_fassung_gast_hell_blau(tmp_path, monkeypatch) -> None:
+    from trainingsapp.core.darstellung import HELL, HELLIGKEITEN, NACHTBLAU, PALETTEN, Darstellung
+    from trainingsapp.ui.state import STANDARD_PROFILNAME, AppState
+
+    vorgaben = dict(config.WEB.vorgaben)
+    assert set(vorgaben) == {"profilname", "palette", "helligkeit"}  # Neues braucht eine Stelle
+    assert vorgaben["palette"] in PALETTEN and vorgaben["helligkeit"] in HELLIGKEITEN
+
+    monkeypatch.delenv("TRAININGSAPP_WEB", raising=False)
+    assert config.web_vorgabe("profilname", "Ich") == "Ich"
+    app = AppState.starten(tmp_path / "app" / "app.db")
+    try:
+        assert app.profil.name == STANDARD_PROFILNAME and app.darstellung() == Darstellung()
+    finally:
+        app.schliessen()
+
+    monkeypatch.setenv("TRAININGSAPP_WEB", "1")
+    assert config.web_vorgabe("gibt_es_nicht", "bleibt") == "bleibt"
+    web = AppState.starten(tmp_path / "web" / "app.db")
+    try:
+        assert web.profil.name == "Gast"
+        assert web.darstellung() == Darstellung(NACHTBLAU, HELL)
+        # was die Person wählt, gilt — die Vorgabe nur, solange nichts gewählt ist
+        web.darstellung_setzen(Darstellung("sand", "dunkel", False))
+        assert web.darstellung() == Darstellung("sand", "dunkel", False)
+        # eine Vorgabe, die es nicht gibt, fällt auf die der App zurück statt zu werfen
+        monkeypatch.setattr(config, "WEB", config.WebProfil(
+            config.WEB.ohne, config.WEB.verweise, (("palette", "rosa"),)))  # fmt: skip
+        assert web.darstellung(profil_id="unbekannt") == Darstellung()
+    finally:
+        web.schliessen()
 
 
 def _zeilen(ansicht, ft) -> list:

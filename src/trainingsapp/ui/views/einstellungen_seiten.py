@@ -28,7 +28,9 @@ from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
 from trainingsapp.core.sicherung import Sicherung
 from trainingsapp.core.timer import schnellzeiten_lesen, schnellzeiten_text
 from trainingsapp.data.repositories import PAPIERKORB_TAGE, SettingRepo
+from trainingsapp.ui import browserspeicher as speicher_im_browser
 from trainingsapp.ui.components import vorschlag
+from trainingsapp.ui.components.dialoge import loeschen_rueckfrage, meldung
 from trainingsapp.ui.components.hilfe import THEMEN, hilfe_oeffner
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte, titel
 from trainingsapp.ui.components.layout import sicher
@@ -279,8 +281,70 @@ def einstellungen_uhr(page: ft.Page, state: AppState) -> ft.View:
     return zurueck_speichert(page, ansicht, geaendert=geaendert, speichern=sichern, meldung="")
 
 
+BROWSER_MD = """\
+Die Seite speichert deine Einträge, Messungen und Einstellungen **in diesem Browser auf
+diesem Gerät**. Sie gehen an keinen Server, und niemand außer dir sieht sie.
+
+**Sie können verschwinden:** wenn du die Websitedaten des Browsers löschst, in einem privaten
+Fenster oder wenn der Browser Speicher freiräumt. In einem anderen Browser oder an einem
+anderen Gerät sind sie nicht da.
+
+**Fremdes oder geteiltes Gerät?** Mit „Alles löschen“ entfernst du alles Gespeicherte. Danach
+die Seite schließen.
+"""
+
+
+def browser_karte(page: ft.Page, state: AppState) -> list[ft.Control]:
+    """Web-Fassung: was im Browser gespeichert ist, und „Alles löschen“ (`ui/browserspeicher.py`)
+    — in der App leer."""
+    speicher = state.browserspeicher
+    if speicher is None:
+        return []
+
+    async def loeschen() -> None:
+        try:
+            await speicher.loeschen()
+        except Exception as grund:
+            page.show_dialog(meldung(f"Löschen ging nicht: {grund}"))
+        state.neu_zeichnen()
+
+    def fragen() -> None:
+        page.show_dialog(
+            loeschen_rueckfrage(
+                "Alles Gespeicherte löschen?",
+                "Einträge, Messungen und Einstellungen werden aus diesem Browser gelöscht. "
+                "Das lässt sich nicht zurückholen. Was du gerade siehst, bleibt, bis du die "
+                "Seite schließt oder neu lädst.",
+                lambda: page.run_task(loeschen),
+                knopf="Alles löschen",
+            )
+        )
+
+    loeschbar = speicher.zustand in (speicher_im_browser.AN, speicher_im_browser.FEHLER)
+    return [
+        karte(
+            titel("Speicher im Browser", info_knopf(page, "Speicher im Browser", BROWSER_MD)),
+            ft.Text(speicher.text, size=13),
+            *(
+                [
+                    ft.OutlinedButton(
+                        "Alles löschen",
+                        icon=ft.Icons.DELETE_OUTLINE,
+                        on_click=fragen,
+                        data="browserspeicher-loeschen",
+                    )
+                ]
+                if loeschbar
+                else []
+            ),
+            abstand=8,
+        )
+    ]
+
+
 def einstellungen_daten(page: ft.Page, state: AppState) -> ft.View:
-    """Daten und Sicherung: Geräte-Backup (`core/sicherung.py`, S4), Papierkorb, Archiv."""
+    """Daten und Sicherung: Geräte-Backup (`core/sicherung.py`, S4), Papierkorb, Archiv —
+    in der Web-Fassung zuerst der Speicher im Browser."""
 
     def sicherung_schalter(ev: ft.Event[ft.Switch]) -> None:
         alt = state.sicherung()
@@ -325,6 +389,7 @@ def einstellungen_daten(page: ft.Page, state: AppState) -> ft.View:
     return _seite(
         DATEN,
         "Daten und Sicherung",
+        *browser_karte(page, state),
         *sicherung_karte,
         karte(
             titel(

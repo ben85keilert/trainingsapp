@@ -1,8 +1,8 @@
 # Web-Fassung — die App als statische Seite im Browser
 
-Stand 14.11.2026. Vertrag für `scripts/web_bauen.py`, das Web-Profil (`config.WEB`), das
-Register der Abzweigungen (`docs/web_abzweigungen.toml`) und den Web-Weg von
-`erweiterungen/flet_ble`.
+Stand 15.11.2026. Vertrag für `scripts/web_bauen.py`, das Web-Profil (`config.WEB`), das
+Register der Abzweigungen (`docs/web_abzweigungen.toml`), den Web-Weg von
+`erweiterungen/flet_ble` und das Speichern im Browser (`ui/browserspeicher.py`).
 
 ## 0. Wozu
 
@@ -68,8 +68,20 @@ Datenschutzerklärung, Quelltext. Wer die Adresse der Web-Fassung direkt öffnet
 anderen Seite der Praxis vorbei; das Impressum muss von der App aus erreichbar sein. In der
 installierten App gibt es die Karte nicht.
 
+`WEB.vorgaben` (Ben, 15.11.2026) — was im Browser gilt, solange die Person nichts gewählt hat:
+
+| Vorgabe | Web-Fassung | App |
+|---|---|---|
+| `profilname` | Gast | Ich |
+| `palette` | Nachtblau | Petrol |
+| `helligkeit` | Hell | wie das System |
+
+Wer die Seite öffnet, ist zu Gast; Name und Farben lassen sich unter Profil und Darstellung
+ändern wie in der App. Eine weitere Vorgabe ist eine Zeile hier und in `WEB.vorgaben` und eine
+Stelle, die `config.web_vorgabe(name, sonst)` fragt.
+
 Dazu in `ui/app.py`: Bluetooth auch im Browser, **GPS nicht** (Kartenkacheln wären Anfragen an
-fremde Server).
+fremde Server), und der Speicher im Browser (§5).
 
 ### Regel: Abzweigungen sind dokumentiert, gezählt und getestet
 
@@ -83,8 +95,8 @@ niemand klickt beide bei jeder Änderung durch. Deshalb:
    `docs/web_abzweigungen.toml`: Zahl der Stellen, was dort anders ist, und der Test, der den
    Web-Zweig durchläuft — oder der Gerätetest, wenn es nur im echten Browser zu sehen ist.
 3. **Der Test zählt nach.** `tests/test_web_abzweigungen.py` vergleicht das Register mit dem
-   Quelltext (Marken: `im_browser(`, `"emscripten"`, `_web`, `web_verweise(`, `TRAININGSAPP_WEB`,
-   in Dart `kIsWeb`). Eine neue Abzweigung ohne Eintrag, eine falsche Zahl, ein Eintrag ohne Test
+   Quelltext (Marken: `im_browser(`, `"emscripten"`, `_web`, `web_verweise(`, `web_vorgabe(`,
+   `TRAININGSAPP_WEB`, das Wort `browserspeicher`, in Dart `kIsWeb`). Eine neue Abzweigung ohne Eintrag, eine falsche Zahl, ein Eintrag ohne Test
    oder ein Test, den es nicht gibt: Der Lauf scheitert, lokal und in der CI.
 4. **Wer eine neue Marke erfindet** (eine andere Art, den Browser zu erkennen), trägt sie im Test
    und im Kopf des Registers nach — sonst zählt niemand sie.
@@ -93,11 +105,8 @@ Was das Register nicht kann: Es beweist, dass es einen Test gibt, nicht, dass er
 nur über einen Schalter aus `WEB.ohne` läuft, zählt es nicht als Abzweigung — dafür steht die
 Tabelle oben (der Test prüft, dass jede Funktion aus `WEB.ohne` dort steht).
 
-**Was noch fehlt** (Stand 14.11.2026, alles vor einem öffentlichen Start):
+**Was noch fehlt** (Stand 15.11.2026):
 
-- **Nichts bleibt.** Die Datenbank liegt im Arbeitsspeicher des Tabs; nach dem Neuladen sind
-  Einträge, Messungen und Einstellungen weg. Gebraucht: Abgleich mit IndexedDB und ein Knopf
-  „Alles löschen“ für fremde Geräte.
 - **`hrv_bewertung` wird in der Oberfläche nirgends abgefragt — und muss es derzeit nicht.**
   Ben, 14.11.2026 (`docs/recht/00_zweckbestimmung.md`, „HF-Auswertung und DFA α1“): Was eine
   Messung ausgibt und die Person selbst übernimmt (Ruhe-HF, HFmax), und Zahlen ohne Schwelle
@@ -148,3 +157,73 @@ unter `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self
 
 Nicht geprüft: Bluetooth am Handy über HTTPS, H10 mit EKG, iPhone, Videos und Bilder aus
 Paketen, lange Messungen — Gerätetest T139.
+
+## 5. Speichern im Browser
+
+Ben, 15.11.2026: „Die Speicherfähigkeit im Browser müsste herausgearbeitet werden.“ Bis dahin
+lag alles im Arbeitsspeicher des Tabs und war mit dem Neuladen weg.
+
+**Was gespeichert wird:** das ganze Datenverzeichnis (`config.datenverzeichnis()`, im Browser
+`/home/pyodide/.trainingsapp`) — Datenbank, Messungen, Anhänge, Dateien aus Paketen. **Wo:** in
+der IndexedDB des Browsers, unter dem Namen dieser Seite, auf diesem Gerät. **Wohin nicht:** an
+keinen Server; die IndexedDB ist kein Netzweg, und die Content-Security-Policy der Seite
+(`connect-src 'self'`) bleibt, wie sie ist.
+
+**Wie** (`ui/browserspeicher.py`): Das Verzeichnis liegt auf IDBFS, Emscriptens Dateisystem,
+das im Arbeitsspeicher arbeitet und sich auf Zuruf mit der IndexedDB abgleicht. SQLite und die
+Dateizugriffe der App bleiben, wie sie sind.
+
+| Wann | Was |
+|---|---|
+| Start, **vor** dem Öffnen der Datenbank (`ui/app.py:einstieg`) | einhängen, Sperre nehmen, Gespeichertes holen |
+| alle 2 s, solange die Seite offen ist | schreiben — nur wenn sich im Verzeichnis etwas geändert hat (Zahl, Größe, jüngste Änderung der Dateien) und in SQLite keine Transaktion offen ist |
+| Tab geht in den Hintergrund | sofort schreiben |
+| „Alles löschen“ (Einstellungen → Daten und Sicherung) | die IndexedDB der Seite entfernen; bis zum Schließen oder Neuladen schreibt der Tab nichts mehr |
+
+**Entschieden von Ben am 15.11.2026: „von selbst speichern“.** Ohne Rückfrage — so stand es
+hier seit dem 14.11.2026 („Abgleich mit IndexedDB und ein Knopf „Alles löschen“ für fremde
+Geräte“). Die Seite ist ein Trainingstagebuch; wer etwas einträgt, will es beim nächsten Besuch
+wiederfinden. Verworfen: beim ersten Besuch fragen — eine Rückfrage vor dem ersten Blick auf
+die App.
+
+**Was schiefgehen kann:**
+
+- **Zwei Tabs.** Jeder Tab hat sein eigenes Python; der zweite überschriebe den Stand des ersten.
+  Der erste Tab hält eine Sperre des Browsers (Web Locks, `trainingsapp-speicher`); der zweite
+  zeigt den gespeicherten Stand, sagt beim Start „Hier wird nicht gespeichert“ und schreibt nicht.
+- **Der Browser lässt es nicht zu** (Speicher voll, gesperrt): Die App läuft weiter, sagt es beim
+  Start und unter „Daten und Sicherung“.
+- **Die App startet mit dem Gespeicherten nicht** (kaputte Datei, misslungene Migration): Statt
+  einer weißen Seite erscheint „Die gespeicherten Daten lassen sich nicht öffnen“ mit dem Knopf
+  „Gespeichertes löschen“ (`ui/app.py:notausgang`) — sonst bliebe die Seite auf diesem Gerät
+  für immer kaputt.
+- **Der Tab wird geschlossen, bevor geschrieben ist:** Bis zu 2 s können fehlen. Ein „Tab wird
+  geschlossen“ meldet der Browser dem Python nicht verlässlich.
+- **Der Browser räumt auf.** Websitedaten löschen, privates Fenster, wenig Platz, Safari nach
+  sieben Tagen ohne Besuch: Dann ist alles weg. Das ist so gewollt (§0) und steht in der App
+  (Karte „Speicher im Browser“, das „i“).
+
+**Die Datenbank läuft auch im Browser im WAL-Modus** (`data/db.py`): Gespeichert werden
+`trainingsapp.db`, `-wal` und `-shm`. Der Abgleich liest alle Dateien in einem Zug und schreibt
+sie in einer Transaktion der IndexedDB; beim nächsten Start liest SQLite das WAL wie nach einem
+Absturz. Ein frischer Stand sind rund 1,8 MB (fast alles im WAL).
+
+**Gemessen** (15.11.2026, kopfloses Chromium 156 am Laptop, Probekopie des Builds mit dem
+Quelltext als App-Archiv, hinter der Content-Security-Policy des Servers):
+
+| Probe | Ergebnis |
+|---|---|
+| erster Besuch | IndexedDB `/home/pyodide/.trainingsapp`, 3 Dateien, 1 795 944 Bytes; keine Anfrage an fremde Server, kein CSP-Verstoß |
+| Browser beenden, neu starten | dieselbe Datenbank (Zeitstempel unverändert), nicht neu angelegt |
+| Schalter umlegen, 4 s warten, neu laden | der Schalter steht, wie er gestellt wurde |
+| „Alles löschen“ → bestätigen | IndexedDB der Seite ist weg; eine Änderung danach wird nicht gespeichert; nach dem Neuladen frischer Stand |
+| zweiter Tab | zeigt „… in einem zweiten Tab offen, und dort wird gespeichert“ |
+
+**Nicht gemessen:** am Handy; Firefox und Safari; wie lange das Schreiben während einer langen
+Messung dauert; ob der Wechsel in den Hintergrund im Browser gemeldet wird; Anhänge (Foto,
+Ton) — Gerätetest T140.
+
+**Recht:** Die Daten bleiben auf dem Gerät der Person; die Praxis bekommt nichts davon. Dass
+die Seite etwas im Browser ablegt, muss in der Datenschutzerklärung der Praxis stehen, **bevor**
+ein Build mit Speicher hochgeladen wird (privates Repository der Homepage, ADR-0024, Nachtrag
+„Speichern im Browser“).

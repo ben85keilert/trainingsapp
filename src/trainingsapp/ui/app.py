@@ -85,6 +85,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.config import datenverzeichnis
 from trainingsapp.core import varianten
 from trainingsapp.core.anhaenge import AUDIO, DOKUMENT, Ziel, ziel_lesen
 from trainingsapp.core.darstellung import Darstellung
@@ -95,8 +96,10 @@ from trainingsapp.core.timer import EINMAL
 from trainingsapp.ui import app_update, ausrichtung, navigation
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import plan_ablauf as plan_ablauf_ui
+from trainingsapp.ui.browserspeicher import Browserspeicher, PyodideZugang
 from trainingsapp.ui.components import diagnose_punkt, marken_leiste
 from trainingsapp.ui.components.dialoge import dialog_offen
+from trainingsapp.ui.components.dialoge import schliessen as dialog_schliessen
 from trainingsapp.ui.components.fokus import FOKUS_ANSICHT
 from trainingsapp.ui.components.startleiste import (
     leiste_auffrischen,
@@ -481,12 +484,89 @@ def schreibende_sichern(state: AppState) -> None:
             logging.getLogger(__name__).exception("Speichern vor dem Verlassen: %s", schluessel)
 
 
+def einstieg() -> Callable[[ft.Page], Any]:
+    """Was `ft.run` bekommt: `main` — in der Web-Fassung davor das Holen der Daten aus dem
+    Browser (`ui/browserspeicher.py`), denn darauf muss das Öffnen der Datenbank warten.
+
+    Flet ruft ein synchrones `main` auf jeder Plattform in der Ereignisschleife auf; die
+    Hülle hier tut dasselbe, nur einen Schritt später. Erkannt an Pyodide selbst: Als
+    Flet-Web-Server am Rechner (TRAININGSAPP_WEB=1) liegen die Daten in einem echten Ordner.
+    """
+    if sys.platform != "emscripten":
+        return main
+
+    async def im_browser(page: ft.Page) -> None:
+        speicher = Browserspeicher(datenverzeichnis(), PyodideZugang())
+        await speicher.starten()
+        try:
+            main(page, speicher)
+        except Exception as fehler:
+            # Nur wenn Gespeichertes da war: Dann liegt es wohl an ihm, und ohne Ausweg
+            # käme die Person nie wieder in die App.
+            if not speicher.vorhanden:
+                raise
+            logging.getLogger(__name__).exception("Start mit gespeicherten Daten")
+            notausgang(page, speicher, fehler)
+
+    return im_browser
+
+
+def nicht_gespeichert_dialog(speicher: Browserspeicher) -> ft.AlertDialog:
+    """Der Hinweis beim Start, wenn dieser Besuch nichts speichert (`Browserspeicher.text`)."""
+    dialog: ft.AlertDialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Hier wird nicht gespeichert"),
+        content=ft.Text(speicher.text),
+        actions=[ft.TextButton("Verstanden", on_click=lambda: dialog_schliessen(dialog))],
+    )
+    return dialog
+
+
+def notausgang(page: ft.Page, speicher: Browserspeicher, fehler: Exception) -> None:
+    """Die App startet mit den im Browser gespeicherten Daten nicht: sagen, was los ist, und
+    das Löschen anbieten — sonst bliebe die Seite auf diesem Gerät für immer kaputt."""
+
+    async def loeschen() -> None:
+        try:
+            await speicher.loeschen()
+        except Exception as grund:
+            hinweis.value = f"Löschen ging nicht: {grund}"
+        else:
+            hinweis.value = "Gelöscht. Lade die Seite jetzt neu."
+            knopf.disabled = True
+        page.update()
+
+    hinweis = ft.Text("")
+    knopf = ft.FilledButton(
+        "Gespeichertes löschen", icon=ft.Icons.DELETE_OUTLINE, on_click=loeschen
+    )
+    page.views.clear()
+    page.views.append(
+        ft.View(
+            route="/",
+            padding=24,
+            controls=[
+                ft.Text("Die gespeicherten Daten lassen sich nicht öffnen", size=20),
+                ft.Text(
+                    "Der Trainingsassistent hat in diesem Browser Daten von einem früheren "
+                    "Besuch gefunden und kann damit nicht starten. Du kannst sie löschen und "
+                    "neu beginnen. Deine Einträge von früher sind dann weg."
+                ),
+                ft.Text(f"Meldung: {fehler}", size=12, selectable=True),
+                knopf,
+                hinweis,
+            ],
+        )
+    )
+    page.update()
+
+
 # Schon beim Laden, nicht erst in `main`: Die erste Nachricht der Flutter-Seite kommt an,
 # bevor `main` läuft (msgpack vor 1.2.3, `ui/flet_absicherung.py`)
 msgpack_absichern()
 
 
-def main(page: ft.Page) -> None:
+def main(page: ft.Page, browserspeicher: Browserspeicher | None = None) -> None:
     # Antworten für ersetzte Controls beenden sonst die Empfangsschleife (Web, Socket)
     methodenantworten_absichern()
     # Meldungen unten gehen nach 5 s von selbst — auch mit „Rückgängig“ (Ben, 22.10.2026)
@@ -501,6 +581,12 @@ def main(page: ft.Page) -> None:
     )
 
     state = AppState.starten()
+    # Web-Fassung: Das Datenverzeichnis liegt im Browser (`ui/browserspeicher.py`); geholt ist
+    # es schon (`einstieg`), hier beginnt das Schreiben — nur wenn sich etwas geändert hat
+    # und in der Datenbank keine Transaktion offen ist.
+    state.browserspeicher = browserspeicher
+    if browserspeicher is not None:
+        page.run_task(browserspeicher.takt, lambda: not state.con.in_transaction)
     # Farbprofil des aktiven Profils (`core.darstellung`); gesetzt wird es bei
     # jedem Routenwechsel, denn ein Profilwechsel bringt ein anderes mit.
     angewandt: tuple[object, ...] | None = None
@@ -556,6 +642,9 @@ def main(page: ft.Page) -> None:
         # Ebenso, was gerade geschrieben wird (Notiz zum Tag: sonst bis zu 1 s)
         if not vorn:
             schreibende_sichern(state)
+        # Web-Fassung: Der Tab geht nach hinten — vielleicht wird er gleich geschlossen
+        if not vorn and browserspeicher is not None and not state.con.in_transaction:
+            page.run_task(browserspeicher.sichern)
         # Das App-Update (A8): zurück von „Unbekannte Apps installieren“ geht es von selbst
         # weiter; in den Hintergrund stellt die Automatik den Wecker, zurück nimmt sie ihn
         if state.installieren is not None:
@@ -1248,6 +1337,10 @@ def main(page: ft.Page) -> None:
         page.show_dialog(entfallene_dialog(page, state, paket, offene_uebungen, offene_kurse))
     # Updates im Hintergrund (Paketquellen, App-Release) — blockiert das Zeichnen nicht
     page.run_task(updates_beim_start, page, state)
+    # Web-Fassung: Wird hier nicht gespeichert (zweiter Tab, Browser lässt es nicht zu), muss
+    # die Person es gleich wissen — nicht erst unter „Daten und Sicherung“.
+    if browserspeicher is not None and not browserspeicher.aktiv:
+        page.show_dialog(nicht_gespeichert_dialog(browserspeicher))
     # Was läuft (HRV, Training, Timer), steht jede Sekunde in der Benachrichtigung —
     # nur in der Android-App (Ben, 16.10.2026, `ui.laufend`)
     page.run_task(laufend_takt, state)
@@ -1259,4 +1352,4 @@ def main(page: ft.Page) -> None:
 
 
 if __name__ == "__main__":
-    ft.run(main)
+    ft.run(einstieg())

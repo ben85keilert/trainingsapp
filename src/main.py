@@ -2,7 +2,7 @@
 
 import flet as ft
 
-from trainingsapp.ui.app import main
+from trainingsapp.ui.app import einstieg
 
 if __name__ == "__main__":
-    ft.run(main)
+    ft.run(einstieg())

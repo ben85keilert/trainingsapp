@@ -206,8 +206,9 @@ class Darstellung:
         return PALETTEN[self.palette]
 
 
-def darstellung_lesen(text: str | None) -> Darstellung:
-    """Aus der gespeicherten Einstellung; Unbekanntes fällt auf die Vorgabe zurück.
+def darstellung_lesen(text: str | None, vorgabe: Darstellung | None = None) -> Darstellung:
+    """Aus der gespeicherten Einstellung; Unbekanntes fällt auf die Vorgabe zurück
+    (``vorgabe``; ohne Angabe Petrol, wie das System) — die Web-Fassung bringt eine eigene mit.
 
     >>> darstellung_lesen(None)
     Darstellung(palette='petrol', helligkeit='system', verlauf=True)
@@ -215,8 +216,12 @@ def darstellung_lesen(text: str | None) -> Darstellung:
     Darstellung(palette='violett', helligkeit='dunkel', verlauf=False)
     >>> darstellung_lesen('{"palette": "gibt_es_nicht", "helligkeit": 3}').palette
     'petrol'
+    >>> darstellung_lesen(None, Darstellung(NACHTBLAU, HELL))
+    Darstellung(palette='nachtblau', helligkeit='hell', verlauf=True)
+    >>> darstellung_lesen('{"palette": "sand"}', Darstellung(NACHTBLAU, HELL))
+    Darstellung(palette='sand', helligkeit='hell', verlauf=True)
     """
-    vorgabe = Darstellung()
+    vorgabe = vorgabe or Darstellung()
     try:
         roh = json.loads(text) if text else {}
     except ValueError:

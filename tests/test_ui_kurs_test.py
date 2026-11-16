@@ -1,0 +1,739 @@
+"""Der Testlauf eines Kurses (Ben, 16.11.2026, `docs/plan_kurs_ablauf.md` §3.3, Skizzen T1–T4):
+Ein Test mit Vorgabe läuft mit der Uhr — Testkarte im Kapitel, Lauf, Ergebnis, ein eigener
+abgeschlossener Eintrag, zurück im Kapitel. Läuft nur mit `flet`.
+
+**Alles auf der Uhr der Attrappen:** Die HRV-Aufnahme läuft auf ihr (so wird sie die Uhr der
+Einheit), und die Einheit bekommt auch ihre Wanduhr (heute 10:00) statt der echten. Das Kapitel
+gilt als eine Stunde davor erreicht — so hängt kein Test an der Tageszeit des Laufs (Katalog
+N170).
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import timedelta
+from functools import partial
+from types import SimpleNamespace
+
+import pytest
+
+ft = pytest.importorskip("flet")
+
+from attrappen import UTC0, Gurt, Seite, Uhr, ruhe, vorbei  # noqa: E402
+from trainingsapp.core.kursbloecke import (  # noqa: E402
+    AUSWAHL,
+    MENGE,
+    SKALA,
+    TEST,
+    ZEIT,
+    Block,
+    Vorgabe,
+)
+from trainingsapp.core.kurse import Kapitel, Kurs  # noqa: E402
+from trainingsapp.core.models import Exercise  # noqa: E402
+from trainingsapp.core.result_spec import ResultSpec, vorrat_feld  # noqa: E402
+from trainingsapp.core.timer import stoppuhr  # noqa: E402
+from trainingsapp.devices.einheit import Einheitslauf  # noqa: E402
+from trainingsapp.devices.messlauf import Messlauf  # noqa: E402
+from trainingsapp.ui import einheit as einheit_ui  # noqa: E402
+from trainingsapp.ui import uebung_lauf  # noqa: E402
+from trainingsapp.ui.components.fokus import FOKUS_ANSICHT  # noqa: E402
+from trainingsapp.ui.state import AppState  # noqa: E402
+from trainingsapp.ui.views import kurs_testlauf as kurs_test  # noqa: E402
+from trainingsapp.ui.views.kurs_testlauf import ERGEBNIS, LAEUFT, kurs_test_view  # noqa: E402
+from trainingsapp.ui.views.kurse import kapitel_view  # noqa: E402
+
+#: Das Kapitel gilt als eine Stunde vor der Uhr der Attrappen erreicht
+SEIT = UTC0 - timedelta(hours=1)
+
+
+class Ton:
+    """Der Tondienst: merkt, was gespielt wurde."""
+
+    def __init__(self) -> None:
+        self.gespielt: list[str] = []
+
+    async def spielen(self, klang: str, *_a) -> None:
+        self.gespielt.append(klang)
+
+
+@pytest.fixture
+async def umgebung(tmp_path, monkeypatch):
+    """App-Zustand, eine laufende HRV-Aufnahme auf der Uhr der Attrappen und eine Seite, die
+    Routen und Meldungen merkt. Die Einheit läuft ganz auf dieser Uhr (Modul-Docstring)."""
+    monkeypatch.setenv("TRAININGSAPP_DATA_DIR", str(tmp_path))
+    state = AppState.starten(tmp_path / "app.db")
+    state.neu_zeichnen = lambda: None
+    uhr = Uhr()
+    monkeypatch.setattr(einheit_ui, "Einheitslauf", partial(Einheitslauf, jetzt_utc=uhr.utc))
+    gurt = Gurt(uhr)
+    lauf = Messlauf(gurt, jetzt_utc=uhr.utc, backup_basis=tmp_path, subject_id=state.profil.id)
+    await lauf.verbinden("gurt", "Polar H10 TEST")
+    lesen = asyncio.create_task(lauf.laufen())
+    state.messlauf = lauf
+    lauf.aufnahme_starten()
+    seite = Seite()
+    yield SimpleNamespace(state=state, uhr=uhr, gurt=gurt, seite=seite)
+    state.kurs_test = None  # der Wächter eines Laufs, der noch wartet, hört damit auf
+    for aufgabe in seite.aufgaben:
+        if not aufgabe.done():
+            aufgabe.cancel()
+    await asyncio.gather(*seite.aufgaben, return_exceptions=True)
+    await lauf.trennen()
+    await asyncio.wait_for(lesen, 5)
+    state.schliessen()
+
+
+# -- Helfer ------------------------------------------------------------------------------
+
+
+def _alle(c):
+    yield c
+    for name in (
+        "content",
+        "controls",
+        "title",
+        "subtitle",
+        "leading",
+        "trailing",
+        "label",
+        "actions",
+        "appbar",
+    ):
+        kind = getattr(c, name, None)
+        for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
+            if isinstance(k, ft.BaseControl):
+                yield from _alle(k)
+
+
+def _texte(c) -> list[str]:
+    return [str(x.value) for x in _alle(c) if isinstance(x, ft.Text | ft.Markdown) and x.value]
+
+
+def _daten(c, wert):
+    gefunden = [x for x in _alle(c) if getattr(x, "data", None) == wert]
+    if not gefunden:
+        raise AssertionError(f"kein Control mit data={wert!r}")
+    return gefunden[0]
+
+
+def _hat(c, wert) -> bool:
+    return any(getattr(x, "data", None) == wert for x in _alle(c))
+
+
+async def klick(control) -> None:
+    """Tippen wie Flet: Der Handler bekommt das Ereignis (Katalog N168)."""
+    ergebnis = control.on_click(SimpleNamespace(control=control))
+    if asyncio.iscoroutine(ergebnis):
+        await ergebnis
+
+
+def _kurs(state, vorgabe: Vorgabe | None, *, uebung: str = "Käfer", feld: str = "reps"):
+    """Ein Kurs mit einem Kapitel und einem Test bei ``uebung`` — erreicht eine Stunde vor
+    der Uhr der Attrappen."""
+    uebungen = {
+        name: Exercise(name=name, result_spec=ResultSpec(fields=[vorrat_feld(f)]))
+        for name, f in (("Käfer", "reps"), ("Planke", "hold"), ("Brücke", "reps"))
+    }
+    for u in uebungen.values():
+        state.uebungen.speichern(u)
+    test = Block(TEST, id="test", uebung=uebungen[uebung].id, feld=feld, vorgabe=vorgabe)
+    kurs = Kurs(name="Rumpf-Kurs", kapitel=[Kapitel(titel="Erweiterung", bloecke=[test])])
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    kapitel = kurs.kapitel[0]
+    _erreichen(state, kurs, kapitel)
+    return kurs, kapitel, kapitel.bloecke[0], state.uebungen.laden(uebungen[uebung].id)
+
+
+def _erreichen(state, kurs, kapitel) -> None:
+    state.kurse.kapitel_erreichen(kurs, kapitel, state.profil.id)
+    state.kurse.con.execute(
+        "UPDATE course_progress SET reached_at = ? WHERE chapter_id = ?",
+        (SEIT.isoformat(), kapitel.id),
+    )
+
+
+async def _sekunden(u, n: int, *, beschleunigung: bool = False) -> None:
+    """``n`` Sekunden auf der Uhr der Attrappen: Schlag, ein Takt der Einheit."""
+    for _ in range(n):
+        u.uhr.t += 1
+        u.gurt.schlag(1000)
+        if beschleunigung:
+            u.gurt.beschleunigung()
+        await ruhe()
+        e = u.state.einheit
+        if e is not None and e.laeuft:
+            e.takt()
+
+
+async def _bis_vorbei(u) -> None:
+    for _ in range(400):
+        if vorbei(u.state):
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("Die Einheit endete nicht")
+
+
+def _kapitel(u, kurs, kapitel) -> ft.View:
+    browser = SimpleNamespace()
+    return kapitel_view(u.seite, u.state, u.state.kurse.laden(kurs.id), kapitel, browser)
+
+
+def _ansicht(u, kurs, kapitel, block, uebung) -> ft.View:
+    return kurs_test_view(u.seite, u.state, kurs, kapitel, block, uebung)
+
+
+def _eintraege(state, uebung):
+    return [
+        e
+        for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+        if e.exercise_id == uebung.id
+    ]
+
+
+async def _starten(u, kurs, kapitel) -> None:
+    """„Test starten“ auf der Testkarte im Kapitel."""
+    await klick(_daten(_kapitel(u, kurs, kapitel), ("test_starten", "test")))
+
+
+# -- Testkarte im Kapitel ----------------------------------------------------------------
+
+
+async def test_karte_mit_vorgabe_startet_den_testlauf(umgebung) -> None:
+    """Mit Vorgabe nennt die Karte Übung und Vorgabe, der Knopf heißt „Test starten“ und
+    öffnet den Testlauf. Der Aufbau der Ansichten startet nichts — erst der Tipp."""
+    u = umgebung
+    kurs, kapitel, block, kaefer = _kurs(u.state, Vorgabe(MENGE, 30))
+    ansicht = _kapitel(u, kurs, kapitel)
+    texte = _texte(ansicht)
+    assert "Käfer: 30 Wiederholungen" in texte
+    assert (
+        "Mach 30 am Stück. Die App misst die Zeit, du sagst danach, wie anstrengend es war."
+        in texte
+    )
+    assert "Noch kein Test, seit du dieses Kapitel öffnest." in texte
+    knopf = _daten(ansicht, ("test_starten", "test"))
+    assert knopf.content == "Test starten" and not _hat(ansicht, ("test_oeffnen", "test"))
+    # Auch die Ansicht des Testlaufs startet nichts: Sie ist bereit
+    bereit = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert u.state.einheit is None and u.state.kurs_test is None
+    assert bereit.data is None and _daten(bereit, "test_start").content == "Start"
+    assert bereit.appbar.title.value == "Test · Käfer" and bereit.appbar.leading is None
+    await klick(knopf)
+    assert u.state.einheit is not None and u.state.einheit.laeuft
+    assert u.seite.route == f"/kurse/{kurs.id}/{kapitel.id}/test/test/{kaefer.id}"
+    assert u.state.kurs_test.phase == LAEUFT
+    # Solange er läuft, führt die Karte zum Test — ein zweiter Tipp startet keinen zweiten
+    einheit = u.state.einheit
+    laufend = _daten(_kapitel(u, kurs, kapitel), ("test_starten", "test"))
+    assert laufend.content == "Zum Test"
+    await klick(laufend)
+    assert u.state.einheit is einheit
+    assert not _eintraege(u.state, kaefer)
+
+
+async def test_ohne_vorgabe_bleibt_die_karte(umgebung) -> None:
+    """Ein Test ohne Vorgabe ist wie bisher: „… was schaffst du?“ und „Zur Übung“."""
+    u = umgebung
+    kurs, kapitel, _, _ = _kurs(u.state, None, uebung="Planke", feld="hold")
+    ansicht = _kapitel(u, kurs, kapitel)
+    assert "Planke: was schaffst du?" in _texte(ansicht)
+    assert _daten(ansicht, ("test_oeffnen", "test")).content == "Zur Übung"
+    assert not _hat(ansicht, ("test_starten", "test"))
+
+
+async def test_route_nur_fuer_tests_mit_vorgabe(umgebung) -> None:
+    u = umgebung
+    kurs, kapitel, block, kaefer = _kurs(u.state, Vorgabe(MENGE, 30))
+    route = kurs_test.route_zum_test(kurs.id, kapitel.id, block.id, kaefer.id).split("/")[4:]
+    assert route == ["test", "test", kaefer.id]
+    gefunden = kurs_test.aus_route(u.state, kurs, kapitel, route)
+    assert gefunden is not None and gefunden[0].id == "test" and gefunden[1].id == kaefer.id
+    planke = next(x for x in u.state.uebungen.alle() if x.name == "Planke")
+    assert kurs_test.aus_route(u.state, kurs, kapitel, ["test", "test", planke.id]) is None
+    assert kurs_test.aus_route(u.state, kurs, kapitel, ["test", "fehlt", kaefer.id]) is None
+    assert kurs_test.aus_route(u.state, kurs, kapitel, []) is None
+    block.vorgabe = None  # ohne Vorgabe gibt es keinen Testlauf
+    assert kurs_test.aus_route(u.state, kurs, kapitel, route) is None
+
+
+class AppSeite:
+    """Gerade so viel `ft.Page`, wie `app.main` braucht (wie in ``test_ui_navigation``)."""
+
+    def __init__(self) -> None:
+        self.route = "/"
+        self.views: list[ft.View] = []
+        self.services: list = []
+        self.dialoge: list = []
+        self.platform = ft.PagePlatform.LINUX
+        self.platform_brightness = ft.Brightness.LIGHT
+        self.title = ""
+        self.padding = 0
+        self.theme = self.dark_theme = self.theme_mode = None
+        self.bgcolor = None
+        self.on_route_change = self.on_view_pop = None
+        self.on_platform_brightness_change = self.on_resize = None
+        self.on_app_lifecycle_state_change = None
+
+    def update(self) -> None:
+        pass
+
+    def run_task(self, *_a, **_k) -> None:
+        pass
+
+    def show_dialog(self, dialog) -> None:
+        self.dialoge.append(dialog)
+
+    def pop_dialog(self) -> None:
+        pass
+
+    async def push_route(self, route: str) -> None:
+        self.route = route
+        self.on_route_change()
+
+    def routen(self) -> list[str]:
+        return [str(v.route) for v in self.views]
+
+
+def test_route_legt_den_testlauf_ueber_kurs_und_kapitel(tmp_path, monkeypatch) -> None:
+    """`app.main`: Aus der Route allein (Start auf der tiefen Route) liegt der Testlauf über
+    Kurs und Kapitel — Zurück führt ins Kapitel; sonst folgt der Stapel dem Weg (aus dem
+    Kapitel in den Test). Der Aufbau der Route startet keinen Lauf."""
+    monkeypatch.setenv("TRAININGSAPP_DATA_DIR", str(tmp_path))
+    from trainingsapp.ui import app
+
+    vorher = AppState.starten()  # dieselbe Datenbank, die `app.main` gleich öffnet
+    kurs, kapitel, block, kaefer = _kurs(vorher, Vorgabe(SKALA, 7))
+    vorher.schliessen()
+    zum_kapitel = f"/kurse/{kurs.id}/{kapitel.id}"
+    route = kurs_test.route_zum_test(kurs.id, kapitel.id, block.id, kaefer.id)
+
+    gestartet: list[AppState] = []
+    original = AppState.starten
+
+    def starten(*a, **k):
+        s = original(*a, **k)
+        gestartet.append(s)
+        return s
+
+    monkeypatch.setattr(AppState, "starten", staticmethod(starten))
+    seite = AppSeite()
+    seite.route = route
+    app.main(seite)
+    state = gestartet[-1]
+    try:
+        assert seite.routen() == ["/", f"/kurse/{kurs.id}", zum_kapitel, route]
+        assert seite.views[-1].appbar.title.value == "Test · Käfer"
+        assert state.einheit is None and state.kurs_test is None  # nur „bereit“
+        asyncio.run(seite.on_view_pop())
+        assert seite.routen()[-1] == zum_kapitel
+        asyncio.run(seite.push_route(route))  # der Weg: aus dem Kapitel in den Test
+        assert seite.routen()[-2:] == [zum_kapitel, route]
+        assert state.einheit is None
+    finally:
+        state.schliessen()
+
+
+# -- Vorgabe Menge -----------------------------------------------------------------------
+
+
+async def test_menge_von_hand_ein_eintrag_mit_zeit_und_skala(umgebung) -> None:
+    """T1 → T3 → T4: 30 Wiederholungen von Hand gezählt. Der Eintrag hält Wiederholungen, Zeit
+    und Skala; es ist **genau einer**, „Läufe heute“ zeigt den Lauf als eingetragen, und
+    `testwerte` liefert den Wert."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(MENGE, 30))
+    await _starten(u, kurs, kapitel)
+    await _sekunden(u, 65)
+    ansicht = _ansicht(u, kurs, kapitel, block, kaefer)
+    texte = _texte(ansicht)
+    assert ansicht.data == FOKUS_ANSICHT and ansicht.appbar.title.value == "Test · Käfer"
+    assert ansicht.appbar.leading.tooltip == "Test abbrechen"
+    assert "VORGABE" in texte and _daten(ansicht, "test_vorgabe").value == "30 Wiederholungen"
+    assert _daten(ansicht, "test_zeit").value == "1:05" and "Zeit läuft · wird gemessen" in texte
+    assert "Du zählst selbst" in texte
+    assert "Bei 30 tippst du „Fertig“ — die Uhr hält an." in texte
+    assert "„Vorher aufgehört“ fragt, wie viele es waren." in texte
+    assert not _hat(ansicht, "test_balken")
+    fertig = _daten(ansicht, "test_fertig")
+    assert fertig.content == "Fertig — 30 gemacht"
+    await klick(fertig)
+    assert state.kurs_test.phase == ERGEBNIS and state.einheit.laeuft
+    await _sekunden(u, 20)  # das Ergebnis bleibt stehen — die Zeit steht fest
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    texte = _texte(ergebnis)
+    assert ergebnis.data == FOKUS_ANSICHT and ergebnis.appbar.leading.tooltip == "Test verwerfen"
+    assert "Dein Test" in texte
+    assert _daten(ergebnis, "wdh").value == "30" and "die Vorgabe" in texte
+    assert _daten(ergebnis, "zeit").value == "1:05" and "von der Uhr" in texte
+    assert "Wie anstrengend war es?" in texte and "0 = gar nicht · 10 = mehr geht nicht" in texte
+    assert not _hat(ergebnis, "test_wdh")  # die Wiederholungen sind die Vorgabe
+    zellen = [x.data[1] for x in _alle(ergebnis) if isinstance(getattr(x, "data", None), tuple)]
+    assert zellen == list(range(11))
+    assert all(_daten(ergebnis, ("test_skala", w)).bgcolor is None for w in range(11))
+    assert not _daten(ergebnis, "test_eintragen").disabled
+    await klick(_daten(ergebnis, ("test_skala", 6)))
+    assert _daten(ergebnis, ("test_skala", 6)).bgcolor == ft.Colors.PRIMARY
+    assert not _eintraege(state, kaefer)  # bis hier ist nichts eingetragen
+    await klick(_daten(ergebnis, "test_eintragen"))
+    assert u.seite.route == f"/kurse/{kurs.id}/{kapitel.id}" and state.kurs_test is None
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, kaefer)  # genau einer — das Ende der Einheit trug nichts ein
+    assert eintrag.result == {"reps": [30], "duration": 65, "scale": 6}
+    assert eintrag.started_at == UTC0 and eintrag.ended_at == UTC0 + timedelta(seconds=65)
+    assert [f.key for f in eintrag.spec_snapshot.fields] == ["reps", "duration", "scale"]
+    assert state.kurse.testwerte(kapitel, state.profil.id, SEIT) == {"test": 30.0}
+    (lauf,) = uebung_lauf.laeufe_heute(state, kaefer.id)
+    assert lauf.eintrag_id == eintrag.id and lauf.eingetragen == {"uhr"}
+    assert not lauf.abgebrochen and not lauf.nachtragbar and not lauf.offen
+    assert lauf.werte == [65] and [z.sekunden for z in lauf.zeiten] == [65.0]
+    # Die laufende Aufnahme: die Übung als Abschnitt, „Pause“ dort, wo die Uhr hielt — das
+    # Ende der Übung steht beim Eintragen (20 s später), nicht beim Tipp auf „Fertig“
+    notizen = [(n["t_s"], n["text"]) for n in state.messlauf.aufnahme.ereignisse]
+    assert notizen == [(0.0, "Käfer: Start"), (65.0, "Käfer: Pause"), (85.0, "Käfer: Ende")]
+    # T4: zurück im Kapitel — der Wert groß, daneben klein, was der Lauf sonst gemessen hat
+    danach = _kapitel(u, kurs, kapitel)
+    assert _daten(danach, "testwert").value == "30 Wdh."
+    assert _daten(danach, "testneben").value == "in 1:05 · Anstrengung 6"
+    assert any(t.startswith("Dein Test von heute.") for t in _texte(danach))
+    assert _daten(danach, ("test_starten", "test")).content == "Nochmal"
+
+
+async def test_vorher_aufgehoert_fragt_wie_viele(umgebung) -> None:
+    """„Vorher aufgehört …“: Die Vorgabe ist nicht erreicht — die App fragt die Wiederholungen,
+    und „Eintragen“ geht erst mit ihnen."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(MENGE, 30))
+    await _starten(u, kurs, kapitel)
+    await _sekunden(u, 40)
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_vorher"))
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    feld = _daten(ergebnis, "test_wdh")
+    assert isinstance(feld, ft.TextField) and not feld.value and "sagst du" in _texte(ergebnis)
+    assert _daten(ergebnis, "zeit").value == "0:40"
+    assert _daten(ergebnis, "test_eintragen").disabled
+    assert _daten(ergebnis, "test_fehlt").value == "Es fehlt noch: Wiederholungen."
+    assert kurs_test.eintragen(u.seite, state) is None and not _eintraege(state, kaefer)
+    feld.value = "18"
+    feld.on_change(SimpleNamespace(control=feld))
+    assert not _daten(ergebnis, "test_eintragen").disabled
+    assert not _daten(ergebnis, "test_fehlt").visible
+    # die Eingabe überlebt den Neuaufbau der Ansicht
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert _daten(ergebnis, "test_wdh").value == "18"
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, kaefer)
+    assert eintrag.result == {"reps": [18], "duration": 40}  # keine Skala gewählt: keine drin
+    assert state.kurse.testwerte(kapitel, state.profil.id, SEIT) == {"test": 18.0}
+
+
+# -- Vorgabe Anstrengung -----------------------------------------------------------------
+
+
+async def test_anstrengung_bis_7_belegt_die_skala_vor_und_fragt_die_wiederholungen(
+    umgebung,
+) -> None:
+    """T2: „Bei 7 angekommen“ ist ein Tipp — die Skala steht danach auf 7 (änderbar), die
+    Wiederholungen fragt die App, weil niemand zählt."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(SKALA, 7))
+    assert "Käfer: bis Anstrengung 7" in _texte(_kapitel(u, kurs, kapitel))
+    await _starten(u, kurs, kapitel)
+    await _sekunden(u, 72)
+    ansicht = _ansicht(u, kurs, kapitel, block, kaefer)
+    texte = _texte(ansicht)
+    assert _daten(ansicht, "test_vorgabe").value == "Bis Anstrengung 7"
+    assert _daten(ansicht, "test_zeit").value == "1:12"
+    assert "ANSTRENGUNG" in texte and "7 · hier ist Schluss" in texte
+    assert "Die Marke ist die Regel des Kurses. Wie es sich anfühlt, weißt nur du." in texte
+    assert "Ein Tipp hält die Uhr an." in texte and "Du zählst selbst" not in texte
+    balken = _daten(ansicht, "test_balken")
+    hoehen = [c.height for c in balken.controls]
+    assert len(hoehen) == 10 and hoehen[6] == 18 and hoehen.count(10) == 9  # die Marke bei 7
+    knopf = _daten(ansicht, "test_fertig")
+    assert knopf.content == "Bei 7 angekommen"
+    await klick(knopf)
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert _daten(ergebnis, ("test_skala", 7)).bgcolor == ft.Colors.PRIMARY  # vorbelegt
+    assert _daten(ergebnis, "zeit").value == "1:12"
+    assert _daten(ergebnis, "test_eintragen").disabled  # das Feld des Tests fehlt noch
+    feld = _daten(ergebnis, "test_wdh")
+    feld.value = "22"
+    feld.on_change(SimpleNamespace(control=feld))
+    assert not _daten(ergebnis, "test_eintragen").disabled
+    await klick(_daten(ergebnis, ("test_skala", 8)))  # änderbar
+    assert _daten(ergebnis, ("test_skala", 7)).bgcolor is None
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, kaefer)
+    assert eintrag.result == {"reps": [22], "duration": 72, "scale": 8}
+    danach = _kapitel(u, kurs, kapitel)
+    assert _daten(danach, "testwert").value == "22 Wdh."
+    assert _daten(danach, "testneben").value == "in 1:12 · Anstrengung 8"
+
+
+# -- Verwerfen ---------------------------------------------------------------------------
+
+
+async def test_verwerfen_traegt_nichts_ein(umgebung) -> None:
+    """„Verwerfen“ nach dem Lauf: kein Eintrag — auch nicht mit dem Ende der Einheit. Der
+    Lauf steht abgebrochen unter „Läufe heute“ und lässt sich dort wie jeder abgebrochene
+    doch eintragen."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(MENGE, 30))
+    await _starten(u, kurs, kapitel)
+    await _sekunden(u, 50)
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_fertig"))
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_verwerfen"))
+    assert u.seite.route == f"/kurse/{kurs.id}/{kapitel.id}" and state.kurs_test is None
+    await _bis_vorbei(u)
+    assert not _eintraege(state, kaefer)
+    assert state.kurse.testwerte(kapitel, state.profil.id, SEIT) == {}
+    (lauf,) = uebung_lauf.laeufe_heute(state, kaefer.id)
+    assert lauf.abgebrochen and lauf.eintrag_id is None and not lauf.offen
+    assert lauf.nachtragbar and [z.sekunden for z in lauf.zeiten] == [50.0]
+    assert "Noch kein Test, seit du dieses Kapitel öffnest." in _texte(_kapitel(u, kurs, kapitel))
+
+
+async def test_kreuz_im_lauf_bricht_ab_und_nochmal_ist_bereit(umgebung) -> None:
+    """✕ im Lauf bricht ab und führt ins Kapitel. „Nochmal“ im Ergebnis verwirft und zeigt
+    wieder „Start“ — gestartet wird erst mit dem Tipp."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(MENGE, 30))
+    await _starten(u, kurs, kapitel)
+    await _sekunden(u, 12)
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_abbrechen"))
+    assert u.seite.route == f"/kurse/{kurs.id}/{kapitel.id}"
+    await _bis_vorbei(u)
+    assert not _eintraege(state, kaefer)
+    # noch einmal, bis ins Ergebnis — dann „Nochmal“
+    await _starten(u, kurs, kapitel)
+    await _sekunden(u, 30)
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_fertig"))
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_nochmal"))
+    await _bis_vorbei(u)
+    bereit = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert bereit.data is None and state.kurs_test is None
+    await klick(_daten(bereit, "test_start"))  # „Start“ startet den nächsten Lauf
+    assert state.kurs_test.phase == LAEUFT and state.einheit.laeuft
+    assert _hat(_ansicht(u, kurs, kapitel, block, kaefer), "test_fertig")
+    assert not _eintraege(state, kaefer)
+    assert [x.abgebrochen for x in uebung_lauf.laeufe_heute(state, kaefer.id)][1:] == [True, True]
+
+
+async def test_laeuft_schon_etwas_anderes_startet_der_test_nicht(umgebung) -> None:
+    """Läuft schon eine Einheit, sagt es eine Meldung — wie im Timer der Übung."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, _, kaefer = _kurs(state, Vorgabe(MENGE, 30))
+    planke = next(x for x in state.uebungen.alle() if x.name == "Planke")
+    andere = uebung_lauf.starten(u.seite, state, uebung_lauf.kontext_fuer(planke), stoppuhr())
+    await _starten(u, kurs, kapitel)
+    assert state.kurs_test is None and state.einheit is andere
+    assert u.seite.route == "/"  # nicht in den Testlauf
+    assert "Es läuft schon eine Einheit" in u.seite.dialoge[-1].content.value
+    andere.timer.lauf.abbrechen()
+    andere.takt()
+    await _bis_vorbei(u)
+    assert not _eintraege(state, kaefer)
+
+
+# -- Vorgabe Zeit ------------------------------------------------------------------------
+
+
+async def test_zeit_laeuft_rueckwaerts_und_endet_von_selbst(umgebung, monkeypatch) -> None:
+    """Vorgabe Zeit: Die Uhr zeigt den Rest, es gibt keinen Knopf zum Beenden; bei 0 hält der
+    Wächter sie an — mit Countdown und Endsignal des Timers. Die Planke hat keine
+    Wiederholungen: gefragt wird nur die Skala."""
+    u = umgebung
+    state = u.state
+    state.ton, state.toene_geladen = Ton(), True
+    # Der Wächter sieht alle 0,2 s (echte Zeit) nach. Der Test wartet nicht auf die Uhr an der
+    # Wand, sondern darauf, dass er einmal nachgesehen hat — so hängt er nicht an der Last
+    blicke = 0
+    echt = kurs_test.pruefen
+
+    def zaehlend(page, zustand) -> bool:
+        nonlocal blicke
+        blicke += 1
+        return echt(page, zustand)
+
+    monkeypatch.setattr(kurs_test, "pruefen", zaehlend)
+
+    async def blick() -> None:
+        vorher = blicke
+        for _ in range(1000):
+            if blicke > vorher:
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("Der Wächter sah nicht nach")
+
+    kurs, kapitel, block, planke = _kurs(state, Vorgabe(ZEIT, 60), uebung="Planke", feld="hold")
+    karte = _texte(_kapitel(u, kurs, kapitel))
+    assert "Planke: 1 Minute" in karte
+    assert "Die Uhr läuft 1 Minute. Danach sagst du, wie anstrengend es war." in karte
+    await _starten(u, kurs, kapitel)
+    stand = state.kurs_test
+    await _sekunden(u, 20)
+    ansicht = _ansicht(u, kurs, kapitel, block, planke)
+    texte = _texte(ansicht)
+    assert _daten(ansicht, "test_zeit").value == "0:40" and "Zeit läuft · endet von selbst" in texte
+    assert not _hat(ansicht, "test_fertig") and _hat(ansicht, "test_vorher")
+    assert "Bei 0 hält die Uhr von selbst an." in texte and "Du zählst selbst" not in texte
+    # der Ticker frischt nur die Zeit auf
+    u.uhr.t += 5
+    state.timer_beobachter[kurs_test.BEOBACHTER]()
+    assert _daten(ansicht, "test_zeit").value == "0:35"
+    assert kurs_test.pruefen(u.seite, state) is False  # noch nicht ab
+    # Der Wächter läuft mit: Countdown bei 3, 2, 1 und das Ende bei 0 — nach jeder Sekunde
+    # der Attrappen-Uhr sieht er einmal nach
+    await _sekunden(u, 31)  # 56 s
+    await blick()
+    assert stand.phase == LAEUFT and state.ton.gespielt == []
+    for _ in range(4):  # 57, 58, 59, 60 s
+        await _sekunden(u, 1)
+        await blick()
+    assert stand.phase == ERGEBNIS and stand.sekunden == 60.0 and not stand.vorher
+    assert state.ton.gespielt == ["countdown", "countdown", "countdown", "ende"]
+    assert state.einheit.timer.lauf.laeuft is False  # die Uhr hält
+    ergebnis = _ansicht(u, kurs, kapitel, block, planke)
+    texte = _texte(ergebnis)
+    assert _daten(ergebnis, "zeit").value == "1:00" and "die Vorgabe" in texte
+    assert "Wiederholungen" not in texte and not _hat(ergebnis, "test_wdh")
+    assert not _daten(ergebnis, "test_eintragen").disabled
+    await klick(_daten(ergebnis, ("test_skala", 5)))
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, planke)
+    assert eintrag.result == {"hold": [60], "scale": 5}
+    assert state.kurse.testwerte(kapitel, state.profil.id, SEIT) == {"test": 60.0}
+    danach = _kapitel(u, kurs, kapitel)
+    assert _daten(danach, "testwert").value == "1:00 Haltezeit"
+    assert _daten(danach, "testneben").value == "Anstrengung 5"
+
+
+async def test_zeit_auf_uebung_mit_wiederholungen_fragt_sie(umgebung) -> None:
+    """Vorgabe Zeit bei einer Übung mit Wiederholungen: Die Zeit ist die Vorgabe, die
+    Wiederholungen sagt die Person danach — ohne sie hat der Test keinen Wert."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(ZEIT, 30))
+    await _starten(u, kurs, kapitel)
+    await _sekunden(u, 20)
+    assert "Wie viele es waren, sagst du danach." in _texte(
+        _ansicht(u, kurs, kapitel, block, kaefer)
+    )
+    await _sekunden(u, 11)
+    kurs_test.pruefen(u.seite, state)  # der Wächter tut dasselbe
+    assert state.kurs_test.phase == ERGEBNIS and state.kurs_test.sekunden == 30.0
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert _daten(ergebnis, "test_eintragen").disabled
+    feld = _daten(ergebnis, "test_wdh")
+    feld.value = "14"
+    feld.on_change(SimpleNamespace(control=feld))
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, kaefer)
+    assert eintrag.result == {"reps": [14], "duration": 30}
+    assert _daten(_kapitel(u, kurs, kapitel), "testneben").value == "in 0:30"
+
+
+# -- Zählt schon jemand ------------------------------------------------------------------
+
+
+async def test_zaehlt_der_sensor_endet_die_menge_von_selbst(umgebung) -> None:
+    """Zählt bei der Übung schon der Sensor, tritt die Uhr des Tests seinem Zähllauf bei: Die
+    Karte zeigt die Zahl statt „Du zählst selbst“, und bei der Menge hält die Uhr von selbst
+    an. Eingetragen wird einmal — das Ende der Einheit trägt die Wiederholungen nicht noch
+    in einen zweiten Eintrag."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(MENGE, 4))
+    uebung_lauf.zaehlen_starten(u.seite, state, uebung_lauf.kontext_fuer(kaefer), uebung=kaefer)
+    await _sekunden(u, 2, beschleunigung=True)
+    zaehllauf = state.einheit
+    await _starten(u, kurs, kapitel)
+    assert state.einheit is zaehllauf and zaehllauf.timer is not None  # die Uhr trat bei
+    await _sekunden(u, 6, beschleunigung=True)
+    ansicht = _ansicht(u, kurs, kapitel, block, kaefer)
+    texte = _texte(ansicht)
+    assert "Sensor zählt" in texte and "Du zählst selbst" not in texte
+    assert "Bei 4 hält die Uhr von selbst an." in texte
+    assert int(_daten(ansicht, "test_zahl").value) >= 1
+    for _ in range(40):
+        await _sekunden(u, 1, beschleunigung=True)
+        kurs_test.pruefen(u.seite, state)  # der Wächter tut dasselbe
+        if state.kurs_test.phase == ERGEBNIS:
+            break
+    stand = state.kurs_test
+    assert stand.phase == ERGEBNIS and stand.gezaehlt and stand.wdh >= 4
+    gezaehlt = stand.wdh
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert _daten(ergebnis, "wdh").value == str(gezaehlt) and "gezählt" in _texte(ergebnis)
+    assert not _hat(ergebnis, "test_wdh")
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, kaefer)
+    assert eintrag.result["reps"] == [gezaehlt] and eintrag.result["duration"] > 0
+    (lauf,) = uebung_lauf.laeufe_heute(state, kaefer.id)
+    assert lauf.eingetragen == {"uhr", "zaehlen"} and not lauf.nachtragbar
+
+
+# -- Test „der gewählten“ ----------------------------------------------------------------
+
+
+async def test_der_gewaehlten_je_uebung_ein_knopf(umgebung) -> None:
+    """Ein Test mit ``aus`` misst die Gewählten: je Übung eine Zeile mit „Test starten“, der
+    Lauf gehört zu dieser Übung, und danach steht in ihrer Zeile, was er gemessen hat."""
+    u = umgebung
+    state = u.state
+    uebungen = {
+        name: Exercise(name=name, result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
+        for name in ("Käfer", "Brücke", "Kniebeuge")
+    }
+    for x in uebungen.values():
+        state.uebungen.speichern(x)
+    kaefer, bruecke = uebungen["Käfer"], uebungen["Brücke"]
+    wahl = Block(AUSWAHL, id="wahl", uebungen=[x.id for x in uebungen.values()], anzahl=2)
+    test = Block(TEST, id="test", aus="wahl", feld="reps", vorgabe=Vorgabe(SKALA, 7))
+    kurs = Kurs(name="Rumpf-Kurs", kapitel=[Kapitel(titel="Wahl", bloecke=[wahl, test])])
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    kapitel = kurs.kapitel[0]
+    _erreichen(state, kurs, kapitel)
+    ansicht = _kapitel(u, kurs, kapitel)
+    assert "Deine Auswahl: bis Anstrengung 7" in _texte(ansicht)
+    assert not [
+        x for x in _alle(ansicht) if (getattr(x, "data", None) or ("",))[0] == "test_starten"
+    ]
+    for x in (kaefer, bruecke):
+        _daten(ansicht, ("wahl", "wahl", x.id)).on_select()
+    assert _daten(ansicht, ("test_starten", "test", kaefer.id)).content == "Test starten"
+    await klick(_daten(ansicht, ("test_starten", "test", bruecke.id)))
+    assert u.seite.route == f"/kurse/{kurs.id}/{kapitel.id}/test/test/{bruecke.id}"
+    assert state.kurs_test.uebung_id == bruecke.id
+    gefunden = kurs_test.aus_route(state, kurs, kapitel, ["test", "test", bruecke.id])
+    assert gefunden is not None
+    block, uebung = gefunden
+    await _sekunden(u, 48)
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, uebung), "test_fertig"))
+    ergebnis = _ansicht(u, kurs, kapitel, block, uebung)
+    feld = _daten(ergebnis, "test_wdh")
+    feld.value = "15"
+    feld.on_change(SimpleNamespace(control=feld))
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    danach = _kapitel(u, kurs, kapitel)  # die offene Wahl hält die Sitzung (P212)
+    assert _daten(danach, ("testwert", "test", bruecke.id)).value == (
+        "15 Wdh. · in 0:48 · Anstrengung 7"
+    )
+    assert _daten(danach, ("testwert", "test", kaefer.id)).value == "noch kein Test"
+    assert _daten(danach, ("test_starten", "test", bruecke.id)).content == "Nochmal"
+    assert _daten(danach, ("test_starten", "test", kaefer.id)).content == "Test starten"

@@ -14,10 +14,17 @@ Knoten ist seine Stelle in der Planliste (Frage 5: nur ein Alias der festen ID).
 Die Wege verlassen eine Übung **wie bei einem Nerv** (Ben, 10.11.2026): ein kurzer Stamm nach
 unten, dann der **Abzweig** — ein Knoten zum Antippen (``on_abzweig``: alle Wege dieser Übung) —,
 von dort die einzelnen Wege, jeder mit seinem **Griff** (Punkt und Etikett mit Auslöser,
-Beschriftung, Pflicht; ``on_kante``: nur dieser Weg). Der Ablauf kräftig, Wege zu Bedarfsübungen
-gestrichelt, ``◀ zurück`` gepunktet; Rückwege laufen in Gassen zwischen den Spalten. Wo was liegt,
-rechnet `core.ablauf_geometrie` — hier wird nur gezeichnet. **Vernebeln**: Knoten in
-``vernebelt`` und ihre Kanten stehen auf 25 %.
+Beschriftung, Pflicht; ``on_kante``: nur dieser Weg). **Ist der Weg eindeutig** — die Übung hat
+genau einen —, steht zwischen den zwei Übungen **nur ein Punkt**, sein Griff (Ben, 16.11.2026);
+er steht dann auch für den Abzweig: mit ``on_abzweig`` öffnet er alle Wege der Übung (von dort
+kommt ein zweiter dazu), ohne meldet er ``on_kante`` mit seiner Kante. Der Ablauf kräftig, Wege
+zu Bedarfsübungen gestrichelt, ``◀ zurück`` gepunktet; Rückwege laufen in Gassen zwischen den
+Spalten. Wo was liegt, rechnet `core.ablauf_geometrie` — hier wird nur gezeichnet.
+**Vernebeln**: Knoten in ``vernebelt`` und ihre Kanten stehen auf 25 %.
+
+**Ohne Start** (der Ablauf ist geleert, `core.ablauf.Ablauf.ohne_start`) steht „Start“ links von
+allem über einem **leeren Platz** (`core.ablauf.startplatz`) — im Reiter eine Ablage: Was dort
+hineinfällt, wird der Start (``on_start_ablegen``).
 
 Für den Reiter, der die Fläche einmal baut und dann nur ihren Inhalt tauscht (die Ansicht behält
 Zoom und Lage): `zeichnung` + `aktualisieren`; für ein Blatt (Workout): `ablaufbild`.
@@ -140,9 +147,12 @@ def zeichnung(
     """Die Schichten der Fläche. ``lagen``: wo jeder Knoten liegt (sonst `core.ablauf.layout`);
     ``laufend`` leuchtet, ``erledigt`` ist blass, ``vernebelt`` auf 25 %, ``gewaehlt`` hat einen
     Rahmen; ``zaehlung`` macht oft gegangene Kanten dicker; ``slots`` sind leere Plätze —
-    ``on_slot(slot, item_id)`` läuft, wenn eine Planübung aus der Palette (Draggable mit ``data``
-    = ID) hineinfällt, ``on_start_ablegen(item_id)`` beim Ablegen auf „Start“. ``on_kante``: der
-    Griff eines Wegs, ``on_abzweig(knoten)``: der Abzweig einer Übung (alle ihre Wege)."""
+    ``on_slot(slot, wert)`` läuft, wenn eine Kachel aus der Palette hineinfällt (``wert`` =
+    ``data`` ihres Draggable; im Reiter „Ablauf“ die ID der **Übung** — welche Planübung daraus
+    wird, entscheidet der Reiter), ``on_start_ablegen(wert)`` beim Ablegen auf „Start“ oder auf
+    den leeren Platz darunter. ``on_kante``: der Griff eines Wegs, ``on_abzweig(knoten)``: der
+    Abzweig einer Übung (alle ihre Wege) — und der Griff ihres **einzigen** Wegs; ohne
+    ``on_abzweig`` meldet auch der ``on_kante``."""
     ids = [it.id for it in items]
     nummer = ab.nummern(ids)
     namen = {it.id: katalog[it.exercise_id].name for it in items if it.exercise_id in katalog}
@@ -158,6 +168,12 @@ def zeichnung(
     nebel = set(vernebelt)
     fertig = set(erledigt)
     bedarf = set(ab.bedarf(ablauf, ids))
+    start = ablauf.startknoten(ids)
+    kein_start = start is None
+    if start is not None and start not in lage:
+        start = None  # es gibt ihn, aber er lässt sich nicht zeichnen
+    # Ohne Start: „Start“ und der leere Platz darunter stehen links von allem (Ben, 16.11.2026)
+    platz = ab.startplatz([*lage.values(), *slot_lage.values()]) if start is None else None
 
     def text_hoehe(it: PlanItem) -> float:
         """So hoch ist die Beschriftung unter dem Bild etwa — der Stamm beginnt darunter."""
@@ -168,7 +184,7 @@ def zeichnung(
         ablauf,
         lage,
         beschriftung={it.id: text_hoehe(it) for it in items},
-        weitere=list(slot_lage.values()),
+        weitere=[*slot_lage.values(), *([platz] if platz is not None else [])],
         mit_abzweig=[s.von for s in slots],
     )
     mitten = g.mitten
@@ -287,6 +303,15 @@ def zeichnung(
             mitte_punkt = rand + PUNKT / 2  # so weit liegt die Punktmitte vom Rand
             left = x + mitte_punkt - breite if links else x - mitte_punkt
             ausrichtung = ft.Alignment.CENTER_RIGHT if links else ft.Alignment.CENTER_LEFT
+        # Der einzige Weg seiner Übung: sein Griff ist der eine Punkt zwischen den zwei
+        # Übungen und steht auch für den Abzweig — er öffnet alle Wege (dort kommt ein zweiter
+        # dazu); wer keinen Abzweig kennt (Workout, Kursplan), bekommt die Kante gemeldet
+        tippen: Callable[[Any], Any] | None = None
+        hinweis = ""
+        if k.von not in g.abzweige and on_abzweig is not None:
+            tippen, hinweis = (lambda _e, kk=k.von: on_abzweig(kk)), " — Wege einstellen"
+        elif on_kante is not None:
+            tippen, hinweis = (lambda _e, kk=k: on_kante(kk)), " — nur diesen Weg einstellen"
         etiketten.append(
             ft.Container(
                 left=left,
@@ -295,9 +320,9 @@ def zeichnung(
                 height=hoch,
                 alignment=ausrichtung,
                 opacity=NEBEL if dimm else 1.0,
-                on_click=(lambda _e, kk=k: on_kante(kk)) if on_kante is not None else None,
+                on_click=tippen,
                 content=inhalt,
-                tooltip=(text or "Weg") + (" — nur diesen Weg einstellen" if on_kante else ""),
+                tooltip=(text or "Weg") + hinweis,
                 data=("kante", k.von, k.nach),
             )
         )
@@ -307,7 +332,8 @@ def zeichnung(
         teile.extend(cv.Path.CubicTo(*c.p1, *c.p2, *c.p3) for c in kurven)
         return cv.Path(teile, paint=farbe_)
 
-    # Stamm und Abzweig: alle Wege einer Übung verlassen sie an einem Punkt
+    # Stamm und Abzweig: alle Wege einer Übung verlassen sie an einem Punkt — der Abzweig
+    # steht nur, wo mehrere Wege abgehen (sonst ist der Griff des einen Wegs der einzige Punkt)
     abzweig_punkte: list[ft.Control] = []
     for knoten_id, (oben_p, unten_p) in g.staemme.items():
         dimm = knoten_id in nebel
@@ -323,6 +349,8 @@ def zeichnung(
                 ),
             )
         )
+        if knoten_id not in g.abzweige:
+            continue
         anzahl = len(ablauf.von(knoten_id))
         abzweig_punkte.append(
             ft.Container(
@@ -335,8 +363,7 @@ def zeichnung(
                 on_click=(
                     (lambda _e, kk=knoten_id: on_abzweig(kk)) if on_abzweig is not None else None
                 ),
-                tooltip=(f"{anzahl} Wege" if anzahl != 1 else "1 Weg")
-                + (" — alle einstellen" if on_abzweig is not None else ""),
+                tooltip=f"{anzahl} Wege" + (" — alle einstellen" if on_abzweig is not None else ""),
                 data=("abzweig", knoten_id),
                 content=ft.Container(
                     width=ABZWEIG,
@@ -357,7 +384,6 @@ def zeichnung(
         etikett(k, *w.griff, dimm, w.seite)
 
     # Start → Startknoten
-    start = ablauf.startknoten(ids)
     if start is not None and start in mitten:
         sx, sy = mitten[start]
         oben_y = sy - (FRAGE_H if ablauf.frage(start) is not None else KNOTEN) / 2 - 6
@@ -370,6 +396,21 @@ def zeichnung(
             )
         )
         formen.append(pfeil(sx, oben_y, math.radians(90), ft.Colors.PRIMARY, False))
+    elif platz is not None:
+        # kein Start: „Start“ über dem leeren Platz, gestrichelt verbunden wie ein Slot
+        sx, sy = mitte(platz)
+        if kein_start and on_start_ablegen is not None:
+            formen.append(
+                cv.Path(
+                    [cv.Path.MoveTo(sx, RAND + START_H), cv.Path.LineTo(sx, sy - 24)],
+                    paint=ft.Paint(
+                        color=ft.Colors.OUTLINE,
+                        stroke_width=2,
+                        style=ft.PaintingStyle.STROKE,
+                        stroke_dash_pattern=[4, 4],
+                    ),
+                )
+            )
     else:
         sx = RAND_X + KNOTEN / 2
 
@@ -379,7 +420,7 @@ def zeichnung(
         if lg is None or slot.von not in mitten:
             continue
         x, y = mitte(lg)
-        x0, y0 = g.abzweige[slot.von]
+        x0, y0 = g.austritte[slot.von]
         formen.append(
             cv.Path(
                 [
@@ -410,14 +451,14 @@ def zeichnung(
         )
 
     def ablage(inhalt: ft.Control, wenn: Callable[[str], Any] | None) -> ft.Control:
-        """Eine Fläche, auf die man eine Planübung aus der Palette ziehen kann."""
+        """Eine Fläche, auf die man eine Kachel aus der Palette ziehen kann."""
         if wenn is None:
             return inhalt
 
         def fallen(e: ft.DragTargetEvent) -> None:
-            item_id = getattr(getattr(e, "src", None), "data", None)
-            if isinstance(item_id, str) and item_id:
-                wenn(item_id)
+            wert = getattr(getattr(e, "src", None), "data", None)
+            if isinstance(wert, str) and wert:
+                wenn(wert)
 
         return ft.DragTarget(group="uebung", content=inhalt, on_accept=fallen)
 
@@ -605,11 +646,9 @@ def zeichnung(
         knoten_controls[f.id] = knoten
         schichten.append(knoten)
 
-    for n, slot in enumerate(slots):
-        lg = slot_lage.get(n)
-        if lg is None or slot.von not in mitten:
-            continue
-        x, y = mitte(lg)
+    def ablagefeld(x: float, y: float, wenn: Callable[[str], Any], daten: tuple[str, ...]) -> None:
+        """Ein leerer Platz bei (x, y): gestrichelt, „hierher“ — fällt eine Kachel aus der
+        Palette hinein, läuft ``wenn`` mit ihrem Wert."""
         feld = ft.Container(
             width=KNOTEN,
             height=44,
@@ -619,19 +658,19 @@ def zeichnung(
             content=ft.Text("hierher", size=11, opacity=0.6),
         )
 
-        def drueber(_e: object, f: ft.Container = feld, an: bool = True) -> None:
-            """Schwebt eine Übung über dem Slot, leuchtet er."""
-            f.border = ft.Border.all(
+        def drueber(_e: object, an: bool = True) -> None:
+            """Schwebt eine Übung über dem Platz, leuchtet er."""
+            feld.border = ft.Border.all(
                 2.5 if an else 2, ft.Colors.PRIMARY if an else ft.Colors.OUTLINE
             )
-            f.bgcolor = ft.Colors.PRIMARY_CONTAINER if an else None
+            feld.bgcolor = ft.Colors.PRIMARY_CONTAINER if an else None
             with contextlib.suppress(Exception):  # noch nicht auf der Seite
-                f.update()
+                feld.update()
 
-        def fallen(e: ft.DragTargetEvent, s: Slot = slot) -> None:
-            item_id = getattr(getattr(e, "src", None), "data", None)
-            if on_slot is not None and isinstance(item_id, str) and item_id:
-                on_slot(s, item_id)
+        def fallen(e: ft.DragTargetEvent) -> None:
+            wert = getattr(getattr(e, "src", None), "data", None)
+            if isinstance(wert, str) and wert:
+                wenn(wert)
 
         schichten.append(
             ft.Container(
@@ -642,11 +681,25 @@ def zeichnung(
                     content=feld,
                     on_accept=fallen,
                     on_will_accept=drueber,
-                    on_leave=lambda e, f=feld: drueber(e, f, False),
+                    on_leave=lambda e: drueber(e, False),
                 ),
-                data=("slot", slot.von),
+                data=daten,
             )
         )
+
+    for n, slot in enumerate(slots):
+        lg = slot_lage.get(n)
+        if lg is None or slot.von not in mitten:
+            continue
+
+        def in_den_slot(wert: str, s: Slot = slot) -> None:
+            if on_slot is not None:
+                on_slot(s, wert)
+
+        ablagefeld(*mitte(lg), in_den_slot, ("slot", slot.von))
+    # Der leere Platz unter „Start“ — nur, wo man etwas hineinlegen kann (Reiter „Ablauf“)
+    if kein_start and platz is not None and on_start_ablegen is not None:
+        ablagefeld(*mitte(platz), on_start_ablegen, ("startplatz",))
     # über allem, damit sie antippbar bleiben: erst die Abzweige, darüber die Griffe der Wege
     schichten.extend(abzweig_punkte)
     schichten.extend(etiketten)

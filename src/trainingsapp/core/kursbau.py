@@ -18,6 +18,14 @@ Bausteinen für die Teilnehmenden wird; dieses Modul rechnet, was die **Autorin*
 - `neue_id`, `vergebene_ids` — die feste, lesbare ID eines neuen Bausteins.
 - `kurs_kopie`, `umschreiben` — die Kopie eines Kurses mit neuen IDs, deren Verweise wieder
   stimmen.
+- Der **Test mit Vorgabe** (Ben, 16.11.2026, §3.3, Skizze T5): `Vorgabenwahl` — was im
+  Test-Dialog unter „Vorgabe — wann der Test endet“ eingestellt ist —, `Kurssicht.zielfelder`
+  und `zielfeld` („Ins Ziel kommt“: das Angebot und die Vorbelegung), `Kurssicht.misst`
+  („Gemessen wird“), `Kurssicht.test_vorschau` („So steht es im Kapitel“). Was der Lauf selbst
+  tut und wie er heißt, rechnet `core/kurstest.py`.
+- Das **Bild des Kursplans** (§14, `core/kursbild.py`): `Kurssicht.marke_fuer_weg` und
+  `Kurssicht.bringt` — womit ein Weg dieses Kapitels eine Planübung aus dem Bild nennt, und
+  welches Kapitel sie bringt.
 
 Die Oberfläche dazu: `ui/views/kurs_bearbeiten.py` und `ui/components/baustein_form.py`.
 Dieses Modul kennt kein flet und keine Datenbank.
@@ -25,6 +33,7 @@ Dieses Modul kennt kein flet und keine Datenbank.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -35,18 +44,25 @@ from .kursbloecke import (
     ARTEN,
     AUSWAHL,
     BAUSTEINE,
+    MENGE,
     PLAN_EINSTELLEN,
     PLAN_UEBUNG,
     PLAN_WEG,
+    SKALA,
+    SKALA_MAX,
     TEST,
+    VORGABEN,
+    ZEIT,
     ZU_ENDE,
     Block,
+    Vorgabe,
     gemessene_uebungen,
     wert_schluessel,
 )
 from .kurse import Kapitel, Kurs, Kursplan, PlanVorlage
 from .kursplan import (
     GRUNDLAGE,
+    ZIEL,
     Aenderung,
     aenderungen,
     anwenden,
@@ -54,6 +70,8 @@ from .kursplan import (
     grundstand,
     zielwert_text,
 )
+from .kurstest import ANSTRENGUNG, GROESSEN, SKALA_NAME, gemessen, skala_name, vorgabe_text
+from .kurstest import felder as lauf_felder
 from .models import Exercise, new_id
 from .result_spec import (
     FELDVORRAT,
@@ -66,7 +84,8 @@ from .result_spec import (
 )
 from .standards import waehlbare_felder, ziel_spec
 from .takt import Takt
-from .timer import TimerProfil, ohne_verweise
+from .timer import TimerProfil, dauer_text, ohne_verweise
+from .timer_eintrag import ZEITFELDER
 from .varianten import ist_variante
 
 if TYPE_CHECKING:
@@ -106,6 +125,271 @@ BEISPIELWERT: Final[dict[str, float]] = {
     "weight": 20,
     "distance": 1000,
 }
+#: Der Test-Dialog: die Wahl „Ohne“ vor den Arten der Vorgabe (`core.kursbloecke.VORGABEN`)
+OHNE: Final = "ohne"
+VORGABE_WAHL: Final[dict[str, str]] = {OHNE: "Ohne", **VORGABEN}
+#: Die drei Formen einer Vorgabe „Anstrengung“ (Skizze T5)
+AB: Final = "ab"
+HOECHSTENS: Final = "hoechstens"
+VON_BIS: Final = "von_bis"
+SKALA_FORMEN: Final[dict[str, str]] = {AB: "ab", HOECHSTENS: "höchstens", VON_BIS: "von–bis"}
+#: Grenzen des Faktors, wie ein Paket sie liest (`core.kursbloecke.Block.from_dict`)
+FAKTOR_MIN: Final = 0.1
+FAKTOR_MAX: Final = 3.0
+_WDH: Final = "reps"
+
+
+@dataclass(frozen=True, slots=True)
+class Vorgabenwahl:
+    """Was im Test-Dialog unter „Vorgabe — wann der Test endet“ eingestellt ist (Skizze T5) —
+    auch die Zahlen der Arten und Formen, die gerade nicht gewählt sind: Wer von Menge zu Zeit
+    und zurück schaltet, findet seine Zahl wieder.
+
+    Die Vorgabe baut `vorgabe` — über `Vorgabe.from_dict`, damit im Editor nichts entsteht,
+    was ein Paket nicht läse. Die Schritte der Anstrengung (`schritt`) bleiben in den Grenzen,
+    in denen jede Form etwas Eigenes sagt: „höchstens 10“ gäbe nichts vor, „von 5 bis 10“ wäre
+    „ab 5“ (so liest es `Vorgabe.from_dict`) — der Dialog zeigte nach dem Speichern etwas
+    anderes als davor.
+
+    >>> Vorgabenwahl().vorgabe() is None, Vorgabenwahl().mit_art(MENGE).vorgabe()
+    (True, Vorgabe(art='menge', n=30, bis=None))
+    >>> w = Vorgabenwahl.aus(Vorgabe(SKALA, 5, 7))
+    >>> w.art, w.form, w.stellen(), w.vorgabe()
+    ('skala', 'von_bis', (('von', 5), ('bis', 7)), Vorgabe(art='skala', n=5, bis=7))
+    >>> w.mit_form(HOECHSTENS).vorgabe(), w.mit_form(AB).vorgabe()
+    (Vorgabe(art='skala', n=0, bis=4), Vorgabe(art='skala', n=7, bis=None))
+    >>> [Vorgabenwahl.aus(v).vorgabe() == v for v in (Vorgabe(MENGE, 12), Vorgabe(ZEIT, 90),
+    ...     Vorgabe(SKALA, 8), Vorgabe(SKALA, bis=3), Vorgabe(SKALA, 2, 9))]
+    [True, True, True, True, True]
+    """
+
+    art: str = OHNE
+    #: `MENGE`: Wiederholungen — ``None``: Im Feld steht keine brauchbare Zahl (`fehler`)
+    menge: int | None = 30
+    #: `ZEIT`: Sekunden
+    sekunden: int | None = 60
+    #: `SKALA`: die Form (`SKALA_FORMEN`) und die Marken jeder Form
+    form: str = AB
+    ab: int = 7
+    hoechstens: int = 4
+    von: int = 5
+    bis: int = 7
+
+    @classmethod
+    def aus(cls, vorgabe: Vorgabe | None) -> Vorgabenwahl:
+        """Die Wahl zu einer gespeicherten Vorgabe — ``None``: „Ohne“."""
+        if vorgabe is None:
+            return cls()
+        if vorgabe.art == MENGE:
+            return cls(art=MENGE, menge=vorgabe.n)
+        if vorgabe.art == ZEIT:
+            return cls(art=ZEIT, sekunden=vorgabe.n)
+        if vorgabe.bis is None:
+            return cls(art=SKALA, form=AB, ab=vorgabe.n)
+        if vorgabe.n <= 0:
+            return cls(art=SKALA, form=HOECHSTENS, hoechstens=vorgabe.bis)
+        return cls(art=SKALA, form=VON_BIS, von=vorgabe.n, bis=vorgabe.bis)
+
+    def vorgabe(self) -> Vorgabe | None:
+        """Die Vorgabe, wie der Test-Block sie trägt — ``None`` bei „Ohne“ und solange ihr
+        etwas fehlt (`fehler`)."""
+        roh: dict[str, Any]
+        if self.art == MENGE:
+            roh = {"art": MENGE, "n": self.menge}
+        elif self.art == ZEIT:
+            roh = {"art": ZEIT, "n": self.sekunden}
+        elif self.art != SKALA:
+            return None
+        elif self.form == AB:
+            roh = {"art": SKALA, "n": self.ab}
+        elif self.form == HOECHSTENS:
+            roh = {"art": SKALA, "bis": self.hoechstens}
+        else:
+            roh = {"art": SKALA, "n": self.von, "bis": self.bis}
+        return Vorgabe.from_dict(roh)
+
+    def vorlaeufig(self) -> Vorgabe | None:
+        """Die Vorgabe für alles, was nur ihre **Art** braucht (das Angebot der Felder, was
+        der Lauf misst) — auch solange ihr die Zahl noch fehlt. ``None`` nur bei „Ohne“.
+
+        >>> Vorgabenwahl(MENGE).mit_menge("").vorlaeufig(), Vorgabenwahl().vorlaeufig()
+        (Vorgabe(art='menge', n=0, bis=None), None)
+        >>> Vorgabenwahl(ZEIT).vorlaeufig()
+        Vorgabe(art='zeit', n=60, bis=None)
+        """
+        if self.art not in VORGABEN:
+            return None
+        return self.vorgabe() or Vorgabe(self.art)
+
+    def fehler(self) -> str | None:
+        """Was der Vorgabe zum Übernehmen fehlt — ``None``: nichts (auch bei „Ohne“).
+
+        >>> Vorgabenwahl(MENGE).mit_menge("").fehler()
+        'Die Vorgabe „Menge“ braucht eine Zahl von Wiederholungen.'
+        >>> Vorgabenwahl().mit_menge("").fehler() is None, Vorgabenwahl(SKALA).fehler() is None
+        (True, True)
+        """
+        if self.art not in VORGABEN or self.vorgabe() is not None:
+            return None
+        if self.art == MENGE:
+            return "Die Vorgabe „Menge“ braucht eine Zahl von Wiederholungen."
+        if self.art == ZEIT:
+            return "Die Vorgabe „Zeit“ braucht eine Dauer."
+        return "Die Vorgabe „Anstrengung“ braucht eine Marke zwischen 1 und 10."
+
+    def mit_art(self, art: str) -> Vorgabenwahl:
+        """Eine andere Art — alles andere gilt als „Ohne“; die Zahlen bleiben."""
+        return replace(self, art=art if art in VORGABEN else OHNE)
+
+    def mit_form(self, form: str) -> Vorgabenwahl:
+        return replace(self, form=form if form in SKALA_FORMEN else AB)
+
+    def mit_menge(self, text: str) -> Vorgabenwahl:
+        """Die eingetippte Zahl der Wiederholungen — Unlesbares und 0 sind keine.
+
+        >>> [Vorgabenwahl().mit_menge(t).menge for t in ("12", " 5 ", "0", "zwölf", "1,5", "")]
+        [12, 5, None, None, None, None]
+        """
+        try:
+            n = int(str(text).strip())
+        except ValueError:
+            n = 0
+        return replace(self, menge=n if 0 < n <= 9_999 else None)
+
+    def mit_sekunden(self, sekunden: float) -> Vorgabenwahl:
+        s = round(sekunden)
+        return replace(self, sekunden=s if s > 0 else None)
+
+    @property
+    def menge_text(self) -> str:
+        return "" if self.menge is None else str(self.menge)
+
+    @property
+    def zeit_text(self) -> str:
+        """Die Zeit, wie der Timer sie schreibt (``m:ss``).
+
+        >>> Vorgabenwahl().zeit_text, Vorgabenwahl(sekunden=90).zeit_text
+        ('1:00', '1:30')
+        """
+        return dauer_text(self.sekunden or 0)
+
+    def stellen(self) -> tuple[tuple[str, int], ...]:
+        """Die Marken der gewählten Form, wie −/+ sie stellen: Name und Wert — bei „von–bis“
+        zwei.
+
+        >>> Vorgabenwahl().stellen(), Vorgabenwahl(form=HOECHSTENS).stellen()
+        ((('ab', 7),), (('hoechstens', 4),))
+        """
+        if self.form == HOECHSTENS:
+            return ((HOECHSTENS, self.hoechstens),)
+        if self.form == VON_BIS:
+            return (("von", self.von), ("bis", self.bis))
+        return ((AB, self.ab),)
+
+    def schritt(self, marke: str, um: int) -> Vorgabenwahl:
+        """Eine Marke (`stellen`) um ``um`` weiter — in ihren Grenzen: „ab“ 1 bis 10,
+        „höchstens“ 1 bis 9, „von“ unter „bis“, „bis“ höchstens 9.
+
+        >>> w = Vorgabenwahl()
+        >>> w.schritt(AB, 1).ab, w.schritt(AB, 9).ab, w.schritt(AB, -9).ab
+        (8, 10, 1)
+        >>> w.schritt(HOECHSTENS, 9).hoechstens, w.schritt("von", 5).von, w.schritt("bis", 5).bis
+        (9, 6, 9)
+        >>> w.schritt("bis", -5).bis, w.schritt(AB, 9).schritt(AB, 1) == w.schritt(AB, 9)
+        (6, True)
+        """
+        oben = SKALA_MAX - 1
+        if marke == AB:
+            return replace(self, ab=min(max(self.ab + um, 1), SKALA_MAX))
+        if marke == HOECHSTENS:
+            return replace(self, hoechstens=min(max(self.hoechstens + um, 1), oben))
+        if marke == "von":
+            return replace(self, von=min(max(self.von + um, 1), max(self.bis - 1, 1)))
+        if marke == "bis":
+            return replace(self, bis=min(max(self.bis + um, min(self.von + 1, oben)), oben))
+        return self
+
+
+def faktor_text(faktor: float, prozent: bool = False) -> str:
+    """Der Faktor eines Tests im Eingabefeld: „0,8“ („mal“) — oder in Prozent „80“.
+
+    >>> faktor_text(0.8), faktor_text(0.8, prozent=True), faktor_text(1.0), faktor_text(1.25)
+    ('0,8', '80', '1', '1,25')
+    """
+    return str(round(faktor * 100)) if prozent else f"{round(faktor, 2):g}".replace(".", ",")
+
+
+def faktor_lesen(text: str, prozent: bool = False) -> float:
+    """Das Gegenstück zu `faktor_text`, in den Grenzen des Pakets (0,1 bis 3) — Unlesbares
+    ist 1.
+
+    >>> faktor_lesen("0,8"), faktor_lesen("80", prozent=True), faktor_lesen("0.5")
+    (0.8, 0.8, 0.5)
+    >>> faktor_lesen(""), faktor_lesen("viel"), faktor_lesen("9"), faktor_lesen("1", prozent=True)
+    (1.0, 1.0, 3.0, 0.1)
+    """
+    try:
+        wert = float(str(text).strip().replace(",", "."))
+    except ValueError:
+        return 1.0
+    if not math.isfinite(wert):
+        return 1.0
+    return min(max(wert / 100 if prozent else wert, FAKTOR_MIN), FAKTOR_MAX)
+
+
+def feld_ist_vorgabe(vorgabe: Vorgabe | None, feld: str) -> bool:
+    """Steht im Feld des Tests die **Vorgabe selbst** — die Wiederholungen bei einer Menge,
+    ein Zeitfeld bei einer Zeit? Dann misst der Lauf dort nichts: Der Wert steht vorher fest.
+
+    >>> menge, zeit = Vorgabe(MENGE, 30), Vorgabe(ZEIT, 60)
+    >>> feld_ist_vorgabe(menge, "reps"), feld_ist_vorgabe(zeit, "hold_2")
+    (True, True)
+    >>> feld_ist_vorgabe(menge, "duration"), feld_ist_vorgabe(Vorgabe(SKALA, 7), "reps")
+    (False, False)
+    >>> feld_ist_vorgabe(None, "reps")
+    False
+    """
+    if vorgabe is None:
+        return False
+    basis = basis_key(feld)
+    return (vorgabe.art == MENGE and basis == _WDH) or (vorgabe.art == ZEIT and basis in ZEITFELDER)
+
+
+def beispielwert(block: Block) -> float:
+    """Der Beispielwert eines Tests für die Vorschau: nach der Art seines Feldes
+    (`BEISPIELWERT`) — steht im Feld die Vorgabe selbst (`feld_ist_vorgabe`), ist sie es.
+
+    >>> beispielwert(Block(TEST, uebung="k", feld="reps")), beispielwert(Block(TEST, uebung="p"))
+    (30.0, 60.0)
+    >>> beispielwert(Block(TEST, uebung="k", feld="reps", vorgabe=Vorgabe(MENGE, 12)))
+    12.0
+    >>> beispielwert(Block(TEST, uebung="k", feld="reps", vorgabe=Vorgabe(SKALA, 7)))
+    30.0
+    >>> beispielwert(Block(TEST, uebung="p", feld="hold", vorgabe=Vorgabe(ZEIT, 45)))
+    45.0
+    """
+    if block.vorgabe is not None and feld_ist_vorgabe(block.vorgabe, block.feld):
+        return float(block.vorgabe.n)
+    return float(BEISPIELWERT.get(basis_key(block.feld), 30.0))
+
+
+def zielfeld(angebot: Sequence[FieldSpec], *wuensche: str) -> str | None:
+    """Welches Feld eines Tests gewählt ist: der erste Wunsch, der zur Wahl steht — eine
+    **getroffene Wahl bleibt**, solange sie gilt —, sonst das erste Feld des Angebots. Mit
+    Vorgabe sind das die Wiederholungen, bei einer Übung ohne sie das Zeitfeld
+    (`Kurssicht.zielfelder` ordnet so). ``None`` ohne Angebot.
+
+    >>> angebot = [vorrat_feld("reps"), vorrat_feld("hold")]
+    >>> zielfeld(angebot), zielfeld(angebot, "", "hold"), zielfeld(angebot, "weight", "hold")
+    ('reps', 'hold', 'hold')
+    >>> zielfeld(angebot, "weight"), zielfeld([], "hold")
+    ('reps', None)
+    """
+    schluessel = [f.key for f in angebot]
+    for wunsch in wuensche:
+        if wunsch and wunsch in schluessel:
+            return wunsch
+    return schluessel[0] if schluessel else None
 
 
 def marke_ziel(verweis: str) -> str:
@@ -323,21 +607,38 @@ def auswahl_name(block: Block, katalog: Mapping[str, Exercise]) -> str:
     )
 
 
-def name_des_tests(block: Block, katalog: Mapping[str, Exercise], gewaehlte: str = "") -> str:
-    """Wie ein Test im Editor heißt: seine Aufforderung, sonst seine Übung — misst er „die
-    gewählte“ einer Auswahl (``aus``), steht ``gewaehlte`` da (`Kurssicht.wer`).
+def name_des_tests(
+    block: Block, katalog: Mapping[str, Exercise], gewaehlte: str = "", skala: str = ""
+) -> str:
+    """Wie ein Test im Editor heißt — und was über seiner Karte im Kapitel steht: seine
+    Aufforderung, sonst seine Übung — misst er „die gewählte“ einer Auswahl (``aus``), steht
+    ``gewaehlte`` da (`Kurssicht.wer`). Hat er eine **Vorgabe**, steht sie klein dahinter
+    (`core.kurstest.vorgabe_text`; ``skala``: wie die Skala heißt — leer: wie die der Übung).
 
     >>> name_des_tests(Block(TEST, uebung="u"), {}), name_des_tests(Block(TEST, aus="w"), {})
     ('Test', 'die gewählte')
     >>> name_des_tests(Block(TEST, aus="w", titel="Wie viele?"), {}, "die gewählte aus „Wahl“")
     'Wie viele?'
+    >>> kaefer = {"k": Exercise(name="Käfer")}
+    >>> name_des_tests(Block(TEST, uebung="k", vorgabe=Vorgabe(SKALA, 7)), kaefer)
+    'Käfer: bis Anstrengung 7'
+    >>> name_des_tests(Block(TEST, aus="w", vorgabe=Vorgabe(MENGE, 30)), kaefer, "Käfer")
+    'Käfer: 30 Wiederholungen'
+    >>> leicht = Block(TEST, uebung="k", vorgabe=Vorgabe(SKALA, bis=4))
+    >>> name_des_tests(leicht, kaefer, skala="Schwere")
+    'Käfer: solange höchstens Schwere 4'
     """
     if block.titel:
         return block.titel
+    uebung = None if block.aus else katalog.get(block.uebung)
     if block.aus:
-        return gewaehlte or "die gewählte"
-    uebung = katalog.get(block.uebung)
-    return uebung.name if uebung is not None else "Test"
+        name = gewaehlte or "die gewählte"
+    else:
+        name = uebung.name if uebung is not None else "Test"
+    if block.vorgabe is None:
+        return name
+    wie = skala or (skala_name(uebung.result_spec) if uebung is not None else SKALA_NAME)
+    return f"{name}: {vorgabe_text(block.vorgabe, wie, satzanfang=False)}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,6 +661,34 @@ class Vorschau:
     zeilen: tuple[Aenderung, ...] = ()
     wahl: Mapping[str, Sequence[str]] = field(default_factory=dict)
     werte: Mapping[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class Kapitelvorschau:
+    """„So steht es im Kapitel“ für einen Test (`Kurssicht.test_vorschau`, Skizze T5)."""
+
+    #: die Überschrift der Testkarte — bei einem Test, der „die gewählte“ misst, eine je
+    #: Übung der Beispielwahl
+    kopf: tuple[str, ...] = ()
+    #: die Zeilen der Sammelkarte, die ihr Ziel aus diesem Test nehmen — jede mit dem Titel
+    #: ihres Kapitels, wenn es ein späteres ist (sonst leer)
+    zeilen: tuple[tuple[str, Aenderung], ...] = ()
+    #: „Beispiel mit …“ zur ersten Zeile — leer ohne Zeilen
+    beispiel: str = ""
+
+
+def _gemeinsame(je_uebung: Sequence[Sequence[FieldSpec]]) -> tuple[list[FieldSpec], bool]:
+    """Die Felder, die in **jeder** der Listen stehen — hat keines alle gemeinsam, die, die
+    wenigstens in einer stehen (zweiter Wert falsch). Jedes Feld so, wie die erste Liste es
+    nennt, die es hat."""
+    alle: dict[str, FieldSpec] = {}
+    for felder in je_uebung:
+        for f in felder:
+            alle.setdefault(f.key, f)
+    gemeinsam = [
+        f for f in alle.values() if all(any(g.key == f.key for g in fs) for fs in je_uebung)
+    ]
+    return gemeinsam or list(alle.values()), bool(gemeinsam)
 
 
 @dataclass(slots=True)
@@ -482,6 +811,45 @@ class Kurssicht:
             if marke.startswith(GRUNDLAGE) or marke in davor
         ]
 
+    def marke_fuer_weg(self, marke: str, block_id: str = "") -> str:
+        """Womit ein Baustein dieses Kapitels (``block_id`` — leer: ein neuer, am Ende) die
+        Planübung ``marke`` aus dem Bild des Kursplans nennt (`core.kursbild.Planbild.marke`):
+        sie selbst, wenn sie zur Wahl steht (`marken_davor`) — bei einer der Gewählten einer
+        Auswahl (``<block>:<übung>``) ihr Baustein, denn die Blätter bieten „die gewählte“ an,
+        nicht jede einzeln. Leer, wenn der Baustein sie nicht nennen kann: Erst ein späteres
+        Kapitel bringt sie (`bringt`), oder es gibt sie nicht.
+
+        >>> from trainingsapp.core.kurse import VorlageItem
+        >>> eins = Kapitel(id="k1", bloecke=[Block(PLAN_UEBUNG, id="a", uebung="p")])
+        >>> zwei = Kapitel(id="k2", titel="Mehr", bloecke=[
+        ...     Block(AUSWAHL, id="w", uebungen=["x", "y"]),
+        ...     Block(PLAN_UEBUNG, id="dazu", aus="w")])
+        >>> drei = Kapitel(id="k3", titel="Seitlich", bloecke=[
+        ...     Block(PLAN_UEBUNG, id="s", uebung="p")])
+        >>> plan = Kursplan("Plan", vorlage=PlanVorlage("Basis", items=[VorlageItem("p")]))
+        >>> s = Kurssicht(Kurs(kapitel=[eins, zwei, drei], kursplan=plan), "k2", zwei.bloecke, {})
+        >>> s.marke_fuer_weg("a"), s.marke_fuer_weg("dazu:x"), s.marke_fuer_weg("g:1")
+        ('a', 'dazu', 'g:1')
+        >>> s.marke_fuer_weg("s"), s.marke_fuer_weg("fehlt"), s.marke_fuer_weg("dazu", "w")
+        ('', '', '')
+        >>> [(nr, k.titel) for nr, k in (s.bringt("s"), s.bringt("dazu:x"))], s.bringt("g:1")
+        ([(3, 'Seitlich'), (2, 'Mehr')], None)
+        """
+        erlaubt = {m for m, _ in self.marken_davor(block_id)}
+        if marke in erlaubt:
+            return marke
+        ziel = marke_ziel(marke)
+        return ziel if ziel in erlaubt else ""
+
+    def bringt(self, marke: str) -> tuple[int, Kapitel] | None:
+        """Das Kapitel, dessen Baustein „Übung dazu“ die Planübung ``marke`` bringt, mit seiner
+        Nummer (ab 1) — ``None`` für die Grundlage und für eine Marke, die kein Baustein trägt."""
+        ziel = marke_ziel(marke)
+        for nr, (kapitel, liste) in enumerate(self.kapitel(), start=1):
+            if any(b.id == ziel and b.art == PLAN_UEBUNG for b in liste):
+                return nr, kapitel
+        return None
+
     def auswahlen(self) -> list[tuple[str, str]]:
         """Die Auswahl-Blöcke, aus denen „die gewählte“ kommen kann (ID, Name)."""
         return [(b.id, auswahl_name(b, self.katalog)) for b in self.bis_hier() if b.art == AUSWAHL]
@@ -497,7 +865,7 @@ class Kurssicht:
     def tests(self) -> list[tuple[str, str]]:
         """Die Tests, aus denen ein Ziel kommen kann (ID, Name)."""
         return [
-            (b.id, name_des_tests(b, self.katalog, self.wer(b)))
+            (b.id, name_des_tests(b, self.katalog, self.wer(b), self.skala(self.uebungen_von(b))))
             for b in self.bis_hier()
             if b.art == TEST
         ]
@@ -611,14 +979,114 @@ class Kurssicht:
         ]
         if len(je_uebung) <= 1:
             return (je_uebung[0] if je_uebung else []), True
-        alle: dict[str, FieldSpec] = {}
-        for felder in je_uebung:
-            for f in felder:
-                alle.setdefault(f.key, f)
-        gemeinsam = [
-            f for f in alle.values() if all(any(g.key == f.key for g in fs) for fs in je_uebung)
-        ]
-        return geordnet(gemeinsam or list(alle.values())), bool(gemeinsam)
+        felder, gemeinsam = _gemeinsame(je_uebung)
+        return geordnet(felder), gemeinsam
+
+    def zielfelder(
+        self, uebungen: Sequence[str], vorgabe: Vorgabe | None = None
+    ) -> tuple[list[FieldSpec], bool]:
+        """Was bei einem Test **ins Ziel kommen** kann — das Feld, dessen Wert er liefert
+        (`Block.feld`). Ohne Vorgabe wie `testfelder`: was die Übung misst.
+
+        Mit Vorgabe ist der Test ein Lauf mit der Uhr (`core.kurstest`). Zur Wahl steht, was
+        der Lauf vorgibt oder misst, **nie die Skala** (sie ist Selbstauskunft): zuerst die
+        Wiederholungen — wenn die Übung welche hat oder die Vorgabe eine Menge ist —, dann die
+        Zeitfelder der Übung; hat sie keines, „Zeit“ (dorthin zählt die Uhr,
+        `core.uebung_timer.zaehlt_als`). Was die Übung nicht selbst anbietet, bringt der Eintrag
+        des Laufs mit (`core.kurstest.eintrag`). Das erste Feld ist die Vorbelegung
+        (`zielfeld`).
+
+        Bei mehreren Übungen („die gewählte“ einer Auswahl) gilt dasselbe wie in `testfelder`:
+        die Felder, die bei **allen** zur Wahl stehen — haben sie keines gemeinsam, die, die es
+        bei wenigstens einer gibt (zweiter Wert falsch).
+
+        >>> felder = (("p", ("hold", "scale")), ("k", ("reps",)), ("b", ("weight", "reps", "hold")))
+        >>> katalog = {n: Exercise(id=n, result_spec=ResultSpec(
+        ...     fields=[vorrat_feld(k) for k in keys])) for n, keys in felder}
+        >>> s = Kurssicht(Kurs(), "", [], katalog)
+        >>> def keys(uebungen, vorgabe):
+        ...     angebot, gemeinsam = s.zielfelder(uebungen, vorgabe)
+        ...     return [f.key for f in angebot], gemeinsam
+        >>> keys(["k"], Vorgabe(SKALA, 7)), keys(["k"], Vorgabe(MENGE, 30))
+        ((['reps', 'duration'], True), (['reps', 'duration'], True))
+        >>> keys(["p"], Vorgabe(ZEIT, 60)), keys(["p"], Vorgabe(MENGE, 5))
+        ((['hold'], True), (['reps', 'hold'], True))
+        >>> keys(["b"], Vorgabe(SKALA, 7)), keys(["b"], None)
+        ((['reps', 'hold'], True), (['weight', 'reps', 'hold'], True))
+        >>> keys(["k", "b"], Vorgabe(SKALA, 7)), keys(["p", "k"], Vorgabe(SKALA, 7))
+        ((['reps'], True), (['reps', 'duration', 'hold'], False))
+        >>> keys([], Vorgabe(SKALA, 7))
+        ([], True)
+        """
+        if vorgabe is None:
+            return self.testfelder(uebungen)
+        je_uebung: list[list[FieldSpec]] = []
+        for u in dict.fromkeys(uebungen):
+            uebung = self.katalog.get(u)
+            if uebung is None:
+                continue
+            eigene = uebung.result_spec.fields
+            wdh = [f for f in eigene if basis_key(f.key) == _WDH]
+            if not wdh and vorgabe.art == MENGE:
+                wdh = [f for f in (vorrat_feld(_WDH),) if f is not None]
+            zeit = [f for f in eigene if basis_key(f.key) in ZEITFELDER]
+            if not zeit:
+                zeit = [f for f in (vorrat_feld("duration"),) if f is not None]
+            je_uebung.append([*wdh, *zeit])
+        if len(je_uebung) <= 1:
+            return (je_uebung[0] if je_uebung else []), True
+        felder, gemeinsam = _gemeinsame(je_uebung)
+        # die Wiederholungen voran, sonst in der Ordnung des Vorrats
+        return sorted(geordnet(felder), key=lambda f: basis_key(f.key) != _WDH), gemeinsam
+
+    def skala(self, uebungen: Sequence[str]) -> str:
+        """Wie die Skala dieser Übungen heißt (`core.kurstest.skala_name`) — heißt sie nicht
+        bei allen gleich oder ist keine bekannt, „Anstrengung“.
+
+        >>> from dataclasses import replace as mit
+        >>> schwere = ResultSpec(fields=[mit(vorrat_feld("scale"), label="Schwere")])
+        >>> katalog = {"a": Exercise(id="a", result_spec=schwere), "b": Exercise(id="b")}
+        >>> s = Kurssicht(Kurs(), "", [], katalog)
+        >>> s.skala(["a"]), s.skala(["a", "b"]), s.skala([]), s.skala(["b", "fehlt"])
+        ('Schwere', 'Anstrengung', 'Anstrengung', 'Anstrengung')
+        """
+        namen = {
+            skala_name(self.katalog[u].result_spec)
+            for u in dict.fromkeys(uebungen)
+            if u in self.katalog
+        }
+        return namen.pop() if len(namen) == 1 else SKALA_NAME
+
+    def misst(self, block: Block) -> list[str]:
+        """„Gemessen wird“ — die Größen, die der Lauf eines Tests mit Vorgabe misst, in Worten
+        (`core.kurstest.gemessen`): alle außer der Vorgabe. Die Wiederholungen stehen nur
+        dabei, wenn der Lauf sie bei wenigstens einer seiner Übungen einträgt
+        (`core.kurstest.felder`: Die Übung hat welche — oder sie kommen ins Ziel); solange
+        keine Übung gewählt ist, auch. Ohne Vorgabe misst kein Lauf.
+
+        >>> felder = (("p", ("hold",)), ("k", ("reps",)))
+        >>> katalog = {n: Exercise(id=n, result_spec=ResultSpec(
+        ...     fields=[vorrat_feld(k) for k in keys])) for n, keys in felder}
+        >>> s = Kurssicht(Kurs(), "", [], katalog)
+        >>> s.misst(Block(TEST, uebung="k", feld="reps", vorgabe=Vorgabe(SKALA, 7)))
+        ['Wiederholungen', 'Zeit']
+        >>> s.misst(Block(TEST, uebung="k", feld="reps", vorgabe=Vorgabe(MENGE, 30)))
+        ['Zeit', 'Anstrengung']
+        >>> s.misst(Block(TEST, uebung="p", feld="hold", vorgabe=Vorgabe(ZEIT, 60)))
+        ['Anstrengung']
+        >>> s.misst(Block(TEST, uebung="p", feld="hold", vorgabe=Vorgabe(SKALA, 7)))
+        ['Zeit']
+        >>> s.misst(Block(TEST, uebung="k", feld="reps"))
+        []
+        >>> s.misst(Block(TEST, vorgabe=Vorgabe(ZEIT, 9)))  # noch keine Übung gewählt
+        ['Wiederholungen', 'Anstrengung']
+        """
+        if block.vorgabe is None:
+            return []
+        ids = self.uebungen_von(block)
+        zaehlt = not ids or any(lauf_felder(block, self.katalog[u]).wdh is not None for u in ids)
+        namen = {**GROESSEN, ANSTRENGUNG: self.skala(ids)}
+        return [namen[g] for g in gemessen(block.vorgabe, zaehlt_wdh=zaehlt)]
 
     def parameter(self, uebungen: Sequence[str]) -> tuple[list[FieldSpec], list[FieldSpec]]:
         """Was ein Baustein als Parameter anbieten kann — wie in „Im Plan einstellen“
@@ -678,9 +1146,9 @@ class Kurssicht:
     def kurz(self, block: Block) -> str:
         """Der Baustein in einer Zeile der Liste „Am Plan“ (K5): „die gewählte, hinter
         Planke“, „Käfer: Timer …“, „Planke → die gewählte · Zeit ab · Pflicht“ — und der Test
-        (für die Rückfrage beim Löschen): „die gewählte · Wiederholungen“."""
+        (auch für die Rückfrage beim Löschen): „die gewählte · Wiederholungen“ (`test_kurz`)."""
         if block.art == TEST:
-            return f"{self.wer(block)} · {self.feld(self.uebungen_von(block), block.feld).label}"
+            return self.test_kurz(block)
         if block.art == PLAN_UEBUNG:
             wo = f"hinter {self.marke_name(block.hinter)}" if block.hinter else "ans Ende"
             angaben = self._angaben(block, self.uebungen_von(block))
@@ -702,6 +1170,50 @@ class Kurssicht:
                 teile.append("von selbst")
             return " · ".join(teile)
         return ""
+
+    def test_kurz(
+        self, block: Block, *, kapitelplan: bool = False, fehlt: str = "Übung fehlt"
+    ) -> str:
+        """Der Test in einer Zeile: seine Übung, mit Vorgabe diese klein dahinter („Käfer: bis
+        Anstrengung 7“, `core.kurstest.vorgabe_text`), dann das Feld, dessen Wert ins Ziel
+        kommt — außer es ist die Vorgabe selbst (`feld_ist_vorgabe`): Sie steht schon da.
+
+        ``kapitelplan``: Der Wert wird von selbst zum Ziel im Kapitelplan
+        (`core.kursbloecke.vorlage_anwenden`, mit dem Faktor des Tests) — dann steht das statt
+        des Feldes da. ``fehlt``: was steht, wenn es die Übung nicht (mehr) gibt.
+
+        >>> katalog = {"k": Exercise(id="k", name="Käfer",
+        ...                          result_spec=ResultSpec(fields=[vorrat_feld("reps")]))}
+        >>> s = Kurssicht(Kurs(), "", [], katalog)
+        >>> s.test_kurz(Block(TEST, uebung="k", feld="reps"))
+        'Käfer · Wiederholungen'
+        >>> s.test_kurz(Block(TEST, uebung="k", feld="reps", vorgabe=Vorgabe(SKALA, 7)))
+        'Käfer: bis Anstrengung 7 · Wiederholungen'
+        >>> s.test_kurz(Block(TEST, uebung="k", feld="reps", vorgabe=Vorgabe(MENGE, 30)))
+        'Käfer: 30 Wiederholungen'
+        >>> s.test_kurz(Block(TEST, uebung="k", feld="duration", vorgabe=Vorgabe(MENGE, 30)))
+        'Käfer: 30 Wiederholungen · Zeit'
+        >>> s.test_kurz(Block(TEST, uebung="k", feld="reps", faktor=0.8,
+        ...                   vorgabe=Vorgabe(ZEIT, 60)), kapitelplan=True)
+        'Käfer: 1 Minute — wird Ziel im Plan (80 %)'
+        >>> s.test_kurz(Block(TEST, uebung="x"), kapitelplan=True, fehlt="Übung wählen")
+        'Übung wählen — wird Ziel im Plan'
+        """
+        uebungen = self.uebungen_von(block)
+        if block.aus:
+            kopf = self.wer(block)
+        else:
+            gefunden = self.katalog.get(block.uebung)
+            kopf = gefunden.name if gefunden is not None else fehlt
+        if block.vorgabe is not None:
+            wie = vorgabe_text(block.vorgabe, self.skala(uebungen), satzanfang=False)
+            kopf = f"{kopf}: {wie}"
+        if kapitelplan:
+            anteil = f" ({round(block.faktor * 100)} %)" if block.faktor != 1.0 else ""
+            return f"{kopf} — wird Ziel im Plan{anteil}"
+        if feld_ist_vorgabe(block.vorgabe, block.feld):
+            return kopf
+        return f"{kopf} · {self.feld(uebungen, block.feld).label}"
 
     def _angaben(self, block: Block, uebungen: Sequence[str]) -> list[str]:
         teile: list[str] = []
@@ -783,11 +1295,29 @@ class Kurssicht:
 
     # -- Vorschau --------------------------------------------------------------------------------
 
+    def beispielwahl(self) -> dict[str, list[str]]:
+        """Die Beispielwahl der Vorschau: je Auswahl ihre ersten Übungen — so viele, wie man
+        wählt.
+
+        >>> kap = Kapitel(id="k", bloecke=[Block(AUSWAHL, id="w", uebungen=["a", "x", "b"],
+        ...                                      anzahl=2)])
+        >>> katalog = {"a": Exercise(id="a"), "b": Exercise(id="b")}
+        >>> Kurssicht(Kurs(kapitel=[kap]), "k", kap.bloecke, katalog).beispielwahl()
+        {'w': ['a', 'b']}
+        """
+        return {
+            b.id: gewaehlt
+            for b in self.alle()
+            if b.art == AUSWAHL
+            and (gewaehlt := [u for u in b.uebungen if u in self.katalog][: b.anzahl])
+        }
+
     def vorschau(self) -> Vorschau:
         """Die Zeilen, die Teilnehmende im bearbeiteten Kapitel sähen — auf einem
         **Beispielplan**: die Grundlage, darauf alle Zeilen der Kapitel davor übernommen; je
-        Auswahl sind ihre ersten Übungen gewählt, je Test gilt ein Beispielwert
-        (`BEISPIELWERT`) — bei einem Test, der „die gewählte“ misst, je gewählter Übung
+        Auswahl sind ihre ersten Übungen gewählt (`beispielwahl`), je Test gilt ein
+        Beispielwert (`beispielwert`: nach der Art seines Feldes — oder die Vorgabe selbst) —
+        bei einem Test, der „die gewählte“ misst, je gewählter Übung
         (`core.kursbloecke.wert_schluessel`). Gerechnet wird mit `core.kursplan.aenderungen`
         und `anwenden` — wie in `KursRepo.plan_aenderungen`. Ein Kurs ohne Kursplan hat keine
         Zeilen."""
@@ -795,14 +1325,9 @@ class Kurssicht:
             return Vorschau()
         kapitel = self.kapitel()
         alle = [b for _, liste in kapitel for b in liste]
-        wahl = {
-            b.id: gewaehlt
-            for b in alle
-            if b.art == AUSWAHL
-            and (gewaehlt := [u for u in b.uebungen if u in self.katalog][: b.anzahl])
-        }
+        wahl = self.beispielwahl()
         werte = {
-            wert_schluessel(b, u): BEISPIELWERT.get(basis_key(b.feld), 30.0)
+            wert_schluessel(b, u): beispielwert(b)
             for b in alle
             if b.art == TEST
             for u in gemessene_uebungen(b, wahl)
@@ -861,6 +1386,71 @@ class Kurssicht:
                 wert = zielwert_text(self.feld(gemessen, test.feld), werte[0])
                 teile.append(f"dem Testwert {wert}")
         return f"Beispiel mit {' und '.join(teile)}." if teile else ""
+
+    def test_vorschau(self, block: Block) -> Kapitelvorschau:
+        """„So steht es im Kapitel“ für den Test ``block``, wie er im Dialog gerade steht:
+
+        - die **Überschrift der Testkarte** (`name_des_tests`: die Aufforderung, sonst die
+          Übung und ihre Vorgabe) — misst er „die gewählte“, je Übung der Beispielwahl eine;
+        - im Kurs mit Kursplan die **Zeilen der Sammelkarte**, die ihr Ziel aus diesem Test
+          nehmen — in diesem Kapitel und in späteren (ein Baustein darf den Test eines
+          früheren Kapitels nennen). Sie kommen aus `vorschau` des jeweiligen Kapitels, also
+          aus `core.kursplan.aenderungen`: Hier wird kein Text nachgebaut.
+
+        >>> katalog = {"k": Exercise(id="k", name="Käfer",
+        ...                          result_spec=ResultSpec(fields=[vorrat_feld("reps")]))}
+        >>> test = Block(TEST, id="t", uebung="k", feld="reps", vorgabe=Vorgabe(SKALA, 7))
+        >>> kap = Kapitel(id="a", bloecke=[test, Block(PLAN_UEBUNG, id="b", uebung="k",
+        ...                                              ziel_aus="t", faktor=0.8)])
+        >>> kurs = Kurs(kapitel=[kap], kursplan=Kursplan("Plan"))
+        >>> v = Kurssicht(kurs, "a", kap.bloecke, katalog).test_vorschau(test)
+        >>> v.kopf, [(wo, z.titel) for wo, z in v.zeilen]
+        (('Käfer: bis Anstrengung 7',), [('', 'Ziel für Käfer: 24 Wiederholungen')])
+        >>> v.zeilen[0][1].unter
+        '80 % von deinem Test (30 Wdh. bis Anstrengung 7)'
+        >>> v.beispiel
+        'Beispiel mit dem Testwert 30 Wiederholungen.'
+        >>> ohne = Kurssicht(Kurs(kapitel=[kap]), "a", kap.bloecke, katalog).test_vorschau(test)
+        >>> ohne.kopf, ohne.zeilen
+        (('Käfer: bis Anstrengung 7',), ())
+        """
+        sicht = self.mit(block)
+        gemessen = [u for u in gemessene_uebungen(block, sicht.beispielwahl()) if u in self.katalog]
+        if block.aus and gemessen and not block.titel:
+            kopf = tuple(
+                name_des_tests(block, self.katalog, self.name(u), self.skala([u])) for u in gemessen
+            )
+        else:
+            wie = self.skala(sicht.uebungen_von(block))
+            kopf = (name_des_tests(block, self.katalog, sicht.wer(block), wie),)
+        zeilen: list[tuple[str, Aenderung]] = []
+        beispiel = ""
+        ab_hier = False
+        for k, liste in sicht.kapitel():
+            hier = k.id == sicht.kapitel_id
+            ab_hier = ab_hier or hier
+            nehmen = {b.id for b in liste if b.baustein and marke_ziel(b.ziel_aus) == block.id}
+            if not ab_hier or not nehmen:
+                continue
+            dort = (
+                sicht
+                if hier
+                else replace(
+                    sicht,
+                    kapitel_id=k.id,
+                    bloecke=liste,
+                    andere={**sicht.andere, sicht.kapitel_id: sicht.bloecke},
+                )
+            )
+            vorschau = dort.vorschau()
+            for z in vorschau.zeilen:
+                if z.art != ZIEL or z.block_id not in nehmen:
+                    continue
+                zeilen.append(("" if hier else k.titel or "Kapitel", z))
+                baustein = dort.block(z.block_id)
+                if not beispiel and baustein is not None:
+                    beispiel = dort.beispiel_text(baustein, vorschau)
+        return Kapitelvorschau(kopf, tuple(zeilen), beispiel)
 
 
 def folgen_anwenden(bloecke: Sequence[Block], folgen: Iterable[Folge]) -> list[Block]:
@@ -956,16 +1546,30 @@ def _kursplan_kopie(
 
 
 __all__ = [
+    "AB",
     "BEISPIELWERT",
+    "FAKTOR_MAX",
+    "FAKTOR_MIN",
     "FELDNAME",
+    "HOECHSTENS",
     "ID_VORSATZ",
     "MIT_GELOESCHT",
+    "OHNE",
+    "SKALA_FORMEN",
     "TESTFELDER",
     "VERWEISFELDER",
+    "VON_BIS",
+    "VORGABE_WAHL",
     "Folge",
+    "Kapitelvorschau",
     "Kurssicht",
+    "Vorgabenwahl",
     "Vorschau",
     "auswahl_name",
+    "beispielwert",
+    "faktor_lesen",
+    "faktor_text",
+    "feld_ist_vorgabe",
     "folgen_anwenden",
     "kante_dict",
     "kante_von",
@@ -980,4 +1584,5 @@ __all__ = [
     "umschreiben",
     "vergebene_ids",
     "verweise",
+    "zielfeld",
 ]

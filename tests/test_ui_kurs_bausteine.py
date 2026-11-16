@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import doctest
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -19,16 +20,27 @@ ft = pytest.importorskip("flet")
 
 from trainingsapp.core import ablauf as ab  # noqa: E402
 from trainingsapp.core.eigenes_paket import noetige_uebungen  # noqa: E402
-from trainingsapp.core.kursbau import Kurssicht, timer_kern  # noqa: E402
+from trainingsapp.core.kursbau import (  # noqa: E402
+    AB,
+    HOECHSTENS,
+    OHNE,
+    VON_BIS,
+    Kurssicht,
+    timer_kern,
+)
 from trainingsapp.core.kursbloecke import (  # noqa: E402
     AUSWAHL,
     HART,
+    MENGE,
     PLAN_EINSTELLEN,
     PLAN_UEBUNG,
     PLAN_WEG,
+    SKALA,
     TEST,
     TEXT,
+    ZEIT,
     Block,
+    Vorgabe,
 )
 from trainingsapp.core.kurse import (  # noqa: E402
     TAGE,
@@ -39,6 +51,7 @@ from trainingsapp.core.kurse import (  # noqa: E402
     PlanVorlage,
     VorlageItem,
 )
+from trainingsapp.core.kursplan import ZIEL  # noqa: E402
 from trainingsapp.core.models import Exercise, Plan, Session  # noqa: E402
 from trainingsapp.core.pakete import (  # noqa: E402
     Paket,
@@ -62,6 +75,7 @@ from trainingsapp.ui.components.baustein_form import (  # noqa: E402
     TAKT,
     WAEHLEN,
 )
+from trainingsapp.ui.components.kursplan_bild import KEIN_BAUSTEIN  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views import kurs_bearbeiten as editor  # noqa: E402
 from trainingsapp.ui.views.kurs_bearbeiten import (  # noqa: E402
@@ -937,7 +951,7 @@ def test_test_misst_die_gewaehlte(page, state) -> None:
     karte = state.kurse.plan_aenderungen(kurs, zwei, profil, {"w": [u["Käfer"].id]})
     assert [(z.titel, z.unter) for z in karte][:2] == [
         ("Käfer kommt dazu", "hinter Seitstütz"),
-        ("Ziel für Käfer: 15 Wiederholungen", "aus deinem Test"),
+        ("Ziel für Käfer: 15 Wiederholungen", "50 % von deinem Test (30 Wdh.)"),
     ]
     for z in karte[:2]:
         assert z.titel in vorschau and z.unter in vorschau
@@ -994,6 +1008,605 @@ def test_test_misst_die_gewaehlte_auch_mit_kapitelplan(page, state) -> None:
     )
 
 
+# -- Der Test mit Vorgabe (Skizze T5) ----------------------------------------------------------
+
+
+def _test_oeffnen(page, ansicht, block_id: str = "t"):
+    """Der Dialog des Tests ``block_id`` im Kapitel-Formular."""
+    _daten(ansicht, ("block", block_id)).on_click()
+    dialog = page.dialoge[-1]
+    assert isinstance(dialog, ft.AlertDialog) and dialog.title.value == "Test"
+    return dialog
+
+
+def _vorgabe(dialog, art: str) -> None:
+    """Ein Tipp auf einen der vier Knöpfe unter „Vorgabe — wann der Test endet“."""
+    _daten(dialog, ("test_vorgabe", art)).on_select()
+
+
+def _zu_sehen(wurzel, ziel) -> bool:
+    """Ist ``ziel`` unter ``wurzel`` zu sehen — es selbst und alles, worin es steckt?"""
+
+    def suche(c, sichtbar: bool) -> bool | None:
+        sichtbar = sichtbar and c.visible is not False
+        if c is ziel:
+            return sichtbar
+        for name in ("content", "controls"):
+            kind = getattr(c, name, None)
+            for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
+                if isinstance(k, ft.BaseControl) and (gefunden := suche(k, sichtbar)) is not None:
+                    return gefunden
+        return None
+
+    return bool(suche(wurzel, True))
+
+
+def _gewaehlt(dialog, kennung: str) -> list[str]:
+    """Welche Knöpfe einer Reihe gewählt sind (``(kennung, <wert>)``)."""
+    return [
+        x.data[1]
+        for x in _alle(dialog)
+        if isinstance(x, ft.Chip)
+        and isinstance(x.data, tuple)
+        and x.data[0] == kennung
+        and x.selected
+    ]
+
+
+def _zeit_stellen(page, dialog, text: str) -> None:
+    """Die Zeit der Vorgabe im Blatt für jede Zeit, das über dem Dialog aufgeht: eintippen,
+    „Übernehmen“ — gestellt ist, sobald das Blatt zu ist."""
+    _daten(dialog, "test_zeit").on_click()
+    blatt = page.dialoge[-1]
+    assert isinstance(blatt, ft.BottomSheet) and "Zeit stellen" in _texte(blatt)
+    feld = next(x for x in _alle(blatt) if isinstance(x, ft.TextField))
+    feld.value = text
+    knopf = next(
+        x for x in _alle(blatt) if isinstance(x, ft.FilledButton) and x.content == "Übernehmen"
+    )
+    knopf.on_click()
+    asyncio.run(blatt.on_dismiss(None))
+
+
+def _test_im_kurs(state: AppState, kurs: Kurs, block_id: str = "t") -> Block:
+    return next(
+        b for k in state.kurse.laden(kurs.id).kapitel for b in k.bloecke if b.id == block_id
+    )
+
+
+def test_test_dialog_ohne_vorgabe_wie_bisher(page, state) -> None:
+    """Ohne Vorgabe steht der Dialog da wie bisher — dazu die Wahl, auf „Ohne“: kein „Gemessen
+    wird“, keine Vorschau, das Feld heißt „Was wird gemessen“, und der Block bleibt ohne."""
+    kurs, _ = _kurs(state)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[1])
+    dialog = _test_oeffnen(page, ansicht)
+    assert "VORGABE — WANN DER TEST ENDET" in _texte(dialog)
+    assert _daten_ids(dialog, "test_vorgabe") == [OHNE, MENGE, ZEIT, SKALA]
+    assert _gewaehlt(dialog, "test_vorgabe") == [OHNE]
+    feld = _daten(dialog, "test_feld")
+    assert (feld.label, feld.value) == ("Was wird gemessen", "reps")
+    for teil in (
+        "test_gemessen",
+        "test_vorschau",
+        "test_menge",
+        "test_zeit",
+        ("test_skala_form", AB),
+        ("test_skala_wert", AB),
+    ):
+        assert not _zu_sehen(dialog, _daten(dialog, teil)), teil
+    assert _zu_sehen(dialog, feld)
+    _daten(dialog, "block_uebernehmen").on_click()
+    assert "Käfer · Wiederholungen" in _texte(ansicht)
+    _speichern(ansicht)
+    assert _test_im_kurs(state, kurs).vorgabe is None
+
+
+def test_test_mit_vorgabe_einstellen_speichern_wieder_oeffnen(page, state) -> None:
+    """Ben, 16.11.2026 (Skizze T5): Die Autorin gibt dem Test eine Vorgabe — Menge, Zeit oder
+    Anstrengung (ab · höchstens · von–bis). Jede lässt sich einstellen und speichern (der Block
+    trägt die `Vorgabe`), steht nach dem Öffnen wieder so da, und „Ohne“ nimmt sie wieder weg.
+    Dazu: was gemessen wird, die Zeile der Liste, die Vorschau „So steht es im Kapitel“ mit der
+    Zeile der Sammelkarte, wie `Kurssicht.vorschau` sie liefert."""
+    kurs, u = _kurs(state)
+    zwei = kurs.kapitel[1]
+
+    def oeffnen() -> tuple[ft.View, ft.AlertDialog]:
+        frisch = state.kurse.laden(kurs.id)
+        ansicht = kapitel_bearbeiten(page, state, frisch, frisch.kapitel[1])
+        return ansicht, _test_oeffnen(page, ansicht)
+
+    def sichern(ansicht, dialog) -> Block:
+        _daten(dialog, "block_uebernehmen").on_click()
+        _speichern(ansicht)
+        return _test_im_kurs(state, kurs)
+
+    def wert(dialog, marke: str) -> str:
+        return str(_daten(dialog, ("test_skala_wert", marke)).value)
+
+    # -- Anstrengung „ab“: −/+ stellen die Marke ------------------------------------------
+    ansicht, dialog = oeffnen()
+    _vorgabe(dialog, SKALA)
+    assert _gewaehlt(dialog, "test_vorgabe") == [SKALA]
+    assert _gewaehlt(dialog, "test_skala_form") == [AB] and wert(dialog, AB) == "7"
+    feld = _daten(dialog, "test_feld")
+    assert (feld.label, feld.value) == ("Ins Ziel kommt", "reps")
+    assert [(o.key, o.text) for o in feld.options] == [
+        ("reps", "Wiederholungen"),
+        ("duration", "Zeit"),
+    ]
+    assert _texte(_daten(dialog, "test_gemessen")) == ["GEMESSEN WIRD", "Wiederholungen", "Zeit"]
+    assert "mal" not in _felder(dialog)  # Kursplan: Den Faktor trägt der Baustein
+    vorschau = _daten(dialog, "test_vorschau")
+    assert vorschau.visible is True
+    assert _texte(vorschau)[:2] == ["SO STEHT ES IM KAPITEL", "Käfer: bis Anstrengung 7"]
+    _daten(dialog, ("test_skala_minus", AB)).on_click()
+    assert wert(dialog, AB) == "6"
+    assert _texte(_daten(dialog, "test_vorschau"))[1] == "Käfer: bis Anstrengung 6"
+    # Die Zeile der Sammelkarte kommt aus der Vorschau des Kapitels — Wort für Wort
+    entwurf = replace(next(b for b in zwei.bloecke if b.id == "t"), vorgabe=Vorgabe(SKALA, 6))
+    sicht = Kurssicht(kurs, zwei.id, zwei.bloecke, {x.id: x for x in u.values()}).mit(entwurf)
+    (ziel,) = [z for z in sicht.vorschau().zeilen if z.block_id == "b2" and z.art == ZIEL]
+    assert ziel.titel == "Ziel für Käfer: 15 Wiederholungen" and "Anstrengung 6" in ziel.unter
+    assert f"Sammelkarte: „{ziel.titel} — {ziel.unter}“" in _texte(_daten(dialog, "test_vorschau"))
+    assert any(
+        t.startswith("Beispiel mit der Wahl „Käfer“ und dem Testwert 30 Wiederholungen.")
+        for t in _texte(_daten(dialog, "test_vorschau"))
+    )
+    _daten(dialog, "block_uebernehmen").on_click()
+    assert "Käfer: bis Anstrengung 6 · Wiederholungen" in _texte(ansicht)  # die Zeile der Liste
+    # … und der Baustein nennt den Test so in seiner Wahl „Ziel“
+    _daten(ansicht, ("baustein", "b2")).on_click()
+    ziel_wahl = _daten(page.dialoge[-1], "baustein_ziel")
+    assert {o.key: o.text for o in ziel_wahl.options}["test:t"] == (
+        "aus dem Test „Käfer: bis Anstrengung 6“"
+    )
+    _daten(page.dialoge[-1], "baustein_abbrechen").on_click()
+    _speichern(ansicht)
+    assert _test_im_kurs(state, kurs).vorgabe == Vorgabe(SKALA, 6)
+
+    # -- wieder öffnen zeigt dieselben Werte; „höchstens“ und „von–bis“ --------------------
+    ansicht, dialog = oeffnen()
+    assert _gewaehlt(dialog, "test_vorgabe") == [SKALA]
+    assert _gewaehlt(dialog, "test_skala_form") == [AB] and wert(dialog, AB) == "6"
+    assert _daten(dialog, "test_feld").value == "reps"
+    _daten(dialog, ("test_skala_form", HOECHSTENS)).on_select()
+    assert wert(dialog, HOECHSTENS) == "4"
+    _daten(dialog, ("test_skala_plus", HOECHSTENS)).on_click()
+    assert _texte(_daten(dialog, "test_vorschau"))[1] == "Käfer: solange höchstens Anstrengung 5"
+    assert sichern(ansicht, dialog).vorgabe == Vorgabe(SKALA, 0, 5)
+    ansicht, dialog = oeffnen()
+    assert _gewaehlt(dialog, "test_skala_form") == [HOECHSTENS] and wert(dialog, HOECHSTENS) == "5"
+    _daten(dialog, ("test_skala_form", VON_BIS)).on_select()
+    assert (wert(dialog, "von"), wert(dialog, "bis")) == ("5", "7")
+    for _ in range(9):  # „von“ bleibt unter „bis“, „bis“ unter 10
+        _daten(dialog, ("test_skala_plus", "bis")).on_click()
+    for _ in range(2):
+        _daten(dialog, ("test_skala_minus", "von")).on_click()
+    assert (wert(dialog, "von"), wert(dialog, "bis")) == ("3", "9")
+    assert _daten(dialog, ("test_skala_plus", "bis")).disabled is True
+    assert sichern(ansicht, dialog).vorgabe == Vorgabe(SKALA, 3, 9)
+    ansicht, dialog = oeffnen()
+    assert _gewaehlt(dialog, "test_skala_form") == [VON_BIS]
+    assert (wert(dialog, "von"), wert(dialog, "bis")) == ("3", "9")
+
+    # -- Menge: Zahl der Wiederholungen; die Vorgabe ist der Beispielwert -----------------
+    _vorgabe(dialog, MENGE)
+    menge = _daten(dialog, "test_menge")
+    assert menge.value == "30" and _daten(dialog, "test_feld").value == "reps"
+    assert _texte(_daten(dialog, "test_gemessen")) == ["GEMESSEN WIRD", "Zeit", "Anstrengung"]
+    menge.value = ""
+    menge.on_blur()
+    assert any("braucht eine Zahl" in t for t in _texte(_daten(dialog, "test_vorschau")))
+    _daten(dialog, "block_uebernehmen").on_click()  # ohne Zahl wird nichts übernommen
+    assert "Die Vorgabe „Menge“ braucht eine Zahl von Wiederholungen." in _texte(dialog)
+    assert "Käfer: zwischen Anstrengung 3 und 9 · Wiederholungen" in _texte(ansicht)
+    menge.value = "12"
+    menge.on_blur()
+    texte = _texte(_daten(dialog, "test_vorschau"))
+    assert texte[1] == "Käfer: 12 Wiederholungen"
+    assert any(t.startswith("Sammelkarte: „Ziel für Käfer: 6 Wiederholungen — ") for t in texte)
+    _daten(dialog, "block_uebernehmen").on_click()
+    assert "Käfer: 12 Wiederholungen" in _texte(ansicht)  # ohne „· Wiederholungen“ dahinter
+    _speichern(ansicht)
+    assert _test_im_kurs(state, kurs).vorgabe == Vorgabe(MENGE, 12)
+    ansicht, dialog = oeffnen()
+    assert _gewaehlt(dialog, "test_vorgabe") == [MENGE]
+    assert _daten(dialog, "test_menge").value == "12"
+
+    # -- Zeit: das Blatt für jede Zeit ---------------------------------------------------
+    _vorgabe(dialog, ZEIT)
+    assert _daten(dialog, "test_zeit").content == "1:00"
+    _zeit_stellen(page, dialog, "1:30")
+    assert _daten(dialog, "test_zeit").content == "1:30"
+    assert _texte(_daten(dialog, "test_vorschau"))[1] == "Käfer: 1:30 Minuten"
+    assert _texte(_daten(dialog, "test_gemessen")) == [
+        "GEMESSEN WIRD",
+        "Wiederholungen",
+        "Anstrengung",
+    ]
+    assert sichern(ansicht, dialog).vorgabe == Vorgabe(ZEIT, 90)
+    ansicht, dialog = oeffnen()
+    assert _gewaehlt(dialog, "test_vorgabe") == [ZEIT]
+    assert _daten(dialog, "test_zeit").content == "1:30"
+    assert "Käfer: 1:30 Minuten · Wiederholungen" in _texte(ansicht)
+
+    # -- als Paket hinaus und wieder herein: Die Vorgabe reist mit ------------------------
+    frisch = state.kurse.laden(kurs.id)
+    assert _paketpruefung(state, frisch)[0] == []
+    _, gebaut, wieder = _rundreise(state, frisch)
+    for inhalt in (gebaut, wieder):
+        (gelesen,) = inhalt.kurse
+        assert [b.vorgabe for b in gelesen.kapitel[1].bloecke if b.art == TEST] == [
+            Vorgabe(ZEIT, 90)
+        ]
+
+    # -- „Ohne“ nimmt die Vorgabe weg ------------------------------------------------------
+    _vorgabe(dialog, OHNE)
+    assert _daten(dialog, "test_vorschau").visible is False
+    assert _daten(dialog, "test_gemessen").visible is False
+    assert _daten(dialog, "test_feld").label == "Was wird gemessen"
+    assert sichern(ansicht, dialog).vorgabe is None
+    ansicht, dialog = oeffnen()
+    assert _gewaehlt(dialog, "test_vorgabe") == [OHNE]
+    assert "Käfer · Wiederholungen" in _texte(ansicht)
+
+
+def test_umschalten_der_vorgabe_belegt_ins_ziel_kommt_vor(page, state) -> None:
+    """Vorbelegt ist bei Vorgabe Menge die Vorgabe selbst (Wiederholungen), sonst das Gemessene
+    — die Wiederholungen, bei einer Übung ohne sie das Zeitfeld. Was von Hand gewählt oder
+    schon gespeichert ist, bleibt, solange es zur Wahl steht."""
+    kurs, u = _kurs(state)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[1])
+
+    def neuer_test(uebung: str) -> ft.AlertDialog:
+        _daten(ansicht, ("block_neu", TEST)).on_click()
+        dialog = page.dialoge[-1]
+        wahl = _felder(dialog)["Übung"]
+        wahl.value = u[uebung].id
+        wahl.on_select()
+        return dialog
+
+    def stand(dialog) -> tuple[list[str], str]:
+        feld = _daten(dialog, "test_feld")
+        return [o.key for o in feld.options], feld.value
+
+    # Die Planke hält: Wiederholungen gibt es nur, wenn die Vorgabe sie verlangt
+    dialog = neuer_test("Planke")
+    assert stand(dialog) == (["hold"], "hold")
+    _vorgabe(dialog, MENGE)
+    assert stand(dialog) == (["reps", "hold"], "reps")  # die Vorgabe selbst
+    assert _texte(_daten(dialog, "test_gemessen")) == ["GEMESSEN WIRD", "Zeit", "Anstrengung"]
+    _vorgabe(dialog, ZEIT)
+    assert stand(dialog) == (["hold"], "hold")
+    assert _texte(_daten(dialog, "test_gemessen")) == ["GEMESSEN WIRD", "Anstrengung"]
+    _vorgabe(dialog, SKALA)
+    assert stand(dialog) == (["hold"], "hold")  # das Gemessene: die Zeit
+    assert _texte(_daten(dialog, "test_gemessen")) == ["GEMESSEN WIRD", "Zeit"]
+    # von Hand gewählt: bleibt, solange es zur Wahl steht
+    _vorgabe(dialog, MENGE)
+    feld = _daten(dialog, "test_feld")
+    assert feld.value == "reps"
+    feld.value = "hold"
+    feld.on_select()
+    _vorgabe(dialog, ZEIT)
+    _vorgabe(dialog, MENGE)
+    assert stand(dialog) == (["reps", "hold"], "hold")
+    _vorgabe(dialog, OHNE)
+    assert stand(dialog) == (["hold"], "hold")
+    _vorgabe(dialog, MENGE)
+    _daten(dialog, "block_uebernehmen").on_click()
+    assert "Planke: 30 Wiederholungen · Haltezeit" in _texte(ansicht)
+
+    # Käfer zählt: Wiederholungen bei jeder Vorgabe, daneben die Zeit der Uhr
+    dialog = neuer_test("Käfer")
+    assert stand(dialog) == (["reps"], "reps")
+    for art in (MENGE, ZEIT, SKALA):
+        _vorgabe(dialog, art)
+        assert stand(dialog) == (["reps", "duration"], "reps"), art
+    feld = _daten(dialog, "test_feld")
+    feld.value = "duration"
+    feld.on_select()
+    _vorgabe(dialog, MENGE)
+    assert stand(dialog)[1] == "duration"
+    _daten(dialog, "block_uebernehmen").on_click()
+    assert "Käfer: 30 Wiederholungen · Zeit" in _texte(ansicht)
+
+    # Gespeichert gilt als gewählt: Der Test „t“ misst Wiederholungen — das bleibt
+    dialog = _test_oeffnen(page, ansicht)
+    for art in (SKALA, ZEIT, MENGE, OHNE):
+        _vorgabe(dialog, art)
+        assert _daten(dialog, "test_feld").value == "reps"
+    # Die Übung wechselt: Was nicht mehr zur Wahl steht, weicht der Vorbelegung
+    _vorgabe(dialog, SKALA)
+    wahl = _felder(dialog)["Übung"]
+    wahl.value = u["Planke"].id
+    wahl.on_select()
+    assert stand(dialog) == (["hold"], "hold")
+    assert _texte(_daten(dialog, "test_vorschau"))[1] == "Planke: bis Anstrengung 7"
+
+
+def test_faktor_des_tests_gilt_im_kapitelplan(page, state) -> None:
+    """Wo der Faktor gilt: Im Kapitelplan nimmt `vorlage_anwenden` den des Tests — dort steht
+    er im Dialog, ohne Vorgabe als „Ziel in % des Tests“, mit Vorgabe als „mal“ neben dem
+    Feld (dieselbe Zahl). Im Kursplan nimmt die Sammelkarte den des Bausteins — der Test-Dialog
+    zeigt dort keinen."""
+    u = _uebungen(state)
+    kurs = editor.kurs_anlegen(state)
+    kapitel = kurs.kapitel[0]
+    kapitel.plaene = [PlanVorlage("Rumpf", items=[VorlageItem(u["Planke"].id)])]
+    kapitel.bloecke = [Block(TEST, id="t", uebung=u["Planke"].id, feld="hold", faktor=0.8)]
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    assert "Planke — wird Ziel im Plan (80 %)" in _texte(ansicht)
+    dialog = _test_oeffnen(page, ansicht)
+    prozent, mal = _felder(dialog)["Ziel in % des Tests"], _daten(dialog, "test_mal")
+    assert (prozent.value, prozent.visible, mal.visible) == ("80", True, False)
+    _vorgabe(dialog, ZEIT)
+    assert (mal.label, mal.value, mal.visible, prozent.visible) == ("mal", "0,8", True, False)
+    assert _daten(dialog, "test_feld").value == "hold"  # gespeichert: bleibt
+    # nur die Überschrift — eine Sammelkarte gibt es ohne Kursplan nicht
+    assert _texte(_daten(dialog, "test_vorschau")) == ["SO STEHT ES IM KAPITEL", "Planke: 1 Minute"]
+    mal.value = "0,5"
+    _vorgabe(dialog, OHNE)  # der Faktor wandert mit
+    assert (prozent.value, prozent.visible, mal.visible) == ("50", True, False)
+    prozent.value = "60"
+    _vorgabe(dialog, ZEIT)
+    assert mal.value == "0,6"
+    _daten(dialog, "block_uebernehmen").on_click()
+    assert "Planke: 1 Minute — wird Ziel im Plan (60 %)" in _texte(ansicht)
+    _speichern(ansicht)
+    test = _test_im_kurs(state, kurs)
+    assert (test.vorgabe, test.faktor, test.feld) == (Vorgabe(ZEIT, 60), 0.6, "hold")
+
+    # Kurs mit Kursplan: kein Faktor am Test — und er bleibt, wie er war
+    kurs, _ = _kurs(state)
+    eigener = next(b for b in kurs.kapitel[1].bloecke if b.id == "t")
+    eigener.faktor = 0.7
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[1])
+    dialog = _test_oeffnen(page, ansicht)
+    assert not _hat(dialog, "test_mal") and "Ziel in % des Tests" not in _felder(dialog)
+    _vorgabe(dialog, SKALA)
+    assert not _hat(dialog, "test_mal")
+    assert any("sagt der Baustein unter „Am Plan“" in t for t in _texte(dialog))
+    _daten(dialog, "block_uebernehmen").on_click()
+    _speichern(ansicht)
+    test = _test_im_kurs(state, kurs)
+    assert (test.vorgabe, test.faktor) == (Vorgabe(SKALA, 7), 0.7)
+
+
+# -- Die Karte „So wächst der Plan“ (§14) ------------------------------------------------------
+
+
+def _kursbild(ansicht):
+    """Bild (`core.kursbild.Planbild`) und Handgriffe (`KursplanBild`) der Karte „So wächst der
+    Plan“ — ``None``, wenn die Ansicht keine zeigt."""
+    for x in _alle(ansicht):
+        daten = getattr(x, "data", None)
+        if isinstance(daten, tuple) and daten and daten[0] == "kursbild":
+            assert x.visible is not False
+            return daten[1], daten[2]
+    return None
+
+
+def _planuebung(bild, uebung: Exercise) -> str:
+    """Die Planübung des Beispielplans zu einer Übung."""
+    (item,) = [i.id for i in bild.plan.items if i.exercise_id == uebung.id]
+    return item
+
+
+def _kurs_mit_drei_kapiteln(state: AppState) -> tuple[Kurs, dict[str, Exercise]]:
+    """Der Kurs der Skizzen und ein drittes Kapitel, das die Brücke bringt — aus Sicht von
+    Kapitel 2 steht sie im Bild blass."""
+    kurs, u = _kurs(state)
+    kurs.kapitel.append(
+        Kapitel(
+            titel="Seitlich",
+            kurs_id=kurs.id,
+            bloecke=[Block(PLAN_UEBUNG, id="b5", uebung=u["Brücke"].id)],
+        )
+    )
+    state.kurse.speichern(kurs)
+    return state.kurse.laden(kurs.id), u
+
+
+def test_bild_des_plans_im_kurs_formular(page, state) -> None:
+    """Ben, 16.11.2026: „die Karte aus dem Ablauf beim Erstellen des Kurses mit einbauen“ — im
+    Kurs-Formular steht sie unter dem Kursplan, nur zum Ansehen, bis zum letzten Kapitel. Die
+    Grundlage aus einem eigenen Plan (die Vorlage im Kurs) ist im Bild. Ohne Kursplan gibt es
+    die Karte nicht."""
+    kurs, u = _kurs_mit_drei_kapiteln(state)
+    ansicht = kurs_bearbeiten(page, state, kurs)
+    bild, karte = _kursbild(ansicht)
+    texte = _texte(ansicht)
+    assert "SO WÄCHST DER PLAN" in texte
+    assert karte.bis() == 3 and "Bis Kapitel 3 „Seitlich“: alle 4 Übungen im Plan." in texte
+    assert {"Planke", "Seitstütz", "Käfer", "Brücke"} <= set(texte)
+    # die Grundlage (ein eigener Plan als Vorlage im Kurs) steht im Bild — als „Anfang“
+    planke = _planuebung(bild, u["Planke"])
+    assert bild.kapitel[planke] == 0 and bild.marke(planke) == "g:1"
+    assert _daten_ids(ansicht, "kursbild_bis") == [0, 1, 2, 3]
+    # nur zum Ansehen: Tipps auf Übung und Weg öffnen nichts
+    offen = len(page.dialoge)
+    karte.knoten(planke)
+    karte.kante(ab.Kante(_planuebung(bild, u["Seitstütz"]), _planuebung(bild, u["Käfer"])))
+    assert len(page.dialoge) == offen
+    assert not any(t.startswith("Tippe eine Übung an") for t in texte)
+
+    # Wochentage ändern das Bild nicht — die Karte bleibt dieselbe (Zoom, gewähltes Kapitel)
+    karte.waehlen(1)
+    _daten(ansicht, ("kursplan_tag", 5)).on_click()
+    assert _kursbild(ansicht)[1] is karte and karte.bis() == 1
+    # Kapitel ändern es: ein neues Kapitel bekommt seinen Chip
+    _daten(ansicht, "kapitel_hinzufuegen").on_click()
+    assert _daten_ids(ansicht, "kursbild_bis") == [0, 1, 2, 3, 4]
+    assert _kursbild(ansicht)[1] is not karte
+
+    # Der Schalter aus: keine Karte; wieder an: Sie ist zurück (ohne Grundlage — kein „Anfang“)
+    _daten(ansicht, "kursplan_an").on_change(_an(False))
+    _daten(page.dialoge[-1], "kursplan_aus_ja").on_click()
+    assert _kursbild(ansicht) is None and "SO WÄCHST DER PLAN" not in _texte(ansicht)
+    _daten(ansicht, "kursplan_an").on_change(_an(True))
+    bild, _ = _kursbild(ansicht)
+    assert [bild.kapitel[i.id] for i in bild.plan.items] == [1, 2, 3]
+    assert _daten_ids(ansicht, "kursbild_bis") == [1, 2, 3, 4]
+
+    # Ein Kurs, der keinen Plan baut, hat kein Bild — auch nicht im Kapitel
+    ohne = editor.kurs_anlegen(state)
+    assert _kursbild(kurs_bearbeiten(page, state, ohne)) is None
+    assert _kursbild(kapitel_bearbeiten(page, state, ohne, ohne.kapitel[0])) is None
+
+
+def test_bild_des_plans_im_kapitel_folgt_den_bausteinen(page, state) -> None:
+    """Im Kapitel-Formular steht die Karte unter den Listen, bis zu diesem Kapitel — was ein
+    späteres bringt, ist blass. Sie rechnet mit den **ungespeicherten** Blöcken: Ein neuer
+    Baustein steht im Bild, bevor gespeichert ist."""
+    kurs, u = _kurs_mit_drei_kapiteln(state)
+    zwei = kurs.kapitel[1]
+    ansicht = kapitel_bearbeiten(page, state, kurs, zwei)
+    bild, karte = _kursbild(ansicht)
+    texte = _texte(ansicht)
+    assert karte.bis() == 2
+    assert "Bis Kapitel 2 „Erweiterung“: 3 von 4 Übungen im Plan." in texte
+    assert any(t.startswith("Tippe eine Übung an, um von ihr einen Weg zu setzen") for t in texte)
+    assert bild.spaeter(2) == [_planuebung(bild, u["Brücke"])]  # Kapitel 3 bringt sie: blass
+    # die Karte steht unter den Listen und den Knöpfen „+ Im Kapitel“ / „+ Am Plan“
+    reihenfolge = [
+        x.data
+        for x in _alle(ansicht)
+        if getattr(x, "data", None) in (("baustein", "b4"), "baustein_dazu")
+        or (isinstance(getattr(x, "data", None), tuple) and x.data[0] == "kursbild")
+    ]
+    assert [d if isinstance(d, str) else d[0] for d in reihenfolge] == [
+        "baustein",
+        "baustein_dazu",
+        "kursbild",
+    ]
+
+    # Ein anderes Kapitel gewählt — das bleibt, wenn das Bild neu entsteht
+    karte.waehlen(1)
+    # Ein neuer Baustein „Übung dazu“ (der Seitstütz noch einmal, ans Ende): ohne zu speichern
+    _daten(ansicht, ("baustein_neu", PLAN_UEBUNG)).on_click()
+    blatt = page.dialoge[-1]
+    _waehlen(blatt, "baustein_uebung", f"u:{u['Seitstütz'].id}")
+    _daten(blatt, "baustein_uebernehmen").on_click()
+    neues_bild, neue_karte = _kursbild(ansicht)
+    assert neue_karte is not karte and neue_karte.bis() == 1
+    assert len(neues_bild.plan.items) == 5
+    assert [neues_bild.marke(i.id) for i in neues_bild.plan.items if i.kurs_marke == "uebung-1"]
+    assert "Bis Kapitel 1 „Grundlage“: 2 von 5 Übungen im Plan." in _texte(ansicht)
+    neue_karte.waehlen(2)
+    assert "Bis Kapitel 2 „Erweiterung“: 4 von 5 Übungen im Plan." in _texte(ansicht)
+    gespeichert = state.kurse.laden(kurs.id).kapitel[1]
+    assert "uebung-1" not in [b.id for b in gespeichert.bloecke]  # noch nichts gespeichert
+
+    # Der Titel im Feld gilt schon für die Karte, sobald sie neu entsteht; Löschen zieht nach
+    _felder(ansicht)["Titel"].value = "Mehr Rumpf"
+    zeile = _daten(ansicht, ("baustein", "uebung-1"))
+    next(x for x in _alle(zeile) if getattr(x, "tooltip", None) == "Entfernen").on_click()
+    assert "Bis Kapitel 2 „Mehr Rumpf“: 3 von 4 Übungen im Plan." in _texte(ansicht)
+
+
+def test_beziehungen_im_bild_setzen(page, state) -> None:
+    """„Beim neu erstellten Kursplan ließen sich dort die Beziehungen setzen“: Ein Tipp auf
+    eine Übung öffnet das Blatt für einen neuen Weg dieses Kapitels, „Von“ vorbelegt — mit der
+    Marke, wie das Blatt sie anbietet (Grundlage ``g:<n>``, ein Baustein, bei einer der
+    Gewählten ihr Baustein). Eine blasse Übung meldet, welches Kapitel sie bringt. Ein Tipp auf
+    den Punkt eines Wegs öffnet seinen Baustein — aus einem anderen Kapitel meldet er es."""
+    kurs, u = _kurs_mit_drei_kapiteln(state)
+    zwei, drei = kurs.kapitel[1], kurs.kapitel[2]
+    ansicht = kapitel_bearbeiten(page, state, kurs, zwei)
+    bild, karte = _kursbild(ansicht)
+    planke, seit, kaefer, bruecke = (
+        _planuebung(bild, u[name]) for name in ("Planke", "Seitstütz", "Käfer", "Brücke")
+    )
+    assert [bild.marke(i) for i in (planke, seit, kaefer, bruecke)] == [
+        "g:1",
+        "b1",
+        f"b2:{u['Käfer'].id}",
+        "b5",
+    ]
+
+    # Blass: Die Brücke kommt erst mit Kapitel 3 — kein Blatt, eine Zeile sagt es
+    assert bruecke in bild.spaeter(karte.bis())
+    offen = len(page.dialoge)
+    karte.knoten(bruecke)
+    meldung = page.dialoge[-1]
+    assert len(page.dialoge) == offen + 1 and isinstance(meldung, ft.SnackBar)
+    assert meldung.content.value == (
+        "Brücke kommt erst mit Kapitel 3 „Seitlich“ in den Plan — ein Weg dieses Kapitels kann "
+        "die Übung noch nicht nennen."
+    )
+
+    # Eine der Gewählten (`b2:<käfer>`): „Von“ ist ihr Baustein — „die gewählte“, wie das
+    # Blatt sie anbietet; nichts „fehlt hier“
+    karte.knoten(kaefer)
+    blatt = page.dialoge[-1]
+    assert isinstance(blatt, ft.BottomSheet) and "Weg im Plan" in _texte(blatt)
+    von = _daten(blatt, "baustein_von")
+    assert von.value == "b2" and [o.key for o in von.options] == ["g:1", "b1", "b2"]
+    assert not any("fehlt hier" in o.text for o in von.options)
+    assert not _hat(blatt, "baustein_loeschen")  # ein neuer Baustein
+    _daten(blatt, "baustein_abbrechen").on_click()
+    # Ein Baustein eines früheren Kapitels
+    karte.knoten(seit)
+    assert _daten(page.dialoge[-1], "baustein_von").value == "b1"
+    _daten(page.dialoge[-1], "baustein_abbrechen").on_click()
+
+    # Die Grundlage: von der Planke zur gewählten — übernommen steht der Weg im Bild
+    karte.knoten(planke)
+    blatt = page.dialoge[-1]
+    assert _daten(blatt, "baustein_von").value == "g:1"
+    _waehlen(blatt, "baustein_zu", "b2")
+    _daten(blatt, "baustein_uebernehmen").on_click()
+    assert "Planke → die gewählte" in _texte(ansicht)
+    bild, karte = _kursbild(ansicht)
+    planke, seit, kaefer = (_planuebung(bild, u[n]) for n in ("Planke", "Seitstütz", "Käfer"))
+    neuer = bild.wege[(planke, kaefer)]
+    assert (neuer.nr, neuer.kapitel_id) == (2, zwei.id)
+    (neue_id,) = [b for b in _daten_ids(ansicht, "baustein") if b not in ("b2", "b3", "b4")]
+    assert neuer.block_id == neue_id and neue_id.startswith("weg-")
+    assert neue_id not in [b.id for b in state.kurse.laden(kurs.id).kapitel[1].bloecke]
+    _speichern(ansicht)
+    gespeichert = next(b for b in state.kurse.laden(kurs.id).kapitel[1].bloecke if b.id == neue_id)
+    assert (gespeichert.art, gespeichert.von, gespeichert.zu) == (PLAN_WEG, "g:1", "b2")
+    assert _paketpruefung(state, state.kurse.laden(kurs.id))[0] == []
+
+    # … und nach dem Speichern wieder geöffnet: Der Baustein ist ein Weg im Bild
+    kurs = state.kurse.laden(kurs.id)
+    zwei, drei = kurs.kapitel[1], kurs.kapitel[2]
+    ansicht = kapitel_bearbeiten(page, state, kurs, zwei)
+    bild, karte = _kursbild(ansicht)
+    planke, seit, kaefer = (_planuebung(bild, u[n]) for n in ("Planke", "Seitstütz", "Käfer"))
+    assert {w.block_id for w in bild.wege.values()} == {"b3", neue_id}
+
+    # Tipp auf den Punkt eines Wegs dieses Kapitels: das Blatt seines Bausteins, zum Ändern
+    karte.kante(ab.Kante(seit, kaefer))
+    blatt = page.dialoge[-1]
+    assert isinstance(blatt, ft.BottomSheet) and blatt.data == ("baustein_blatt", "b3")
+    assert _daten(blatt, "baustein_von").value == "b1" and _hat(blatt, "baustein_loeschen")
+    _daten(blatt, "baustein_abbrechen").on_click()
+    # Ein Schritt, der nur die Reihenfolge der Liste ist: kein Blatt — die Karte sagt es selbst
+    offen = len(page.dialoge)
+    karte.kante(ab.Kante(planke, seit))
+    assert len(page.dialoge) == offen and KEIN_BAUSTEIN in _texte(ansicht)
+
+    # Derselbe Weg aus Sicht von Kapitel 3: Er gehört nicht hierher — eine Zeile sagt, wohin
+    ansicht = kapitel_bearbeiten(page, state, kurs, drei)
+    bild, karte = _kursbild(ansicht)
+    seit, kaefer = (_planuebung(bild, u[n]) for n in ("Seitstütz", "Käfer"))
+    assert karte.bis() == 3
+    offen = len(page.dialoge)
+    karte.kante(ab.Kante(seit, kaefer))
+    meldung = page.dialoge[-1]
+    assert len(page.dialoge) == offen + 1 and isinstance(meldung, ft.SnackBar)
+    assert meldung.content.value == (
+        "Dieser Weg kommt aus Kapitel 2 „Erweiterung“ — dort lässt er sich ändern."
+    )
+
+
 def test_vorschau_zeigt_die_texte_der_karte(page, state) -> None:
     """„So steht es in der Karte“ nennt dieselben Zeilen wie `KursRepo.plan_aenderungen` — für
     eine Person, die Kapitel 1 übernommen, wie im Beispiel gewählt und getestet hat."""
@@ -1020,7 +1633,7 @@ def test_vorschau_zeigt_die_texte_der_karte(page, state) -> None:
     karte = state.kurse.plan_aenderungen(kurs, zwei, profil, wahl)
     assert [(z.block_id, z.titel, z.unter) for z in karte] == [
         ("b2", "Käfer kommt dazu", "hinter Seitstütz"),
-        ("b2", "Ziel für Käfer: 15 Wiederholungen", "aus deinem Test"),
+        ("b2", "Ziel für Käfer: 15 Wiederholungen", "50 % von deinem Test (30 Wdh.)"),
         ("b3", "Von Seitstütz weiter zu Käfer, wenn die Zeit ab ist", "aus dem Kurs"),
         ("b4", "Ziel für Planke: 75 s", "aus dem Kurs"),
     ]

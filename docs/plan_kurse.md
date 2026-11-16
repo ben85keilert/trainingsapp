@@ -199,8 +199,16 @@ Formatversion 6).
   Ziel aus ihrem eigenen Wert. **Mehrere Gewählte als Wege sind gleichwertig** — im Workout
   geht man einen, in der Liste lassen sich alle abhaken. Die noch nicht übernommene Wahl bleibt
   für die Sitzung erhalten, wenn man das Kapitel verlässt (`AppState.kurs_wahl`).
+- **Ein Test kann mit der Uhr laufen** (`vorgabe`, Ben 16.11.2026, `docs/plan_kurs_ablauf.md`
+  §13, `core/kurstest.py`): Menge, Zeit oder Skala (ab · höchstens · von–bis) steht fest und
+  beendet den Lauf, das andere wird gemessen. Am Ende steht ein gewöhnlicher Eintrag; der Kurs
+  liest daraus wie bisher den Wert seines Feldes. Die Sammelkarte nennt die Regel („80 % von
+  deinem Test (22 Wdh. bis Anstrengung 7)“), sie wertet nicht. Die Skala ist Selbstauskunft.
+  Geht auch in Kursen mit Kapitelplänen.
 - **Wachsen statt bereitliegen** (`docs/plan_kurs_ablauf.md` §12): keine gesperrten Übungen im
-  Plan der Person; für die Autorenseite ist ein Werkzeug „vom fertigen Plan aus“ vorgesehen.
+  Plan der Person; die Kursseite zeigt **„Das kommt noch“** — was spätere Kapitel am Plan
+  vorschlagen werden, ohne etwas zu ändern (`core/kursvorschau.py`); für die Autorenseite ist
+  ein Werkzeug „vom fertigen Plan aus“ vorgesehen.
 - Kapitel abschließen deaktiviert den Kursplan nicht; „Von vorn“ macht ihn zum früheren
   Durchlauf (§2, Migration 063); die Bedingung „Tage“ zählt seine Übungen.
 - Ein Kurs **ohne** `kursplan` verhält sich wie in §1–§8 (der Einführungskurs im Paket

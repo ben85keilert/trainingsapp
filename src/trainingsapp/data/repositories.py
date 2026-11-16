@@ -1157,7 +1157,9 @@ class PlanRepo:
         Änderung gilt dann auch im Workout (Ben, 10.11.2026)."""
         roh = self.ablauf_laden(plan_id)
         if not roh.an or (not roh.kanten and not roh.start):
-            return  # aus, oder schon das Zeichen
+            # aus, schon das Zeichen — oder geleert (``ohne_start``, Ben 16.11.2026): der bleibt
+            # leer und folgt nicht
+            return
         p = self.laden(plan_id, mit_geloeschten=True)
         if p is not None and folgt_der_liste(roh, [(it.id, it.bedingung) for it in p.items]):
             with transaktion(self.con):

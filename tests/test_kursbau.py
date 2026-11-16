@@ -10,20 +10,34 @@ nennt wie `KursRepo.plan_aenderungen` und wie der Editor damit umgeht, prüft
 from __future__ import annotations
 
 from trainingsapp.core.kursbau import (
+    AB,
+    HOECHSTENS,
+    OHNE,
+    VON_BIS,
+    VORGABE_WAHL,
     Kurssicht,
+    Vorgabenwahl,
+    faktor_lesen,
+    faktor_text,
     folgen_anwenden,
     kurs_kopie,
+    name_des_tests,
     timer_einbetten,
     timer_kern,
+    zielfeld,
 )
 from trainingsapp.core.kursbloecke import (
     AUSWAHL,
+    MENGE,
     PLAN_EINSTELLEN,
     PLAN_UEBUNG,
     PLAN_WEG,
+    SKALA,
     TEST,
     TEXT,
+    ZEIT,
     Block,
+    Vorgabe,
 )
 from trainingsapp.core.kurse import Kapitel, Kurs, Kursplan, PlanVorlage, VorlageItem
 from trainingsapp.core.kursplan import NEU
@@ -101,7 +115,7 @@ def test_vorschau_rechnet_auf_dem_beispielplan() -> None:
     assert (vorschau.wahl, vorschau.werte) == ({"w": ["Käfer"]}, {"t": 30})
     assert [(z.block_id, z.titel, z.unter, z.stand) for z in vorschau.zeilen] == [
         ("b2", "Käfer kommt dazu", "hinter Seitstütz", NEU),
-        ("b2", "Ziel für Käfer: 15 Wiederholungen", "aus deinem Test", NEU),
+        ("b2", "Ziel für Käfer: 15 Wiederholungen", "50 % von deinem Test (30 Wdh.)", NEU),
         ("b3", "Von Seitstütz weiter zu Käfer, wenn die Zeit ab ist", "aus dem Kurs", NEU),
         ("b4", "Ziel für Planke: 75 s", "aus dem Kurs", NEU),
     ]
@@ -352,7 +366,7 @@ def test_test_misst_die_gewaehlte() -> None:
     assert (vorschau.wahl, vorschau.werte) == ({"w": ["Käfer"]}, {"t:Käfer": 30})
     assert [(z.block_id, z.titel, z.unter) for z in vorschau.zeilen][:2] == [
         ("b2", "Käfer kommt dazu", "hinter Seitstütz"),
-        ("b2", "Ziel für Käfer: 15 Wiederholungen", "aus deinem Test"),
+        ("b2", "Ziel für Käfer: 15 Wiederholungen", "50 % von deinem Test (30 Wdh.)"),
     ]
     assert sicht.beispiel_text(zwei.bloecke[2], vorschau) == (
         "Beispiel mit der Wahl „Käfer“ und dem Testwert 30 Wiederholungen."
@@ -418,3 +432,218 @@ def test_test_der_gewaehlten_im_kurs_mit_kapitelplaenen_nur_aus_dem_eigenen_kapi
     assert [i for i, _ in Kurssicht(ohne, "k2", zwei.bloecke, katalog).auswahlen_fuer_test()] == [
         "w2"
     ]
+
+
+# -- Der Test mit Vorgabe (Skizze T5) ----------------------------------------------------------
+
+
+def test_vorgabenwahl_baut_jede_vorgabe() -> None:
+    """Was im Test-Dialog unter „Vorgabe — wann der Test endet“ eingestellt ist: Ohne · Menge ·
+    Zeit · Anstrengung (ab · höchstens · von–bis). Jede Wahl ergibt die Vorgabe, die ein Paket
+    auch läse, und eine gespeicherte Vorgabe steht wieder so im Dialog."""
+    assert list(VORGABE_WAHL.values()) == ["Ohne", "Menge", "Zeit", "Anstrengung"]
+    wahl = Vorgabenwahl()
+    assert (wahl.art, wahl.vorgabe(), wahl.fehler(), wahl.vorlaeufig()) == (OHNE, None, None, None)
+    assert wahl.mit_art(MENGE).mit_menge("12").vorgabe() == Vorgabe(MENGE, 12)
+    assert wahl.mit_art(ZEIT).mit_sekunden(90).vorgabe() == Vorgabe(ZEIT, 90)
+    skala = wahl.mit_art(SKALA)
+    assert skala.vorgabe() == Vorgabe(SKALA, 7)  # „ab 7“ ist die Vorbelegung der Skizze
+    assert skala.mit_form(HOECHSTENS).vorgabe() == Vorgabe(SKALA, 0, 4)
+    assert skala.mit_form(VON_BIS).vorgabe() == Vorgabe(SKALA, 5, 7)
+    # Die Zahlen der anderen Arten bleiben: zurückgeschaltet steht die Menge wieder da
+    hin_und_her = wahl.mit_art(MENGE).mit_menge("12").mit_art(SKALA).mit_art(OHNE).mit_art(MENGE)
+    assert hin_und_her.vorgabe() == Vorgabe(MENGE, 12)
+    # Eine Menge ohne Zahl ist keine Vorgabe — „Übernehmen“ sagt, was fehlt; das Angebot der
+    # Felder richtet sich trotzdem schon nach der Art
+    leer = wahl.mit_art(MENGE).mit_menge("")
+    assert leer.vorgabe() is None and "braucht eine Zahl" in (leer.fehler() or "")
+    assert leer.vorlaeufig() == Vorgabe(MENGE)
+    # −/+ bleiben in den Grenzen, in denen die Form etwas Eigenes sagt
+    assert skala.schritt(AB, 5).vorgabe() == Vorgabe(SKALA, 10)
+    assert skala.schritt(AB, -99).vorgabe() == Vorgabe(SKALA, 1)
+    hoechstens = skala.mit_form(HOECHSTENS)
+    assert hoechstens.schritt(HOECHSTENS, 99).vorgabe() == Vorgabe(SKALA, 0, 9)  # nie „bis 10“
+    assert hoechstens.schritt(HOECHSTENS, -99).vorgabe() == Vorgabe(SKALA, 0, 1)
+    von_bis = skala.mit_form(VON_BIS)
+    assert von_bis.schritt("von", 99).vorgabe() == Vorgabe(SKALA, 6, 7)  # „von“ bleibt darunter
+    assert von_bis.schritt("bis", 99).vorgabe() == Vorgabe(SKALA, 5, 9)
+    assert von_bis.schritt("bis", -99).vorgabe() == Vorgabe(SKALA, 5, 6)
+    assert von_bis.stellen() == (("von", 5), ("bis", 7))
+    # Rundreise: was gespeichert ist, steht wieder so da — und ergibt wieder dasselbe
+    for vorgabe in (
+        Vorgabe(MENGE, 30),
+        Vorgabe(ZEIT, 45),
+        Vorgabe(SKALA, 7),
+        Vorgabe(SKALA, bis=4),
+        Vorgabe(SKALA, 5, 7),
+    ):
+        gelesen = Vorgabenwahl.aus(vorgabe)
+        assert gelesen.vorgabe() == vorgabe
+        assert Vorgabe.from_dict(vorgabe.to_dict()) == vorgabe  # wie das Paket sie liest
+    assert Vorgabenwahl.aus(Vorgabe(SKALA, bis=4)).form == HOECHSTENS
+    assert Vorgabenwahl.aus(Vorgabe(SKALA, 5, 7)).form == VON_BIS
+    assert Vorgabenwahl.aus(Vorgabe(ZEIT, 90)).zeit_text == "1:30"
+
+
+def test_faktor_im_feld() -> None:
+    """Der Faktor des Tests steht als „mal“ (0,8) oder — ohne Vorgabe, wie bisher — in Prozent
+    da; gelesen wird in den Grenzen des Pakets."""
+    assert (faktor_text(0.8), faktor_text(0.8, prozent=True)) == ("0,8", "80")
+    assert faktor_lesen(faktor_text(0.85)) == 0.85
+    assert faktor_lesen(faktor_text(0.85, prozent=True), prozent=True) == 0.85
+    assert (faktor_lesen("0"), faktor_lesen("12"), faktor_lesen("x")) == (0.1, 3.0, 1.0)
+
+
+def test_ins_ziel_kommt_angebot_und_vorbelegung() -> None:
+    """Mit Vorgabe steht zur Wahl, was der Lauf vorgibt oder misst — die Wiederholungen (wenn
+    die Übung welche hat oder die Vorgabe eine Menge ist) und die Zeitfelder der Übung bzw.
+    „Zeit“, nie die Skala. Vorbelegt ist bei einer Menge die Vorgabe selbst (Wiederholungen),
+    sonst das Gemessene; eine getroffene Wahl, die weiter gilt, bleibt."""
+    kurs = _kurs()
+    sicht = _sicht(kurs, kurs.kapitel[1])
+
+    def angebot(uebungen: list[str], vorgabe: Vorgabe | None) -> list[str]:
+        return [f.key for f in sicht.zielfelder(uebungen, vorgabe)[0]]
+
+    menge, zeit, skala = Vorgabe(MENGE, 30), Vorgabe(ZEIT, 60), Vorgabe(SKALA, 7)
+    # Käfer zählt Wiederholungen; die Uhr zählt bei ihm als „Zeit“
+    for vorgabe in (menge, zeit, skala):
+        assert angebot(["Käfer"], vorgabe) == ["reps", "duration"]
+        assert zielfeld(sicht.zielfelder(["Käfer"], vorgabe)[0]) == "reps"
+    assert angebot(["Käfer"], None) == ["reps"]  # ohne Vorgabe wie bisher
+    # Die Planke hält: Wiederholungen gibt es nur, wenn die Vorgabe sie verlangt
+    assert angebot(["Planke"], menge) == ["reps", "hold"]
+    assert angebot(["Planke"], zeit) == angebot(["Planke"], skala) == ["hold"]
+    assert zielfeld(sicht.zielfelder(["Planke"], menge)[0]) == "reps"  # die Vorgabe selbst
+    assert zielfeld(sicht.zielfelder(["Planke"], zeit)[0]) == "hold"
+    assert zielfeld(sicht.zielfelder(["Planke"], skala)[0]) == "hold"  # das Gemessene
+    # Eine getroffene Wahl bleibt, solange sie zur Wahl steht — sonst gilt die Vorbelegung
+    assert zielfeld(sicht.zielfelder(["Planke"], menge)[0], "hold") == "hold"
+    assert zielfeld(sicht.zielfelder(["Käfer"], skala)[0], "duration") == "duration"
+    assert zielfeld(sicht.zielfelder(["Planke"], zeit)[0], "reps") == "hold"
+    # „die gewählte“: was bei allen zur Wahl steht — die Skala steht nie dabei
+    katalog = _katalog()
+    katalog["Käfer"].result_spec = ResultSpec(
+        fields=[vorrat_feld("reps"), vorrat_feld("scale"), vorrat_feld("weight")]
+    )
+    mit_skala = Kurssicht(kurs, "k2", kurs.kapitel[1].bloecke, katalog)
+    assert [f.key for f in mit_skala.zielfelder(["Käfer", "Brücke"], skala)[0]] == [
+        "reps",
+        "duration",
+    ]
+    assert [f.key for f in mit_skala.zielfelder(["Käfer"], None)[0]] == ["reps", "weight"]
+    felder, gemeinsam = sicht.zielfelder(["Planke", "Käfer"], skala)
+    assert ([f.key for f in felder], gemeinsam) == (["reps", "duration", "hold"], False)
+    # „Gemessen wird“: alles außer der Vorgabe — ohne Wiederholungen bei einer Übung ohne sie
+    kaefer = Block(TEST, uebung="Käfer", feld="reps")
+    planke = Block(TEST, uebung="Planke", feld="hold")
+    kaefer.vorgabe, planke.vorgabe = skala, skala
+    assert (sicht.misst(kaefer), sicht.misst(planke)) == (["Wiederholungen", "Zeit"], ["Zeit"])
+    kaefer.vorgabe, planke.vorgabe = menge, zeit
+    assert (sicht.misst(kaefer), sicht.misst(planke)) == (["Zeit", "Anstrengung"], ["Anstrengung"])
+    kaefer.vorgabe = None
+    assert sicht.misst(kaefer) == []
+
+
+def test_test_mit_vorgabe_name_zeile_und_vorschau() -> None:
+    """Der Test mit Vorgabe heißt nach Übung und Vorgabe („Käfer: bis Anstrengung 7“) — in
+    der Liste, in der Wahl „aus dem Test …“ und über der Karte. Die Vorschau rechnet mit einem
+    Beispielwert: Steht im Feld die Vorgabe selbst, ist sie es."""
+    kurs = _kurs()
+    zwei = kurs.kapitel[1]
+    test, baustein = zwei.bloecke[1], zwei.bloecke[2]
+    sicht = _sicht(kurs, zwei)
+    test.vorgabe = Vorgabe(SKALA, 7)
+    assert sicht.kurz(test) == "Käfer: bis Anstrengung 7 · Wiederholungen"
+    assert sicht.tests() == [("t", "Käfer: bis Anstrengung 7")]
+    assert name_des_tests(test, sicht.katalog) == "Käfer: bis Anstrengung 7"
+    assert sicht.test_kurz(test, kapitelplan=True) == "Käfer: bis Anstrengung 7 — wird Ziel im Plan"
+    # gemessen werden die Wiederholungen: der Beispielwert bleibt 30, die Karte nennt die Regel
+    vorschau = sicht.vorschau()
+    assert vorschau.werte == {"t": 30}
+    ziel = next(z for z in vorschau.zeilen if z.block_id == "b2" and "Ziel" in z.titel)
+    assert ziel.titel == "Ziel für Käfer: 15 Wiederholungen"
+    assert ziel.unter == "50 % von deinem Test (30 Wdh. bis Anstrengung 7)"
+    # „So steht es im Kapitel“: die Überschrift der Testkarte und die Zeile der Sammelkarte —
+    # dieselbe, die `vorschau` liefert
+    kapitel = sicht.test_vorschau(test)
+    assert kapitel.kopf == ("Käfer: bis Anstrengung 7",)
+    assert [(wo, z) for wo, z in kapitel.zeilen] == [("", ziel)]
+    assert kapitel.beispiel == "Beispiel mit der Wahl „Käfer“ und dem Testwert 30 Wiederholungen."
+
+    # Vorgabe Menge, ins Ziel kommen die Wiederholungen: Der Beispielwert ist die Vorgabe
+    test.vorgabe = Vorgabe(MENGE, 12)
+    assert sicht.kurz(test) == "Käfer: 12 Wiederholungen"  # das Feld stünde doppelt da
+    vorschau = sicht.vorschau()
+    assert vorschau.werte == {"t": 12}
+    assert "Ziel für Käfer: 6 Wiederholungen" in [z.titel for z in vorschau.zeilen]
+    # … ins Ziel kommt die Zeit: gemessen, also ein Beispielwert
+    test.feld = "duration"
+    assert sicht.kurz(test) == "Käfer: 12 Wiederholungen · Zeit"
+    assert sicht.vorschau().werte == {"t": 60}
+    test.vorgabe, test.feld = Vorgabe(ZEIT, 45), "reps"
+    assert sicht.kurz(test) == "Käfer: 45 Sekunden · Wiederholungen"
+    assert sicht.vorschau().werte == {"t": 30}
+
+    # Der Test misst „die gewählte“: je Übung der Beispielwahl eine Überschrift; die
+    # Aufforderung ersetzt sie
+    test.uebung, test.aus, test.vorgabe = "", "w", Vorgabe(SKALA, 5, 7)
+    assert sicht.kurz(test) == "die gewählte: zwischen Anstrengung 5 und 7 · Wiederholungen"
+    assert sicht.test_vorschau(test).kopf == ("Käfer: zwischen Anstrengung 5 und 7",)
+    test.titel = "Wie viele schaffst du?"
+    assert sicht.test_vorschau(test).kopf == ("Wie viele schaffst du?",)
+    test.titel = ""
+
+    # Ein Baustein eines späteren Kapitels nimmt sein Ziel aus diesem Test: Die Zeile steht mit
+    # dem Titel ihres Kapitels dabei; ohne Kursplan gibt es keine Sammelkarte
+    drei = Kapitel(
+        id="k3",
+        titel="Mehr",
+        bloecke=[Block(PLAN_EINSTELLEN, id="b9", an="b2", ziel_aus="t", faktor=1.0)],
+    )
+    kurs.kapitel.append(drei)
+    zeilen = _sicht(kurs, zwei).test_vorschau(test).zeilen
+    assert [(wo, z.block_id) for wo, z in zeilen] == [("", "b2"), ("Mehr", "b9")]
+    assert zeilen[1][1].titel == "Ziel für Käfer: 30 Wiederholungen"
+    assert baustein.ziel_aus == "t"
+    kurs.kursplan = None
+    ohne = _sicht(kurs, zwei).test_vorschau(test)
+    assert (ohne.kopf, ohne.zeilen, ohne.beispiel) == (
+        ("Käfer: zwischen Anstrengung 5 und 7",),
+        (),
+        "",
+    )
+
+
+def test_marke_fuer_einen_weg_aus_dem_bild() -> None:
+    """Ein Tipp auf eine Übung im Bild des Kursplans (`core/kursbild.py`) wird ein Weg dieses
+    Kapitels: Die Marke geht so ins Blatt, wie es sie anbietet — die Grundlage, ein Baustein
+    „Übung dazu“, bei einer der Gewählten ihr Baustein. Was erst ein späteres Kapitel bringt,
+    kann ein Weg dieses Kapitels nicht nennen; `bringt` sagt, welches."""
+    kurs = _kurs()
+    eins, zwei = kurs.kapitel
+    drei = Kapitel(
+        id="k3", titel="Seitlich", bloecke=[Block(PLAN_UEBUNG, id="b5", uebung="Brücke")]
+    )
+    kurs.kapitel.append(drei)
+    sicht = _sicht(kurs, zwei)
+    assert sicht.marke_fuer_weg("g:1") == "g:1"
+    assert sicht.marke_fuer_weg("b1") == "b1"  # ein früheres Kapitel
+    assert sicht.marke_fuer_weg("b2") == "b2"  # dieses Kapitel: ein neuer Weg steht am Ende
+    assert sicht.marke_fuer_weg("b2:Käfer") == "b2"  # eine der Gewählten: „die gewählte“
+    assert sicht.marke_fuer_weg("b5") == sicht.marke_fuer_weg("b5:Brücke") == ""
+    assert sicht.marke_fuer_weg("gibt-es-nicht") == ""
+    # was das Blatt in „Von“ anbietet, ist genau das (`marken_davor`)
+    assert sicht.marke_fuer_weg("b2:Käfer") in [m for m, _ in sicht.marken_davor("")]
+    # ein vorhandener Baustein darf nur nennen, was vor ihm steht
+    assert sicht.marke_fuer_weg("b2", "b2") == "" and sicht.marke_fuer_weg("b1", "b2") == "b1"
+    # aus Sicht des ersten Kapitels kommt die gewählte erst später
+    assert _sicht(kurs, eins).marke_fuer_weg("b2:Käfer") == ""
+    assert _sicht(kurs, drei).marke_fuer_weg("b5") == "b5"
+
+    nr, kapitel = sicht.bringt("b5")
+    assert (nr, kapitel.id, kapitel.titel) == (3, "k3", "Seitlich")
+    assert sicht.bringt("b2:Käfer")[0] == 2 and sicht.bringt("b1")[0] == 1
+    assert sicht.bringt("g:1") is None and sicht.bringt("gibt-es-nicht") is None
+    assert sicht.bringt("t") is None  # ein Test bringt keine Planübung
+    assert sicht.marke_name("b5") == "Brücke" and sicht.marke_name("b2:Käfer") == "Käfer"

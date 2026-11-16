@@ -13,10 +13,14 @@ gebaut**: bei Änderungen tauscht sie nur Inhalte, so bleiben Zoom und Lage der 
 die Knoten liegen fest, bis jemand **„Neu anordnen“** tippt (dann richtet sich auch die Ansicht
 neu aus — Ben: „Ansicht neu ausrichten nur mit dem Button“).
 
-- **Palette**: die Übungen des Plans mit ihrer Nummer (Frage 5: die Nummer ist die Stelle in der
-  Liste, ein Alias der festen ID) — eine Übung darf mehrmals im Plan stehen. „+“ daneben fügt eine
-  weitere hinzu (wie im Reiter „Plan“), „i“ erklärt alles Übrige. Waagerecht scrollt die Palette,
-  nach unten zieht man eine Übung in einen **Slot** (oder auf „Start“).
+- **Palette**: ein **Vorrat an Übungen** (Ben, 16.11.2026) — eine Kachel je Übung des Plans,
+  „2×“, „3×“, wenn sie mehrfach im Plan steht, „frei“, solange keine ihrer Planübungen im Bild
+  ist. Ziehen oder Tippen setzt eine **Planübung** dieser Übung ins Bild: zuerst eine freie;
+  gibt es keine, entsteht eine neue Planübung derselben Übung am Ende der Liste
+  (`core.ablauf.vorrat`). Im Bild ist jede Planübung ein eigener Knoten mit ihrer Nummer (Frage
+  5: die Stelle in der Liste, ein Alias der festen ID). „+“ daneben fügt eine weitere Übung hinzu
+  (wie im Reiter „Plan“), „i“ erklärt alles Übrige. Waagerecht scrollt die Palette, nach unten
+  zieht man eine Übung in einen **Slot** (oder auf „Start“).
 - **Zeichnung** (`components/ablaufbild.py`): ein Tipp wählt einen Knoten, lang drücken zeigt nur
   seinen Weg (vernebelt den Rest).
 - **Unter dem Bild** die Knöpfe zum gewählten Knoten (Ben: „Man könnte ein Symbol anklicken und die
@@ -26,6 +30,10 @@ neu aus — Ben: „Ansicht neu ausrichten nur mit dem Button“).
   **Beiname**, **Aus dem Ablauf nehmen** (fragt: Lücke schließen oder Nachfolgereihe — die Übung
   bleibt in der Palette; aus dem Plan nimmt sie dort Gedrückthalten);
   daneben **Neu anordnen**, **Pfad abspielen**, Hinweise.
+- **Leeren heißt leer** (Ben, 16.11.2026): Wer alle Übungen aus dem Bild nimmt, sieht „Start“
+  und einen leeren Platz — nichts setzt sich von selbst wieder hinein
+  (`core.ablauf.Ablauf.ohne_start`). „Wie die Liste“ unter dem leeren Bild holt die Kette der
+  Liste zurück.
 
 Gespeichert wird sofort (`ablauf_speichern`): der Ablauf und, gespiegelt, die Hauptwege als
 Bedingungen der Planübungen — so stimmt auch „Der Reihe nach“.
@@ -92,6 +100,9 @@ def ablauf_zusammenfassung(plan: Plan) -> str:
             "Workout: Übung für Übung in der Reihenfolge der Liste. Wann es weitergeht und "
             "wohin sonst, stellst du im Reiter „Ablauf“ ein."
         )
+    if ab.ohne_start_text(plan.ablauf, ids):
+        # geleert (Ben, 16.11.2026) — was zu tun ist, sagt die Warnung darunter
+        return "Workout mit eigenem Ablauf — noch ohne Start."
     teile = [f"{len(plan.ablauf.kanten)} Wege"]
     if n := len(ab.bedarf(plan.ablauf, ids)):
         teile.append(f"{n} bei Bedarf")
@@ -252,12 +263,9 @@ def entfernen_fragen(
         if nur_ablauf or a.frage(k) is not None or k not in ids:
             jetzt = state.plaene.laden(plan_id)
             if jetzt is not None:
-                alt = jetzt.ablauf
-                neu = alt.ohne_knoten(k)
-                if alt.start == k:  # war sie der Start, rückt ihr Hauptweg nach
-                    folge = [x for x in alt.von(k) if not x.schleife and x.nach in ids]
-                    neu = replace(neu, start=folge[0].nach if folge else "")
-                ablauf_speichern(state, plan_id, neu)
+                # War sie der Start, rückt ihr Hauptweg nach; hat sie keinen, bleibt der Start
+                # leer — nichts setzt sich von selbst hinein (`Ablauf.ohne_knoten`)
+                ablauf_speichern(state, plan_id, jetzt.ablauf.ohne_knoten(k))
         else:
             state.plaene.uebung_entfernen(k)  # nimmt die Kanten von und zu ihr mit
         if state.ablauf_wahl.get(plan_id) == k:
@@ -439,16 +447,28 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         ],
     )
 
+    def vorrat_jetzt(p: Plan) -> dict[str, ab.Vorrat]:
+        """Die Übungen des Plans mit ihren Planübungen — was die Leiste zeigt
+        (`core.ablauf.vorrat`)."""
+        return {
+            v.uebung: v for v in ab.vorrat(p.ablauf, [(it.id, it.exercise_id) for it in p.items])
+        }
+
     def palette_fuellen(p: Plan) -> None:
-        nummer = ab.nummern([it.id for it in p.items])
-        im_bild = set(ab.im_bild(p.ablauf, [it.id for it in p.items]))
+        """Eine Kachel je **Übung** (Ben, 16.11.2026): „2×“, „3×“, wenn sie mehrfach im Plan
+        steht, „frei“, solange keine ihrer Planübungen im Bild ist. Die Listennummer steht nur
+        noch am Knoten im Bild — dort ist jede Planübung für sich."""
         suche = lokal["suche"]
+        beiname = {it.id: it.beiname for it in p.items}
         kacheln: list[ft.Control] = []
-        for it in p.items:
-            u = katalog.get(it.exercise_id)
+        for v in vorrat_jetzt(p).values():
+            u = katalog.get(v.uebung)
             if u is None or (suche and suche not in u.name.casefold()):
                 continue
-            frei = it.id not in im_bild
+            frei = v.ganz_frei
+            # Der Beiname gehört der Planübung: an der Kachel nur, solange es genau eine gibt —
+            # sonst steht er am Knoten im Bild
+            zusatz = beiname.get(v.planuebungen[0], "") if v.anzahl == 1 else ""
             bild = ft.Stack(
                 width=56,
                 height=56,
@@ -463,35 +483,44 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                         alignment=ft.Alignment.CENTER,
                         content=uebungsbild(state, u.icon_key, u.image_path, groesse=30),
                     ),
-                    ft.Container(
-                        left=-6,
-                        top=-6,
-                        width=20,
-                        height=20,
-                        border_radius=10,
-                        bgcolor=ft.Colors.ON_SURFACE,
-                        alignment=ft.Alignment.CENTER,
-                        content=ft.Text(
-                            str(nummer[it.id]),
-                            size=10,
-                            weight=ft.FontWeight.BOLD,
-                            color=ft.Colors.SURFACE,
-                        ),
+                    *(
+                        [
+                            ft.Container(
+                                right=-6,
+                                top=-6,
+                                height=20,
+                                padding=ft.Padding.symmetric(horizontal=5),
+                                border_radius=10,
+                                bgcolor=ft.Colors.PRIMARY,
+                                alignment=ft.Alignment.CENTER,
+                                data=("mehrfach", v.uebung),
+                                content=ft.Text(
+                                    f"{v.anzahl}×",
+                                    size=10,
+                                    weight=ft.FontWeight.BOLD,
+                                    color=ft.Colors.ON_PRIMARY,
+                                ),
+                            )
+                        ]
+                        if v.anzahl > 1
+                        else []
                     ),
                 ],
             )
             kacheln.append(
                 ft.Draggable(
                     group="uebung",
-                    data=it.id,
+                    # die Übung, nicht eine Planübung — welche ins Bild kommt, entscheidet sich
+                    # beim Ablegen (`ins_bild`)
+                    data=v.uebung,
                     # Waagerecht scrollt die Palette, nach unten greift man die Übung
                     affinity=ft.Axis.VERTICAL,
                     content=ft.Container(
                         width=70,
-                        on_click=lambda _e, i=it.id: palette_getippt(i),
+                        on_click=lambda _e, i=v.uebung: palette_getippt(i),
                         # Gedrückt halten nimmt sie aus dem Plan (Ben, 9.11.2026) — mit Rückfrage
-                        on_long_press=lambda _e, i=it.id: aus_dem_plan(i),
-                        tooltip="Tippen: in den Ablauf · gedrückt halten: aus dem Plan",
+                        on_long_press=lambda _e, i=v.uebung: aus_dem_plan(i),
+                        tooltip="Tippen oder ziehen: in den Ablauf · gedrückt halten: aus dem Plan",
                         content=ft.Column(
                             spacing=3,
                             tight=True,
@@ -499,7 +528,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                             controls=[
                                 bild,
                                 ft.Text(
-                                    u.name + (f" · {it.beiname}" if it.beiname else ""),
+                                    u.name + (f" · {zusatz}" if zusatz else ""),
                                     size=10,
                                     text_align=ft.TextAlign.CENTER,
                                     max_lines=2,
@@ -531,11 +560,16 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             )
         reihe.controls = kacheln
 
-    def aus_dem_plan(item_id: str) -> None:
-        """Gedrückt halten an einer Kachel: die Übung aus dem Plan nehmen — steht sie mitten in
-        einer Reihe, fragt `entfernen_fragen` nach Lücke oder Nachfolgereihe, sonst eine
-        einfache Rückfrage. Einträge bleiben."""
+    def aus_dem_plan(uebung_id: str) -> None:
+        """Gedrückt halten an einer Kachel: **eine** Planübung dieser Übung aus dem Plan nehmen
+        — die zuletzt hinzugekommene, eine freie zuerst (`Vorrat.letzte`); der Dialog nennt sie
+        mit ihrer Nummer. Steht sie mitten in einer Reihe, fragt `entfernen_fragen` nach Lücke
+        oder Nachfolgereihe, sonst eine einfache Rückfrage. Einträge bleiben."""
         p = frisch()
+        v = vorrat_jetzt(p).get(uebung_id)
+        if v is None:
+            return
+        item_id = v.letzte
         a = p.ablauf
         if a.an and [k for k in a.zu(item_id) if k.von != item_id] and a.von(item_id):
             entfernen_fragen(page, state, plan.id, item_id, neu_zeichnen)
@@ -553,7 +587,10 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
 
         dialog = ft.AlertDialog(
             title=ft.Text(f"„{name}“ aus dem Plan entfernen?"),
-            content=ft.Text("Ihre Wege im Ablauf fallen weg. Einträge im Tagebuch bleiben."),
+            content=ft.Text(
+                "Ihre Wege im Ablauf fallen weg. Einträge im Tagebuch bleiben."
+                + (f" Die Übung steht danach noch {v.anzahl - 1}× im Plan." if v.anzahl > 1 else "")
+            ),
             actions=[
                 ft.TextButton("Abbrechen", on_click=lambda _e=None: schliessen(dialog)),
                 ft.TextButton(
@@ -565,40 +602,73 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         with contextlib.suppress(Exception):
             page.show_dialog(dialog)
 
-    def palette_getippt(item_id: str) -> None:
-        """Ohne Ziehen: mit gewähltem Knoten ein Weg dorthin, sonst in den ersten Slot."""
+    def ins_bild(uebung_id: str, aendern: Callable[[Ablauf, str], Ablauf]) -> tuple[str, bool]:
+        """Eine Kachel kommt ins Bild (Ben, 16.11.2026): zuerst eine Planübung dieser Übung, die
+        noch nicht dort steht; gibt es keine freie, entsteht eine **neue Planübung derselben
+        Übung** am Ende der Liste (sie folgt der Übung, P79) — so muss niemand die Übung vorher
+        zwei-, dreimal in den Plan laden. ``aendern(ablauf, planuebung)`` setzt sie ein. Zurück:
+        die Planübung und ob sie neu ist; ``("", False)``, wenn die Übung nicht im Plan steht.
+
+        Der Ablauf, in den sie kommt, ist der von **vor** dem Hinzufügen: Folgte er der Liste,
+        hängt die neue Planübung nicht von selbst hinten an — sie kommt dorthin, wohin die
+        Person sie gesetzt hat."""
+        p = frisch()
+        v = vorrat_jetzt(p).get(uebung_id)
+        if v is None:
+            return "", False
+        item_id = v.naechste
+        neu = item_id is None
+        if item_id is None:
+            item_id = state.plaene.uebung_hinzufuegen(plan.id, uebung_id).id
+        speichern(aendern(p.ablauf, item_id))
+        return item_id, neu
+
+    def palette_getippt(uebung_id: str) -> None:
+        """Ohne Ziehen: mit gewähltem Knoten ein Weg dorthin, sonst in den ersten Slot — im
+        leeren Bild wird sie der Start."""
         p = frisch()
         von = gewaehlt()
-        namen = knoten_namen(state, p)
-        if von is not None and von in namen:
-            if any(k.von == von and k.nach == item_id for k in p.ablauf.kanten):
-                melden("Diesen Weg gibt es schon.")
-                return
-            speichern(p.ablauf.mit_kante(Kante(von, item_id)))
-            melden(f"Weg {namen[von]} → {namen.get(item_id, '?')}")
-            neu_zeichnen()
+        if von is not None and von in knoten_namen(state, p):
+            item_id, neu = ins_bild(uebung_id, lambda a, i: a.mit_kante(Kante(von, i)))
+            if item_id:
+                namen = knoten_namen(state, frisch())
+                melden(
+                    f"Weg {namen.get(von, '?')} → {namen.get(item_id, '?')}"
+                    + (" — neu im Plan" if neu else "")
+                )
+                neu_zeichnen()
             return
         if slots:
-            einsetzen(Slot(slots[0]), item_id)
+            einsetzen(Slot(slots[0]), uebung_id)
+            return
+        if p.ablauf.startknoten([it.id for it in p.items]) is None:
+            start_ablegen(uebung_id)
             return
         melden("Erst eine Übung im Bild antippen — oder nach unten in einen Slot ziehen.")
 
     # -- Zeichnung ------------------------------------------------------------------------------
 
-    def einsetzen(slot: Slot, item_id: str) -> None:
-        p = frisch()
-        if item_id not in {it.id for it in p.items}:
+    def einsetzen(slot: Slot, uebung_id: str) -> None:
+        item_id, neu = ins_bild(uebung_id, lambda a, i: a.mit_kante(Kante(slot.von, i)))
+        if not item_id:
             return
-        if not any(k.von == slot.von and k.nach == item_id for k in p.ablauf.kanten):
-            speichern(p.ablauf.mit_kante(Kante(slot.von, item_id)))
         with contextlib.suppress(ValueError):
             slots.remove(slot.von)
         state.ablauf_wahl[plan.id] = item_id
+        if neu:
+            melden(f"„{knoten_namen(state, frisch()).get(item_id, '?')}“ ist neu im Plan.")
         neu_zeichnen()
 
-    def start_ablegen(item_id: str) -> None:
+    def start_ablegen(uebung_id: str) -> None:
+        """Eine Kachel auf „Start“ (oder den leeren Platz darunter): Die Übung wird der Start —
+        eine freie Planübung zuerst; steht sie schon im Bild, **dieser Knoten** (bei mehreren
+        der erste), wie bisher. Hier entsteht nie eine neue Planübung: Ein neuer, einzelner
+        Start ließe alles Übrige ohne Weg dorthin zurück."""
         p = frisch()
-        speichern(replace(p.ablauf, start=item_id))
+        v = vorrat_jetzt(p).get(uebung_id)
+        if v is None:
+            return
+        speichern(replace(p.ablauf, start=v.naechste or v.planuebungen[0]))
         melden("Neuer Start")
         neu_zeichnen()
 
@@ -772,10 +842,49 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             ],
         )
 
+    def wie_die_liste(_e: Any = None) -> None:
+        """Im leeren Bild: der Ablauf folgt wieder der Liste — Übung für Übung."""
+        speichern(Ablauf(an=True))
+        lagen.clear()
+        melden("Der Ablauf folgt wieder der Liste.")
+        neu_zeichnen()
+
+    def leer_hinweis(p: Plan) -> list[ft.Control]:
+        """Unter einem Bild ohne Start (Ben, 16.11.2026: geleert bleibt es leer): was jetzt zu
+        tun ist — und, solange gar nichts im Bild steht, der Weg zurück zur Liste."""
+        ganz_leer = not p.ablauf.kanten and not p.ablauf.fragen
+        return [
+            ft.Text(
+                (
+                    "Der Ablauf ist leer — tippe oben eine Übung an oder zieh sie auf „Start“."
+                    if ganz_leer
+                    else "Der Ablauf hat keinen Start — zieh oben eine Übung auf „Start“ oder "
+                    "wähle eine im Bild und „Routing → Als Start“."
+                ),
+                size=12,
+                opacity=0.65,
+                data="ablauf_leer",
+            ),
+            *(
+                [
+                    ft.TextButton(
+                        "Wie die Liste",
+                        icon=ft.Icons.FORMAT_LIST_NUMBERED,
+                        tooltip="Übung für Übung in der Reihenfolge der Liste",
+                        on_click=wie_die_liste,
+                    )
+                ]
+                if ganz_leer
+                else []
+            ),
+        ]
+
     def knoten_knoepfe(p: Plan) -> list[ft.Control]:
         knoten = gewaehlt()
         namen = knoten_namen(state, p)
         if knoten is None or knoten not in namen:
+            if ab.ohne_start_text(p.ablauf, [it.id for it in p.items]):
+                return leer_hinweis(p)
             return [
                 ft.Text(
                     "Tipp auf eine Übung im Bild — dann stehen hier Routing, Slot, Beiname und "
@@ -1153,7 +1262,12 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             )
         # Was den Plan hängen lassen kann, steht sichtbar über dem Bild (Ben, 9.11.2026: „dafür
         # braucht es in der Planerstellung eine Warnung“)
-        gefahr = ab.warnungen(p.ablauf, [it.id for it in p.items], knoten_namen(state, p))
+        ids = [it.id for it in p.items]
+        gefahr = ab.warnungen(p.ablauf, ids, knoten_namen(state, p))
+        # „kein Start“ steht hier unter dem Bild, mit dem, was zu tun ist (`leer_hinweis`) —
+        # die rote Karte dazu gehört in den Reiter „Plan“
+        kein_start = ab.ohne_start_text(p.ablauf, ids)
+        gefahr = [g for g in gefahr if g != kein_start]
         warnung.visible = bool(gefahr)
         warnung.content = warn_karte(gefahr) if gefahr else None
         abbild.aktualisieren(bild, zeichnung_jetzt(p))

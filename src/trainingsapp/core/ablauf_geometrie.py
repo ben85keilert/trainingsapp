@@ -2,16 +2,19 @@
 10.11.2026, `docs/plan_verzweigungen.md` §8.11).
 
 Wie bei einem Nerv: Alle Wege einer Übung verlassen sie an **einem** Punkt — ein kurzer Stamm
-nach unten (unter Bild und Namen), dann der **Abzweig** (ein Knoten zum Antippen: alle Wege
-dieser Übung). Vom Abzweig gehen die Wege einzeln ab, jeder mit seinem eigenen **Griff**
-(Punkt mit Beschriftung: nur dieser Weg):
+nach unten (unter Bild und Namen) zum **Austritt**. Gehen dort **mehrere** Wege ab, steht an
+ihm der **Abzweig** (ein Knoten zum Antippen: alle Wege dieser Übung), und jeder Weg hat
+seinen eigenen **Griff** (Punkt mit Beschriftung: nur dieser Weg). Ist der Weg **eindeutig** —
+genau einer —, gibt es keinen Abzweig: Zwischen den zwei Übungen steht nur der Griff (Ben,
+16.11.2026: „wenn ein Weg eindeutig ist, keine zwei Knoten zwischen den Übungen, sondern nur
+1“). Die Wege:
 
 - **ab**: zu einem Knoten weiter unten — eine weiche Kurve zur Oberkante; liegt ein anderer
   Knoten im Weg (der Weg überspringt Ebenen), weicht sie seitlich aus;
 - **rueck**: zu einem Knoten auf gleicher Höhe oder weiter oben — in einer Gasse neben den
   Knoten hinauf und von der Seite hinein;
 - **schleife**: dieselbe Übung noch einmal — links herum zurück in den Knoten;
-- **zurueck** und **ende**: kurze Stummel links bzw. rechts am Abzweig, sie enden im Griff.
+- **zurueck** und **ende**: kurze Stummel links bzw. rechts am Austritt, sie enden im Griff.
 
 Hier steht nur Rechnung (Punkte, Kurven, Kollisionen) — gezeichnet wird in
 `ui/components/ablaufbild.py`. Maße in Pixeln vor dem Zoom.
@@ -20,6 +23,7 @@ Hier steht nur Rechnung (Punkte, Kurven, Kollisionen) — gezeichnet wird in
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -40,10 +44,10 @@ FRAGE_B = 120
 FRAGE_H = 66
 #: Breite der Beschriftung unter einem Übungsbild
 NAME_B = SPALTE - 24
-#: so weit unter der **Beschriftung** (Name, Beiname, „bei Bedarf“) liegt der Abzweig — knapp
+#: so weit unter der **Beschriftung** (Name, Beiname, „bei Bedarf“) liegt der Austritt — knapp
 #: darunter, nicht in festem Abstand zum Bild (Ben, 10.11.2026)
 AUSTRITT = 12
-#: so weit unter einer Frage liegt ihr Abzweig (sie hat keine Beschriftung darunter)
+#: so weit unter einer Frage liegt ihr Austritt (sie hat keine Beschriftung darunter)
 AUSTRITT_FRAGE = 20
 #: wo der Griff eines Wegs nach unten auf seiner Kurve liegt — gut zwei Drittel der Höhe, der
 #: Abstand zum Ziel bleibt dabei wie zuvor
@@ -103,7 +107,7 @@ def gerade(a: Punkt, b: Punkt) -> Kurve:
 
 @dataclass(frozen=True, slots=True)
 class Weg:
-    """Eine Kante im Bild: ihre Kurven ab dem Abzweig, die Pfeilspitze (x, y, Winkel) am Ziel
+    """Eine Kante im Bild: ihre Kurven ab dem Austritt, die Pfeilspitze (x, y, Winkel) am Ziel
     — ``None`` bei einem Stummel — und der Griff mit der Seite der Beschriftung (−1 links,
     1 rechts, 0 darunter)."""
 
@@ -121,9 +125,13 @@ class Geometrie:
 
     #: Pixelmitte je Knoten (Mitte des Übungsbilds bzw. der Fragekarte)
     mitten: dict[str, Punkt]
-    #: der Abzweig je Knoten mit Wegen
+    #: der Austritt je Knoten mit Wegen (oder Slot): dort endet der Stamm, dort beginnen alle
+    #: seine Wege
+    austritte: dict[str, Punkt]
+    #: der Abzweig — ein Punkt zum Antippen am Austritt —, nur wo **mehrere** Wege abgehen;
+    #: bei genau einem Weg steht allein dessen Griff zwischen den Übungen
     abzweige: dict[str, Punkt]
-    #: der Stamm vom Knoten zum Abzweig
+    #: der Stamm vom Knoten zum Austritt
     staemme: dict[str, tuple[Punkt, Punkt]]
     wege: tuple[Weg, ...]
     breite: float
@@ -154,17 +162,19 @@ def geometrie(
 ) -> Geometrie:
     """Die Geometrie zu den Lagen der gezeichneten Knoten. ``beschriftung``: Höhe des Texts
     unter dem Bild je Planübung (sonst `NAME_H`); ``weitere``: Lagen ohne Knoten (leere Slots)
-    — sie zählen für die Größe; ``mit_abzweig``: Knoten, die auch ohne Weg einen Abzweig
+    — sie zählen für die Größe; ``mit_abzweig``: Knoten, die auch ohne Weg einen Austritt
     bekommen (ein Slot hängt daran).
 
     >>> a = Ablauf(True, "p", (Kante("p", "k"), Kante("p", "r"), Kante("k", "p")))
     >>> g = geometrie(a, {"p": Lage(0.5, 0), "k": Lage(0.0, 1), "r": Lage(1.0, 1)})
-    >>> [w.art for w in g.wege], sorted(g.abzweige)
+    >>> [w.art for w in g.wege], sorted(g.austritte)
     (['ab', 'ab', 'rueck'], ['k', 'p'])
-    >>> g.abzweige["p"][1] - g.mitten["p"][1] == KNOTEN / 2 + NAME_H + AUSTRITT
+    >>> g.austritte["p"][1] - g.mitten["p"][1] == KNOTEN / 2 + NAME_H + AUSTRITT
     True
-    >>> all(w.kurven[0].p0 == g.abzweige[w.kante.von] for w in g.wege)  # ein Austrittspunkt
+    >>> all(w.kurven[0].p0 == g.austritte[w.kante.von] for w in g.wege)  # ein Austrittspunkt
     True
+    >>> sorted(g.abzweige)  # „p“ hat zwei Wege: Abzweig und Griffe; „k“ einen: nur den Griff
+    ['p']
     """
     text_h = dict(beschriftung or {})
     fragen = {f.id for f in ablauf.fragen}
@@ -208,7 +218,7 @@ def geometrie(
                         n += 1
         return n
 
-    abzweige: dict[str, Punkt] = {}
+    austritte: dict[str, Punkt] = {}
     staemme: dict[str, tuple[Punkt, Punkt]] = {}
     for kn in dict.fromkeys([*(x.von for x in ablauf.kanten), *mit_abzweig]):
         if kn not in mitten:
@@ -220,14 +230,14 @@ def geometrie(
         else:
             beginn = y + KNOTEN / 2 + text_h.get(kn, NAME_H) + 2
             unten = y + KNOTEN / 2 + text_h.get(kn, NAME_H) + AUSTRITT
-        abzweige[kn] = (x, unten)
+        austritte[kn] = (x, unten)
         staemme[kn] = ((x, min(beginn, unten - 8)), (x, unten))
 
     wege: list[Weg] = []
     ankommend: dict[str, int] = {}
     gassen: dict[float, int] = {}
     for k in ablauf.kanten:
-        j = abzweige.get(k.von)
+        j = austritte.get(k.von)
         if j is None:
             continue
         x0, y0 = mitten[k.von]
@@ -274,7 +284,7 @@ def geometrie(
                 Weg(k, AB, (beste,), griff, 1 if i % 2 == 0 else -1, (*b, beste.winkel_am_ende()))
             )
             continue
-        # hinauf oder auf gleicher Höhe: im freien Band unter dem Abzweig zur Seite, in einer
+        # hinauf oder auf gleicher Höhe: im freien Band unter dem Austritt zur Seite, in einer
         # Gasse zwischen den Spalten hinauf und von der Seite ins Ziel. Die Gasse liegt neben
         # dem **Ziel** (zuerst auf der Seite, von der der Weg kommt); steht dort ein Knoten,
         # die nächste — die erste ohne Treffer, sonst die mit den wenigsten
@@ -323,9 +333,13 @@ def geometrie(
         + [p[0] for w in wege for kurve in w.kurven for p in (kurve.p0, kurve.p3)]
     )
     breite = rechts + RAND + 120
-    tiefster = max((p[1] for p in abzweige.values()), default=0.0)
+    tiefster = max((p[1] for p in austritte.values()), default=0.0)
     hoehe = max(RAND + START_H + 22 + ebene_max * EBENE + KNOTEN + NAME_H + AUSTRITT, tiefster) + 80
-    return Geometrie(mitten, abzweige, staemme, tuple(wege), breite, hoehe, x_min)
+    # Ein Abzweig steht nur, wo sich die Wege teilen: bei genau einem gezeichneten Weg bleibt
+    # zwischen den zwei Übungen ein Punkt — sein Griff (Ben, 16.11.2026)
+    anzahl = Counter(w.kante.von for w in wege)
+    abzweige = {kn: p for kn, p in austritte.items() if anzahl[kn] >= 2}
+    return Geometrie(mitten, austritte, abzweige, staemme, tuple(wege), breite, hoehe, x_min)
 
 
 __all__ = [

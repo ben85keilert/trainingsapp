@@ -54,12 +54,17 @@ from trainingsapp.core.kursbloecke import (
     ARTEN,
     AUSWAHL,
     BAUSTEINE,
+    MENGE,
     PLAN_EINSTELLEN,
     PLAN_UEBUNG,
     PLAN_WEG,
+    SKALA,
     TEST,
+    VORGABEN,
+    ZEIT,
     ZU_ENDE,
     Block,
+    Vorgabe,
 )
 from trainingsapp.core.kurse import Kapitel, Kurs, PlanVorlage, VorlageItem
 from trainingsapp.core.kursplan import GRUNDLAGE
@@ -110,7 +115,7 @@ from trainingsapp.core.privat import (
     ordner_neu,
     zugangsdatei,
 )
-from trainingsapp.core.result_spec import VORLAGEN
+from trainingsapp.core.result_spec import VORLAGEN, basis_key
 from trainingsapp.core.takt import takt_pruefen
 from trainingsapp.core.zaehlen import wahl_pruefen
 from trainingsapp.data.seed import seed_inhalt
@@ -762,6 +767,15 @@ def _kurs_pruefen(
             hinweise.extend(f"{s.ort}: {x}" for x in h_kante)
         fehler.extend(f"{s.ort}: {x}" for x in probleme)
 
+    # Ein Test mit Vorgabe (`vorgabe`) ist ein Lauf mit der Uhr: Sie muss etwas vorgeben, und
+    # ins Ziel kann nur, was der Lauf vorgibt oder misst
+    for s in stellen:
+        if s.art != TEST or "vorgabe" not in s.roh:
+            continue
+        f_vorgabe, h_vorgabe = _vorgabe_pruefen(s.roh, felder)
+        fehler.extend(f"{s.ort}: {x}" for x in f_vorgabe)
+        hinweise.extend(f"{s.ort}: {x}" for x in h_vorgabe)
+
     # Ein Test, der „die gewählte“ misst (`aus`), braucht seine Auswahl — hier oder davor
     for s in stellen:
         aus = _marke_roh(s.roh.get("aus")) if s.art == TEST else ""
@@ -806,6 +820,58 @@ def _kurs_pruefen(
             + ", ".join(f"„{t}“" for t in mit_plaenen)
             + ") — beides gilt nebeneinander: Die Kapitelpläne entstehen wie bisher, der "
             "Kursplan wächst daneben"
+        )
+    return fehler, hinweise
+
+
+#: Was ein Testlauf liefert — nur diese Felder können mit `vorgabe` ins Ziel
+_LAUF_FELDER = ("reps", "hold", "duration")
+
+
+def _vorgabe_pruefen(
+    block: Mapping[str, Any], felder: Mapping[str, Collection[str]] | None = None
+) -> tuple[list[str], list[str]]:
+    """``(Fehler, Hinweise)`` zur ``vorgabe`` eines Tests (`core.kursbloecke.Vorgabe`,
+    `docs/uebungspakete.md` „Test mit Vorgabe“). Die App liest nachsichtig — eine Vorgabe, die
+    nichts vorgibt, fiele still weg und der Test wäre wieder „der jüngste Eintrag“.
+
+    >>> _vorgabe_pruefen({"art": "test", "feld": "reps", "vorgabe": {"art": "skala", "n": 7}})
+    ([], [])
+    >>> _vorgabe_pruefen({"art": "test", "vorgabe": {"art": "menge"}})[0][0][:37]
+    '`vorgabe`: `n` (Wiederholungen) fehlt'
+    >>> zeit = {"art": "zeit", "n": 60}
+    >>> _vorgabe_pruefen({"art": "test", "feld": "weight", "vorgabe": zeit})[0][0][:44]
+    '`feld` „weight“ liefert ein Testlauf nicht —'
+    """
+    roh = block.get("vorgabe")
+    if not isinstance(roh, Mapping):
+        return ["`vorgabe` ist keine Tabelle (`art`, `n`, bei `skala` auch `bis`)"], []
+    art = str(roh.get("art") or "").strip().lower()
+    if art not in VORGABEN:
+        bekannt = ", ".join(VORGABEN)
+        return [f"`vorgabe`: `art` „{roh.get('art')}“ ist unbekannt (bekannt: {bekannt})"], []
+    fehler: list[str] = []
+    hinweise: list[str] = []
+    if Vorgabe.from_dict(roh) is None:
+        was = {
+            MENGE: "`n` (Wiederholungen) fehlt oder ist 0",
+            ZEIT: "`n` (Sekunden) fehlt oder ist 0",
+            SKALA: "`n` (ab) und `bis` (höchstens) geben nichts vor — eines davon zwischen 1 und "
+            "9, `bis` nicht kleiner als `n`",
+        }[art]
+        fehler.append(f"`vorgabe`: {was} — der Test liefe ohne Vorgabe")
+    feld = str(block.get("feld") or "hold").strip() or "hold"
+    if basis_key(feld) not in _LAUF_FELDER:
+        fehler.append(
+            f"`feld` „{feld}“ liefert ein Testlauf nicht — mit `vorgabe` nur `reps`, `hold` "
+            "oder `duration`"
+        )
+    uebung = str(block.get("uebung") or "").strip()
+    eigene = felder.get(uebung) if felder is not None and uebung else None
+    if eigene is not None and art == MENGE and not any(basis_key(k) == "reps" for k in eigene):
+        hinweise.append(
+            f"`vorgabe` Menge, aber „{uebung}“ hat kein Wiederholungsfeld — der Eintrag des "
+            "Tests bringt es mit, im Plan zeigt die Übung es nicht"
         )
     return fehler, hinweise
 

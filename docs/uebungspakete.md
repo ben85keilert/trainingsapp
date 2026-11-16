@@ -472,6 +472,12 @@ Planübung liest die App als diesen Ablauf (P108, `PlanVorlage.zweige_als_ablauf
 gibt einen Hinweis). `trainingsapp-paket pruefen` meldet eine Kante ohne Position als Fehler,
 einen unbekannten Auslöser als Hinweis; ältere Apps übergehen das Feld. Je Planübung dazu
 `beiname` (Text, unterscheidet zwei gleiche Übungen im Bild: „2. Durchgang“).
+**`ohne_start = true`** (Ben, 16.11.2026, `docs/plan_verzweigungen.md` §8.13): Der Start ist
+ausdrücklich leer — die Person hat ihn aus dem Bild genommen, keine Planübung rückt von selbst
+nach (ohne `start` und ohne diesen Vermerk gilt wie bisher die erste Planübung). Ein geleerter
+Ablauf reist als `ablauf = { an = true, ohne_start = true }` und kommt leer an; eine App vor
+dieser Fassung kennt den Schlüssel nicht und liest `{ an = true }` — das Workout folgt dort der
+Liste. Kein neuer Stand der Formatversion.
 
 **Anweisungen je Planübung** (U2, Ben 9.11.2026, `docs/plan_paketinhalte.md` §9, F6) — in
 `plaene[].uebungen[]` und in Kurskapiteln: `beschreibung` (ein Text mit `## Name`-Zeilen wie die
@@ -567,6 +573,29 @@ aber **im selben Kapitel** stehen wie der Test (im Kursplan-Kurs darf sie in ein
 stehen: die Wahl steht dann im Kursplan). `feld` gilt für alle Übungen der Auswahl; hat eine
 das Feld nicht, bekommt sie keinen Testwert. Ein Test mit `aus` braucht Formatversion 6.
 
+**Test mit Vorgabe — der Test läuft mit der Uhr** (Ben, 16.11.2026: „Anstrengung kann Menge,
+Zeit, Skala sein. Skala kann ab, bis oder dazwischen sein“; `docs/plan_kurs_ablauf.md` §3.3 und
+§13, Rechnung `core/kurstest.py`): Mit `vorgabe` steht **eine Größe fest und beendet den Lauf,
+die anderen werden gemessen**. Ohne `vorgabe` bleibt der Test, wie er war — es zählt der
+jüngste Eintrag der Übung.
+
+| `vorgabe` | der Lauf endet, wenn … | gemessen |
+|---|---|---|
+| `{ art = "menge", n = 30 }` | die Person „Fertig — 30 gemacht“ tippt (zählt der Sensor oder der Takt: bei 30 von selbst) | Zeit, Anstrengung |
+| `{ art = "zeit", n = 60 }` (Sekunden) | die Zeit ab ist | Wiederholungen, Anstrengung |
+| `{ art = "skala", n = 7 }` — „bis 7“ | die Person „Bei 7 angekommen“ tippt | Wiederholungen, Zeit |
+| `{ art = "skala", bis = 4 }` — „solange höchstens 4“ | die Person „Jetzt über 4“ tippt | Wiederholungen, Zeit |
+| `{ art = "skala", n = 5, bis = 7 }` — „zwischen 5 und 7“ | die Person „Nicht mehr zwischen 5 und 7“ tippt | Wiederholungen, Zeit |
+
+Am Ende steht **ein gewöhnlicher Eintrag** bei der Übung, mit Wiederholungen, Zeit und Skala;
+bietet die Übung eines der Felder nicht an, bringt der Eintrag es in seiner Kopie der Felder
+mit. **`feld` sagt, was ins Ziel kommt** — `reps`, `hold` oder `duration`: die Vorgabe selbst
+(30 Wiederholungen) oder eine gemessene Größe, jeweils × `faktor`. Die Karte nennt die Regel,
+nicht mehr: „Ziel für Käfer: 18 Wiederholungen — 80 % von deinem Test (22 Wdh. bis Anstrengung
+7)“. Die Skala ist die der Übung (ihr Name gilt), ohne eigene heißt sie „Anstrengung“; sie ist
+**Selbstauskunft** — die App misst sie nicht und deutet sie nicht. Ein Test mit `vorgabe`
+braucht Formatversion 6.
+
 **Gleichwertige Wege:** Führen von einer Planübung mehrere Wege zu den Gewählten desselben
 Bausteins (`zu = "<block-id>"` bei `anzahl` ≥ 2), geht man im Workout **einen** davon — die
 Kette der Liste zwischen den Gewählten entfällt, jede führt dorthin, wohin die letzte von ihnen
@@ -591,8 +620,8 @@ Bausteine nichts; hat ein Kapitel eines Kursplan-Kurses trotzdem `plaene`, entst
 bisher als Kapitelpläne neben dem Kursplan.
 
 **Formatversion 6 — was eine ältere App tut:** Ein Paket mit einem `kursplan`, einem
-`plan_*`-Block oder einem `test` mit `aus` wird als Version 6 geschrieben, alle anderen wie
-bisher. Die veröffentlichten
+`plan_*`-Block oder einem `test` mit `aus` oder mit `vorgabe` wird als Version 6 geschrieben,
+alle anderen wie bisher. Die veröffentlichten
 Apps bis einschließlich 0.3.94 lesen höchstens Version 5 und **lehnen ein solches Paket ab**
 („Das Paket ist neuer als diese App — bitte die App aktualisieren.“), statt den Kurs ohne
 seinen Plan zu zeigen; kommt es als Update aus einer Quelle, behalten sie ihren Stand. Das gilt
@@ -602,7 +631,8 @@ dann nicht mehr.
 Ein Beispiel (TOML wie im Inhalte-Repo; `trainingsapp-paket pruefen` nimmt es so an,
 `tests/test_paket_kursplan.py` liest es aus dieser Datei): Kapitel 1 bringt die Planke mit
 60 Sekunden; Kapitel 2 lässt eine von drei Übungen wählen, hängt sie hinter die Planke, nimmt
-ihr Ziel aus einem Test und setzt den Weg Planke → Gewählte, „Zeit ab“, Pflicht.
+ihr Ziel aus einem Test (ein Lauf mit der Uhr, „bis Anstrengung 7“, davon 80 %) und setzt den
+Weg Planke → Gewählte, „Zeit ab“, Pflicht.
 
 ```toml
 [paket]
@@ -683,7 +713,8 @@ art = "test"
 id = "test"
 titel = "Wie viele schaffst du am Stück?"
 aus = "wahl"                     # misst die gewählte Übung (statt uebung = "…")
-feld = "reps"
+feld = "reps"                    # ins Ziel kommen die Wiederholungen …
+vorgabe = { art = "skala", n = 7 }   # … die der Lauf misst: üben „bis Anstrengung 7“
 
 [[kurse.kapitel.bloecke]]
 art = "plan_uebung"
@@ -691,6 +722,7 @@ id = "dazu"
 aus = "wahl"                     # „die gewählte“ — im Plan trägt sie die Marke dazu:<übung>
 hinter = "start"
 ziel_aus = "test"                # Testwert × faktor, im Feld des Tests (reps)
+faktor = 0.8                     # „80 % von deinem Test“
 
 [[kurse.kapitel.bloecke]]
 art = "plan_weg"
@@ -710,14 +742,16 @@ einem früheren Kapitel; `plan_uebung` ohne `uebung` und ohne `aus` oder mit bei
 auch im `ablauf` ein Fehler ist (`n`, `bis` keine Zahl); einen Block `plan_…`, den es nicht
 gibt; eine Marke `<block-id>:<übung>`, deren Übung nicht zur Wahl steht; einen `test` mit
 `aus` ohne Auswahl in diesem oder einem früheren Kapitel, mit `uebung` und `aus` zugleich oder
-— ohne `kursplan` — mit der Auswahl in einem anderen Kapitel.
+— ohne `kursplan` — mit der Auswahl in einem anderen Kapitel; eine `vorgabe`, die nichts
+vorgibt (unbekannte `art`, Menge oder Zeit ohne `n`, Skala ohne Grenze), und mit `vorgabe` ein
+`feld`, das ein Lauf nicht liefert (nur `reps`, `hold`, `duration`).
 Die Planübungen einer
 `vorlage` dürfen Dateien mitbringen (`medien = [{ datei = "…" }]`) wie die eines Kapitelplans.
 Als **Hinweis**: Bausteine in einem
 Kurs ohne `kursplan`, Kapitel-`plaene` neben einem `kursplan`, einen unbekannten Auslöser
 („frei“ gilt), ein `plan_einstellen`, das nichts einstellt, eine `vorlage` ohne Übung, einen
 `test` mit `aus`, dessen `feld` nicht jede Übung der Auswahl hat (geprüft nur an Übungen dieses
-Pakets) — und zu
+Pakets), eine `vorgabe` Menge an einer Übung ohne Wiederholungsfeld — und zu
 jedem solchen Paket die Formatversion 6. Die Übungen in `uebung` prüft das Werkzeug hier so
 wenig wie in `test`, `auswahl` und Planübungen; was die App nicht kennt, ergibt keine Zeile.
 

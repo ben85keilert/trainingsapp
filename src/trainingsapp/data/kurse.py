@@ -37,6 +37,7 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
+from ..core import kursvorschau
 from ..core.kursbloecke import (
     AUSWAHL,
     TEST,
@@ -57,6 +58,7 @@ from ..core.kurse import (
     Kursplan,
     PlanVorlage,
     Stand,
+    aktuelles,
     bedingung_stand,
     durchlauf_name,
     eigenes_uebernehmen,
@@ -75,7 +77,7 @@ from ..core.kursplan import (
     grundstand,
     wahl_im_plan,
 )
-from ..core.models import Plan, jetzt, lokaler_tag, new_id
+from ..core.models import Plan, SessionEntry, jetzt, lokaler_tag, new_id
 from ..core.pakete import PaketPlan, paketplan_aus, plan_abgleichen, plan_stand
 from ..core.result_spec import FieldSpec, FieldType
 from .db import transaktion
@@ -399,6 +401,25 @@ class KursRepo:
         in seiner Auswahl zur Wahl steht, einen Wert unter ``<block>:<übung>``
         (`core.kursbloecke.wert_schluessel`) — welcher zählt, sagt die Wahl."""
         ergebnis: dict[str, float] = {}
+        eintraege = self.testeintraege(kapitel, subject_id, seit)
+        for block in kapitel.bloecke:
+            if block.art != TEST:
+                continue
+            for uebung in self._zu_messen(kapitel, block):
+                eintrag = eintraege.get(wert_schluessel(block, uebung))
+                wert = wert_im_test(eintrag.result, block.feld) if eintrag is not None else None
+                if wert is not None and wert > 0:
+                    ergebnis[wert_schluessel(block, uebung)] = wert
+        return ergebnis
+
+    def testeintraege(
+        self, kapitel: Kapitel, subject_id: str, seit: datetime
+    ) -> dict[str, SessionEntry]:
+        """Je Test-Block der **jüngste Eintrag** seiner Übung seit ``seit`` — unter denselben
+        Schlüsseln wie `testwerte`. Die Testkarte liest daraus, was der Lauf sonst gemessen hat
+        (`core.kurstest.lauf_aus`: Zeit, Wiederholungen, Skala); der Wert des Tests bleibt
+        `testwerte`."""
+        ergebnis: dict[str, SessionEntry] = {}
         eintraege = SessionRepo(self.con)
         for block in kapitel.bloecke:
             if block.art != TEST:
@@ -407,9 +428,7 @@ class KursRepo:
                 letzter = eintraege.letzter_eintrag(subject_id, uebung)
                 if letzter is None or letzter.started_at is None or letzter.started_at < seit:
                     continue
-                wert = wert_im_test(letzter.result, block.feld)
-                if wert is not None and wert > 0:
-                    ergebnis[wert_schluessel(block, uebung)] = wert
+                ergebnis[wert_schluessel(block, uebung)] = letzter
         return ergebnis
 
     def _zu_messen(self, kapitel: Kapitel, test: Block) -> list[str]:
@@ -746,6 +765,41 @@ class KursRepo:
             if neuer_stand != stand:
                 plaene.kurs_stand_setzen(neu.id, neuer_stand)
         return plaene.laden(neu.id) or neu
+
+    def kommt_noch(
+        self,
+        kurs: Kurs,
+        subject_id: str,
+        wahl: Mapping[str, Sequence[str]] | None = None,
+    ) -> list[kursvorschau.KapitelVorschau]:
+        """Die Vorschau „Das kommt noch“ der Kursseite (A1, `docs/plan_kurs_ablauf.md` §12):
+        was die Kapitel **nach dem aktuellen** am Kursplan vorschlagen
+        (`core.kursvorschau.kommt_noch`). **Nur lesen** — nichts wird gespeichert, kein Plan
+        angelegt; gibt es den Kursplan noch nicht, wird gegen seine Grundlage gerechnet.
+
+        Gerechnet wird mit dem, was es wirklich gibt: dem Plan und seinem Kurs-Stand, der Wahl
+        (``wahl`` wie in `plan_aenderungen`: was im Plan steht, gilt; die offene Wahl der
+        Sitzung kommt als Argument) und den Testwerten aus Einträgen — nie aus Messwerten.
+
+        Leer, wenn der Kurs keinen Kursplan baut, noch kein Kapitel erreicht ist, der Kurs
+        abgeschlossen ist oder die späteren Kapitel am Plan nichts mehr ändern.
+        """
+        if kurs.kursplan is None:
+            return []
+        staende = self.staende(subject_id, kurs.id)
+        dran = aktuelles(kurs, staende)
+        if not staende or dran is None:
+            return []
+        plan = self.kursplan(kurs, subject_id)
+        if plan is None:
+            plan, stand = self._grundplan(kurs, subject_id)
+        else:
+            stand = PlanRepo(self.con).kurs_stand(plan.id)
+        werte, gewaehlt, namen, feld_von, _bloecke = self._kursplan_eingaben(
+            kurs, subject_id, plan, wahl
+        )
+        stelle = next(n for n, kapitel in enumerate(kurs.kapitel) if kapitel.id == dran.id)
+        return kursvorschau.kommt_noch(kurs, plan, stand, gewaehlt, werte, stelle, namen, feld_von)
 
     # -- Kapitelplan neu laden (U2, `docs/plan_paketinhalte.md` §9) ---------------------
 

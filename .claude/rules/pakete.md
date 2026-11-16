@@ -69,7 +69,9 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   (`Paketinhalt.raeumen`). **Kursplan im Paket** (Ben, 16.11.2026, Formatversion 6 — nur
   für Pakete, die ihn nutzen; `core.pakete.noetige_version`): `kurse[].kursplan` und die
   Blöcke `plan_uebung` · `plan_einstellen` · `plan_weg`, dazu ein `test` mit `aus` („die
-  gewählte“ — ohne Kursplan nur mit der Auswahl im selben Kapitel); **Bausteine brauchen eine feste
+  gewählte“ — ohne Kursplan nur mit der Auswahl im selben Kapitel) oder mit `vorgabe` (der Test
+  läuft mit der Uhr: Menge · Zeit · Skala steht fest, das andere wird gemessen, `core/kurstest.py`;
+  am Ende ein gewöhnlicher Eintrag, die Skala ist Selbstauskunft); **Bausteine brauchen eine feste
   `id`** (sie ist die Marke der Planübung), Verweise zeigen nur auf Bausteine davor —
   `trainingsapp-paket pruefen` (`kursplan_pruefen`) meldet es; eine ältere App lehnt das Paket
   ab (`docs/uebungspakete.md` „Kursplan und Bausteine“). Paketmanager: Jede

@@ -62,8 +62,9 @@ from .kursbloecke import (
     ziel_aus_test,
 )
 from .kurse import Kapitel, Kurs, Kursplan, PlanVorlage, plan_aus_vorlage
+from .kurstest import SKALA_NAME, herkunft, skala_name
 from .models import Plan, PlanItem
-from .result_spec import FieldSpec, FieldType, vorrat_feld, wert_text
+from .result_spec import FieldSpec, FieldType, ResultSpec, vorrat_feld, wert_text
 from .takt import AUS, Takt
 from .timer import TimerProfil
 
@@ -572,6 +573,11 @@ class _Lauf:
         feld = self.feld_von(uebung, key) if self.feld_von is not None else None
         return feld or vorrat_feld(key) or FieldSpec(key=key, type=FieldType.FLOAT, label=key)
 
+    def _skala_name(self, uebung: str) -> str:
+        """Wie die Skala der Übung heißt (ihr Feld ``scale``) — ohne eigene „Anstrengung“."""
+        feld = self.feld_von(uebung, "scale") if self.feld_von is not None else None
+        return skala_name(ResultSpec(fields=[feld])) if feld is not None else SKALA_NAME
+
     def _erledigt(self, marke: str) -> list[str]:
         liste = self.stand.get(marke, {}).get("erledigt")
         return liste if isinstance(liste, list) else []
@@ -757,10 +763,16 @@ class _Lauf:
             self._zeile(Aenderung(zid, b.id, ZIEL, f"Ziel für {name}", unter, OFFEN))
             return
         zahl = ziel_aus_test(b, wert)
-        je_satz = self._feld(uebung, test.feld).type == FieldType.SET_LIST
+        feld = self._feld(uebung, test.feld)
+        je_satz = feld.type == FieldType.SET_LIST
         bisher = dict(item.target) if item is not None and item.target else {}
         ziel = {**bisher, test.feld: [zahl] if je_satz else zahl}
         text = self._ziel_text(uebung, ziel, (test.feld,))
+        # Die Regel des Kurses, ohne Wertung: woher die Zahl kommt (Faktor, gemessener Wert,
+        # Vorgabe des Tests) — `core.kurstest.herkunft`
+        woher = herkunft(
+            b.faktor, _kurzwert(feld, wert), test.vorgabe, test.feld, self._skala_name(uebung)
+        )
         self._wert(
             zid=zid,
             b=b,
@@ -769,7 +781,7 @@ class _Lauf:
             traeger=item,
             neu=ziel,
             titel=f"Ziel für {name}: {text}",
-            unter="aus deinem Test",
+            unter=woher,
             wer=name,
             uebung=uebung,
             nur=(test.feld,),
@@ -1214,6 +1226,17 @@ def _zeit_text(sekunden: float) -> str:
         return f"{sekunden:g} s".replace(".", ",")
     ganz = round(sekunden)
     return f"{ganz // 60} min" if ganz % 60 == 0 else f"{ganz // 60}:{ganz % 60:02d} min"
+
+
+def _kurzwert(feld: FieldSpec, wert: float) -> str:
+    """Ein gemessener Wert, knapp — für die Klammer hinter „aus deinem Test“.
+
+    >>> _kurzwert(vorrat_feld("reps"), 22.0), _kurzwert(vorrat_feld("hold"), 48.0)
+    ('22 Wdh.', '48 s')
+    """
+    if feld.unit == "s" or feld.type == FieldType.DURATION:
+        return _zeit_text(float(wert))
+    return f"{wert:g} {feld.unit or feld.label}"
 
 
 def zielwert_text(feld: FieldSpec, wert: Any) -> str:

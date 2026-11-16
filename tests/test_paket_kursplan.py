@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 from trainingsapp.core import pakete
-from trainingsapp.core.kursbloecke import PLAN_UEBUNG, Block
+from trainingsapp.core.kursbloecke import MENGE, PLAN_UEBUNG, Block, Vorgabe
 from trainingsapp.core.kurse import Kapitel, Kurs, Kursplan, PlanVorlage, VorlageItem
 from trainingsapp.core.kursplan import NEU, OFFEN, UEBERNOMMEN
 from trainingsapp.core.models import Exercise, Subject
@@ -106,8 +106,24 @@ def test_beispiel_bauen_lesen_gleich(tmp_path) -> None:
     (kurs,) = gebaut.kurse
     assert kurs.kursplan == Kursplan("Rumpf", [0, 2, 4])
     assert kurs_stand(kurs) == kurs_stand(quelle.kurse[0])
+    # der Test läuft mit der Uhr: seine Vorgabe reist mit
+    assert kurs.kapitel[1].bloecke[1].to_dict() == {
+        "art": "test",
+        "id": "test",
+        "titel": "Wie viele schaffst du am Stück?",
+        "aus": "wahl",
+        "feld": "reps",
+        "vorgabe": {"art": "skala", "n": 7},
+    }
     assert [b.to_dict() for b in kurs.kapitel[1].bloecke[2:]] == [
-        {"art": "plan_uebung", "id": "dazu", "aus": "wahl", "hinter": "start", "ziel_aus": "test"},
+        {
+            "art": "plan_uebung",
+            "id": "dazu",
+            "aus": "wahl",
+            "hinter": "start",
+            "ziel_aus": "test",
+            "faktor": 0.8,
+        },
         {
             "art": "plan_weg",
             "id": "weiter",
@@ -204,6 +220,63 @@ def test_version_6_auch_fuer_einen_test_der_die_gewaehlte_misst() -> None:
         name="K", kapitel=[Kapitel(titel="A", bloecke=[Block("test", id="t", uebung="u1")])]
     )
     assert not nutzt_kursplan(fest) and noetige_version(kurse=[fest]) == 2
+
+
+def test_version_6_auch_fuer_einen_test_mit_vorgabe() -> None:
+    """Ein Test mit ``vorgabe`` braucht Version 6: Eine ältere App überläse sie und nähme als
+    Test irgendeinen Eintrag der Übung."""
+    lauf = Block("test", id="t", uebung="u1", feld="reps", vorgabe=Vorgabe(MENGE, 30))
+    kurs = Kurs(name="K", kapitel=[Kapitel(titel="A", bloecke=[lauf])])
+    assert nutzt_kursplan(kurs) and noetige_version(kurse=[kurs]) == 6
+    paket = Paket(id="p", name="P")
+    (gelesen,) = paket_lesen(paket_bauen(paket, [], kurse=[kurs])).kurse
+    assert gelesen.kapitel[0].bloecke[0].vorgabe == Vorgabe(MENGE, 30)
+
+
+def _vorgabe_ohne_zahl(roh: dict[str, Any]) -> None:
+    block(roh, "test")["vorgabe"] = {"art": "menge"}
+
+
+def _vorgabe_unbekannt(roh: dict[str, Any]) -> None:
+    block(roh, "test")["vorgabe"] = {"art": "tanz", "n": 3}
+
+
+def _vorgabe_skala_ohne_grenze(roh: dict[str, Any]) -> None:
+    block(roh, "test")["vorgabe"] = {"art": "skala", "bis": 10}
+
+
+def _vorgabe_feld_das_kein_lauf_liefert(roh: dict[str, Any]) -> None:
+    block(roh, "test")["feld"] = "weight"
+
+
+@pytest.mark.parametrize(
+    ("aendern", "teil"),
+    [
+        (_vorgabe_ohne_zahl, "`vorgabe`: `n` (Wiederholungen) fehlt oder ist 0"),
+        (_vorgabe_unbekannt, "`vorgabe`: `art` „tanz“ ist unbekannt (bekannt: menge, zeit, skala)"),
+        (_vorgabe_skala_ohne_grenze, "`vorgabe`: `n` (ab) und `bis` (höchstens) geben nichts vor"),
+        (_vorgabe_feld_das_kein_lauf_liefert, "`feld` „weight“ liefert ein Testlauf nicht"),
+    ],
+    ids=["ohne_zahl", "unbekannt", "skala_ohne_grenze", "feld"],
+)
+def test_pruefen_meldet_eine_vorgabe_die_nichts_taugt(tmp_path, aendern, teil) -> None:
+    roh = beispiel()
+    aendern(roh)
+    fehler, _ = pruefe(tmp_path, roh)
+    ort = "Kurs „Rumpf-Kurs“: Kapitel „Erweiterung“, Block 2 „test“: "
+    assert [f for f in fehler if "vorgabe" in f] and fehler[0].startswith(ort + teil)
+
+
+def test_hinweis_vorgabe_menge_an_einer_uebung_ohne_wiederholungen(tmp_path) -> None:
+    roh = beispiel()
+    test = block(roh, "test")
+    del test["aus"]
+    test.update(uebung="planke", feld="hold", vorgabe={"art": "menge", "n": 5})
+    block(roh, "dazu").pop("ziel_aus")
+    block(roh, "dazu").pop("faktor")
+    fehler, hinweise = pruefe(tmp_path, roh)
+    assert fehler == []
+    assert any("`vorgabe` Menge, aber „planke“ hat kein Wiederholungsfeld" in h for h in hinweise)
 
 
 def test_aeltere_app_lehnt_version_6_ab(monkeypatch) -> None:
@@ -745,7 +818,12 @@ def test_beispiel_einspielen_kurs_starten_plan_entsteht(tmp_path) -> None:
         marke = f"dazu:{kaefer}"
         assert [(z.id, z.titel, z.unter, z.stand) for z in zeilen] == [
             (marke, "Käfer kommt dazu", "hinter Planke", NEU),
-            (f"{marke}#ziel", "Ziel für Käfer: 30 Wiederholungen", "aus deinem Test", NEU),
+            (
+                f"{marke}#ziel",
+                "Ziel für Käfer: 24 Wiederholungen",
+                "80 % von deinem Test (30 Wdh. bis Anstrengung 7)",
+                NEU,
+            ),
             (
                 "weiter#weg",
                 "Von Planke weiter zu Käfer, wenn die Zeit ab ist",
@@ -759,7 +837,7 @@ def test_beispiel_einspielen_kurs_starten_plan_entsteht(tmp_path) -> None:
         assert (gewaehlte.exercise_id, gewaehlte.kurs_marke, gewaehlte.target) == (
             kaefer,
             marke,
-            {"reps": [30]},
+            {"reps": [24]},
         )
         assert plan.ablauf.an and plan.workout  # der Weg macht den Plan zum Workout
         (kante,) = plan.ablauf.kanten

@@ -18,11 +18,15 @@ from trainingsapp.core.kursbloecke import (
     ARTEN,
     AUSWAHL,
     BAUSTEINE,
+    MENGE,
     PLAN_EINSTELLEN,
     PLAN_UEBUNG,
     PLAN_WEG,
+    SKALA,
     TEST,
+    ZEIT,
     Block,
+    Vorgabe,
     bloecke_lesen,
     braucht_eingabe,
 )
@@ -496,13 +500,48 @@ def test_test_in_einem_anderen_kapitel_kommt_ueber_bezug() -> None:
     frueh = [Block(TEST, id="frueh", uebung="planke", feld="hold")]
     assert aenderungen(plan, spaeter, {"frueh": 90.0}, {}, stand, NAMEN)[0].stand == OFFEN
     (zeile,) = aenderungen(plan, spaeter, {"frueh": 90.0}, {}, stand, NAMEN, bezug=frueh)
+    # Die Zeile nennt die Regel des Kurses: den Faktor und den Wert, auf den er sich bezieht
     assert (zeile.stand, zeile.titel, zeile.unter) == (
         NEU,
         "Ziel für Planke: 45 s",
-        "aus deinem Test",
+        "50 % von deinem Test (90 s)",
     )
     neu, _ = anwenden(plan, spaeter, {"frueh": 90.0}, {}, {"e#ziel"}, (), stand, bezug=frueh)
     assert neu.items[0].target == {"hold": [45]}
+
+
+def test_ziel_aus_einem_test_mit_vorgabe_nennt_woher_die_zahl_kommt() -> None:
+    """Ben, 16.11.2026 (Skizze T4): „80 % von deinem Test (22 Wdh. bis Anstrengung 7)“ — die
+    Zeile nennt Faktor, gemessenen Wert und Vorgabe des Tests, ohne Wertung. Übernommen heißt
+    sie wieder schlicht „aus deinem Test“."""
+    plan, stand = nach_kapitel_1()
+    test = Block(TEST, id="t", uebung="kaefer", feld="reps", vorgabe=Vorgabe(SKALA, 7))
+    dazu = Block(PLAN_UEBUNG, id="k", uebung="kaefer", ziel_aus="t", faktor=0.8)
+    bloecke = [test, dazu]
+    zeilen = aenderungen(plan, bloecke, {"t": 22.0}, {}, stand, NAMEN)
+    assert [(z.titel, z.unter) for z in zeilen] == [
+        ("Käfer kommt dazu", "ans Ende"),
+        ("Ziel für Käfer: 18 Wiederholungen", "80 % von deinem Test (22 Wdh. bis Anstrengung 7)"),
+    ]
+    # Vorgabe Menge, Ziel ist die Menge selbst: nur der Wert, kein Anhang
+    test.vorgabe, dazu.faktor = Vorgabe(MENGE, 30), 1.0
+    (_, ziel) = aenderungen(plan, bloecke, {"t": 30.0}, {}, stand, NAMEN)
+    assert ziel.unter == "aus deinem Test (30 Wdh.)"
+    # Vorgabe Zeit, gemessen werden die Wiederholungen
+    test.vorgabe = Vorgabe(ZEIT, 60)
+    (_, ziel) = aenderungen(plan, bloecke, {"t": 25.0}, {}, stand, NAMEN)
+    assert ziel.unter == "aus deinem Test (25 Wdh. in 1 Minute)"
+    # die Skala der Übung heißt anders: Die Zeile nennt sie beim Namen
+    schwere = FieldSpec(key="scale", type=FieldType.SCALE, label="Schwere")
+    test.vorgabe = Vorgabe(SKALA, 5, 7)
+    (_, ziel) = aenderungen(
+        plan, bloecke, {"t": 25.0}, {}, stand, NAMEN, lambda u, k: schwere if k == "scale" else None
+    )
+    assert ziel.unter == "aus deinem Test (25 Wdh. bei Schwere 5–7)"
+    # übernommen: wie bisher
+    neu, neuer_stand = anwenden(plan, bloecke, {"t": 25.0}, {}, {"k", "k#ziel"}, (), stand, NAMEN)
+    danach = aenderungen(neu, bloecke, {"t": 40.0}, {}, neuer_stand, NAMEN)
+    assert [(z.stand, z.unter) for z in danach][-1] == (UEBERNOMMEN, "aus deinem Test")
 
 
 def test_mehrere_gewaehlte_stehen_in_der_reihenfolge_der_wahl_und_bekommen_je_einen_weg() -> None:

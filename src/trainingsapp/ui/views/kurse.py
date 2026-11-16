@@ -21,7 +21,9 @@ Ein Kurs mit **Kursplan** (Ben, 16.11.2026, `docs/plan_kurs_ablauf.md` §11.5) b
 Person einen Plan, der über die Kapitel wächst: Das Kapitel zeigt unter seinen Blöcken die
 Sammelkarte „Das ändert sich an deinem Plan“ (`components/kursplan_karte.py`) — geändert wird
 erst mit „Übernehmen“ —, die Kursseite die Karte „Dein Kursplan“ mit „Trainieren“. Gerechnet
-wird in `core/kursplan.py` und `KursRepo.plan_aenderungen`/`plan_uebernehmen`.
+wird in `core/kursplan.py` und `KursRepo.plan_aenderungen`/`plan_uebernehmen`. Darunter zeigt
+die Kursseite die Vorschau „Das kommt noch“ (A1, `components/kommt_noch.py`): was die späteren
+Kapitel am Plan vorschlagen — sie ändert nichts (`KursRepo.kommt_noch`).
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ from datetime import datetime
 import flet as ft
 
 from trainingsapp.core.kapiteltext import bilder_zu_links
-from trainingsapp.core.kursbloecke import BAUSTEINE
+from trainingsapp.core.kursbloecke import BAUSTEINE, Block
 from trainingsapp.core.kurse import (
     AKTUELL,
     FERTIG,
@@ -62,6 +64,7 @@ from trainingsapp.core.plaene import erledigte, tage_text
 from trainingsapp.core.plan_durchlauf import startet_als_workout
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
+from trainingsapp.ui.components.kommt_noch import kommt_noch_karte
 from trainingsapp.ui.components.kursblock import kapitel_bloecke
 from trainingsapp.ui.components.kursplan_karte import KursplanKarte, kursplan_karte
 from trainingsapp.ui.components.layout import sicher
@@ -69,6 +72,7 @@ from trainingsapp.ui.components.links import oeffnen as link_oeffnen
 from trainingsapp.ui.components.medienliste import medium_zeile
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views import kurs_testlauf
 from trainingsapp.ui.views.katalog import trainieren_knopf
 
 #: Symbol und Beschriftung je Status eines Kapitels
@@ -268,9 +272,33 @@ def _dein_kursplan(
     return karte(*inhalt, abstand=6)
 
 
+def _wahl_stempel(kurs: Kurs, stand: Kapitelstand | None) -> tuple[object, object] | None:
+    """Der Stempel, unter dem die Sitzung die offene Wahl eines Kapitels hält (P212): dieser
+    Stand des Kurses, dieser Durchlauf — ``None``, solange das Kapitel nicht erreicht ist.
+    Kapitelansicht und Vorschau lesen damit dasselbe."""
+    return (kurs.updated_at, stand.erreicht) if stand is not None else None
+
+
+def _offene_wahl(
+    state: AppState, kurs: Kurs, staende: Mapping[str, Kapitelstand]
+) -> dict[str, list[str]]:
+    """Was die Sitzung in den erreichten Kapiteln des Kurses an **offener Wahl** hält (P212) —
+    Auswahl-Block → Übungen, für die Vorschau „Das kommt noch“. Gelesen mit demselben Stempel
+    wie in `kapitel_view` (dieser Stand des Kurses, dieser Durchlauf): Was dort verworfen
+    wäre, zählt auch hier nicht."""
+    wahl: dict[str, list[str]] = {}
+    for kapitel in kurs.kapitel:
+        stempel = _wahl_stempel(kurs, staende.get(kapitel.id))
+        if stempel is not None:
+            wahl.update(state.kurs_wahl_lesen(kapitel.id, stempel))
+    return wahl
+
+
 def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
     """Die Kapitel untereinander mit Status; „Kurs beginnen“, Menü „Von vorn beginnen“;
-    darunter die Karte „Dein Kursplan“, wenn der Kurs einen baut (`_dein_kursplan`)."""
+    darunter die Karte „Dein Kursplan“, wenn der Kurs einen baut (`_dein_kursplan`), und die
+    Vorschau „Das kommt noch“, solange spätere Kapitel am Plan etwas vorschlagen
+    (`components/kommt_noch.py`) — sie zeigt nur, geändert wird im Kapitel."""
     route = f"/kurse/{kurs.id}"
     staende = state.kurse.staende(state.profil.id, kurs.id)
     stati = status(kurs, staende)
@@ -474,6 +502,12 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
         waechst=kurs.kursplan is not None
         and any(stati[k.id] not in (FERTIG, UEBERSPRUNGEN) for k in kurs.kapitel),
     )
+    # Was die späteren Kapitel am Plan vorschlagen (A1) — nur gelesen, nichts ändert sich
+    vorschau = kommt_noch_karte(
+        state,
+        kurs.id,
+        state.kurse.kommt_noch(kurs, state.profil.id, _offene_wahl(state, kurs, staende)),
+    )
 
     return ft.View(
         route=route,
@@ -490,16 +524,14 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
                             content=ft.Column(spacing=10, controls=kopf),
                         ),
                         *[zeile(nr, k) for nr, k in enumerate(kurs.kapitel, start=1)],
-                        *(
-                            [
-                                ft.Container(
-                                    padding=ft.Padding.only(left=16, right=16, top=10),
-                                    content=plankarte,
-                                )
-                            ]
-                            if plankarte is not None
-                            else []
-                        ),
+                        *[
+                            ft.Container(
+                                padding=ft.Padding.only(left=16, right=16, top=10),
+                                content=eine,
+                            )
+                            for eine in (plankarte, vorschau)
+                            if eine is not None
+                        ],
                     ],
                 )
             )
@@ -634,13 +666,24 @@ def kapitel_view(
             if stand_hier is not None
             else {}
         )
+        # Ein Test mit Vorgabe läuft mit der Uhr (Ben, 16.11.2026, `views/kurs_testlauf.py`): Die
+        # Karte zeigt aus dem Eintrag, was der Lauf neben dem Wert gemessen hat, und ihr Knopf
+        # startet den Testlauf
+        eintraege = (
+            state.kurse.testeintraege(kapitel, profil, stand_hier.erreicht)
+            if stand_hier is not None
+            else {}
+        )
+
+        def test_starten(block: Block, uid: str) -> Callable[..., Awaitable[None]]:
+            return kurs_testlauf.starter(page, state, kurs, kapitel, block, katalog[uid])
 
         # Die offene Wahl einer Auswahl bleibt für die Sitzung (Ben, 16.11.2026, P212): Wer
         # zum Test in die Übung geht und zurückkommt, muss nicht neu wählen. Der Stempel
         # sagt, wofür sie gilt — dieser Stand des Kurses, dieser Durchlauf: Nach „Von vorn“
         # (das Kapitel wird neu erreicht) und nach jedem Speichern, Entfernen oder
         # Wiederkommen des Kurses passt er nicht mehr, und die Wahl ist verworfen.
-        stempel = (kurs.updated_at, stand_hier.erreicht) if stand_hier is not None else None
+        stempel = _wahl_stempel(kurs, stand_hier)
         vorwahl = state.kurs_wahl_lesen(kapitel.id, stempel) if stempel is not None else {}
         sammelkarte: KursplanKarte | None = None
 
@@ -680,6 +723,9 @@ def kapitel_view(
                 letzte_wahl={} if angelegt else state.kurse.letzte_wahl(kapitel, profil),
                 bei_wahl=wahl_geaendert,
                 vorwahl=vorwahl,
+                test_starten=test_starten,
+                eintraege=eintraege,
+                laufender_test=kurs_testlauf.laeuft_fuer(state),
             )
             bloecke.extend(gezeichnet.controls)
         else:
@@ -732,6 +778,9 @@ def kapitel_view(
                 feste_wahl=wahl_im_plan(kursplan, alle_bloecke) if kursplan is not None else {},
                 bei_wahl=wahl_geaendert,
                 vorwahl=vorwahl,
+                test_starten=test_starten,
+                eintraege=eintraege,
+                laufender_test=kurs_testlauf.laeuft_fuer(state),
             )
             bloecke.extend(gezeichnet.controls)
             if stand_hier is not None and any(b.art in BAUSTEINE for b in kapitel.bloecke):

@@ -468,3 +468,20 @@ def test_auf_hart_bei_unerfuellter_bedingung_bleibt_bei_der_uebung() -> None:
 def test_ohne_workout_gibt_es_keinen_uebergang_zum_umschalten() -> None:
     teil = PlanAblaufBaustein("p1", "Liste", _schritte())
     assert teil.uebergang_setzen(HART) is False and teil.uebergang is None
+
+
+def test_geleerter_ablauf_beginnt_nicht_und_sagt_was_fehlt() -> None:
+    """Ben, 16.11.2026: „Das automatische Übungssetzen, wenn alles gelöscht wird, muss raus“ —
+    ein Ablauf ohne Start beginnt nicht bei der ersten Planübung, er sagt, dass er leer ist.
+    Fortsetzen an einer genannten Stelle geht weiter."""
+    leer = Ablauf(True, ohne_start=True)
+    with pytest.raises(ValueError, match="Der Ablauf ist leer"):
+        PlanAblaufBaustein("p1", "Rumpf", _schritte(), workout=True, ablauf=leer)
+    ohne = Ablauf(True, kanten=(Kante("k", "p"),), ohne_start=True)
+    with pytest.raises(ValueError, match="Der Ablauf hat keinen Start"):
+        PlanAblaufBaustein("p1", "Rumpf", _schritte(), workout=True, ablauf=ohne)
+    teil = PlanAblaufBaustein("p1", "Rumpf", _schritte(), workout=True, ablauf=ohne, erste="k")
+    assert teil.schritt.item_id == "k"
+    # Ohne den Vermerk gilt weiter die erste Planübung (Altbestand, Pakete ohne ``start``)
+    alt = PlanAblaufBaustein("p1", "Rumpf", _schritte(), workout=True, ablauf=Ablauf(True))
+    assert alt.schritt.item_id == "w"

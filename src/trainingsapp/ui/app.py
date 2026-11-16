@@ -14,6 +14,7 @@ Routen:
     /plan/<id>/bearbeiten[/…]       Plan bearbeiten, aus dem Üben heraus
     /plaene/<id>                    Plan bearbeiten (aus „Übungen" → „Pläne")
     /kurse/<id>[/<kapitel_id>]      Ein Kurs mit seinen Kapiteln; ein Kapitel (Text, Pläne, Weiter)
+    /kurse/<id>/<kapitel_id>/test/<block>/<übung>   Der Testlauf: ein Test mit Vorgabe, mit der Uhr
     /messung/<id>                   Eine HRV-Aufzeichnung: Kurven, Kennzahlen, Korrektur
     /training/<übung>[/info|/eintrag/<id>]   Eine einzelne Übung üben — ohne Plan (Katalog)
     <bearbeiten>/ziel/<item_id>     Im Plan einstellen: Parameter, Chips, Uhr, Ziel (P79)
@@ -158,6 +159,8 @@ from trainingsapp.ui.views.geraeteprobe import geraeteprobe_view
 from trainingsapp.ui.views.gps_test import gps_test_view
 from trainingsapp.ui.views.heute import heute
 from trainingsapp.ui.views.kurs_bearbeiten import kapitel_bearbeiten, kurs_bearbeiten
+from trainingsapp.ui.views.kurs_testlauf import aus_route as kurs_test_aus_route
+from trainingsapp.ui.views.kurs_testlauf import kurs_test_view
 from trainingsapp.ui.views.kurse import kapitel_view, kurs_view
 from trainingsapp.ui.views.leistungen import leistungen_view
 from trainingsapp.ui.views.live_vollbild import live_vollbild_view
@@ -1252,6 +1255,16 @@ def main(page: ft.Page, browserspeicher: Browserspeicher | None = None) -> None:
                         ablegen(lambda: kapitel_bearbeiten(page, state, kurs, kapitel))
                     else:
                         ablegen(lambda: kapitel_view(page, state, kurs, kapitel, browser))
+                        # Der Testlauf (Ben, 16.11.2026): ein Test mit Vorgabe läuft mit der Uhr
+                        # — über dem Kapitel, Zurück führt dorthin (`views/kurs_testlauf.py`)
+                        test = kurs_test_aus_route(state, kurs, kapitel, teile[3:])
+                        if test is not None:
+                            test_block, test_uebung = test
+                            ablegen(
+                                lambda: kurs_test_view(
+                                    page, state, kurs, kapitel, test_block, test_uebung
+                                )
+                            )
         elif teile[:1] == ["live"]:
             ablegen(lambda: live_vollbild_view(page, state))
         elif teile[:1] == [PROBE_ROUTE.strip("/")]:

@@ -362,11 +362,11 @@ ist.“
 |---|---|---|
 | 0 | **Von vorn bei Test/Auswahl** (§5.2): Marke „Durchlauf beendet“ (Migration 063, `plan.course_run_ended_at`), neu fragen, „Wie beim letzten Mal“; Tests `tests/test_kurse.py`, `tests/test_ui_kursbloecke.py` | **gebaut 16.11.2026** — Gerätetest T141 |
 | 1 | Kursplan wächst (`plan = wachsend`, Marken, Spalte `plan.course_id`), Bausteine `plan_uebung`, `plan_einstellen`, `plan_weg`; Rest von B2 (Timer, Übergang … in `VorlageItem`/`PlanVorlage`); Sammelkarte „Das ändert sich an deinem Plan“; **Kurs-Editor** (`views/kurs_bearbeiten.py`: Baustein hinzufügen) und **Werkzeug** (`trainingsapp-paket pruefen`); neue Formatversion nur für Pakete, die das nutzen (Formatversion 6) | **gebaut 16.11.2026** — Bauplan §11, Abweichungen §11.8; Gerätetest T142; P211 und P212 entschieden (Ben: „Ja“), P212 noch zu bauen; Grenzen N171 |
-| 2 | Test im Fokus mit Vorgabe Menge · Zeit · Skala ab/bis/dazwischen (§3.3), „Als Ziel übernehmen“ | Frage 4: beantwortet; Stufe 1 |
+| 2 | Test im Fokus mit Vorgabe Menge · Zeit · Skala ab/bis/dazwischen (§3.3), „Als Ziel übernehmen“ | **gebaut 16.11.2026** — §13; Skizzen T1–T5; Gerätetest T143 |
 | 3 | Antworten speichern, Folgen (`zeige`, `baustein`), `zeigen_wenn`; Tabelle `course_answer`; Editor (Liste mit „Wenn …“) = **K1**; im laufenden Kurs nur der eigene Weg (§6 „Zwei Sichten“) | Frage 3: **ja** |
 | 4 | Kursbild lesend **im Kurs-Editor** = **K2** (Knoten-Darsteller aus `ablaufbild` herauslösen) | Frage 5: **ja**; Stufe 3 |
 | 5 | Kursbild zeichnen = **K3**, gemeinsame Graph-Schicht, Kapitel-Auslöser „Tor offen“ | Entscheidung nach Stufe 4 |
-| A1 | **Vorschau „Das kommt noch“** auf der Kursseite: was spätere Kapitel am Plan ändern werden, gerechnet aus ihren Bausteinen — ohne Sperren (§12) | Skizze; Bens Wort |
+| A1 | **Vorschau „Das kommt noch“** auf der Kursseite: was spätere Kapitel am Plan ändern werden, gerechnet aus ihren Bausteinen — ohne Sperren (§12) | **gebaut 16.11.2026** — §13.6; Skizze V1; Gerätetest T143 |
 | A2 | **Autorenwerkzeug „vom fertigen Plan aus“**: Zielplan im Plan- und Ablauf-Editor bauen, jede Übung, jeden Weg und jede Einstellung einem Kapitel zuordnen („ab Kapitel 2“); der Editor erzeugt daraus die Bausteine (§12) | Skizzen; Bens Wort |
 
 Vor Stufe 1: **T134** (Material, Kurse aus Blöcken am Gerät, `offene_fragen.md` §2) sollte
@@ -701,3 +701,177 @@ in den Plan der Person.
   rechnet seine Vorschau schon so, `core.kursbau.Kurssicht.vorschau`).
 - **Offen:** wie eine Korrektur an einem schon übernommenen Kapitel die Person erreicht (heute
   gar nicht) — Katalog P213.
+
+## 13. Stufe 2 und A1 (16.11.2026) — der Test läuft mit der Uhr, „Das kommt noch“
+
+Ben, 16.11.2026: „mach weiter. Wenn es Fragen gibt, bitte stellen“ — Antworten auf die
+Rückfrage: **Stufe 2 und Vorschau** in einem Zug · Skizzen T1–T5 und V1 **„Passen“**
+(https://claude.ai/artifact/MXp93v2Ya2uYJxvW7Nvc5J; K1–K6 der Stufe 1:
+https://claude.ai/artifact/13qzjuaHx6GtRTpV9ayE4L) · was ins Ziel kommt, **legt die Autorin
+fest** · bei Vorgabe Anstrengung beendet **ein Knopf** den Lauf.
+
+Vor dem Plan gesucht (Katalog, Entscheidungszeilen): „test“, „bestwert“, „vorschau“, P207–P213,
+T141/T142, N171. Gelesen: P207, P213, N171, T142 und §3.3, §7, §12 dieses Dokuments. Nur
+gefunden: P90 (Kurs stellt den Plan aus einer Auswahl zusammen, 28.10.), P200 (Material).
+
+### 13.1 Die Vorgabe am Test
+
+`core.kursbloecke.Vorgabe(art, n, bis)` am Test-Block (`Block.vorgabe`, Paketfeld `vorgabe`):
+**Eine Größe steht fest und beendet den Lauf, die anderen werden gemessen.** Ohne Vorgabe
+bleibt der Test, wie er war (der jüngste Eintrag der Übung, Knopf „Zur Übung“).
+
+| Vorgabe | Paket | der Lauf endet | gemessen |
+|---|---|---|---|
+| Menge | `{ art = "menge", n = 30 }` | „Fertig — 30 gemacht“; zählt jemand (Sensor, Takt), bei 30 von selbst | Zeit, Skala |
+| Zeit | `{ art = "zeit", n = 60 }` | wenn die Zeit ab ist | Wiederholungen, Skala |
+| Skala ab n | `{ art = "skala", n = 7 }` | „Bei 7 angekommen“ | Wiederholungen, Zeit |
+| Skala höchstens m | `{ art = "skala", bis = 4 }` | „Jetzt über 4“ | Wiederholungen, Zeit |
+| Skala von n bis m | `{ art = "skala", n = 5, bis = 7 }` | „Nicht mehr zwischen 5 und 7“ | Wiederholungen, Zeit |
+
+„Bis 10“ gilt als nach oben offen; eine Vorgabe, die nichts vorgibt (0 bis 10, Menge 0), gibt
+es nicht (`Vorgabe.from_dict` → `None`, das Werkzeug meldet es als Fehler).
+
+**Was ins Ziel kommt, legt die Autorin fest** (Ben): `feld` am Test — `reps`, `hold` oder
+`duration`, also die Vorgabe selbst oder eine gemessene Größe —, mal `faktor`. Die Skala kommt
+nie ins Ziel.
+
+### 13.2 Der Lauf und sein Eintrag (`core/kurstest.py`, flet-frei)
+
+- Der Testlauf ist ein **echter Lauf der Übung** — dieselbe Uhr wie beim Üben (Einheit,
+  Benachrichtigung, Marken in einer laufenden HRV-Aufnahme), mit einer eigenen, schlanken
+  Ansicht (`ui/views/kurs_testlauf.py`, Route `/kurse/<kurs>/<kapitel>/test/<block>/<übung>`).
+- Am Ende steht **ein gewöhnlicher, abgeschlossener Eintrag** bei der Übung
+  (`core.kurstest.eintrag`): Wiederholungen, Zeit und Skala in ihren Feldern. Bietet die Übung
+  eines nicht an, bringt der Eintrag es in **seiner Kopie der Felder** mit (wie die Uhr die
+  Zeit) — die Übung selbst ändert sich nicht.
+- **Nicht über den offenen Eintrag der Uhr:** `SessionRepo.lauf_eintragen` hängt an einen
+  offenen Eintrag nur Wiederholungen und Zeiten an (eine Skala ginge verloren), und frühere
+  Sätze desselben Tages stünden im selben Eintrag — der beste Satz wäre dann nicht der Test.
+  Der Lauf schreibt darum selbst und vermerkt es in der Zeitleiste (`person/eintrag` mit
+  `teil`), damit die Uhr am Ende nichts doppelt einträgt (`ui.uebung_lauf.einzutragen`).
+  Neue Ereignisarten gibt es nicht.
+- **Der Ablauf** (`ui/views/kurs_testlauf.py`, Stand in `AppState.kurs_test`): „Test starten“
+  im Kapitel startet eine **Stoppuhr** der Übung (nie der Aufbau der Ansicht) → der Knopf der
+  Vorgabe bzw. „Vorher aufgehört …“ **hält die Uhr an** → die Ergebnis-Seite fragt, was fehlt
+  (Wiederholungen, wenn niemand zählte; die Skala — bei „bis n“ ist n vorbelegt) → „Eintragen
+  und zurück zum Kapitel“ schreibt den Eintrag, vermerkt ihn und beendet den Lauf; „Verwerfen“
+  und „Nochmal“ brechen ab (nichts eingetragen, der Lauf steht unter „Läufe heute“). Ohne
+  laufenden Lauf zeigt die Ansicht „bereit“ mit „Start“.
+- **Vorgabe Zeit:** dieselbe Stoppuhr, ein Wächter hält sie bei n an (auch wenn die Ansicht
+  nicht offen ist) und spielt Countdown und Endsignal nach den Timer-Einstellungen; die Anzeige
+  zählt rückwärts. Ein Einmal-Timer ginge nicht: Er trüge selbst ein, bevor Wiederholungen und
+  Skala gefragt sind.
+- **Vorgabe Menge mit Sensor:** Zählt der Sensor schon bei dieser Übung, tritt die Uhr dem
+  Zählen bei, die Karte zeigt die Zahl, und bei n hält die Uhr von selbst an. Den Takt der
+  Übung bringt der Test nicht an (Katalog P214 b).
+- **Zurück** (Geste) verlässt die Ansicht, der Lauf läuft weiter; das Kapitel zeigt „Zum
+  Test“. ✕ bricht ab.
+- **Der Kurs liest wie bisher:** `KursRepo.testwerte` nimmt aus dem jüngsten Eintrag der Übung
+  den Wert des Feldes — ein von Hand geschriebener Eintrag zählt darum weiter. Was der Lauf
+  sonst gemessen hat, liest die Karte aus demselben Eintrag (`KursRepo.testeintraege`,
+  `core.kurstest.lauf_aus`, `neben_text`). Folge: Ein **späterer** gewöhnlicher Eintrag löst
+  den Wert des Laufs ab, solange sein Ziel nicht übernommen ist (Katalog P214 a).
+- **Die Skala ist die der Übung** (ihr Name gilt in allen Texten); hat die Übung keine oder
+  heißt sie wie im Vorrat, heißt sie „Anstrengung“. Sie ist Selbstauskunft — die App misst
+  sie nicht und deutet sie nicht (§3.3 „Rechtlich“).
+
+### 13.3 Karte und Sammelkarte
+
+- Testkarte (T4): Überschrift „Käfer: bis Anstrengung 7“, der Wert groß, daneben klein, was
+  sonst gemessen wurde („in 1:12 · Anstrengung 7“); Knopf „Test starten“ bzw. „Nochmal“.
+- Sammelkarte: Die Zeile nennt **die Regel des Kurses** (`core.kurstest.herkunft`): „80 % von
+  deinem Test (22 Wdh. bis Anstrengung 7)“. Das gilt auch für Tests ohne Vorgabe, sobald der
+  Faktor nicht 1 ist („50 % von deinem Test (90 s)“ — vorher stand dort nur „aus deinem
+  Test“); mit Faktor 1 und ohne Vorgabe bleibt „aus deinem Test“, übernommene Zeilen auch.
+
+### 13.4 Editor (T5)
+
+Im Test-Dialog (`ui/views/kurs_bearbeiten.py`, Rechnung `core/kursbau.py`: `Vorgabenwahl`,
+`Kurssicht.zielfelder`, `misst`, `test_vorschau`, `test_kurz`):
+
+- **Vorgabe** als Chips **Ohne · Menge · Zeit · Anstrengung** (ein Segmentknopf macht alle
+  Segmente gleich breit, „Anstrengung“ passte nicht); Menge als Zahl, Zeit über das vorhandene
+  Zeit-Blatt, Anstrengung **ab · höchstens · von–bis** mit −/+. „höchstens 10“ und „von n bis
+  10“ bietet der Dialog nicht an — das Paket läse sie als nichts bzw. als „ab n“.
+- **„Gemessen wird“** nur lesend; bei einer Übung ohne Wiederholungen fehlen sie.
+- **„Ins Ziel kommt“**: Wiederholungen (wenn die Übung welche hat oder die Vorgabe Menge ist)
+  und die Zeitfelder der Übung bzw. „Zeit“ — nie die Skala. Beim Umschalten vorbelegt mit den
+  Wiederholungen, ohne solche mit dem Zeitfeld; von Hand Gewähltes und das Feld eines
+  gespeicherten Tests bleiben, solange sie zur Wahl stehen.
+- **Der Faktor („mal“)** steht am Test nur im Kurs mit **Kapitelplänen** (dort rechnet
+  `vorlage_anwenden` mit dem des Tests). Im **Kursplan-Kurs** zählt der Faktor des Bausteins,
+  der sein Ziel aus dem Test nimmt (`core.kursplan._ziel_aus_test`) — der Dialog verweist
+  darauf, statt ein „mal“ ohne Wirkung zu zeigen (Abweichung von Skizze T5).
+- **Vorschau „So steht es im Kapitel“**: die Überschrift der Testkarte und, im Kursplan-Kurs,
+  die Ziel-Zeilen der Bausteine mit `ziel_aus` auf diesen Test — aus `Kurssicht.vorschau()`,
+  nicht nachgebaut. Beispielwert ist die Vorgabe selbst, wenn sie im Feld steht.
+
+### 13.5 Paket
+
+Ein `test` mit `vorgabe` braucht **Formatversion 6** (`core.pakete.nutzt_kursplan`) — eine
+ältere App überläse die Vorgabe und nähme irgendeinen Eintrag. `trainingsapp-paket pruefen`
+meldet als Fehler eine Vorgabe, die nichts vorgibt, und ein `feld`, das ein Lauf nicht liefert;
+als Hinweis eine Vorgabe Menge an einer Übung ohne Wiederholungsfeld. Das Beispiel in
+`docs/uebungspakete.md` trägt jetzt eine Vorgabe („bis Anstrengung 7“, davon 80 %).
+
+### 13.6 A1 — „Das kommt noch“ (Skizze V1)
+
+Auf der Kursseite eines Kursplan-Kurses, unter „Dein Kursplan“: je späterem Kapitel, was es am
+Plan vorschlagen wird — „+“ Übung dazu, „~“ Einstellung, „→“ Weg. Gerechnet in
+`core/kursvorschau.py` mit `core.kursplan.aenderungen`/`anwenden` auf dem Plan, wie er wäre,
+wenn man alles übernimmt; wo eine Wahl oder ein Test noch fehlt, steht nur, **dass** etwas
+kommt. Nichts wird geschrieben, nichts gesperrt (§12).
+
+## 14. Das Bild des Kursplans im Kurs-Editor (Ben, 16.11.2026)
+
+Ben: „Ist es irgendwie möglich die Karte aus dem Ablauf beim Erstellen des Kurses mit
+einzubauen. Beim fertigen Plan sowieso, wo auch dargestellt wird, wieviel vom Plan freigegeben
+ist. Beim neu erstellten Kursplan ließen sich dort die Beziehungen setzen. Was ist dafür nötig,
+wenn das gut geht, weil schon alles vorhanden ist, bitte einbauen.“
+
+**Was dafür nötig war — und schon da ist:**
+
+- Das **Ablaufbild** der Pläne (`ui/components/ablaufbild.py`) zeichnet jeden Plan aus
+  `Ablauf` + Planübungen, kennt „blass“ (`vernebelt`) und meldet Tipps auf Übung und Weg — es
+  wird unverändert wiederverwendet, nur gelesen.
+- Der **Zielplan** entsteht aus derselben Rechnung wie die Sammelkarte
+  (`core.kursplan.aenderungen`/`anwenden`), mit Beispielwahl und Beispielwerten der Vorschau
+  im Editor (`Kurssicht.vorschau`). Neu ist nur `core/kursbild.py`: der Plan **nach allen
+  Kapiteln** und dazu, welches Kapitel jede Planübung und jeden Weg bringt.
+- Die Blätter der Bausteine („Weg“) gibt es im Kapitel-Formular — das Bild öffnet sie.
+
+**Was gebaut ist** (Karte „So wächst der Plan“, `ui/components/kursplan_bild.py`):
+
+- Der Zielplan als Bild; darüber Chips je Kapitel („Anfang“, wenn die Grundlage Übungen hat).
+  Was erst ein **späteres** Kapitel bringt, steht blass; darunter „Bis Kapitel 2
+  „Erweiterung“: 2 von 3 Übungen im Plan.“ — so ist zu sehen, wie viel vom Plan freigegeben ist.
+- Eine Liste (kein Weg) wird der Reihe nach gezeichnet, mit dem Hinweis, dass der erste Weg sie
+  zum Workout macht.
+- Bei einer Auswahl steht als Beispiel die erste Übung, die zur Wahl steht (wie in der
+  Vorschau der Sammelkarte).
+- **Wo sie steht:** im Kurs-Formular unter „Der Kurs baut einen Plan“ (nur zum Ansehen, bis
+  zum letzten Kapitel; neu gerechnet bei Schalter, Grundlage und Änderungen an den Kapiteln) und
+  im Kapitel-Formular unter den Listen und den Knöpfen „+ Im Kapitel / + Am Plan“ (bis zu
+  diesem Kapitel; gerechnet aus den **ungespeicherten** Blöcken, neu mit jeder Änderung der
+  Bausteine). Die Grundlage aus einem eigenen Plan ist im Bild (Chip „Anfang“, Marken `g:<n>`).
+- **Beziehungen setzen** im Kapitel-Formular: Tipp auf eine Übung → das Blatt „Weg im Plan“
+  für einen neuen Baustein dieses Kapitels, „Von“ vorbelegt (`Kurssicht.marke_fuer_weg`: eine
+  der Gewählten wird zur Block-ID ihrer „Übung dazu“ — der Weg gilt dann für alle Gewählten);
+  Tipp auf den Punkt eines Wegs → sein Baustein, wenn er zu diesem Kapitel gehört, sonst die
+  Meldung, aus welchem Kapitel er kommt. Eine **blasse** Übung (erst ein späteres Kapitel
+  bringt sie) öffnet kein Blatt — ein Weg dieses Kapitels könnte sie nicht nennen. Ein Schritt,
+  der nur die Reihenfolge der Liste ist, gehört zu keinem Baustein — die Karte sagt es.
+- **Übungen ohne Weg:** Sobald ein Weg den Ablauf eigen macht (er folgt nicht mehr der Reihe
+  der Liste), hängt eine spätere „Übung dazu“ nicht mehr von selbst an der Kette — im Workout
+  käme sie nicht dran. Das Ablaufbild zeichnet sie nicht; die Karte nennt sie darunter („Ohne
+  Weg im Ablauf …“, `Planbild.lose`), ein Tipp ist „Weg von hier“. Das Paket-Werkzeug meldet
+  den Fall noch nicht.
+- **Höhe und Gesten:** Das Bild ist so hoch wie die Zeichnung (bis 900 px), das Formular rollt.
+  Zoomen ist in dieser Karte aus (Mausrad und zwei Finger bewegen die Seite); seitlich schieben
+  geht, wenn die Zeichnung breiter ist als die Karte.
+
+**Was es nicht ist** (bleibt bei §7, Stufe 4/5 und A2): kein Bild der **Kapitel** (Kursablauf
+mit „Wenn …“), kein Ziehen von Übungen im Bild, kein Bauen „vom fertigen Plan aus“ mit
+Zuordnung zu Kapiteln. Die Lagen im Bild ordnet es selbst (`core.ablauf.layout`); gemerkt wird
+nichts.
+

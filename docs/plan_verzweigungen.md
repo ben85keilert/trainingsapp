@@ -561,6 +561,86 @@ zu verwalten und zu regeln.“ — gewählt aus zwei Vorschlägen: **Workout = A
    Kette eines Workouts, das der Liste folgt, steht dort ausgeschrieben und wird beim Import
    wieder als „folgt der Liste“ erkannt.
 
+### 8.13 Vorrat an Übungen, ein Punkt bei eindeutigem Weg, leer bleibt leer (16.11.2026)
+
+Ben, drei Punkte zum Reiter „Ablauf“ — alle gebaut:
+
+1. **Die Leiste ist ein Vorrat an Übungen** — „Oben in der Leiste sind die Übungen verfügbar.
+   Wenn man eine Übung mehrfach haben möchte, muss man die Übung 2,3-mal reinladen. Kannst du
+   das so machen, dass Übungen aus der Liste oben mehrfach verwendet werden können, dann steht
+   da ein 2x, 3x bei Mehrfachverwendung. Unten die Übungen sind aber nummeriert. Nach außen mit
+   einer sich ändernden Nummer zum leichteren Referenzieren, nach innen aber fix.“
+   - **Eine Kachel je Übung** des Plans, in der Reihenfolge des ersten Vorkommens
+     (`core.ablauf.vorrat`, `Vorrat`) — ohne Listennummer. Steht die Übung mehrfach im Plan,
+     trägt sie **„2×“, „3×“**; **„frei“**, solange keine ihrer Planübungen im Bild ist. Der
+     Beiname gehört der Planübung: an der Kachel steht er nur, solange es genau eine gibt.
+   - **Tippen oder Ziehen** setzt eine **Planübung** dieser Übung ins Bild: zuerst eine, die
+     noch nicht dort steht (`Vorrat.naechste`); gibt es keine freie, entsteht eine **neue
+     Planübung derselben Übung** am Ende der Liste (`PlanRepo.uebung_hinzufuegen` — sie folgt der
+     Übung, P79) und kommt ins Bild (`views/ablauf.ins_bild`). Tippen mit gewähltem Knoten = ein
+     Weg dorthin, sonst in den ersten Slot, im leeren Bild als Start. Folgte der Ablauf der
+     Liste, hängt die neue Planübung nicht zusätzlich von selbst hinten an — sie kommt dorthin,
+     wohin sie gesetzt wurde. Ein Weg zu einem Knoten, der **schon im Bild steht**, geht wie
+     bisher über „Routing → Weg zu einer Übung im Bild …“ oder das Wege-Blatt.
+   - **Auf „Start“ gezogen** wird die Übung der Start: eine freie Planübung zuerst; steht sie
+     schon im Bild, **dieser Knoten** (bei mehreren der erste), wie bisher. Dort entsteht nie
+     eine neue Planübung — ein neuer, einzelner Start ließe alles Übrige ohne Weg zurück.
+   - **Im Bild** ist jede Planübung ein eigener Knoten mit ihrer **Nummer = Stelle in der
+     Liste** (`core.ablauf.nummern`): Sie ändert sich beim Umordnen und Löschen, die Wege hängen
+     an der festen ID und bleiben (`tests/test_workout_ablauf.py`).
+   - **Gedrückt halten** nimmt eine Planübung aus dem Plan, mit den Rückfragen von bisher: die
+     zuletzt hinzugekommene dieser Übung, eine freie zuerst (`Vorrat.letzte`); der Dialog nennt
+     sie mit Nummer und sagt, wie oft die Übung danach noch im Plan steht.
+2. **Ein Punkt bei eindeutigem Weg** — „In Ablauf brauche ich auch, dass wenn ein Weg eindeutig
+   ist, keine zwei Knoten zwischen den Übungen, sondern nur 1. Wenn mehr Wege gemeinsamer Knoten
+   und Abzweigungsknoten so wie jetzt.“ Der **Abzweig** steht nur noch, wo **mehrere** Wege
+   abgehen (`Geometrie.abzweige`); der Austritt, an dem der Stamm endet und alle Wege beginnen,
+   bleibt für jede Übung (`Geometrie.austritte`). Hat eine Übung **genau einen** Weg, steht
+   zwischen ihr und dem Ziel nur dessen **Griff** mit seinem Etikett. Dieser eine Punkt steht
+   auch für den Abzweig: Im Reiter öffnet er das Blatt mit **allen** Wegen der Übung (Herkunft,
+   der Weg aufgeklappt, „+ Weg“) — der vorhandene lässt sich ändern, ein zweiter anlegen; wer
+   keinen Abzweig kennt (Workout, Workout-Eintrag, Kursplan-Bild: nur ``on_kante``), bekommt
+   seine Kante gemeldet. Mit zwei und mehr Wegen bleibt §8.11.
+3. **Leeren heißt leer** — „Das automatische Übungssetzen, wenn alles gelöscht wird, muss
+   raus.“ Bisher hieß ein Ablauf ohne Start und ohne Wege „folgt der Liste“, und ein fehlender
+   Start fiel auf die erste Planübung zurück: Wer alles aus dem Bild nahm, hatte die Kette der
+   Liste wieder darin.
+   - Der Ablauf kennt jetzt den Vermerk **``ohne_start``** (`core.ablauf.Ablauf`, gespeichert
+     in `plan.ablauf_json` als ``{"an": true, "ohne_start": true}`` — keine Migration): Der
+     Start ist **ausdrücklich leer**. Dann gibt es keinen Startknoten (`startknoten` → ``None``,
+     kein Rückfall auf die erste Planübung), und der Ablauf folgt nicht der Liste
+     (`folgt_der_liste`, `fuer_plan`). Ein gesetzter Start hebt den Vermerk auf.
+   - Gesetzt wird er, wo der Start wegfällt und **kein Hauptweg nachrückt**: beim Herausnehmen
+     aus dem Bild und beim Entfernen aus dem Plan (`Ablauf.ohne_knoten` — war sie der Start,
+     wird das Ziel ihrer ersten Kante der Start, sonst bleibt er leer) und bei „Lücke
+     schließen“ (`luecke_schliessen`). Vorher rückte beim Entfernen aus dem Plan die erste
+     Planübung der Liste nach — das war derselbe Automatismus.
+   - **Im Reiter:** „Start“ steht über einem **leeren Platz** („hierher“, eine Ablage —
+     `core.ablauf.startplatz`, links von allem, was noch im Bild steht), alle Kacheln sind
+     „frei“; darunter der Hinweis und, solange gar nichts im Bild steht, **„Wie die Liste“**
+     (der Ablauf folgt wieder der Liste). Eine Kachel antippen oder in den Platz ziehen setzt
+     den Start. Neue Planübungen stehen nur in der Leiste.
+   - **Was bleibt:** Ein Workout, dessen Ablauf nie angefasst wurde, folgt der Liste (das
+     Zeichen ``{"an": true}``), neue Workouts ebenso; ein von Hand wieder vollständig
+     gezeichneter Ablauf wird am Vergleich als „folgt“ erkannt (§8.12). „Liste“ und wieder
+     „Workout“ holt die Liste zurück — ein geleerter Ablauf hat keine Zeichnung, die „Liste“
+     aufheben müsste. Altbestand und Pakete mit Wegen, aber ohne ``start`` und ohne den
+     Vermerk, beginnen wie bisher bei der ersten Planübung.
+   - **Trainieren:** Ein Workout ohne Start beginnt nicht — das Start-Bild sagt „Der Ablauf
+     ist leer — im Reiter „Ablauf“ eine Übung auf „Start“ setzen.“ (`core.ablauf.
+     ohne_start_text`, in `pruefung` und `warnungen`) und zeigt keinen Startknopf; der Baustein
+     lehnt ihn mit demselben Satz ab (`PlanAblaufBaustein`, `ValueError`). Dieselbe Warnung
+     steht im Reiter „Plan“ unter dem Schalter. „Fortsetzen“ an einer Stelle von heute geht
+     weiter.
+   - **Pakete:** `plaene[].ablauf` trägt ``ohne_start`` mit (`als_position`, `aus_position`) —
+     Export → Import kommt leer an (`tests/test_pakete.py`). Eine App vor dieser Fassung kennt
+     den Schlüssel nicht und liest ``{"an": true}``: Dort folgt das Workout der Liste. Die
+     Formatversion bleibt (`docs/uebungspakete.md`).
+
+**Offen / nur am Gerät:** Ziehen mit dem Finger in den leeren Platz und auf „Start“ (im
+Browser mit der Maus geprüft), Treffen des einen Punkts mit dem Finger, „2×“ neben dem Rand der
+Kachel bei großer Schrift — zu T98.
+
 ## 9. Entscheidungen (Ergänzung)
 
 - **P113** Name des Reiters: „Ablauf“ (Vorschlag) statt „Verlauf“ (belegt durch Kurven/Tagebuch)?

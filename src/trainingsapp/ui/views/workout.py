@@ -394,10 +394,13 @@ def workout_view(
                     padding=6,
                 )
             )
-        if uebungen:
+        # Geleert (Ben, 16.11.2026): Ohne Start beginnt das Workout nicht — was fehlt, steht oben
+        # als Hinweis (`core.ablauf.pruefung`); niemand setzt von selbst eine Übung an den Anfang
+        kein_start = gezeichnet and bool(ab.ohne_start_text(plan.ablauf, ids))
+        fort = plan_ablauf.fortsetzung_heute(state, plan) if gezeichnet else None
+        if uebungen and not (kein_start and fort is None):
             alles_weg = not offen()
             rund = ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26))
-            fort = plan_ablauf.fortsetzung_heute(state, plan) if gezeichnet else None
             if fort is not None:
                 # Heute vorzeitig beendet: dort weiter — oder von vorn (Ben, 9.11.2026, P166)
                 bei = schritt_fuer(fort.bei)
@@ -413,11 +416,12 @@ def workout_view(
                         data="fortsetzen",
                     )
                 )
-                teile.append(
-                    ft.OutlinedButton(
-                        "Von vorn", icon=ft.Icons.RESTART_ALT, on_click=von_vorn, style=rund
+                if not kein_start:
+                    teile.append(
+                        ft.OutlinedButton(
+                            "Von vorn", icon=ft.Icons.RESTART_ALT, on_click=von_vorn, style=rund
+                        )
                     )
-                )
             else:
                 teile.append(
                     ft.FilledButton(
@@ -428,7 +432,8 @@ def workout_view(
                         style=rund,
                     )
                 )
-            teile.append(ft.OutlinedButton("Bereitstellen", on_click=bereitstellen))
+            if not kein_start:
+                teile.append(ft.OutlinedButton("Bereitstellen", on_click=bereitstellen))
         if einheit_ui.laeuft(state) is not None:
             teile.append(hinweis("Es läuft schon eine Einheit — erst oben mit ⏹ beenden."))
         return teile
@@ -521,9 +526,9 @@ def workout_view(
             if bild_ is None or not hasattr(page, "run_task"):
                 return
             start = teil.schritt.item_id if teil is not None and teil.phase != FERTIG else ""
+            a = plan.ablauf
             pfad = ab.hauptpfad(
-                ab.Ablauf(True, start or plan.ablauf.start, plan.ablauf.kanten, plan.ablauf.fragen),
-                ids,
+                ab.Ablauf(True, start or a.start, a.kanten, a.fragen, a.ohne_start), ids
             )
             page.run_task(abspielen, page, bild_, pfad)
 

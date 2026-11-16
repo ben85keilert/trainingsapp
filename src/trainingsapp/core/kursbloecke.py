@@ -77,6 +77,76 @@ ZU_ENDE: Final = "ende"
 #: ``plan_einstellen``: die Vorgabe des Übergangs im Workout
 HART: Final = "hart"
 WEICH: Final = "weich"
+#: ``test``: die **Vorgabe** — welche Größe feststeht und den Lauf beendet (`Vorgabe`)
+MENGE: Final = "menge"
+ZEIT: Final = "zeit"
+SKALA: Final = "skala"
+VORGABEN: Final[dict[str, str]] = {MENGE: "Menge", ZEIT: "Zeit", SKALA: "Anstrengung"}
+#: Die Skala der Anstrengung reicht von 0 bis hier (Feldvorrat ``scale``)
+SKALA_MAX: Final = 10
+
+
+@dataclass(frozen=True, slots=True)
+class Vorgabe:
+    """Die Vorgabe eines Tests (Ben, 16.11.2026: „Anstrengung kann Menge, Zeit, Skala sein.
+    Skala kann ab, bis oder dazwischen sein“, `docs/plan_kurs_ablauf.md` §3.3): **eine Größe
+    steht fest und beendet den Lauf, die anderen werden gemessen.**
+
+    Die Anstrengung ist Selbstauskunft — die App misst sie nicht, die Person sagt sie mit
+    einem Tipp. Was aus dem Lauf wird (der Eintrag, die Texte), rechnet `core/kurstest.py`.
+    """
+
+    art: str
+    #: `MENGE`: Wiederholungen · `ZEIT`: Sekunden · `SKALA`: „ab“ (0 = keine Untergrenze)
+    n: int = 0
+    #: `SKALA`: „höchstens“ — ``None`` = nach oben offen
+    bis: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Wie im Paket (``vorgabe`` am Test-Block).
+
+        >>> Vorgabe(MENGE, 30).to_dict(), Vorgabe(SKALA, 5, 7).to_dict()
+        ({'art': 'menge', 'n': 30}, {'art': 'skala', 'n': 5, 'bis': 7})
+        >>> Vorgabe(SKALA, bis=4).to_dict()
+        {'art': 'skala', 'bis': 4}
+        """
+        d: dict[str, Any] = {"art": self.art}
+        if self.n:
+            d["n"] = self.n
+        if self.art == SKALA and self.bis is not None:
+            d["bis"] = self.bis
+        return d
+
+    @classmethod
+    def from_dict(cls, roh: Any) -> Vorgabe | None:
+        """Liest, was `to_dict` schreibt — ``None``, wenn die Angabe nichts vorgibt (unbekannte
+        Art, Menge oder Zeit ohne Zahl, Skala ohne Grenze oder mit vertauschten Grenzen).
+
+        >>> Vorgabe.from_dict({"art": "Menge", "n": "30"})
+        Vorgabe(art='menge', n=30, bis=None)
+        >>> Vorgabe.from_dict({"art": "skala", "n": 7, "bis": 99})  # „bis 10“ ist offen
+        Vorgabe(art='skala', n=7, bis=None)
+        >>> Vorgabe.from_dict({"art": "skala", "bis": 10}) is None  # 0 bis 10: gibt nichts vor
+        True
+        >>> [Vorgabe.from_dict(x) for x in ({"art": "zeit"}, {"art": "skala", "n": 8, "bis": 3},
+        ...                                 {"art": "tanz", "n": 3}, "menge")]
+        [None, None, None, None]
+        """
+        if not isinstance(roh, Mapping):
+            return None
+        art = str(roh.get("art") or "").strip().lower()
+        if art in (MENGE, ZEIT):
+            n = int(_zahl(roh.get("n"), 0, 0, 86_400 if art == ZEIT else 9_999))
+            return cls(art, n) if n > 0 else None
+        if art != SKALA:
+            return None
+        ab = int(_zahl(roh.get("n"), 0, 0, SKALA_MAX))
+        bis = int(_zahl(roh.get("bis"), SKALA_MAX, 0, SKALA_MAX)) if "bis" in roh else None
+        if bis is not None and (bis < ab or (ab == 0 and bis >= SKALA_MAX)):
+            return None
+        if bis is not None and bis >= SKALA_MAX:
+            bis = None  # „bis 10“ ist nach oben offen
+        return cls(SKALA, ab, bis) if ab > 0 or bis is not None else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +184,9 @@ class Block:
     feld: str = "hold"
     #: ``test``: Ziel = Testwert × Faktor (0,8 = „80 % deiner Zeit“)
     faktor: float = 1.0
+    #: ``test``: die Vorgabe — der Test ist dann ein **Lauf mit der Uhr**, der mit ihr endet
+    #: (Ben, 16.11.2026). ``None`` = ohne: Es zählt der jüngste Eintrag der Übung, wie bisher
+    vorgabe: Vorgabe | None = None
     #: ``auswahl``: die Übungen zur Wahl und wie viele man nimmt
     uebungen: list[str] = field(default_factory=list)
     anzahl: int = 1
@@ -162,6 +235,8 @@ class Block:
         {'art': 'test', 'id': 'b2', 'uebung': 'u1', 'feld': 'hold', 'faktor': 0.8}
         >>> Block(TEST, id="b5", aus="b1", feld="reps").to_dict()
         {'art': 'test', 'id': 'b5', 'aus': 'b1', 'feld': 'reps'}
+        >>> Block(TEST, id="b6", uebung="u1", vorgabe=Vorgabe(SKALA, 7)).to_dict()["vorgabe"]
+        {'art': 'skala', 'n': 7}
         >>> Block(PLAN_UEBUNG, id="b3", aus="b1", hinter="g:1", ziel_aus="b2").to_dict()
         {'art': 'plan_uebung', 'id': 'b3', 'aus': 'b1', 'hinter': 'g:1', 'ziel_aus': 'b2'}
         >>> Block(PLAN_WEG, id="b4", von="g:1", zu="b3", kante={"ausloeser": "zeit"}).to_dict()
@@ -184,6 +259,8 @@ class Block:
             d["feld"] = self.feld
             if self.faktor != 1.0:
                 d["faktor"] = self.faktor
+            if self.vorgabe is not None:
+                d["vorgabe"] = self.vorgabe.to_dict()
         if self.art == AUSWAHL:
             d["uebungen"] = list(self.uebungen)
             d["anzahl"] = self.anzahl
@@ -243,6 +320,9 @@ class Block:
         >>> t = Block.from_dict({"art": "test", "aus": "wahl", "uebung": "planke", "feld": "reps"})
         >>> t.aus, t.uebung  # „die gewählte“ geht vor
         ('wahl', '')
+        >>> v = {"art": "zeit", "n": 60}
+        >>> Block.from_dict({"art": "test", "uebung": "u", "vorgabe": v}).vorgabe
+        Vorgabe(art='zeit', n=60, bis=None)
 
         Bausteine: Die Übung kommt wie beim Test über ihren Paketschlüssel; ein Baustein, der
         nichts ändern könnte, fällt weg.
@@ -296,6 +376,7 @@ class Block:
             block.uebung = "" if block.aus else zu_id.get(uebung, uebung)
             block.feld = str(roh.get("feld") or "hold").strip() or "hold"
             block.faktor = _zahl(roh.get("faktor"), 1.0, 0.1, 3.0)
+            block.vorgabe = Vorgabe.from_dict(roh.get("vorgabe"))
             if not block.uebung and not block.aus:
                 return None
         if art == AUSWAHL:
@@ -652,15 +733,21 @@ __all__ = [
     "FRAGE",
     "HART",
     "MEDIUM",
+    "MENGE",
     "PLAN_EINSTELLEN",
     "PLAN_UEBUNG",
     "PLAN_WEG",
+    "SKALA",
+    "SKALA_MAX",
     "TEST",
     "TEXT",
+    "VORGABEN",
     "WEICH",
+    "ZEIT",
     "ZU_ENDE",
     "Antwort",
     "Block",
+    "Vorgabe",
     "bloecke_lesen",
     "bloecke_von",
     "braucht_eingabe",

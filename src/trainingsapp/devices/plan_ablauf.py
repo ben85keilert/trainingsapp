@@ -113,7 +113,9 @@ class PlanAblaufBaustein:
         Klammer ``plan/start`` … ``plan/ende`` (Spur ``workout`` in der Messung).
 
         ``ablauf`` (G2): der gezeichnete Ablauf — nur mit ``an`` wirksam; dann bestimmen seine
-        Kanten den Weg, ``erste`` geht vor seinem Startknoten.
+        Kanten den Weg, ``erste`` geht vor seinem Startknoten. Ein **geleerter** Ablauf
+        (``ohne_start``, Ben 16.11.2026) hat keinen Anfang: ohne ``erste`` ein `ValueError` mit
+        dem Satz, der sagt, was fehlt — niemand setzt von selbst die erste Planübung ein.
 
         ``vorher`` (Fortsetzen, P166): woher das unterbrochene Workout zu ``erste`` kam — steht
         vorn im Verlauf, damit ``◀ zurück`` auch nach dem Fortsetzen weiß, wohin."""
@@ -132,6 +134,13 @@ class PlanAblaufBaustein:
         self.ablauf = ablauf if ablauf is not None and ablauf.an else None
         #: die laufende (oder zuletzt gelaufene) Übung
         self.k = next((i for i, s in enumerate(schritte) if s.item_id == erste), 0)
+        if erste is None and self.ablauf is not None and self.ablauf.ohne_start:
+            # Geleert (Ben, 16.11.2026): Niemand setzt von selbst eine Übung an den Anfang —
+            # ohne Start beginnt das Workout nicht, es sagt, was fehlt
+            raise ValueError(
+                ab.ohne_start_text(self.ablauf, [s.item_id for s in schritte if s.frage is None])
+                or "Der Ablauf hat keinen Start."
+            )
         if erste is None and self.ablauf is not None and self.ablauf.start:
             # Der Startknoten — fehlt er unter den Schritten (heute schon gemacht, Übung im
             # Papierkorb), beginnt es dort, wohin seine erste Kante führt

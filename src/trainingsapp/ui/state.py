@@ -397,6 +397,13 @@ class AppState:
     kurs_wahl: dict[tuple[str, str], tuple[Hashable, dict[str, list[str]]]] = field(
         default_factory=dict
     )
+    #: Der Testlauf eines Kurses, der gerade läuft oder auf sein Ergebnis wartet (Ben,
+    #: 16.11.2026, `ui.views.kurs_test.Kurstestlauf`) — am Zustand, weil die Ansicht bei jedem
+    #: Aufbau neu entsteht; ``None``: keiner
+    kurs_test: Any = None
+    #: Kursseite, Karte „Das kommt noch“ (A1, `components/kommt_noch.py`): die Kurse, bei
+    #: denen sie zugeklappt ist — nur für die Sitzung; Vorgabe ist aufgeklappt
+    kommt_noch_zu: set[str] = field(default_factory=set)
     #: Uhrenplan (K3, `views/plan_uhren.py`): je Plan die aufgeklappten Planübungen
     uhren_offen: dict[str, set[str]] = field(default_factory=dict)
     #: Workout, Bedingung „Skala“: die Selbsteinschätzung je Schritt-Durchlauf

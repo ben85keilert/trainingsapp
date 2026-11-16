@@ -69,7 +69,7 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   Abzweig = alle Wege, auf den Griff eines Wegs = nur dieser, `wege_karte(allein=)`; Rückwege
   in Gassen zwischen den Spalten) und `devices/plan_ablauf.py`; `ui/` zeichnet (`components/ablaufbild.py`:
   Fläche einmal bauen, Inhalt tauschen, Lagen bleiben bis „Neu anordnen“, Eltern mittig;
-  `views/ablauf.py`: Seite scrollt nicht, Palette = Planübungen mit `Draggable.affinity`
+  `views/ablauf.py`: Seite scrollt nicht, Palette = Übungen des Plans mit `Draggable.affinity`
   senkrecht, Knöpfe unter dem Bild). Zeitleiste `plan/kante|frage|antwort`, `person/wdh`;
   Paket `plaene[].ablauf` mit Positionen. **Korrekturen 9.11.2026** (§8.9): „Aus dem Ablauf
   nehmen“ lässt die Planübung im Plan (aus dem Plan: Kachel gedrückt halten), jede Kante hat
@@ -89,6 +89,17 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   nur Gemachtes. **Hart | Weich jederzeit** (`PlanAblaufBaustein.uebergang_setzen`, Umschalter
   in der Unterzeile; der Übergang steht im Schlüssel des Aufbaus) — ein Kurs setzt ihn nur als
   Vorgabe („Eigenverantwortung“); kein Ereignis in der Zeitleiste (Ben, 16.11.2026: „nein“).
+  **Reiter „Ablauf“, drei Punkte** (Ben, 16.11.2026, §8.13): **Die Palette ist ein Vorrat an
+  Übungen** — eine Kachel je Übung, „2×“ bei Mehrfachverwendung; Tippen oder Ziehen nimmt eine
+  freie Planübung, sonst entsteht eine neue derselben Übung (`core.ablauf.vorrat`,
+  `views/ablauf.ins_bild`; auf „Start“ nie eine neue), im Bild bleibt jede Planübung ein Knoten
+  mit Nummer = Stelle in der Liste. **Ein eindeutiger Weg hat einen Punkt:** Der Abzweig steht
+  nur ab zwei Wegen (`Geometrie.abzweige`; `austritte` für alle), sonst nur der Griff — er
+  öffnet im Reiter alle Wege der Übung (`on_abzweig`), ohne den Rückruf meldet er `on_kante`.
+  **Leeren heißt leer:** `Ablauf.ohne_start` (``{"an": true, "ohne_start": true}``) — fällt der
+  Start weg und rückt kein Hauptweg nach, setzt sich nichts von selbst hinein (kein Rückfall auf
+  die erste Planübung, folgt nicht der Liste), und ohne Start beginnt kein Workout
+  (`core.ablauf.ohne_start_text`, `PlanAblaufBaustein` lehnt ab).
 
 - **Neue Ereignisse der Zeitleiste** (Ben, 16.11.2026): Wer eines plant, sieht **vorher** in
   `core/einheit.py` nach — `ARTEN` und `DATEN_SCHLUESSEL` sind eine feste Liste, alles andere

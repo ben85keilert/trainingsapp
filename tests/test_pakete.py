@@ -1387,6 +1387,41 @@ def test_ablauf_reist_im_paket_mit_positionen_und_kommt_als_graph_zurueck(con) -
     assert d["ablauf"]["fragen"][0]["id"] == "?1" and d["uebungen"][1]["beiname"] == "2. Durchgang"
 
 
+def test_geleerter_ablauf_uebersteht_die_rundreise_im_paket(con) -> None:
+    """Ben, 16.11.2026 (`docs/plan_verzweigungen.md` §8.13): Ein geleerter Ablauf — das Workout
+    hat keinen Start, nichts setzt sich von selbst hinein — reist mit seinem Vermerk
+    ``ohne_start``: Export → Import kommt wieder leer an, nicht als Kette der Liste."""
+    from trainingsapp.core import ablauf as ab
+    from trainingsapp.core.ablauf import Ablauf
+    from trainingsapp.core.pakete import paketplan_aus
+
+    pakete, plaene = PaketRepo(con), PlanRepo(con)
+    ich, du = _profil(con, "Ich"), _profil(con, "Du")
+    leer = Ablauf(an=True, ohne_start=True)
+    inhalt = paket_lesen(qigong_mit_plan(version=1))
+    pakete.importieren(inhalt, subject_id=ich.id)
+    (plan,) = plaene.des_pakets(inhalt.paket.id, ich.id)
+    plaene.ablauf_setzen(plan.id, leer)
+    # Export: nur das Zeichen und der Vermerk — keine Kanten, kein Start
+    d = paketplan_aus(plaene.laden(plan.id), "morgen").to_dict()
+    assert d["ablauf"] == {"an": True, "ohne_start": True}
+    assert ab.ablauf_pruefen(d["ablauf"]) == ([], [])  # `trainingsapp-paket pruefen` nimmt ihn
+    # Import in ein anderes Profil: leer, kein Knoten im Bild, kein Start
+    roh = qigong_mit_plan(version=2)
+    roh["plaene"][0] = d
+    pakete.importieren(paket_lesen(roh), subject_id=du.id)
+    (neu,) = plaene.des_pakets(inhalt.paket.id, du.id)
+    ids = [it.id for it in neu.items]
+    assert neu.ablauf == leer and len(ids) == 2
+    assert ab.im_bild(neu.ablauf, ids) == [] and neu.ablauf.startknoten(ids) is None
+    # Ohne den Vermerk (eine ältere App schreibt und liest ihn nicht) folgt der Plan der Liste
+    roh["plaene"][0]["ablauf"] = {"an": True}
+    roh["paket"]["version"] = 3
+    pakete.importieren(paket_lesen(roh), subject_id=du.id)
+    (neu,) = plaene.des_pakets(inhalt.paket.id, du.id)
+    assert ab.im_bild(neu.ablauf, [it.id for it in neu.items]) == [it.id for it in neu.items]
+
+
 def test_paketversion_x_y_z_wird_zur_zahl() -> None:
     """Ben, 9.11.2026: Versionen mit Stellen — gespeichert als X·10000 + Y·100 + Z, damit ältere
     Apps weiter vergleichen; eine ganze Zahl bleibt, was sie war (4 = 0.0.4)."""

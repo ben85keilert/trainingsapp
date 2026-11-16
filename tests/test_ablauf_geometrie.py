@@ -1,5 +1,6 @@
 """Die Geometrie des Ablaufbilds (Ben, 10.11.2026): ein Austrittspunkt je Übung, Wege ohne
-fremde Knoten zu kreuzen, Rückwege in Gassen, Stummel für „◀ zurück“ und „Ende“."""
+fremde Knoten zu kreuzen, Rückwege in Gassen, Stummel für „◀ zurück“ und „Ende“. Seit
+16.11.2026: ein Abzweig nur, wo mehrere Wege abgehen — ein eindeutiger Weg hat einen Punkt."""
 
 from __future__ import annotations
 
@@ -50,6 +51,7 @@ def test_ein_austrittspunkt_fuer_alle_wege() -> None:
     assert {w.kurven[0].p0 for w in von_a} == {g.abzweige["a"]}
     x, y = g.mitten["a"]
     assert g.abzweige["a"] == (x, y + 32 + geo.NAME_H + geo.AUSTRITT)
+    assert g.abzweige["a"] == g.austritte["a"]
     oben, unten = g.staemme["a"]
     assert unten == g.abzweige["a"] and y + 32 < oben[1] < unten[1]
     # Jeder Weg hat seinen eigenen Griff — keine zwei liegen aufeinander
@@ -93,7 +95,7 @@ def test_wege_weichen_knoten_aus() -> None:
         if w.art == geo.RUECK:
             assert w.spitze is not None and w.spitze[1] == g.mitten[w.kante.nach][1]
     assert g.breite > max(x for x, _ in g.mitten.values())
-    assert g.hoehe > max(y for _, y in g.abzweige.values())
+    assert g.hoehe > max(y for _, y in g.austritte.values())
 
 
 def test_zwei_wege_in_denselben_knoten_haben_getrennte_griffe() -> None:
@@ -103,3 +105,39 @@ def test_zwei_wege_in_denselben_knoten_haben_getrennte_griffe() -> None:
     assert len(nach_d) == 2 and nach_d[0].seite != nach_d[1].seite
     (x0, y0), (x1, y1) = nach_d[0].griff, nach_d[1].griff
     assert abs(x0 - x1) + abs(y0 - y1) > 20
+
+
+def test_eindeutiger_weg_hat_nur_einen_punkt() -> None:
+    """Ben, 16.11.2026: „wenn ein Weg eindeutig ist, keine zwei Knoten zwischen den Übungen,
+    sondern nur 1. Wenn mehr Wege gemeinsamer Knoten und Abzweigungsknoten so wie jetzt.“ —
+    der Abzweig steht nur, wo mehrere Wege abgehen; bei genau einem bleibt sein Griff."""
+    a = Ablauf(
+        True,
+        "a",
+        (
+            Kante("a", "b"),  # a: zwei Wege → Abzweig und je Weg ein Griff
+            Kante("a", "c", ab.SKALA, 7),
+            Kante("b", "d"),  # b: ein Weg hinunter
+            Kante("c", ab.ENDE),  # c: nur der Stummel „Ende“
+            Kante("d", "d"),  # d: nur die Schleife
+        ),
+    )
+    ids = ["a", "b", "c", "d"]
+    g = geo.geometrie(a, ab.layout(a, ids))
+    assert sorted(g.abzweige) == ["a"]
+    # Der Austritt bleibt für alle: dort endet der Stamm, dort beginnt der Weg
+    assert sorted(g.austritte) == ids == sorted(g.staemme)
+    assert all(w.kurven[0].p0 == g.austritte[w.kante.von] for w in g.wege)
+    # Je Weg genau ein Griff — bei „b“ also ein einziger Punkt zwischen b und d, unter dem
+    # Austritt und über dem Ziel
+    (weg,) = [w for w in g.wege if w.kante.von == "b"]
+    assert g.austritte["b"][1] < weg.griff[1] < g.mitten["d"][1] - 32
+    assert len(g.wege) == len(a.kanten)
+    # Ein Slot an einer Übung ohne Weg bekommt einen Austritt, aber keinen Abzweig
+    leer = Ablauf(True, "a")
+    g = geo.geometrie(leer, ab.layout(leer, ["a"]), mit_abzweig=["a"])
+    assert sorted(g.austritte) == ["a"] and g.abzweige == {}
+    # Zeigt einer von zwei Wegen auf einen Knoten, der nicht gezeichnet wird, bleibt ein Punkt
+    halb = Ablauf(True, "a", (Kante("a", "b"), Kante("a", "x")))
+    g = geo.geometrie(halb, ab.layout(halb, ["a", "b"]))
+    assert g.abzweige == {} and [w.kante.nach for w in g.wege] == ["b"]

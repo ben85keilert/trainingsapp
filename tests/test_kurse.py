@@ -16,8 +16,10 @@ from trainingsapp.core.kursbloecke import (
     PLAN_EINSTELLEN,
     PLAN_UEBUNG,
     PLAN_WEG,
+    SKALA,
     TEST,
     Block,
+    Vorgabe,
 )
 from trainingsapp.core.kurse import (
     AKTUELL,
@@ -1126,3 +1128,60 @@ def test_test_der_gewaehlten_im_kapitelplan_und_auswahl_im_kapitel_davor(con, pr
         f"t2:{kaefer}": 40.0,
         f"t2:{bruecke}": 20.0,
     }
+
+
+def test_testlauf_mit_vorgabe_wird_ein_gewoehnlicher_eintrag(con, profil) -> None:
+    """Ben, 16.11.2026 (Stufe 2): Ein Test mit Vorgabe läuft mit der Uhr. Am Ende steht ein
+    gewöhnlicher Eintrag bei der Übung — mit Wiederholungen, Zeit und Skala, auch wenn die
+    Übung Zeit und Skala nicht anbietet. Der Kurs liest daraus wie bisher den Wert seines
+    Feldes; was sonst gemessen wurde, steht dabei (`KursRepo.testeintraege`)."""
+    from trainingsapp.core.kurstest import eintrag, lauf_aus, neben_text
+
+    repo, sitzungen, uebungen = KursRepo(con), SessionRepo(con), ExerciseRepo(con)
+    kurs, ids = rumpf_kurs(con)
+    test = next(b for b in kurs.kapitel[1].bloecke if b.art == TEST)
+    test.vorgabe = Vorgabe(SKALA, 7)
+    dazu = next(b for b in kurs.kapitel[1].bloecke if b.id == "dazu")
+    dazu.faktor = 0.8
+    repo.speichern(kurs)
+    kurs = repo.laden(kurs.id)
+    assert kurs is not None
+    eins, zwei, _drei = kurs.kapitel
+    test = next(b for b in zwei.bloecke if b.art == TEST)
+    assert test.vorgabe == Vorgabe(SKALA, 7)  # die Vorgabe überlebt Speichern und Laden
+
+    repo.starten(kurs, profil.id)
+    repo.plan_uebernehmen(
+        kurs, eins, profil.id, {z.id for z in repo.plan_aenderungen(kurs, eins, profil.id)}
+    )
+    repo.kapitel_abschliessen(kurs, eins, profil.id)
+    erreicht = repo.staende(profil.id, kurs.id)[zwei.id].erreicht
+    assert repo.testeintraege(zwei, profil.id, erreicht) == {}
+
+    kaefer = uebungen.laden(ids["kaefer"])
+    assert kaefer is not None
+    assert [f.key for f in kaefer.result_spec.fields] == ["reps"]  # weder Zeit noch Skala
+    mit_feldern, werte = eintrag(test, kaefer, wdh=22, sekunden=72.4, skala=7)
+    assert werte == {"reps": [22], "duration": 72, "scale": 7}
+    session = sitzungen.session_fuer(profil.id, None, datetime.now(UTC).astimezone().date())
+    geschrieben = sitzungen.eintrag_anlegen(session, mit_feldern, werte)
+
+    assert repo.testwerte(zwei, profil.id, erreicht) == {"test": 22.0}
+    (gelesen,) = repo.testeintraege(zwei, profil.id, erreicht).values()
+    assert gelesen.id == geschrieben.id
+    # der Eintrag bringt seine Felder mit — die Übung selbst bleibt, wie sie war
+    assert [f.key for f in gelesen.spec_snapshot.fields] == ["reps", "duration", "scale"]
+    nachher = uebungen.laden(ids["kaefer"])
+    assert nachher is not None and [f.key for f in nachher.result_spec.fields] == ["reps"]
+    lauf = lauf_aus(test, gelesen.result, gelesen.spec_snapshot)
+    assert (lauf.wdh, lauf.sekunden, lauf.skala) == (22.0, 72.0, 7.0)
+    assert neben_text(test, lauf) == "in 1:12 · Anstrengung 7"
+
+    wahl = {"wahl": [ids["kaefer"]]}
+    zeilen = repo.plan_aenderungen(kurs, zwei, profil.id, wahl)
+    assert [(z.titel, z.unter) for z in zeilen][:2] == [
+        ("Käfer kommt dazu", "hinter Planke"),
+        ("Ziel für Käfer: 18 Wiederholungen", "80 % von deinem Test (22 Wdh. bis Anstrengung 7)"),
+    ]
+    plan = repo.plan_uebernehmen(kurs, zwei, profil.id, {z.id for z in zeilen}, wahl=wahl)
+    assert [(i.exercise_id, i.target) for i in plan.items][1] == (ids["kaefer"], {"reps": [18]})

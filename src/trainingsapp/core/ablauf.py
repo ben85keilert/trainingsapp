@@ -243,13 +243,24 @@ class Frage:
 @dataclass(frozen=True, slots=True)
 class Ablauf:
     """Der Graph eines Plans. ``an`` = der Plan ist ein Workout (Reiter „Ablauf“); aus = eine
-    Liste. ``an`` ohne Kanten und Fragen: das Workout folgt der Liste (`fuer_plan`)."""
+    Liste. ``an`` ohne Kanten und Fragen: das Workout folgt der Liste (`fuer_plan`) — außer mit
+    ``ohne_start``: dann ist es ein eigener, **leerer** Ablauf."""
 
     an: bool = False
-    #: der Startknoten — leer: die erste Planübung
+    #: der Startknoten — leer: die erste Planübung (Altbestand und Pakete ohne ``start``),
+    #: außer mit ``ohne_start``
     start: str = ""
     kanten: tuple[Kante, ...] = ()
     fragen: tuple[Frage, ...] = ()
+    #: Der Start ist **ausdrücklich leer** (Ben, 16.11.2026: „Das automatische Übungssetzen,
+    #: wenn alles gelöscht wird, muss raus“): Die Startübung ist aus dem Bild genommen, und
+    #: nichts rückt von selbst nach — keine Planübung wird zum Start (`startknoten`), der Ablauf
+    #: folgt nicht der Liste (`folgt_der_liste`). Ein gesetzter Start hebt den Vermerk auf.
+    ohne_start: bool = False
+
+    def __post_init__(self) -> None:
+        if self.start and self.ohne_start:
+            object.__setattr__(self, "ohne_start", False)
 
     @property
     def leer(self) -> bool:
@@ -266,16 +277,23 @@ class Ablauf:
         return next((f for f in self.fragen if f.id == knoten), None)
 
     def startknoten(self, items: Sequence[str]) -> str | None:
-        """Der Start: ``start``, wenn es ihn gibt, sonst die erste Planübung.
+        """Der Start: ``start``, wenn es ihn gibt, sonst die erste Planübung — mit ``ohne_start``
+        keiner: Wer den Start aus dem Bild nimmt, bekommt keinen neuen gesetzt.
 
         >>> Ablauf(start="b").startknoten(["a", "b"]), Ablauf(start="x").startknoten(["a"])
         ('b', 'a')
         >>> Ablauf().startknoten([]) is None
         True
+        >>> Ablauf(True, ohne_start=True).startknoten(["a", "b"]) is None
+        True
+        >>> replace(Ablauf(True, ohne_start=True), start="b").ohne_start  # ein Start hebt ihn auf
+        False
         """
         bekannt = set(items) | {f.id for f in self.fragen}
         if self.start and self.start in bekannt:
             return self.start
+        if self.ohne_start:
+            return None
         return items[0] if items else None
 
     def mit_kante(self, kante: Kante) -> Ablauf:
@@ -288,17 +306,32 @@ class Ablauf:
         return replace(self, kanten=tuple(neu if k == alt else k for k in self.kanten))
 
     def ohne_knoten(self, knoten: str) -> Ablauf:
-        """Eine Planübung oder Frage verschwindet — mit allen Kanten von und zu ihr.
+        """Eine Planübung oder Frage verschwindet — mit allen Kanten von und zu ihr. War sie der
+        Start, rückt ihr Hauptweg nach (das Ziel ihrer ersten Kante, Ben 9.11.2026); hat sie
+        keinen, bleibt der Start **leer** (``ohne_start``) — keine andere Planübung rückt von
+        selbst an ihre Stelle (Ben, 16.11.2026).
 
         >>> a = Ablauf(True, "a", (Kante("a", "b"), Kante("b", "c")), (Frage("b"),))
         >>> a.ohne_knoten("b").kanten, a.ohne_knoten("b").fragen, a.ohne_knoten("a").start
-        ((), (), '')
+        ((), (), 'b')
+        >>> leer = a.ohne_knoten("b").ohne_knoten("a")  # der Start ohne Weg weiter
+        >>> leer.start, leer.ohne_start, leer.startknoten(["a", "c"])
+        ('', True, None)
+        >>> Ablauf(an=True).ohne_knoten("a").ohne_start  # folgt der Liste: bleibt dabei
+        False
         """
+        start, ohne_start = self.start, self.ohne_start
+        if start == knoten:
+            folge = [
+                k.nach for k in self.von(knoten) if not k.schleife and k.nach not in (ENDE, ZURUECK)
+            ]
+            start, ohne_start = (folge[0], False) if folge else ("", True)
         return replace(
             self,
-            start="" if self.start == knoten else self.start,
+            start=start,
             kanten=tuple(k for k in self.kanten if knoten not in (k.von, k.nach)),
             fragen=tuple(f for f in self.fragen if f.id != knoten),
+            ohne_start=ohne_start,
         )
 
     def bereinigt(self, items: Iterable[str]) -> Ablauf:
@@ -324,6 +357,8 @@ class Ablauf:
             d["kanten"] = [k.als_dict() for k in self.kanten]
         if self.fragen:
             d["fragen"] = [f.als_dict() for f in self.fragen]
+        if self.ohne_start and not self.start:
+            d["ohne_start"] = True
         return d
 
     @classmethod
@@ -332,6 +367,9 @@ class Ablauf:
         >>> a = Ablauf.aus_dict({"an": 1, "start": "a", "kanten": [{"von": "a", "nach": "b"}, 3]})
         >>> a.an, a.start, len(a.kanten), Ablauf.aus_dict(None).leer
         (True, 'a', 1, True)
+        >>> leer = Ablauf(True, ohne_start=True)  # der geleerte Ablauf übersteht das Speichern
+        >>> leer.als_dict(), Ablauf.aus_dict(leer.als_dict()) == leer
+        ({'an': True, 'ohne_start': True}, True)
         """
         if not isinstance(roh, Mapping):
             return cls()
@@ -341,7 +379,13 @@ class Ablauf:
         fragen = tuple(
             f for f in (Frage.aus_dict(x) for x in roh.get("fragen") or []) if f is not None
         )
-        return cls(bool(roh.get("an")), str(roh.get("start") or ""), kanten, fragen)
+        return cls(
+            bool(roh.get("an")),
+            str(roh.get("start") or ""),
+            kanten,
+            fragen,
+            bool(roh.get("ohne_start")),
+        )
 
 
 # -- Entstehen ---------------------------------------------------------------------------------
@@ -545,8 +589,15 @@ def folgt_der_liste(ablauf: Ablauf, items: Sequence[tuple[str, Bedingung]]) -> b
     False
     >>> folgt_der_liste(Ablauf(True, "a"), liste), folgt_der_liste(Ablauf(True, "a"), liste[:1])
     (False, True)
+
+    Ein **geleerter** Ablauf (der Start ist herausgenommen) folgt nie — auch nicht bei einer
+    einzigen oder gar keiner Übung im Plan (Ben, 16.11.2026: leer bleibt leer):
+
+    >>> leer = Ablauf(True, ohne_start=True)
+    >>> folgt_der_liste(leer, liste), folgt_der_liste(leer, liste[:1]), folgt_der_liste(leer, [])
+    (False, False, False)
     """
-    if not ablauf.an or ablauf.fragen:
+    if not ablauf.an or ablauf.fragen or ablauf.ohne_start:
         return False
     if not ablauf.kanten:
         # Nur das Zeichen ``{"an": true}`` folgt. Ein Ablauf mit Start, aber ohne Wege, ist
@@ -572,6 +623,9 @@ def fuer_plan(ablauf: Ablauf, workout: bool, items: Sequence[tuple[str, Bedingun
     True
     >>> nur_a = Ablauf(True, "a")  # „b“ aus dem Ablauf genommen: bleibt draußen (N53)
     >>> fuer_plan(nur_a, True, liste) is nur_a
+    True
+    >>> leer = Ablauf(True, ohne_start=True)  # alles herausgenommen: bleibt leer
+    >>> fuer_plan(leer, True, liste) is leer
     True
     """
     if (workout and not ablauf.an) or (not ablauf.kanten and folgt_der_liste(ablauf, items)):
@@ -912,17 +966,40 @@ def kreis_von_selbst(ablauf: Ablauf, items: Sequence[str]) -> list[str]:
     return out
 
 
+def ohne_start_text(ablauf: Ablauf, items: Sequence[str]) -> str:
+    """Was ein Workout sagt, dessen Ablauf keinen Start hat (Ben, 16.11.2026: Leeren heißt leer
+    — niemand setzt von selbst eine Übung) — leer, wenn es einen Start gibt, der Plan eine
+    Liste ist oder noch keine Übung hat.
+
+    >>> ohne_start_text(Ablauf(True, ohne_start=True), ["a"])
+    'Der Ablauf ist leer — im Reiter „Ablauf“ eine Übung auf „Start“ setzen.'
+    >>> ohne_start_text(Ablauf(True, kanten=(Kante("b", "c"),), ohne_start=True), ["a", "b", "c"])
+    'Der Ablauf hat keinen Start — im Reiter „Ablauf“ eine Übung auf „Start“ setzen.'
+    >>> ohne_start_text(Ablauf(True), ["a"]), ohne_start_text(Ablauf(True, ohne_start=True), [])
+    ('', '')
+    """
+    if not ablauf.an or not items or ablauf.startknoten(items) is not None:
+        return ""
+    was = "hat keinen Start" if ablauf.kanten or ablauf.fragen else "ist leer"
+    return f"Der Ablauf {was} — im Reiter „Ablauf“ eine Übung auf „Start“ setzen."
+
+
 def warnungen(ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str]) -> list[str]:
     """Was den Plan hängen lassen kann — sichtbar beim Erstellen, nicht hinter einem Knopf (Ben,
-    9.11.2026): ein Kreis ohne Weg hinaus und ein Kreis, der von selbst weiterläuft.
+    9.11.2026): ein Kreis ohne Weg hinaus und ein Kreis, der von selbst weiterläuft; dazu ein
+    Ablauf ohne Start (`ohne_start_text`) — so beginnt das Workout nicht.
 
     >>> a = Ablauf(True, "a", (Kante("a", "b"), Kante("b", "a")))
     >>> warnungen(a, ["a", "b"], {"a": "Bauchatmung", "b": "HRV-Ruhemessung"})[0]
     'Kein Weg hinaus ab: Bauchatmung, HRV-Ruhemessung — dort käme das Workout nie zum Ende.'
+    >>> warnungen(Ablauf(True, ohne_start=True), ["a", "b"], {})
+    ['Der Ablauf ist leer — im Reiter „Ablauf“ eine Übung auf „Start“ setzen.']
     """
     if not ablauf.an:
         return []
     out: list[str] = []
+    if kein_start := ohne_start_text(ablauf, items):
+        out.append(kein_start)
     if kreis := ohne_ausweg(ablauf, items):
         liste = ", ".join(namen.get(i, i) for i in kreis)
         out.append(f"Kein Weg hinaus ab: {liste} — dort käme das Workout nie zum Ende.")
@@ -970,11 +1047,18 @@ def pruefung(ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str]) -> 
     >>> h = pruefung(a, ["a", "b", "c"], {"a": "Wandsitz", "b": "Pause", "c": "Dehnung"})
     >>> h[0], h[1].startswith("Kein Weg hinaus ab: Wandsitz, Pause")
     ('Dehnung ist bei Bedarf, aber niemand ruft sie.', True)
+
+    Ohne Start steht nur das da — nicht jede Übung einzeln als „niemand ruft sie“:
+
+    >>> pruefung(Ablauf(True, ohne_start=True), ["a", "b"], {})
+    ['Der Ablauf ist leer — im Reiter „Ablauf“ eine Übung auf „Start“ setzen.']
     """
     out: list[str] = []
     da = erreichbar(ablauf, items)
+    if kein_start := ohne_start_text(ablauf, items):
+        out.append(kein_start)
     for i in items:
-        if i not in da and not ablauf.zu(i):
+        if i not in da and not ablauf.zu(i) and not kein_start:
             out.append(f"{namen.get(i, i)} ist bei Bedarf, aber niemand ruft sie.")
     kreis = ohne_ausweg(ablauf, items)
     if kreis:
@@ -1131,6 +1215,8 @@ def im_bild(ablauf: Ablauf, items: Sequence[str]) -> list[str]:
     >>> a = Ablauf(True, "a", (Kante("a", "b"),), (Frage("f"),))
     >>> im_bild(a, ["a", "b", "c"])
     ['a', 'b', 'f']
+    >>> im_bild(Ablauf(True, ohne_start=True), ["a", "b", "c"])  # geleert: nichts im Bild
+    []
     """
     start = ablauf.startknoten(items)
     mit_kante = {k.von for k in ablauf.kanten} | {k.nach for k in ablauf.kanten}
@@ -1222,6 +1308,18 @@ def layout(ablauf: Ablauf, items: Sequence[str]) -> dict[str, Lage]:
     return {k: lage[k] for k in knoten}
 
 
+def startplatz(belegt: Iterable[Lage]) -> Lage:
+    """Wo der **leere Platz** unter „Start“ liegt, wenn der Ablauf keinen Start hat (Ben,
+    16.11.2026: geleert bleibt das Bild leer — „Start“ und ein leerer Platz): ganz oben, links
+    von allem, was noch im Bild steht — so sieht kein Knoten wie der Start aus.
+
+    >>> startplatz([]), startplatz([Lage(1.0, 0), Lage(0.5, 1)])
+    (Lage(x=0.0, ebene=0), Lage(x=-1.0, ebene=0))
+    """
+    links = min((b.x for b in belegt), default=1.5)
+    return Lage(links - 1.5, 0)
+
+
 def freie_lage(belegt: Iterable[Lage], x: float, ebene: int) -> Lage:
     """Der nächste freie Platz auf ``ebene`` bei ``x`` — erst dort, dann abwechselnd rechts
     und links in ganzen Spalten.
@@ -1294,6 +1392,62 @@ def nummern(items: Sequence[str]) -> dict[str, int]:
     return {i: n for n, i in enumerate(items, start=1)}
 
 
+@dataclass(frozen=True, slots=True)
+class Vorrat:
+    """Eine **Übung** in der Leiste über dem Bild (Ben, 16.11.2026: „Übungen aus der Liste oben
+    mehrfach verwenden … dann steht da ein 2x, 3x“): alle ihre Planübungen in Listenfolge und
+    welche davon noch nicht im Bild stehen. Die Leiste ist der Vorrat, das Bild zeigt
+    Planübungen — jede ein eigener Knoten mit ihrer Nummer (`nummern`)."""
+
+    uebung: str
+    planuebungen: tuple[str, ...]
+    #: noch nicht im Bild (`im_bild`)
+    frei: tuple[str, ...]
+
+    @property
+    def anzahl(self) -> int:
+        """Wie oft die Übung im Plan steht — ab zwei steht „2×“ an der Kachel."""
+        return len(self.planuebungen)
+
+    @property
+    def ganz_frei(self) -> bool:
+        """Keine ihrer Planübungen steht im Bild — „frei“ an der Kachel."""
+        return len(self.frei) == len(self.planuebungen)
+
+    @property
+    def naechste(self) -> str | None:
+        """Die Planübung, die als nächste ins Bild kommt: die erste freie — ``None``, wenn alle
+        schon dort stehen (dann entsteht eine neue Planübung derselben Übung)."""
+        return self.frei[0] if self.frei else None
+
+    @property
+    def letzte(self) -> str:
+        """Die Planübung, die Gedrückthalten aus dem Plan nimmt: die zuletzt hinzugekommene,
+        eine freie zuerst — so verliert das Bild nur einen Knoten, wenn es nicht anders geht."""
+        return (self.frei or self.planuebungen)[-1]
+
+
+def vorrat(ablauf: Ablauf, items: Sequence[tuple[str, str]]) -> list[Vorrat]:
+    """Die Leiste über dem Bild: **eine Zeile je Übung** des Plans, in der Reihenfolge ihres
+    ersten Vorkommens — ``items``: ``(Planübung, Übung)`` in Listenfolge.
+
+    >>> a = Ablauf(True, "p1", (Kante("p1", "p2"),))
+    >>> v = vorrat(a, [("p1", "knie"), ("p2", "planke"), ("p3", "knie"), ("p4", "dehnen")])
+    >>> [(x.uebung, x.anzahl, x.frei, x.ganz_frei) for x in v]
+    [('knie', 2, ('p3',), False), ('planke', 1, (), False), ('dehnen', 1, ('p4',), True)]
+    >>> [(x.naechste, x.letzte) for x in v]  # freie zuerst — sonst entsteht eine neue
+    [('p3', 'p3'), (None, 'p2'), ('p4', 'p4')]
+    """
+    da = set(im_bild(ablauf, [i for i, _ in items]))
+    je_uebung: dict[str, list[str]] = {}
+    for item_id, uebung in items:
+        je_uebung.setdefault(uebung, []).append(item_id)
+    return [
+        Vorrat(uebung, tuple(ids), tuple(i for i in ids if i not in da))
+        for uebung, ids in je_uebung.items()
+    ]
+
+
 def luecke_schliessen(ablauf: Ablauf, knoten: str) -> Ablauf:
     """Eine Übung fällt aus der Reihe, die Lücke schließt sich (Ben, 8.11.2026, Frage 4): jede
     Kante, die zu ihr führte, führt jetzt dorthin, wohin ihr Hauptweg (erste Kante) ging — mit
@@ -1306,6 +1460,11 @@ def luecke_schliessen(ablauf: Ablauf, knoten: str) -> Ablauf:
     [('a', 'b', 'wdh'), ('b', 'c', 'frei')]
     >>> luecke_schliessen(Ablauf(True, "x", (Kante("x", "b"),)), "x").start
     'b'
+
+    Führt der Hauptweg des Starts ins Ende, gibt es keinen Nachfolger — der Start bleibt leer:
+
+    >>> luecke_schliessen(Ablauf(True, "x", (Kante("x", ENDE),)), "x").ohne_start
+    True
     """
     raus = [k for k in ablauf.von(knoten) if not k.schleife]
     haupt = raus[0] if raus else None
@@ -1322,11 +1481,12 @@ def luecke_schliessen(ablauf: Ablauf, knoten: str) -> Ablauf:
             kanten.append(replace(k, nach=ziel))
             continue
         kanten.append(k)
-    start = ablauf.start
+    start, ohne_start = ablauf.start, ablauf.ohne_start
     if start == knoten:
         start = ziel if ziel is not None and ziel != ENDE else ""
+        ohne_start = not start
     fragen = tuple(f for f in ablauf.fragen if f.id != knoten)
-    return replace(ablauf, start=start, kanten=tuple(kanten), fragen=fragen)
+    return replace(ablauf, start=start, kanten=tuple(kanten), fragen=fragen, ohne_start=ohne_start)
 
 
 def nachfolgereihe(ablauf: Ablauf, items: Sequence[str], knoten: str) -> list[str]:
@@ -1369,6 +1529,12 @@ def als_position(ablauf: Ablauf, ids: Sequence[str]) -> dict[str, Any]:
     >>> d = als_position(a, ["i1", "i2"])
     >>> d["start"], [(k["von"], k["nach"]) for k in d["kanten"]], d["fragen"][0]["id"]
     ('#1', [('#1', '?1'), ('?1', '#2')], '?1')
+
+    Ein geleerter Ablauf reist mit seinem Vermerk — er kommt leer an, nicht als Kette der Liste:
+
+    >>> roh = als_position(Ablauf(True, ohne_start=True), ["i1", "i2"])
+    >>> roh, aus_position(roh, ["x", "y"], [1, 2]) == Ablauf(True, ohne_start=True)
+    ({'an': True, 'ohne_start': True}, True)
     """
     stelle = {i: f"#{n}" for n, i in enumerate(ids, start=1)}
     stelle.update({f.id: f"?{n}" for n, f in enumerate(ablauf.fragen, start=1)})
@@ -1382,6 +1548,7 @@ def als_position(ablauf: Ablauf, ids: Sequence[str]) -> dict[str, Any]:
             if k.von in stelle and k.nach in stelle
         ),
         tuple(replace(f, id=stelle[f.id]) for f in ablauf.fragen),
+        ablauf.ohne_start,
     )
     return umgesetzt.als_dict()
 
@@ -1412,6 +1579,7 @@ def aus_position(roh: Any, ids: Sequence[str], positionen: Sequence[int]) -> Abl
             if k.von in ziel and k.nach in ziel
         ),
         fragen,
+        a.ohne_start,
     )
 
 
@@ -1501,6 +1669,7 @@ __all__ = [
     "Kante",
     "KanteStand",
     "Lage",
+    "Vorrat",
     "ablauf_pruefen",
     "als_position",
     "aus_bedingungen",
@@ -1531,12 +1700,15 @@ __all__ = [
     "nachfolgereihe",
     "nummern",
     "ohne_ausweg",
+    "ohne_start_text",
     "ohne_verzweigung",
     "pruefung",
     "regulaere",
     "sekunden_text",
+    "startplatz",
     "tore",
     "von_selbst",
+    "vorrat",
     "wahl_offen",
     "warnungen",
     "weg_durch",

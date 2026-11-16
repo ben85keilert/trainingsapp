@@ -467,8 +467,8 @@ den Vordergrund“ · c) „ja“. Dazu: „Fang an, und arbeite dich soweit wie
 - **Kein Ereignis `plan/uebergang`.** §10.5 wollte den Wechsel in die Zeitleiste schreiben. Die
   Zeitleiste hat einen festen Vertrag für Arten und Datenfelder (`core/einheit.py`: `ARTEN`,
   `DATEN_SCHLUESSEL`; `docs/plan_einheit.md`); für eine Einstellung der Ansicht habe ich ihn
-  nicht erweitert. Der Workout-Eintrag weiß also nicht, wann umgeschaltet wurde. Wenn das
-  gewünscht ist: eine Art und ein Feld dazu.
+  nicht erweitert. Der Workout-Eintrag weiß also nicht, wann umgeschaltet wurde. **Ben,
+  16.11.2026, auf die Frage, ob er das braucht: „nein“ — es bleibt dabei.**
 - **Die Wege stehen vorn, nicht „unter ‚Eintragen‘“** (§9.4, §10.1 erste Fassung) — Bens
   Antwort b.
 - **Fehlt nur die Wahl, entfällt der Hinweis** „Noch nicht erfüllt — du bleibst bei der Übung“.

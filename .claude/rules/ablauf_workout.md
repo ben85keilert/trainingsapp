@@ -88,4 +88,10 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   `vorn`). Der **Streifen je Übung nur bei linearem Ablauf** (`core.ablauf.ist_linear`), gefüllt
   nur Gemachtes. **Hart | Weich jederzeit** (`PlanAblaufBaustein.uebergang_setzen`, Umschalter
   in der Unterzeile; der Übergang steht im Schlüssel des Aufbaus) — ein Kurs setzt ihn nur als
-  Vorgabe („Eigenverantwortung“); kein Ereignis in der Zeitleiste.
+  Vorgabe („Eigenverantwortung“); kein Ereignis in der Zeitleiste (Ben, 16.11.2026: „nein“).
+
+- **Neue Ereignisse der Zeitleiste** (Ben, 16.11.2026): Wer eines plant, sieht **vorher** in
+  `core/einheit.py` nach — `ARTEN` und `DATEN_SCHLUESSEL` sind eine feste Liste, alles andere
+  fällt weg (`daten_pruefen`) — und in der Tabelle von `docs/plan_einheit.md`. Ein Plan, der
+  „schreibt … in die Zeitleiste“ sagt, ohne das geprüft zu haben, verspricht etwas, das der
+  Vertrag nicht hergibt (so geschehen bei `plan/uebergang`, `docs/plan_uhr_fokus.md` §10.6).

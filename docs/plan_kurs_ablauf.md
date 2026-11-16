@@ -432,3 +432,98 @@ Patientenmodus), mit meiner Empfehlung zuerst:
 Zum Veranschaulichen der Sammelkarte „Das ändert sich an deinem Plan“ und der „Wenn …“-Zeilen
 sind **Skizzen als Bildergeschichte** sinnvoll — sobald du das Grundmodell (Fragen 1–3) bestätigt
 hast.
+
+## 11. Bauplan Stufe 1 (16.11.2026) — nach Bens Ja zu den Skizzen
+
+Skizzen K1–K6: <https://claude.ai/artifact/13qzjuaHx6GtRTpV9ayE4L>. Ben, 16.11.2026: „Die
+Skizzen passen“ · Umfang: „Alles in einem“ (Kern, Teilnehmer-Seite **und** Editor) · zur
+Grundlage des Plans: „Es soll flexibel möglich sein, die Pläne zu entwickeln, einen im Paket
+existierenden Plan kann man natürlich genauso nehmen, evtl. auch nur einer, der als
+‚unsichtbare‘ Vorlage besteht.“
+
+### 11.1 Begriffe und Daten
+
+| Begriff | Bedeutung | Wo |
+|---|---|---|
+| **Kursplan** | der eine Plan je Profil, den ein Kurs mit `kursplan` baut; gewöhnlicher Plan mit Herkunft Kurs | `plan.course_id` (neu) |
+| **Grundlage** | womit der Kursplan beginnt: **leer** · **ein Plan des Pakets** (`plaene[]`, über seinen Schlüssel) · **eine Vorlage im Kurs**, die sonst nirgends erscheint | `Kurs.kursplan` (neu): `name`, `wochentage`, `grundlage` (Schlüssel) **oder** `vorlage` (`PlanVorlage`) |
+| **Baustein** | Block der Art `plan_uebung` · `plan_einstellen` · `plan_weg` — eine Änderung am Kursplan | `core/kursbloecke.py` |
+| **Marke** | woran der Kurs seine Planübungen wiederfindet: die Block-ID des Bausteins (bei einer Auswahl `block:uebung`, in der Grundlage `g:<n>`) | `plan_item.course_mark` (neu), `PlanItem.kurs_marke` |
+| **Kurs-Stand** | was der Kurs an einer Marke zuletzt gesetzt hat (Ziel, Timer …) — daran erkennt er, was die Person geändert hat | `plan.course_state_json` (neu), gerätelokal |
+| **Änderung** | eine Zeile der Sammelkarte | `core/kursplan.py` (neu): `Aenderung` |
+
+Ein Kurs **ohne** `kursplan` verhält sich wie bisher (Kapitelpläne); der Einführungskurs im Paket
+„Standard“ bleibt so. Migration 064: `course.kursplan_json`, `plan.course_id`,
+`plan.course_state_json`, `plan_item.course_mark`. `PlanRepo.speichern` schreibt die Marke der
+Planübungen mit (es ersetzt die Liste, sonst gingen die Marken bei jedem Speichern verloren);
+`course_id` und den Kurs-Stand fasst es nicht an.
+
+### 11.2 Bausteine (Paketfelder der Blöcke)
+
+| Art | Felder | Zeile in der Karte |
+|---|---|---|
+| `plan_uebung` | `uebung` (Schlüssel/ID) **oder** `aus` (Block-ID einer Auswahl: „die gewählte“), `hinter` (Marke; leer = ans Ende), `ziel` (Tabelle) oder `ziel_aus` (Block-ID eines Tests) mit `faktor`, `felder`, `timer`, `takt` | „Käfer kommt dazu — hinter Planke“ |
+| `plan_einstellen` | `an` (Marke; leer = der Plan), dazu eines oder mehrere von `ziel`/`ziel_aus`+`faktor`, `timer`, `takt`, `felder`, `uebergang` (`hart`/`weich`, nur Vorgabe), `pause_ohne_timer` | „Ziel für Käfer: 30 Wiederholungen — aus deinem Test“ · „Timer für Käfer: 3 Runden …“ |
+| `plan_weg` | `von`, `zu` (Marke oder `ende`), `kante` (wie `core.ablauf.Kante.als_dict` ohne `von`/`nach`) | „Von Planke weiter zu Käfer nach 60 s — Pflicht“ |
+
+`auswahl` und `test` ändern im Kursplan-Kurs nichts von selbst: Sie liefern Wahl und Wert, auf
+die sich Bausteine beziehen (`aus`, `ziel_aus`). Ein Baustein mit `ziel`, `timer` usw. an einer
+`plan_uebung` erzeugt je Angabe eine eigene Zeile, damit sich jede einzeln abwählen lässt (K2).
+
+### 11.3 Rechnung (`core/kursplan.py`, flet-frei, mit Doctests)
+
+- `grundplan(kurs, paketplan) -> Plan` — der Kursplan am Anfang (leer, aus dem Paketplan oder
+  aus der Vorlage; die Planübungen der Grundlage tragen `g:<n>`).
+- `aenderungen(plan, bloecke, werte, wahl, kurs_stand, namen) -> list[Aenderung]` — je Zeile
+  `id`, `titel`, `unter`, `stand`:
+  - **neu** — noch nicht im Plan;
+  - **übernommen** — steht schon so im Plan (nicht mehr angeboten, höchstens als erledigt gezeigt);
+  - **offen** — die Wahl oder der Test, auf den sie sich bezieht, fehlt noch;
+  - **weicht ab** — die Person hat den Wert seit dem letzten Kurs-Stand geändert: Beide Werte
+    stehen da, Vorgabe „lassen“ (K3);
+  - **Anker fehlt** — die Planübung, hinter die etwas soll, gibt es nicht mehr: ans Ende, mit
+    Hinweis (K3); ein `plan_einstellen` oder `plan_weg` ohne seine Marke entfällt mit Hinweis.
+- `anwenden(plan, bloecke, werte, wahl, gewaehlt, uebernehmen_trotz, kurs_stand) -> (Plan,
+  kurs_stand)` — nur die gewählten Zeilen; **zweimal anwenden ändert nichts** (Marken).
+  Wege entstehen im Ablauf des Plans (`core.ablauf`); folgt der Ablauf noch der Liste, bleibt
+  er dabei, solange kein `plan_weg` etwas anderes sagt.
+
+### 11.4 Datenbank (`data/kurse.py`)
+
+- `kursplan(kurs, profil)` — der laufende Kursplan (ohne frühere Durchläufe) oder `None`;
+  `kursplan_anlegen` beim Start des Kurses, **wenn die Grundlage Übungen hat**, sonst mit dem
+  ersten „Übernehmen“.
+- `plan_aenderungen(kurs, kapitel, profil)` und `plan_uebernehmen(kurs, kapitel, profil, ids,
+  trotz)` — rufen die Rechnung, speichern Plan und Kurs-Stand in einer Transaktion.
+- Kapitel abschließen deaktiviert den Kursplan **nicht**; „Von vorn“ macht ihn immer zum
+  früheren Durchlauf (wie §5.2); Kurs löschen deaktiviert ihn; die Bedingung „Tage“ zählt die
+  Übungen des Kursplans.
+
+### 11.5 Teilnehmer-Seite (K1–K4)
+
+- `ui/components/kursplan_karte.py`: die Sammelkarte — Zeilen mit Haken, die Karte „Dein Plan
+  weicht ab“ mit zwei Knöpfen, Hinweiszeilen, „Übernehmen“/„Später“, darunter der Satz „Nichts
+  ändert sich ohne deinen Tipp“. Eingebaut in die Kapitelansicht (`views/kurse.py`), wenn der
+  Kurs einen Kursplan baut.
+- Kursseite: Karte „Dein Kursplan“ mit „Trainieren“ (K4); die Kapitelliste bleibt, wie sie ist
+  (Wege zwischen Kapiteln kommen erst mit Stufe 3).
+- **Nicht in Stufe 1:** `zeigen_wenn` (K1 zeigt es schon — das Video „weil du Käfer gewählt
+  hast“ ist Stufe 3) und der Test mit Vorgabe (Stufe 2); der Test bleibt vorerst „jüngster
+  Eintrag“.
+
+### 11.6 Editor (K5, K6) und Pakete
+
+- Kurs bearbeiten: Karte „Der Kurs baut einen Plan“ — an/aus, Name, Grundlage (leer · einer der
+  eigenen Pläne als Vorlage). Kapitel bearbeiten: zwei Abschnitte, „Im Kapitel“ und „Am Plan“;
+  je Baustein ein Formular wie K6 mit der Vorschau „So steht es in der Karte“.
+- Paket: `kurse[].kursplan`, die drei Blockarten; **Formatversion 6** nur für Pakete, die das
+  nutzen; `trainingsapp-paket pruefen` meldet unbekannte Marken, einen `aus`-Verweis ohne
+  Auswahl, einen `ziel_aus`-Verweis ohne Test, eine `grundlage` ohne Paketplan;
+  `docs/uebungspakete.md` nachführen.
+
+### 11.7 Reihenfolge und Prüfung
+
+1. Rechnung + Tests · 2. Migration, Repos + Tests · 3. Teilnehmer-Seite + Tests + Web-Fotos ·
+4. Paketformat, Werkzeug + Tests · 5. Editor + Tests + Web-Fotos · 6. voller Testlauf
+(Migration), Doku (`plan_kurse.md`, `datenmodell.md`, `uebungspakete.md`, Katalog, Gerätetest).
+Nach jedem Schritt ist der Baum grün.

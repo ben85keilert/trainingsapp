@@ -111,6 +111,83 @@ darunter fällt, ist nicht entschieden — bis dahin gehört er dort ausgeschalt
 für **Pulsbereiche aus Messdaten** bleiben, was oben steht: nicht erlaubt in Edition A (ein
 Vorschlag aus den Fitness-Zonen ja, nie eine Grenze aus Alter oder Messwerten).
 
+**Empfehlungen aus Messwerten** (Ben, 16.11.2026 — **Absicht, nicht gebaut, nicht
+freigegeben**): „Messwerte können aber Empfehlungen geben und Training anpassen, aber niemals
+harte Vorgabe. Rechtliche Überprüfung nochmal, ob das passt.“ Das geht über die Liste „Nicht
+erlaubt in Edition A“ oben hinaus (aus Puls oder HRV eine Handlungsanweisung ableiten). **Die
+Liste gilt weiter, bis die Prüfung durch ist**; `physiologische_steuerung` bleibt gesperrt,
+`core/limits.py` und der Test dazu bleiben, wie sie sind.
+
+Einschätzung von Claude vom 16.11.2026 — **keine Rechtsberatung**. Die Primärtexte ließen sich
+nicht öffnen (EUR-Lex lieferte eine leere Seite, die Seite der Kommission mit MDCG 2019-11 wies
+den Abruf ab); gestützt ist sie auf die Darstellungen unten und auf dieses Dokument.
+
+1. **„Weich statt hart“ ist nicht die rechtliche Grenze.** Ob Software ein Medizinprodukt ist,
+   entscheidet ihre Zweckbestimmung — was der Hersteller in Kennzeichnung, Anleitung, Werbung
+   und Store-Eintrag über sie sagt —, nicht ihre Technik und nicht, wie verbindlich sie etwas
+   vorschlägt. Eine unverbindliche Empfehlung mit medizinischem Zweck bleibt
+   Medizinprodukte-Software; eine feste Steuerung zu reinem Fitnesszweck wird keine. „Niemals
+   harte Vorgabe“ ist eine gute Regel für die Eigenverantwortung, sie beantwortet die Frage
+   aber nicht.
+2. **Empfehlungen zu Fitness und Wohlbefinden sind als solche nicht ausgeschlossen.** Software
+   für Lifestyle und Wohlbefinden gilt nicht als Medizinprodukt. Als Beispiele nennen die
+   Darstellungen: die Herzfrequenz über den Tag anzeigen — kein Medizinprodukt; bei
+   unregelmäßigem Herzschlag alarmieren, ein Herz-Kreislauf-Risiko berechnen — Medizinprodukt.
+   Die Grenze läuft dort, wo die Software eine Krankheit erkennt, überwacht oder behandeln
+   hilft. **Ein Beispiel für „Trainingsempfehlung aus Herzfrequenz oder HRV“ habe ich in
+   keiner Quelle gefunden**; die Neufassung der Leitlinie von 2025 soll Grenzfälle bei
+   Wellness-Apps genauer fassen — ihren Wortlaut kenne ich nicht.
+3. **Das Risiko liegt im Umfeld der App, nicht in der Funktion.** Dieselbe Empfehlung, die bei
+   einer Sportuhr als Fitness durchgeht, liest sich anders, wenn die App über die Seite einer
+   Praxis kommt, „mit Anleitung“ geübt wird, Tagesfelder für Schmerz und Medikamente
+   vorgeschlagen werden und Kurse sich an Beschwerden richten. Dann unterstützt die Empfehlung
+   der Sache nach eine Behandlung — der Fall, für den die Klassifizierungsregel für Software
+   (Regel 11) gedacht ist. Genau deshalb fiel am 7.11.2026 die Entscheidung für Weg A.
+4. **Unter diesen Bedingungen halte ich es für vertretbar, mehr nicht:** (a) Die
+   Zweckbestimmung oben nennt Trainingsempfehlungen ausdrücklich und als Fitness; (b) die
+   Empfehlung spricht über das Training (Umfang, Intensität, Pause), nie über den Zustand der
+   Person („erschöpft“, „überlastet“, „Erholung unzureichend“ bleiben verboten); (c) die Regel
+   ist sichtbar, wirkt nur auf Tipp und lässt sich abschalten — wie beim Vorschlag nach der
+   Belastung; (d) Schwellen und Regeln kommen nie von einer Praxis und nie mit einem Kurs, der
+   sich an Beschwerden richtet — wie beim Zielbereich-Ton; (e) Store-Text, Homepage und
+   Kurstexte sagen dasselbe.
+5. **Vor dem Bau gehört das zu einem Fachanwalt für Medizinrecht** — mit dem neuen Wortlaut der
+   Zweckbestimmung und den Texten, die die App dann zeigt. Die Pflichthinweise unten („gibt
+   keine Therapieempfehlung“) müssten zur neuen Funktion passen.
+
+Ungeprüft: Handelsübliche Sportuhren geben Trainings- und Erholungsempfehlungen aus solchen
+Messwerten; wie ihre Hersteller das rechtlich absichern, habe ich nicht nachgesehen.
+
+**Entscheidung (Ben, 16.11.2026, nach dieser Einschätzung):** „Ok, machen wir das von der
+rechtlichen Seite so, dass Grenzen selbst gesetzt werden. Die HF-Bereiche 3-5-10-X sind
+dokumentiert und ergeben sich aus dem validierten Stand der Forschung. Dieses wird in der
+Dokumentation nachgereicht. Bitte gib Warnungen aus, wenn die Zweckbestimmung überschritten
+wird, wir dürfen aber an der Grauzone bleiben.“ Daraus:
+
+- **Grenzen setzt die Person selbst** — wie beim Zielbereich-Ton (Entscheidung C). Die
+  HF-Bereiche (3 · 5 · 10 · X) dürfen als **Vorschlag** dienen, den sie übernimmt; ihre
+  Herleitung aus der Forschung reicht Ben in der Dokumentation nach. Die Bereiche heißen nie
+  „sicher“ oder „für dich richtig“ (oben: „nie eine ‚sichere‘ Grenze aus Alter oder Messdaten“).
+- **An der Grauzone bleiben ist erlaubt. Claude warnt, sobald ein Vorhaben die Zweckbestimmung
+  überschreitet** — in der Antwort, bevor gebaut wird, mit der Stelle in diesem Dokument.
+- **Erste Warnung, gleich hier:** „Messwerte passen das Training an“ überschreitet die
+  Zweckbestimmung, **wie sie heute geschrieben steht** („Nicht erlaubt in Edition A: Aus Puls
+  oder HRV eine Handlungsanweisung ableiten“; Pflichthinweis „gibt keine Therapieempfehlung“).
+  Damit es Grauzone bleibt und nicht Widerspruch zum eigenen Text wird, muss **vor dem Bau**
+  der Abschnitt „Was daraus folgt“ neu gefasst werden — dieses Dokument verlangt selbst, dass
+  die Formulierung feststeht, bevor eine Funktion gebaut wird. Bis dahin bleibt
+  `physiologische_steuerung` gesperrt.
+- Die Empfehlung, den neuen Wortlaut einem Fachanwalt vorzulegen, bleibt als Empfehlung
+  stehen; sie ist keine Bedingung mehr.
+
+Quellen (abgerufen 16.11.2026, alles Sekundärdarstellungen):
+[CMS zur MDR und Software](https://cms.law/en/gbr/legal-updates/digital-health-the-new-regulation-of-medical-software-and-apps) ·
+[Lexgo: wann eine App ein Medizinprodukt ist](https://www.lexgo.be/en/news-and-articles/7458-when-does-my-app-qualify-as-medical-device) ·
+[Sanolabs: Wellness-App oder Medizinprodukt](https://www.sanolabs.eu/blog/wellness-app-vs-medical-device-eu-mdr/) (Herstellerseite) ·
+[Pure Clinical zur Neufassung von MDCG 2019-11](https://pureclinical.eu/news/revised-mdcg-2019-11-guidance-updated-approach-to-qualification-and-classification-of-medical-software/) ·
+[Emergo zur Neufassung](https://www.emergobyul.com/news/european-revision-primary-software-guidance-mdcg-2019-11-revision-1-small-changes-meaningful) (nur Suchtreffer, nicht gelesen).
+Katalog: **P210**.
+
 **Tagesfelder** (Ben, 21.10.2026, `docs/plan_tagesfelder.md`): Die Person hält je Tag
 selbst Werte fest — frei benannt, etwa Schmerz auf einer Skala, Einnahmen eines
 Medikaments, Trinkmenge, Texte zur Ernährung. Das ist Dokumentation wie die Notizen
@@ -194,8 +271,10 @@ mehr gewünscht sein, ist der Schritt bewusst zu gehen — nicht versehentlich.
 > **keine Bauvorgabe** mehr: Neue Funktionen bekommen keinen Zweig dafür, und Vorbehalte „vor
 > einem Patientenmodus zu klären“ halten keinen Bau mehr auf. **Für die eine Edition gelten
 > die Regeln der Edition A oben unverändert** (anzeigen ja; aus Messwerten bewerten oder
-> steuern nein) — die Entscheidung lockert nichts. *Diese Lesart ist von Claude, von Ben noch
-> nicht bestätigt und nicht anwaltlich geprüft.*
+> steuern nein) — die Entscheidung lockert nichts. Ben dazu am selben Tag: „Ja. Messwerte
+> können aber Empfehlungen geben und Training anpassen, aber niemals harte Vorgabe. Rechtliche
+> Überprüfung nochmal, ob das passt.“ — die Lesart gilt also, bis diese Prüfung durch ist;
+> siehe „Empfehlungen aus Messwerten“ oben. *Nicht anwaltlich geprüft.*
 
 Ben: „Weg A nehmen“ — die App als **Hausaufgabenbetreuung** für Patient:innen bleibt
 Dokumentations- und Kommunikationswerkzeug. Was die Diskussion ergab, verbindlich:

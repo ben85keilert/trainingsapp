@@ -98,6 +98,16 @@ Knopf „zählt“ noch in der Uhr-Zeile, er stand seit P148 im Uhr-Blatt).
 **Meldet Ben, dass etwas fehlt oder nicht geht, zuerst ein Web-Foto der Stelle** (Skill
 `web-fotos`; Ben, 13.11.2026) — der Code zeigte den Foto-Knopf an der Notiz, am Bildschirm
 erschien die Leiste nie, weil der Editor mit Fokus öffnet.
+**Aussagen über das Verhalten von Kursen und Plänen** (Ben, 16.11.2026) werden nachgestellt
+(Test oder Probe), nicht aus `docs/plan_*.md` abgeschrieben — `plan_kurse.md` §7 beschrieb
+„Von vorn beginnen“ anders, als der Code es tat.
+
+**Vor einem neuen Plan** (Ben, 16.11.2026) den Katalog durchsuchen — aber billig: nur die
+Entscheidungszeilen, drei bis fünf Stichwörter, Treffer gekürzt
+(`grep -n "^| P" docs/offene_fragen.md | grep -i "wort1\|wort2" | cut -c1-160`). Höchstens fünf
+Treffer ganz lesen; ein Plan-Dokument ganz nur, wenn es der Vertrag der Stelle ist, die sich
+ändert; **nie** den Katalog oder alle Plan-Dokumente ganz (rund 535.000 bzw. 890.000 Zeichen).
+Im Plan steht, wonach gesucht, was gelesen und was nur gefunden wurde.
 
 `TRAININGSAPP_EDITION=praxis uv run pytest …` bzw. `TRAININGSAPP_DATA_DIR=…` setzen
 Edition und Datenpfad zur Laufzeit (siehe `config.py`).
@@ -204,7 +214,9 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   `origin_device_id`, `deleted_at`) existieren ab Migration 001, obwohl `solo` sie nicht
   nutzt. **Stand 16.11.2026 (Ben): vorerst eine Edition** — die Trainingsapp (eigener Name
   und Symbol folgen), der Patientenmodus liegt auf Eis. Neue Funktionen bekommen keinen
-  Editions- oder Patientenmodus-Zweig; die vorhandenen Schalter bleiben.
+  Editions- oder Patientenmodus-Zweig; die vorhandenen Schalter bleiben. **Zweckbestimmung**
+  (Ben, 16.11.2026): An der Grauzone bleiben ist erlaubt — **Claude warnt, sobald etwas sie
+  überschreitet** (`docs/recht/00_zweckbestimmung.md`); Grenzen setzt die Person selbst.
 
 - **Konflikte strukturell vermeiden.** `hrv_recording` und `session_entry` sind
   **unveränderlich** — eine Korrektur ist ein neuer Eintrag mit `replaces_entry_id`.

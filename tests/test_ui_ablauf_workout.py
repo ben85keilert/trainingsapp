@@ -128,13 +128,30 @@ async def test_workout_folgt_den_kanten_mit_einschub_und_zurueck(umgebung) -> No
     paar = plan_ablauf.laufender(state, plan.id)
     assert paar is not None and paar[1].ablauf is not None
     teil = paar[1]
-    await _sekunden(state, uhr, gurt, 10)
+    await _sekunden(state, uhr, gurt, 2)
+    # Mitten in der Übung stehen die Wege nicht da (Ben, 15.11.2026: „Die gehören hier nicht
+    # rein. Wie es weiter geht, ist erst nach der Übung“) — und mit Abzweig gibt es keinen
+    # Streifen je Übung („bei nicht linearen Übungen sind die Balken störend“)
+    mitten = workout_view(seite, state, plan, route=route)
+    assert teil.phase == UEBUNG and "Fertig" in _knoepfe(mitten)
+    assert not [t for t in _knoepfe(mitten) if str(t).startswith("Weiter:")]
+    assert not any(getattr(x, "data", None) in ("wege", "fortschritt") for x in _alle(mitten))
+    assert "danach" not in " ".join(_texte(mitten))
+    await _sekunden(state, uhr, gurt, 8)
     assert teil.phase == UEBERZEIT
     laufend = workout_view(seite, state, plan, route=route)
     knoepfe = _knoepfe(laufend)
     assert "Weiter: Kniebeuge" in knoepfe and isinstance(
         knoepfe["Weiter: Kniebeuge"], ft.FilledButton
     )
+    # Die Übung ist beendet: Die Wege stehen vorn — als Erstes unter Uhr und Steuerzeile,
+    # gleich nach dem Hinweis (Ben, 16.11.2026: „Dann rücken die Pfade in den Vordergrund“)
+    scroll = next(
+        x for x in _alle(laufend) if isinstance(x, ft.Column) and x.scroll == ft.ScrollMode.AUTO
+    )
+    vorn = scroll.controls[0].content.controls
+    assert getattr(vorn[1], "data", None) == "wege"
+    assert knoepfe["Weiter: Kniebeuge"] in vorn[1].controls
     dehnung = knoepfe["Weiter: Dehnung Beine — Beine krampfen (Skala ≥ 7)"]
     # Weich: auch ein unerfüllter Weg ist wählbar (Bedingungen sind Vorschläge) — nur nicht betont
     assert isinstance(dehnung, ft.FilledTonalButton) and not dehnung.disabled
@@ -157,8 +174,10 @@ async def test_workout_folgt_den_kanten_mit_einschub_und_zurueck(umgebung) -> No
     assert wandsitz.result["scale"] == 7
     einschub = workout_view(seite, state, plan, route=route)
     knoepfe = _knoepfe(einschub)
-    zurueck = knoepfe["◀ zurück: weiter mit Kniebeuge"]
-    zurueck.on_click()
+    # Im Einschub läuft die Dehnung: Der Rückweg steht nicht da, solange sie läuft — „Fertig“
+    # nimmt ihn, es ist der einzige Weg (◀ zurück: weiter mit Kniebeuge)
+    assert not [t for t in knoepfe if str(t).startswith(("Weiter:", "◀"))]
+    knoepfe["Fertig"].on_click()
     await _sekunden(state, uhr, gurt, 1)
     assert teil.schritt.name == "Kniebeuge"
     kanten = [x for x in state.einheit.ereignisse if (x.quelle, x.art) == ("plan", "kante")]
@@ -306,9 +325,12 @@ async def test_mehrere_freie_wege_fragen_vor_dem_weiter(umgebung) -> None:
     knoepfe["Weiter: Kniebeuge"].on_click()
     await _sekunden(state, uhr, gurt, 1)
     assert teil.schritt.name == "Kniebeuge"
-    # Die Kniebeuge hat einen Weg — „danach Wandsitz“; zurück im Wandsitz fragt „Überspringen“
-    assert "danach Wandsitz" in " ".join(_texte(workout_view(seite, state, plan, route=route)))
-    _knoepfe(workout_view(seite, state, plan, route=route))["Fertig"].on_click()
+    # Die Kniebeuge hat einen Weg zurück zum Wandsitz — genannt wird er nicht, solange sie
+    # läuft (keine „danach“-Zeile mehr, Ben 16.11.2026); zurück im Wandsitz fragt „Überspringen“
+    kniebeuge = workout_view(seite, state, plan, route=route)
+    assert "danach" not in " ".join(_texte(kniebeuge))
+    assert not [t for t in _knoepfe(kniebeuge) if str(t).startswith("Weiter:")]
+    _knoepfe(kniebeuge)["Fertig"].on_click()
     await _sekunden(state, uhr, gurt, 1)
     assert teil.schritt.name == "Wandsitz" and teil.durchlauf == 2
     # Die Ansicht bleibt stehen und baut sich neu — die Rückfrage gehört ihr

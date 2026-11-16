@@ -202,7 +202,9 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   Handlungsempfehlung aus Messwerten wäre eine medizinische Aussage — siehe
   `docs/recht/00_zweckbestimmung.md`). Sync-Felder (`outbox`, `external_ref`,
   `origin_device_id`, `deleted_at`) existieren ab Migration 001, obwohl `solo` sie nicht
-  nutzt.
+  nutzt. **Stand 16.11.2026 (Ben): vorerst eine Edition** — die Trainingsapp (eigener Name
+  und Symbol folgen), der Patientenmodus liegt auf Eis. Neue Funktionen bekommen keinen
+  Editions- oder Patientenmodus-Zweig; die vorhandenen Schalter bleiben.
 
 - **Konflikte strukturell vermeiden.** `hrv_recording` und `session_entry` sind
   **unveränderlich** — eine Korrektur ist ein neuer Eintrag mit `replaces_entry_id`.

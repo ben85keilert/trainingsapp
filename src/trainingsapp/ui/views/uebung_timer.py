@@ -880,6 +880,8 @@ def uebung_timer_view(
             steuer,
             *teile[FOKUS_OBEN:],
             *([] if eintragen_karte.leer else [eintragen_karte.bauen(e)]),
+            # der Überblick über die Sätze steht unter „Eintragen“ (Ben, 15.11.2026)
+            fokus.saetze_karte,
         ]
 
     def anzeigen(e: Einheitslauf) -> None:

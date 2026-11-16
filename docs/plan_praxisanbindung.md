@@ -7,6 +7,13 @@ die Solo-Edition eine solche, und die Praxisanbindungs-App greift auf die Solo-A
 verwaltet den Dateiaustausch, neue Übungen usw.“ — Ja. Festgehalten als Richtung; die
 Edition `praxis` im Code bleibt vorerst stehen, wird aber nicht weiter ausgebaut.
 
+> **Stand 16.11.2026 (Ben):** Der Patientenmodus liegt auf Eis; es bleibt vorerst bei einer
+> Edition (`docs/recht/00_zweckbestimmung.md`, „Entscheidung 7.11.2026“). Zur zweiten App: „Die
+> Praxisanbindung wird evtl. nur eine Export-App, mit welcher man hübsch die exportierten
+> Inhalte darstellen und dann an eine bestimmte Adresse abschicken kann.“ Das ist eine
+> Richtung, kein Auftrag — was unten steht, bleibt als Stand vom 20.10. bis 7.11. stehen und
+> wird neu gefasst, wenn Ben die Export-App angeht.
+
 ## Warum zwei Apps
 
 - **Die Solo-App bleibt, was sie verspricht:** alles auf dem Gerät, keine

@@ -286,6 +286,12 @@ async def test_fokus_karte_eintragen_und_pfeile_danach(umgebung) -> None:
     # „Messung läuft weiter“ ist überall die Vorgabe (Ben, 8.11.2026 spät)
     assert state.messung_ende_beenden is False
     assert "Wiederholungen — niemand zählt" in texte
+    # Der Überblick über die Sätze steht unter der Karte „Eintragen“ (Ben, 15.11.2026: Er schob
+    # sie bei vielen Sätzen aus dem Blick)
+    unten = _texte(scroll)
+    eintragen = next(n for n, t in enumerate(unten) if t.startswith("Wiederholungen — niemand"))
+    saetze = next(n for n, t in enumerate(unten) if t.startswith("Satz 1"))
+    assert eintragen < saetze
     pfeile = next(x for x in _alle(fokus) if isinstance(x, ft.Container) and x.data == "pfeile")
     assert not pfeile.visible  # während die Uhr läuft, keine Pfeile
     _knopf(fokus, "+10").on_click()

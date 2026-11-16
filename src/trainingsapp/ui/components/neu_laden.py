@@ -27,11 +27,14 @@ def herkunft(state: Any, plan: Plan) -> str | None:
         paket = state.pakete.laden(plan.package_id)
         return f"Paket „{paket.name}“" if paket is not None else "einem entfernten Paket"
     if plan.kurs_kapitel_id:
-        quelle = state.kurse.kapitelplan_vorlage(plan)
-        if quelle is None:
+        # Kurs und Kapitel nennt auch ein Plan aus einem früheren Durchlauf (Migration 063) —
+        # neu laden lässt er sich nicht mehr (`KursRepo.kapitelplan_vorlage` gibt dann nichts)
+        woher = state.kurse.kurs_und_kapitel(plan)
+        if woher is None:
             return "einem Kurs, den es nicht mehr gibt"
-        kurs, kapitel, _vorlage = quelle
-        return f"Kurs „{kurs.name}“ · {kapitel.titel}" if kapitel.titel else f"Kurs „{kurs.name}“"
+        kurs, kapitel = woher
+        text = f"Kurs „{kurs.name}“ · {kapitel.titel}" if kapitel.titel else f"Kurs „{kurs.name}“"
+        return f"{text} · früherer Durchlauf" if plan.kurs_durchlauf_beendet else text
     return None
 
 

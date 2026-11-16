@@ -12,7 +12,10 @@ Regeln (Ben, 15.10.2026; `docs/plan_kurse.md`):
   bleiben, der Plan bleibt in der Planverwaltung wählbar — und erreicht das
   nächste Kapitel.
 - **Zurücksetzen** löscht den Fortschritt des Profils und deaktiviert die
-  Kurspläne; Einträge bleiben.
+  Kurspläne; Einträge bleiben. Der Plan eines Kapitels mit Test oder Auswahl wird
+  dabei zum **früheren Durchlauf** (Migration 063, Ben 16.11.2026): Er bleibt
+  stehen, das Kapitel legt einen neuen an und fragt neu (`zuruecksetzen`,
+  `fruehere_plaene`, `letzte_wahl`).
 - Der **Stand einer Bedingung** wird aus vorhandenen Daten gerechnet
   (`core.kurse.bedingung_stand`): Einträge seit Kapitelstart, Varianten der
   Übung zählen mit, HRV-Messungen nur nach Dauer.
@@ -27,7 +30,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
-from ..core.kursbloecke import TEST, bloecke_lesen, vorlage_anwenden, wert_im_test
+from ..core.kursbloecke import AUSWAHL, TEST, bloecke_lesen, vorlage_anwenden, wert_im_test
 from ..core.kurse import (
     MESSUNG,
     SUMME,
@@ -39,6 +42,7 @@ from ..core.kurse import (
     PlanVorlage,
     Stand,
     bedingung_stand,
+    durchlauf_name,
     eigenes_uebernehmen,
     medien_from_list,
     medien_to_list,
@@ -378,24 +382,94 @@ class KursRepo:
         return folgend
 
     def zuruecksetzen(self, kurs: Kurs, subject_id: str) -> None:
-        """Fortschritt des Profils löschen, Kurspläne deaktivieren — Einträge bleiben."""
+        """Fortschritt des Profils löschen, Kurspläne deaktivieren — Einträge bleiben.
+
+        Der Plan eines Kapitels **mit Test oder Auswahl** wird dabei zum abgeschlossenen
+        Durchlauf (Ben, 16.11.2026, `docs/plan_kurs_ablauf.md` §5.2): deaktiviert, umbenannt
+        („… · Durchlauf n“, `core.kurse.durchlauf_name`) und mit `course_run_ended_at`
+        markiert. Das Kapitel legt beim nächsten Mal einen neuen Plan an und fragt Test und
+        Auswahl neu — bis hierher holte der neue Start den alten Plan mit der alten Wahl zurück,
+        die neue galt nie. Pläne aus Kapiteln ohne Test und Auswahl werden wie bisher nur
+        deaktiviert und beim neuen Start wieder aktiv (kein Duplikat, `docs/plan_kurse.md` §2).
+        """
         plaene = PlanRepo(self.con)
+        stempel = jetzt().isoformat()
         with transaktion(self.con):
             self.con.execute(
                 "DELETE FROM course_progress WHERE subject_id = ? AND course_id = ?",
                 (subject_id, kurs.id),
             )
+            nummer = self._naechster_durchlauf(kurs, subject_id)
             for k in kurs.kapitel:
                 for p in self.kapitel_plaene(k.id, subject_id):
+                    if k.braucht_eingabe:
+                        plaene.umbenennen(p.id, durchlauf_name(p.name, nummer))
                     plaene.aktiv_setzen(p.id, False)
+                    if k.braucht_eingabe:
+                        self.con.execute(
+                            "UPDATE plan SET course_run_ended_at = ? WHERE id = ?",
+                            (stempel, p.id),
+                        )
+
+    def _naechster_durchlauf(self, kurs: Kurs, subject_id: str) -> int:
+        """Die Nummer für die Pläne, die jetzt zum früheren Durchlauf werden: eins mehr als
+        die Durchläufe des Kurses, die schon Pläne hinterlassen haben."""
+        ids = [k.id for k in kurs.kapitel]
+        if not ids:
+            return 1
+        platzhalter = ",".join("?" * len(ids))
+        (n,) = self.con.execute(
+            "SELECT COUNT(DISTINCT course_run_ended_at) FROM plan WHERE subject_id = ? "
+            f"AND course_run_ended_at IS NOT NULL AND course_chapter_id IN ({platzhalter})",
+            (subject_id, *ids),
+        ).fetchone()
+        return int(n) + 1
+
+    def fruehere_plaene(self, kapitel_id: str, subject_id: str) -> list[Plan]:
+        """Die Pläne dieses Kapitels aus **früheren Durchläufen** (Migration 063) — der jüngste
+        Durchlauf zuerst; ohne die im Papierkorb. Gewöhnliche, deaktivierte Pläne: ansehen,
+        üben und löschen kann man sie in der Planverwaltung."""
+        repo = PlanRepo(self.con)
+        ids = [
+            r["id"]
+            for r in self.con.execute(
+                "SELECT id FROM plan WHERE course_chapter_id = ? AND subject_id = ? "
+                "AND deleted_at IS NULL AND course_run_ended_at IS NOT NULL "
+                "ORDER BY course_run_ended_at DESC, created_at",
+                (kapitel_id, subject_id),
+            )
+        ]
+        return [p for p in (repo.laden(i) for i in ids) if p is not None]
+
+    def letzte_wahl(self, kapitel: Kapitel, subject_id: str) -> dict[str, list[str]]:
+        """Je Auswahl-Block, was im jüngsten früheren Durchlauf gewählt war — gelesen aus dem
+        Plan von damals: die Übungen der Auswahl, die in ihm stehen. Leer ohne früheren
+        Durchlauf. Nur eine Vorbelegung („Wie beim letzten Mal“), die Person bestätigt sie."""
+        fruehere = self.fruehere_plaene(kapitel.id, subject_id)
+        if not fruehere:
+            return {}
+        juengster = fruehere[0].kurs_durchlauf_beendet
+        drin = {
+            i.exercise_id
+            for p in fruehere
+            if p.kurs_durchlauf_beendet == juengster
+            for i in p.items
+        }
+        ergebnis: dict[str, list[str]] = {}
+        for block in kapitel.bloecke:
+            if block.art != AUSWAHL:
+                continue
+            gewaehlt = [u for u in block.uebungen if u in drin][: block.anzahl]
+            if gewaehlt:
+                ergebnis[block.id] = gewaehlt
+        return ergebnis
 
     # -- Kapitelplan neu laden (U2, `docs/plan_paketinhalte.md` §9) ---------------------
 
-    def kapitelplan_vorlage(self, plan: Plan) -> tuple[Kurs, Kapitel, PlanVorlage] | None:
-        """Kurs, Kapitel und die Vorlage, aus der ``plan`` entstand — gefunden über den Namen,
-        sonst über die Reihenfolge der Pläne des Kapitels; ``None``, wenn es den Kurs nicht
-        mehr gibt."""
-        if not plan.kurs_kapitel_id or plan.subject_id is None:
+    def kurs_und_kapitel(self, plan: Plan) -> tuple[Kurs, Kapitel] | None:
+        """Kurs und Kapitel, die ``plan`` angelegt haben — auch für einen Plan aus einem
+        früheren Durchlauf; ``None`` für eigene Pläne und wenn es den Kurs nicht mehr gibt."""
+        if not plan.kurs_kapitel_id:
             return None
         r = self.con.execute(
             "SELECT course_id FROM course_chapter WHERE id = ?", (plan.kurs_kapitel_id,)
@@ -404,15 +478,26 @@ class KursRepo:
         kapitel = (
             next((k for k in kurs.kapitel if k.id == plan.kurs_kapitel_id), None) if kurs else None
         )
-        if kurs is None or kapitel is None or not kapitel.plaene:
+        return (kurs, kapitel) if kurs is not None and kapitel is not None else None
+
+    def kapitelplan_vorlage(self, plan: Plan) -> tuple[Kurs, Kapitel, PlanVorlage] | None:
+        """Kurs, Kapitel und die Vorlage, aus der ``plan`` entstand — gefunden über den Namen,
+        sonst über die Reihenfolge der Pläne des Kapitels; ``None``, wenn es den Kurs nicht
+        mehr gibt — und für einen Plan aus einem früheren Durchlauf (Migration 063): Er wird
+        nicht mehr aus dem Kapitel neu geladen."""
+        if plan.subject_id is None or plan.kurs_durchlauf_beendet is not None:
             return None
+        quelle = self.kurs_und_kapitel(plan)
+        if quelle is None or not quelle[1].plaene:
+            return None
+        kurs, kapitel = quelle
         vorlage = next((v for v in kapitel.plaene if v.name == plan.name), None)
         if vorlage is None:
             ids = [
                 r2["id"]
                 for r2 in self.con.execute(
                     "SELECT id FROM plan WHERE course_chapter_id = ? AND subject_id = ? "
-                    "AND purged_at IS NULL ORDER BY created_at",
+                    "AND purged_at IS NULL AND course_run_ended_at IS NULL ORDER BY created_at",
                     (plan.kurs_kapitel_id, plan.subject_id),
                 )
             ]
@@ -491,7 +576,7 @@ class KursRepo:
             r["id"]
             for r in self.con.execute(
                 "SELECT id FROM plan WHERE course_chapter_id = ? AND subject_id = ? "
-                "AND purged_at IS NULL ORDER BY created_at",
+                "AND purged_at IS NULL AND course_run_ended_at IS NULL ORDER BY created_at",
                 (kapitel.id, subject_id),
             )
         ]
@@ -546,13 +631,14 @@ class KursRepo:
         return geladen, angelegt
 
     def kapitel_plaene(self, kapitel_id: str, subject_id: str) -> list[Plan]:
-        """Die (nicht gelöschten) Pläne, die dieses Kapitel für das Profil angelegt hat."""
+        """Die (nicht gelöschten) Pläne, die dieses Kapitel für das Profil angelegt hat — im
+        laufenden Durchlauf; die aus früheren stehen in `fruehere_plaene`."""
         repo = PlanRepo(self.con)
         ids = [
             r["id"]
             for r in self.con.execute(
                 "SELECT id FROM plan WHERE course_chapter_id = ? AND subject_id = ? "
-                "AND deleted_at IS NULL ORDER BY created_at",
+                "AND deleted_at IS NULL AND course_run_ended_at IS NULL ORDER BY created_at",
                 (kapitel_id, subject_id),
             )
         ]

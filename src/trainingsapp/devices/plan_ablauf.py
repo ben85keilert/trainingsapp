@@ -600,6 +600,40 @@ class PlanAblaufBaustein:
 
     # -- Bedienung (Oberfläche) -----------------------------------------------------------
 
+    def uebergang_setzen(self, uebergang: str) -> bool:
+        """Hart oder weich — jederzeit, auch mitten im Workout (Ben, 16.11.2026: „Der Charakter
+        der Übung ist Eigenverantwortung. Man soll auch jederzeit hin und her wechseln können“;
+        `docs/plan_uhr_fokus.md` §10.5). Nur im Workout — ohne Übergang gibt es nichts
+        umzustellen.
+
+        Auf **hart** gilt sofort, was hart heißt: Lief die Übung über, ist sie mit ihrem Timer
+        zu Ende — reicht es, geht es weiter, sonst bleibt die Person bei der Übung, bis es
+        reicht; ein wartender Schritt mit freiem Weg geht ebenfalls weiter. Auf **weich** geht
+        nichts mehr von selbst; wer wartet, bleibt, und die Ansicht lässt auch unerfüllte Wege
+        zu (nie gegen eine Pflicht). Nicht in der Zeitleiste: Sie hält fest, was geleistet
+        wurde, nicht wie die Ansicht eingestellt war.
+
+        Returns:
+            Ob sich etwas geändert hat.
+        """
+        if uebergang not in (HART, WEICH) or self.uebergang in (None, uebergang):
+            return False
+        self.uebergang = uebergang
+        self.weiter_automatisch = uebergang == HART
+        if self._t0 is None or self.phase == FERTIG or uebergang == WEICH:
+            return True
+        if self.phase == UEBERZEIT and not self.wartet:
+            grund = "gemacht" if self.ohne_timer else "fertig"
+            if not self._weg_frei() and not self.wahl_noetig:
+                # wie hart am Ende des Timers (`takt`): noch nicht erfüllt — bleiben, läuft über
+                self.wartet = True
+                self._grund_wartend = grund
+            else:
+                self._ende_versuchen(self._uhr(), grund)
+        else:
+            self._weiter_wenn_frei()
+        return True
+
     def weiter(self, ziel: str | None = None) -> None:
         """In der Pause: die nächste Übung beginnt jetzt. In der Überzeit (weich): die
         laufende Übung endet als fertig — mit Überzeit —, die nächste beginnt. ``ziel``

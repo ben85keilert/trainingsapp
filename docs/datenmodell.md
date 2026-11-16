@@ -121,7 +121,11 @@ Titel, Markdown-Text, `gate_json` = Bedingung, `plans_json` = Plan-Vorlagen,
 `media_json`), `course_progress` (je Profil und Kapitel: erreicht, abgeschlossen,
 übersprungen; `UNIQUE(subject_id, chapter_id)`). Pläne, die ein Kapitel anlegt,
 tragen `plan.course_chapter_id` und werden beim Abschluss des Kapitels deaktiviert,
-nie gelöscht. Bedingungen rechnen aus `session_entry` und `hrv_recording`, nie aus
+nie gelöscht. `plan.course_run_ended_at` (Migration 063, Ben 16.11.2026): Der Plan
+gehört zu einem **früheren Durchlauf** des Kurses — „Von vorn beginnen“ ließ ihn stehen,
+weil sein Kapitel einen Test oder eine Auswahl hat; NULL = der laufende Plan. Gerätelokal,
+`PlanRepo.speichern` fasst die Spalte nicht an (`KursRepo.zuruecksetzen`,
+`fruehere_plaene`). Bedingungen rechnen aus `session_entry` und `hrv_recording`, nie aus
 Messwerten (`core/kurse.py`, `data/kurse.py`).
 
 **Einheit** (Migration 018, `docs/plan_einheit.md`): was zusammen lief — HRV-Messung,

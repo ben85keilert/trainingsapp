@@ -138,8 +138,25 @@ async def test_workout_start_weich_ueberzeit_weiter_und_ende(umgebung) -> None:
     await _sekunden(state, uhr, gurt, 3)
     laufend = workout_view(seite, state, plan, route=route)
     texte = _texte(laufend)
-    assert "Schritt 1 von 2 · weich · danach Katze-Kuh" in texte and "Kniebeuge" in texte
-    assert any("Katze-Kuh" in t for t in texte) and _knopf(laufend, "Fertig")
+    assert "Schritt 1 von 2" in texte and "Kniebeuge" in texte
+    # Wie es weitergeht, steht erst nach der Übung da (Ben, 15./16.11.2026): keine „danach“-
+    # Zeile und kein „Weiter: …“, solange sie läuft — man beendet sie mit „Fertig“
+    assert not any("danach" in t or "Katze-Kuh" in t for t in texte) and _knopf(laufend, "Fertig")
+    # linear: je Übung ein Streifen
+    streifen = next(x for x in _alle(laufend) if getattr(x, "data", None) == "fortschritt")
+    assert len(streifen.controls) == 2
+    # Hart | Weich lässt sich im Lauf umschalten (Ben, 16.11.2026) und gilt für heute
+    umschalter = next(x for x in _alle(laufend) if getattr(x, "data", None) == "uebergang")
+    assert _texte(umschalter) == ["weich"]
+    umschalter.on_click(None)
+    assert paar[1].uebergang == HART and state.workout_uebergang[plan.id] == HART
+    # dieselbe Ansicht baut sich neu und zeigt den Stand (am Bildschirm blieb erst „weich“
+    # stehen, weil der Übergang nicht im Schlüssel des Aufbaus stand)
+    umschalter = next(x for x in _alle(laufend) if getattr(x, "data", None) == "uebergang")
+    assert _texte(umschalter) == ["hart"]
+    umschalter.on_click(None)
+    assert paar[1].uebergang == WEICH and uebergang_fuer(state, plan) == WEICH
+    laufend = workout_view(seite, state, plan, route=route)
     assert _ebenen(laufend) == ["Takt", "Bewegung", "HF", "Kurve"]
     # Fokus (Ben, 8.11.2026 spät): keine Laufleiste, keine Uhr in der Titelleiste — und die Uhr
     # des Fokus steht fest oben, außerhalb der scrollenden Spalte
@@ -161,12 +178,22 @@ async def test_workout_start_weich_ueberzeit_weiter_und_ende(umgebung) -> None:
         "IconButton",
     ]
     assert not any(x is zeile for x in _alle(scroll))
-    # Zeit ab → Überzeit: die Zeit zählt ins Minus, „Weiter: Katze-Kuh“
+    # Der Überblick über die Sätze steht ganz unten, unter allem zum Eintragen (Ben, 15.11.2026)
+    inhalt = scroll.controls[0].content.controls
+    assert any(t.startswith("Satz 1") for t in _texte(inhalt[-1]))
+    # Zeit ab → Überzeit: die Zeit zählt ins Minus, „Weiter: Katze-Kuh“ — jetzt vorn, als
+    # Erstes unter Uhr und Steuerzeile, gleich nach dem Hinweis
     await _sekunden(state, uhr, gurt, 10)
     assert paar[1].phase == UEBERZEIT
     ueber = workout_view(seite, state, plan, route=route)
     texte = _texte(ueber)
     assert any(t.startswith("−0:0") for t in texte) and "Zeit ab — erfüllt" in " ".join(texte)
+    scroll = next(
+        x for x in _alle(ueber) if isinstance(x, ft.Column) and x.scroll == ft.ScrollMode.AUTO
+    )
+    vorn = scroll.controls[0].content.controls
+    assert "Zeit ab — erfüllt" in " ".join(_texte(vorn[0]))
+    assert vorn[1] is _knopf(ueber, "Weiter: Katze-Kuh")
     _knopf(ueber, "Weiter: Katze-Kuh").on_click()
     await _sekunden(state, uhr, gurt, 1)
     assert paar[1].k == 1 and paar[1].ergebnisse[plan.items[0].id] == "fertig"

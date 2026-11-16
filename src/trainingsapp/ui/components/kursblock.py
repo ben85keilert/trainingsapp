@@ -6,7 +6,8 @@ Text, Medium, Frage, Test und Auswahl stehen untereinander auf der Seite des Kap
 - Ein **Test** zeigt den jüngsten Eintrag der Übung seit dem Erreichen des Kapitels und führt
   zur Übung; der Wert wird das Ziel im Kapitelplan.
 - Eine **Auswahl** hält die gewählten Übungen, bis „Plan anlegen“ gedrückt ist — danach ist
-  sie fest (der Plan lässt sich von Hand ändern).
+  sie fest (der Plan lässt sich von Hand ändern). Beginnt der Kurs von vorn, wird neu gewählt;
+  „Wie beim letzten Mal“ belegt die Wahl des früheren Durchlaufs vor (Ben, 16.11.2026).
 
 Die Rechnung steht in `core/kursbloecke.py`; hier wird nur gezeichnet.
 """
@@ -72,12 +73,14 @@ def kapitel_bloecke(
     text_bauen: Callable[[str], ft.Control] | None = None,
     zur_uebung: Callable[[str], Callable[..., Any]] | None = None,
     anlegen: Callable[[Mapping[str, Sequence[str]]], Any] | None = None,
+    letzte_wahl: Mapping[str, Sequence[str]] | None = None,
 ) -> KapitelBloecke:
     """Die Controls zu ``bloecke``. ``werte``: je Test-Block der Wert aus dem Eintrag;
     ``angelegt``: die Kapitelpläne gibt es schon (Auswahl fest); ``offen``: das Kapitel ist
     dran — sonst nur lesen. ``text_bauen`` macht aus Markdown ein Control (die Ansicht kennt
     die Regeln für Links und Bilder), ``zur_uebung`` den Weg zur Übung, ``anlegen`` bekommt
-    die Wahl."""
+    die Wahl. ``letzte_wahl``: je Auswahl-Block, was im früheren Durchlauf des Kurses gewählt
+    war — dann bietet der Block „Wie beim letzten Mal“ an (nur eine Vorbelegung)."""
     ergebnis = KapitelBloecke(controls=[])
     wahl = ergebnis.wahl
     knopf = ft.FilledButton(
@@ -207,6 +210,35 @@ def kapitel_bloecke(
                 data=("wahl", block.id, uid),
             )
         reihe = ft.Row(wrap=True, spacing=8, run_spacing=8, controls=list(chips.values()))
+        # Kurs von vorn (Ben, 16.11.2026): die Wahl vom letzten Mal als Vorbelegung — die
+        # Person tippt sie an, nichts ist von selbst gewählt
+        frueher = [u for u in (letzte_wahl or {}).get(block.id, ()) if u in chips]
+
+        def wie_letztes_mal(_e: Any = None) -> None:
+            gewaehlt[:] = frueher[: block.anzahl]
+            for k, chip in chips.items():
+                chip.selected = k in gewaehlt
+            with contextlib.suppress(Exception):
+                reihe.update()
+            stand_zeigen()
+
+        letztes_mal: list[ft.Control] = (
+            [
+                ft.Row(
+                    controls=[
+                        ft.TextButton(
+                            "Wie beim letzten Mal",
+                            icon=ft.Icons.HISTORY,
+                            tooltip=", ".join(katalog[u].name for u in frueher),
+                            on_click=wie_letztes_mal,
+                            data=("wie_letztes_mal", block.id),
+                        )
+                    ]
+                )
+            ]
+            if frueher and not fest
+            else []
+        )
         return karte(
             ft.Text(
                 block.titel or f"Wähle {block.anzahl} von {len(chips)}",
@@ -214,6 +246,7 @@ def kapitel_bloecke(
             ),
             *([ft.Text(block.text, size=13)] if block.text else []),
             reihe,
+            *letztes_mal,
             hinweis(
                 "Der Plan ist angelegt — ändern kannst du ihn in der Planverwaltung."
                 if angelegt

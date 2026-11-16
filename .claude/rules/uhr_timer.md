@@ -24,7 +24,10 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   Erklärungen im „i“ (Titelleiste), Takt · Zeit · Ebenen-Knopf in einer Zeile, die **beim
   Scrollen oben stehen bleibt** (`fokus.OBEN`) — direkt darunter, ebenfalls fest, die
   **Steuerzeile** (`fokus.steuerzeile`, Ben 10.11.2026, §9.4): ⏸ · Fertig · „Wiederholen“ · ⏭ ·
-  ✕ in einer Zeile, Pause/Überspringen/Abbrechen nur als Symbol; „Weiter: …“ und Wege darunter; Fokus-Ansichten (``data = FOKUS_ANSICHT``) bekommen **keine
+  ✕ in einer Zeile, Pause/Überspringen/Abbrechen nur als Symbol; **„Weiter: …“ und Wege erst
+  nach der Übung, dann vorn** (Ben, 15./16.11.2026, §10: als Erstes unter der Steuerzeile; keine
+  „danach“-Zeile), die **Sätze stehen unter „Eintragen“** (`fokus.saetze_karte` — `bauen` gibt
+  sie nicht mehr zurück); Fokus-Ansichten (``data = FOKUS_ANSICHT``) bekommen **keine
   Laufleiste**. **Messung läuft weiter** ist Vorgabe (`Einheitslauf.stoppt_am_ende`): nach Timer,
   Übung, Workout und GPS-Training läuft eine mitgestartete Messung weiter — außer sie ist allein
   oder die Einheit begann als reine Messung (`beitreten`); die Strecke findet sie dann über die

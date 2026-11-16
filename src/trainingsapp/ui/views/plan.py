@@ -2621,8 +2621,18 @@ def plan_view(
                 controls=[
                     ft.Icon(ft.Icons.INVENTORY_2_OUTLINED, size=16, opacity=0.7),
                     ft.Text(f"Aus {quelle}", size=12, opacity=0.75, expand=True),
-                    ft.TextButton(
-                        "Neu laden …", icon=ft.Icons.RESTORE, on_click=oeffnen, data="neu_laden"
+                    # ein Plan aus einem früheren Durchlauf lädt nicht mehr aus dem Kapitel
+                    *(
+                        []
+                        if plan.kurs_durchlauf_beendet is not None
+                        else [
+                            ft.TextButton(
+                                "Neu laden …",
+                                icon=ft.Icons.RESTORE,
+                                on_click=oeffnen,
+                                data="neu_laden",
+                            )
+                        ]
                     ),
                 ],
             )

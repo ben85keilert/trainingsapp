@@ -205,7 +205,9 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
                 title=ft.Text("Kurs von vorn beginnen?"),
                 content=ft.Text(
                     "Dein Fortschritt in diesem Kurs wird gelöscht und die Pläne des Kurses "
-                    "werden deaktiviert. Einträge im Verlauf bleiben."
+                    "werden deaktiviert. Ein Plan aus einem Test oder einer Auswahl bleibt als "
+                    "„… · Durchlauf“ stehen — beim nächsten Mal testest und wählst du neu. "
+                    "Einträge im Verlauf bleiben."
                 ),
                 actions=[
                     ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
@@ -500,6 +502,8 @@ def kapitel_view(
                 text_bauen=markdown,
                 zur_uebung=lambda uid: _oeffner(page, f"/uebung/{uid}"),
                 anlegen=plan_anlegen,
+                # Kurs von vorn: was beim letzten Mal gewählt war, als Vorbelegung
+                letzte_wahl={} if angelegt else state.kurse.letzte_wahl(kapitel, profil),
             ).controls
         )
     elif kapitel.text.strip():
@@ -544,6 +548,18 @@ def kapitel_view(
                 zeilen.append(
                     hinweis("Entsteht mit „Plan anlegen“ aus deinem Test und deiner Wahl.")
                 )
+        # Pläne aus früheren Durchläufen des Kurses (Migration 063) — deaktiviert, zum Nachsehen
+        for frueher in state.kurse.fruehere_plaene(kapitel.id, profil):
+            zeilen.append(
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.HISTORY, opacity=0.6),
+                    title=ft.Text(frueher.name, opacity=0.8),
+                    subtitle=ft.Text("früherer Durchlauf · deaktiviert", size=12),
+                    on_click=_oeffner(page, f"/plaene/{frueher.id}"),
+                    content_padding=ft.Padding.only(left=0, right=0),
+                    data=("frueherer_plan", frueher.id),
+                )
+            )
         bloecke.append(
             karte(
                 titel("Pläne dieses Kapitels"),

@@ -8,7 +8,8 @@ Liegestützen, dann das nächste Video“), optional verbundenen Tagesplänen un
 (HRV-Messung: was ist das, wie bediene ich die App).
 
 Stand 15.10.2026: **Phasen 0–3 gebaut** (Abschnitt 6). Offene Entscheidungen
-stehen im Katalog `docs/offene_fragen.md` (P16–P21), nicht hier.
+stehen im Katalog `docs/offene_fragen.md` (P16–P21), nicht hier. **Überarbeitung „Kurse als
+Plan-Baukasten“ (Ben, 15.11.2026):** `docs/plan_kurs_ablauf.md` (Plan, nichts gebaut, P207).
 
 ---
 
@@ -40,6 +41,10 @@ Wochentage bleiben am Plan** (`plan.weekdays_json`, wie bisher).
 - Beim Abschluss des Kapitels werden sie **deaktiviert, nicht gelöscht**:
   Einträge bleiben, der Plan bleibt wählbar. „Von vorn beginnen“ deaktiviert
   ebenfalls; ein neuer Start aktiviert dieselben Pläne wieder (kein Duplikat).
+  **Ausnahme seit 16.11.2026** (Ben, Migration 063, `plan_kurs_ablauf.md` §5.2): Der Plan
+  eines Kapitels **mit Test oder Auswahl** bleibt bei „Von vorn“ als früherer Durchlauf
+  stehen („… · Durchlauf 1“, deaktiviert), und das Kapitel legt einen neuen an — sonst
+  gälte die neue Wahl nie.
 - Heute, Tagesbilanz, Verlauf, Planblock: **unverändert**. Kein Wochentag je
   Planübung — das bliebe die Alternative (P16), falls Ben sie ausdrücklich will.
 
@@ -129,7 +134,13 @@ statt Text und Medienliste eine Folge von **Blöcken** tragen (`core/kursbloecke
 - Ein Kapitel **mit `test` oder `auswahl`** legt seine Pläne nicht beim Erreichen an, sondern
   mit **„Plan anlegen“** (`KursRepo.plaene_anlegen`, `core.kursbloecke.vorlage_anwenden`).
   Kapitel ohne solche Blöcke verhalten sich wie bisher. Der Plan ist danach ein gewöhnlicher
-  Plan; die Auswahl ist fest, bis man den Kurs von vorn beginnt.
+  Plan; die Auswahl ist fest, bis man den Kurs von vorn beginnt. Bis zum 16.11.2026 stimmte
+  der zweite Halbsatz nicht (nach „Von vorn“ kam der alte Plan mit der alten Auswahl zurück).
+  **Seit Migration 063:** „Von vorn“ lässt den alten Plan als „… · Durchlauf n“ stehen
+  (`KursRepo.zuruecksetzen`, `fruehere_plaene`), das Kapitel fragt Test und Auswahl neu, und
+  „Wie beim letzten Mal“ belegt die frühere Wahl vor (`letzte_wahl`) — `plan_kurs_ablauf.md`
+  §5.2. Ein Plan aus einem früheren Durchlauf nennt weiter Kurs und Kapitel, lässt sich aber
+  nicht mehr „neu laden“; `trainingsapp-paket uebernehmen` übergeht ihn.
 - Gerechnet wird aus **Einträgen und der eigenen Wahl**, nie aus Messwerten.
 - Hat die Vorlage schon einen gezeichneten Ablauf, kommen die Gewählten ans Ende und der
   Ablauf bleibt.

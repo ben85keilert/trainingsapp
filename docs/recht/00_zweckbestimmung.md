@@ -186,6 +186,17 @@ mehr gewünscht sein, ist der Schritt bewusst zu gehen — nicht versehentlich.
 
 ### Entscheidung 7.11.2026: Weg A (Ben)
 
+> **Stand 16.11.2026 (Ben): Der Patientenmodus liegt auf Eis.** „Lege die Idee vom
+> Patientenmodus erst einmal auf Eis. Das wird nicht weiter verfolgt. Wir bleiben erst einmal
+> in einer einzigen Edition, ausgelegt auf User, die alleine oder mit Anleitung üben wollen —
+> keine Unterscheidung zwischen zwei Editionen im Moment.“ Was in diesem Abschnitt zum
+> Patientenmodus steht, bleibt als Stand der Überlegung vom 7. bis 14.11.2026 stehen, ist aber
+> **keine Bauvorgabe** mehr: Neue Funktionen bekommen keinen Zweig dafür, und Vorbehalte „vor
+> einem Patientenmodus zu klären“ halten keinen Bau mehr auf. **Für die eine Edition gelten
+> die Regeln der Edition A oben unverändert** (anzeigen ja; aus Messwerten bewerten oder
+> steuern nein) — die Entscheidung lockert nichts. *Diese Lesart ist von Claude, von Ben noch
+> nicht bestätigt und nicht anwaltlich geprüft.*
+
 Ben: „Weg A nehmen“ — die App als **Hausaufgabenbetreuung** für Patient:innen bleibt
 Dokumentations- und Kommunikationswerkzeug. Was die Diskussion ergab, verbindlich:
 

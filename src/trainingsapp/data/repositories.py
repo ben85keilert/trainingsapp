@@ -1769,6 +1769,9 @@ class PlanRepo:
             aktiv=bool(r["active"]),
             wochentage=json.loads(r["weekdays_json"]),
             kurs_kapitel_id=r["course_chapter_id"],
+            kurs_durchlauf_beendet=datetime.fromisoformat(r["course_run_ended_at"])
+            if r["course_run_ended_at"]
+            else None,
             timer=_timer_lesen(self.con, r["timer_json"], {}, bibliothek) or None,
             weiter_automatisch=bool(r["auto_next"]),
             pause_ohne_timer=bool(r["pause_no_timer"]),

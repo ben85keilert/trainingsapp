@@ -815,7 +815,8 @@ def _quelle_lesen(quelle: Path, paket_id: str) -> Quelle:
             plaene: dict[str, Plan] = {}
             for subject in SubjectRepo(con).alle():
                 for plan in PlanRepo(con).alle(subject.id):
-                    if plan.kurs_kapitel_id:
+                    # ein Plan aus einem früheren Durchlauf (Migration 063) ist keine Vorlage mehr
+                    if plan.kurs_kapitel_id and plan.kurs_durchlauf_beendet is None:
                         plaene[plan.id] = plan
             try:
                 ergaenzt = frozenset(

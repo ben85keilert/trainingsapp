@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from trainingsapp.core.kursbloecke import AUSWAHL, TEST, Block
 from trainingsapp.core.kurse import (
     AKTUELL,
     FERTIG,
@@ -192,6 +193,76 @@ def test_starten_legt_plaene_an_und_abschliessen_deaktiviert_sie(con, profil) ->
     repo.kapitel_abschliessen(k, lesen, profil.id)
     wieder = repo.kapitel_plaene(ueben.id, profil.id)
     assert [p.id for p in wieder] == [plan.id] and wieder[0].aktiv
+    assert repo.fruehere_plaene(ueben.id, profil.id) == []  # kein Test, keine Auswahl
+
+
+def test_von_vorn_fragt_test_und_auswahl_neu(con, profil) -> None:
+    """Ben, 16.11.2026 (`docs/plan_kurs_ablauf.md` §5.2): Bis Migration 063 holte „Von vorn“
+    den alten Kapitelplan mit der alten Wahl zurück — die neue Wahl und der neue Test galten
+    nie. Jetzt bleibt der alte Plan als früherer Durchlauf stehen, und das Kapitel legt einen
+    neuen an."""
+    repo, plaene, uebungen = KursRepo(con), PlanRepo(con), ExerciseRepo(con)
+    ids = []
+    for name in ("Planke", "Dehnen", "Käfer", "Brücke"):
+        u = Exercise(name=f"Probe {name}", result_spec=SPEC_SAETZE_WDH)
+        uebungen.speichern(u)
+        ids.append(u.id)
+    a, b, c, d = ids
+    kurs = Kurs(
+        name="Mit Test",
+        kapitel=[
+            Kapitel(
+                titel="Rumpf",
+                plaene=[PlanVorlage("Rumpf", [0], [VorlageItem(a), VorlageItem(b)])],
+                bloecke=[
+                    Block(TEST, id="t", uebung=a, feld="reps"),
+                    Block(AUSWAHL, id="w", uebungen=[c, d], anzahl=1, nach=1),
+                ],
+            ),
+            Kapitel(titel="Ende"),
+        ],
+    )
+    repo.speichern(kurs)
+    kurs = repo.laden(kurs.id)
+    assert kurs is not None
+    kapitel = kurs.kapitel[0]
+
+    repo.starten(kurs, profil.id)
+    assert repo.letzte_wahl(kapitel, profil.id) == {}
+    (erster,) = repo.plaene_anlegen(kapitel, profil.id, {"t": 20}, {"w": [c]})
+    assert [i.exercise_id for i in erster.items] == [a, c, b]
+    assert erster.items[0].target["reps"] in (20, [20])
+
+    repo.zuruecksetzen(kurs, profil.id)
+    repo.starten(kurs, profil.id)
+    # Der alte Plan ist ein früherer Durchlauf: deaktiviert, umbenannt, sonst unverändert —
+    # und nicht mehr „der Plan des Kapitels“
+    assert repo.kapitel_plaene(kapitel.id, profil.id) == []
+    (frueher,) = repo.fruehere_plaene(kapitel.id, profil.id)
+    assert frueher.id == erster.id and not frueher.aktiv
+    assert frueher.name == "Rumpf · Durchlauf 1" and frueher.kurs_durchlauf_beendet is not None
+    assert [i.exercise_id for i in frueher.items] == [a, c, b]
+    assert repo.kurs_und_kapitel(frueher) is not None  # die Herkunft bleibt sichtbar
+    assert repo.kapitelplan_vorlage(frueher) is None  # neu laden lässt er sich nicht mehr
+    assert repo.kapitelplan_neu_laden(frueher.id, hart=True) is None
+    # Was beim letzten Mal gewählt war, ist nur eine Vorbelegung …
+    assert repo.letzte_wahl(kapitel, profil.id) == {"w": [c]}
+    # … denn jetzt gelten die neue Wahl und der neue Test
+    (zweiter,) = repo.plaene_anlegen(kapitel, profil.id, {"t": 50}, {"w": [d]})
+    assert zweiter.id != erster.id and zweiter.name == "Rumpf" and zweiter.aktiv
+    assert [i.exercise_id for i in zweiter.items] == [a, d, b]
+    assert zweiter.items[0].target["reps"] in (50, [50])
+
+    # Speichern (etwa aus dem Plan-Editor) nimmt dem früheren Plan die Marke nicht
+    frueher.description = "vom ersten Mal"
+    plaene.speichern(frueher)
+    nachher = plaene.laden(frueher.id)
+    assert nachher is not None and nachher.kurs_durchlauf_beendet is not None
+    # Noch einmal von vorn: Der zweite Plan wird „Durchlauf 2“, der erste bleibt, wie er heißt
+    repo.zuruecksetzen(kurs, profil.id)
+    namen = sorted(p.name for p in repo.fruehere_plaene(kapitel.id, profil.id))
+    assert namen == ["Rumpf · Durchlauf 1", "Rumpf · Durchlauf 2"]
+    assert repo.letzte_wahl(kapitel, profil.id) == {"w": [d]}
 
 
 def test_kurs_entfernen_deaktiviert_kapitelplaene_aller_profile(con, profil) -> None:

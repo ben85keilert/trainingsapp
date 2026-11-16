@@ -559,6 +559,19 @@ def naechstes(kurs: Kurs, kapitel: Kapitel) -> Kapitel | None:
     return kurs.kapitel[i] if i < len(kurs.kapitel) else None
 
 
+def durchlauf_name(name: str, nummer: int) -> str:
+    """Wie ein Kapitelplan heißt, sobald er zu einem **früheren Durchlauf** des Kurses gehört
+    (Ben, 16.11.2026; Migration 063, `data.kurse.KursRepo.zuruecksetzen`) — der neue Plan des
+    Kapitels trägt dann wieder den Namen der Vorlage.
+
+    >>> durchlauf_name("Rumpf Woche 1", 2)
+    'Rumpf Woche 1 · Durchlauf 2'
+    >>> durchlauf_name("  ", 1)
+    'Plan · Durchlauf 1'
+    """
+    return f"{name.strip() or 'Plan'} · Durchlauf {max(nummer, 1)}"
+
+
 def begonnen(staende: Mapping[str, Kapitelstand]) -> bool:
     return bool(staende)
 
@@ -907,6 +920,7 @@ __all__ = [
     "bedingung_stand",
     "bedingung_text",
     "begonnen",
+    "durchlauf_name",
     "eigenes_uebernehmen",
     "fehlt_text",
     "fortschritt_text",

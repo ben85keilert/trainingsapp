@@ -216,6 +216,11 @@ class Fokus:
         self._ebenen_eintraege: dict[str, ft.PopupMenuItem] = {}
         self.tempo_platz = ft.Container()
         self.saetze_spalte = ft.Column(spacing=0)
+        #: Der Überblick über die Sätze als Karte — `bauen` legt sie an, gibt sie aber **nicht**
+        #: in seiner Liste zurück: Der Aufrufer setzt sie hinter „Eintragen“ (Ben, 15.11.2026:
+        #: „Der Überblick über die Sätze muss unter die Eintragefenster“ — bei sechs Sätzen schob
+        #: sie die Karte aus dem Blick)
+        self.saetze_karte: ft.Control = ft.Container(content=self.saetze_spalte)
         #: Anhalten/Fortsetzen — nur das Symbol (Ben, 10.11.2026); der Aufrufer setzt ``on_click``
         self.halt_knopf = ft.FilledTonalIconButton(icon=ft.Icons.PAUSE, tooltip="Pause")
         self.ebenen = state.fokus_ebenen()
@@ -346,7 +351,8 @@ class Fokus:
 
     def bauen(self, e: Einheitslauf, lauf: Any) -> list[ft.Control]:
         """Die Controls des Fokus (ohne Knöpfe — die gehören dem Aufrufer): Chips, Zeit, Stand,
-        Balken, die Reihe Takt · Bewegung · HF, Kurven, Zählstand, Sätze."""
+        Balken, die Reihe Takt · Bewegung · HF, Kurven, Zählstand. Die Sätze stehen danach in
+        `saetze_karte` — der Aufrufer setzt sie hinter seine Karte „Eintragen“."""
         from trainingsapp.ui.components import zaehlen
         from trainingsapp.ui.components.karte import karte
         from trainingsapp.ui.components.material import material_knopf
@@ -369,6 +375,7 @@ class Fokus:
         # Material (U2, F6): nur, wenn es welches gibt — ansehen hält die Uhr an
         material = material_knopf(self.page, self.state, self.uebung, self.item, text=False)
         self.ebenen_anwenden()
+        self.saetze_karte = karte(self.saetze_spalte, abstand=0, padding=10)
         return [
             # Takt · Zeit (mit Stand) · Material · Ebenen — eine Zeile (8.11.2026 spät)
             self.uhr.zeile(
@@ -387,7 +394,6 @@ class Fokus:
             ),
             self.kurven_karte,
             *([karte(*zaehl, abstand=4, padding=10)] if zaehl else []),
-            karte(self.saetze_spalte, abstand=0, padding=10),
         ]
 
     # -- Nachziehen ------------------------------------------------------------------------

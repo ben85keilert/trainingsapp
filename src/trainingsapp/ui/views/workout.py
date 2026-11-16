@@ -894,17 +894,28 @@ def workout_view(
 
     # -- Während (C2) ----------------------------------------------------------------------
 
-    def fortschritt(teil: PlanAblaufBaustein) -> ft.Control:
+    def fortschritt(teil: PlanAblaufBaustein) -> ft.Control | None:
+        """Je Übung ein Streifen — gefüllt, wenn sie **gemacht** ist (übersprungen oder
+        gewechselt zählt nicht), der laufende hervorgehoben. Nur bei linearem Ablauf (Ben,
+        15.11.2026: „Das macht nur Sinn, wenn man linear durch den Ablauf geht“,
+        `core.ablauf.ist_linear`), in der Reihenfolge des Wegs: Mit Abzweigen, Fragen oder
+        Schleifen sagt die Reihe nichts über den Weg — dort gibt es das Ablaufbild."""
+        folge = [s for s in teil.schritte if s.frage is None]
+        if teil.ablauf is not None:
+            if not ab.ist_linear(teil.ablauf, ids):
+                return None
+            lage = {k: n for n, k in enumerate(ab.hauptpfad(teil.ablauf, ids))}
+            folge = sorted((s for s in folge if s.item_id in lage), key=lambda s: lage[s.item_id])
         stuecke: list[ft.Control] = []
-        for i, s in enumerate(teil.schritte):
-            if s.item_id in teil.ergebnisse:
+        for s in folge:
+            if teil.ergebnisse.get(s.item_id) in plan_ablauf.EINTRAGEN:
                 farbe = ft.Colors.PRIMARY
-            elif i == teil.k and teil.phase != FERTIG:
+            elif s.item_id == teil.schritt.item_id and teil.phase != FERTIG:
                 farbe = ft.Colors.TERTIARY
             else:
                 farbe = ft.Colors.OUTLINE_VARIANT
             stuecke.append(ft.Container(expand=True, height=5, border_radius=3, bgcolor=farbe))
-        return ft.Row(spacing=4, controls=stuecke)
+        return ft.Row(spacing=4, controls=stuecke, data="fortschritt") if stuecke else None
 
     def bedingung_karte(erf: bd.Erfuellung, b: bd.Bedingung) -> ft.Control:
         text = ft.Text(erf.text or b.kurztext() or "erfüllt", size=14, weight=ft.FontWeight.W_600)
@@ -984,17 +995,50 @@ def workout_view(
         erf = teil.bedingung_stand()
         nr = nummern.get(s.item_id)
         durchlauf = f" · {teil.durchlauf}. Durchlauf" if teil.durchlauf > 1 else ""
+        # Die Unterzeile sagt, wo man ist — nicht, wie es weitergeht: Das steht erst da, wenn
+        # die Übung beendet ist (Ben, 15./16.11.2026: „Wie es weiter geht, ist erst nach der
+        # Übung“; das frühere „· danach Kniebeuge“ ist weg)
         unter = (
-            f"Workout {plan.name}{durchlauf} · {uebergang}"
+            f"Workout {plan.name}{durchlauf}"
             if gez
-            else f"Schritt {teil.k + 1} von {len(teil.schritte)} · {uebergang}{durchlauf}"
+            else f"Schritt {teil.k + 1} von {len(teil.schritte)}{durchlauf}"
         )
-        # Statt einer Liste nur, was als Nächstes kommt — eindeutig, sonst nichts (die Wahl
-        # kommt als Frage)
-        if s.frage is None and teil.phase != FERTIG and not teil.wahl_noetig:
-            n = teil.naechster
-            if n is not None and n != teil.k:
-                unter += f" · danach {teil.schritte[n].anzeigename}"
+
+        def uebergang_wechseln(_e: Any = None) -> None:
+            """Hart | Weich jederzeit (Ben, 16.11.2026: „Man soll auch jederzeit hin und her
+            wechseln können“) — gilt für heute wie die Wahl am Start."""
+            neu = HART if uebergang == WEICH else WEICH
+            if teil.uebergang_setzen(neu):
+                state.workout_uebergang[plan.id] = neu
+                einheit_ui.melden(state)
+                auffrischen()
+
+        unterzeile: list[ft.Control] = [ft.Text(unter, size=12, opacity=0.6)]
+        if teil.uebergang is not None:
+            unterzeile.append(
+                ft.Container(
+                    data="uebergang",
+                    on_click=uebergang_wechseln,
+                    ink=True,
+                    border_radius=12,
+                    border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+                    padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+                    tooltip=(
+                        "Hart: Übungen folgen von selbst, Bedingungen gelten. Weich: du gehst "
+                        "von Hand weiter. Tippen wechselt — jederzeit."
+                    ),
+                    content=ft.Row(
+                        spacing=4,
+                        tight=True,
+                        controls=[
+                            ft.Text(uebergang, size=12),
+                            ft.Icon(ft.Icons.SWAP_HORIZ, size=14, opacity=0.7),
+                        ],
+                    ),
+                )
+            )
+        else:
+            unterzeile.append(ft.Text(f"· {uebergang}", size=12, opacity=0.6))
         kopf = ft.Row(
             spacing=8,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -1008,7 +1052,13 @@ def workout_view(
                             size=18,
                             weight=ft.FontWeight.W_600,
                         ),
-                        ft.Text(unter, size=12, opacity=0.6),
+                        ft.Row(
+                            spacing=8,
+                            wrap=True,
+                            run_spacing=2,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            controls=unterzeile,
+                        ),
                     ],
                 ),
                 *(
@@ -1025,7 +1075,8 @@ def workout_view(
             ],
         )
         # Das „i“ steht in der Titelleiste — hier nur, was zur Übung gehört (Ben, 10.11.2026)
-        teile: list[ft.Control] = [kopf, fortschritt(teil)]
+        streifen = fortschritt(teil)  # nur bei linearem Ablauf
+        teile: list[ft.Control] = [kopf, *([streifen] if streifen is not None else [])]
         stand["oben"] = len(teile)
 
         def anhalten() -> None:
@@ -1091,6 +1142,11 @@ def workout_view(
                 karte(ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[zeit]), abstand=4)
             )
         wartend = teil.phase == UEBERZEIT or teil.wartet
+        # Was nach der Übung nach vorn rückt — der Hinweis, wie es steht, und die Wege (Ben,
+        # 16.11.2026: „bis die Übung wirklich beendet ist. Dann rücken die Pfade in den
+        # Vordergrund“): Es steht als Erstes im scrollenden Teil, direkt unter Uhr und
+        # Steuerzeile
+        vorn: list[ft.Control] = []
         if wartend and s.frage is None:
             frei = teil._weg_frei()
             if frei:
@@ -1108,7 +1164,7 @@ def workout_view(
                     "Noch nicht erfüllt — du bleibst bei der Übung. Es geht weiter, sobald es "
                     "reicht."
                 )
-            teile.append(
+            vorn.append(
                 ft.Container(
                     padding=ft.Padding.symmetric(horizontal=12, vertical=10),
                     border_radius=12,
@@ -1184,6 +1240,10 @@ def workout_view(
                 eintragen.append(wdh_eintrag(e, teil, u, wdh_ziel))
             if eintragen:
                 teile.append(fe.karte(*eintragen, page=page))
+        # Der Überblick über die Sätze steht unter „Eintragen“ (Ben, 15.11.2026) — darüber
+        # schob er die Karte bei sechs Sätzen aus dem Blick
+        if stand["fokus"] is not None:
+            teile.append(stand["fokus"].saetze_karte)
         # Keine Liste des Vergangenen im Lauf (Ben, 9.11.2026: „im Fokusmodus stört die Übersicht
         # über das Vergangene … alles, was man für die aktuelle Übung braucht“) — der Weg steht im
         # Ablaufbild (Symbol oben), das Ergebnis nach dem Workout
@@ -1192,7 +1252,9 @@ def workout_view(
         # Was den Lauf steuert, steht in **einer** Zeile direkt unter der Zeit, fest wie sie
         # (Ben, 10.11.2026): Pause · Fertig · Wiederholen · Überspringen · Abbrechen — Pause,
         # Überspringen und Abbrechen nur als Symbol. Wohin es geht („Weiter: …“, die Wege),
-        # steht darunter.
+        # steht **erst nach der Übung** da und dann vorn, direkt darunter (Ben, 15./16.11.2026:
+        # „Mitten in der Übung werden bereits die Folgewege angezeigt. Die gehören hier nicht
+        # rein … Man muss die Übung beenden: ‚Fertig‘“).
         rund = ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26))
         haupt: ft.Control | None = None
         nochmal: ft.Control | None = None
@@ -1224,12 +1286,19 @@ def workout_view(
             frage_offen = teil.wahl_noetig and (teil.wartet or teil.phase == UEBERZEIT or ueber)
             knoepfe = kanten_knoepfe(teil, weich, gleich=frage_offen, ueber=ueber)
             if frage_offen:
-                # oben über allem anderen — ohne zu scrollen sichtbar
-                teile.insert(stand["oben"], weg_frage(knoepfe, ueber, doch_nicht))
+                # oben über allem anderen — ohne zu scrollen sichtbar. Der Hinweis „Noch nicht
+                # erfüllt …“ fällt hier weg: Es fehlt nichts außer der Wahl (am Bildschirm
+                # stand er sonst direkt unter der Abfrage, 16.11.2026)
+                vorn[:] = [weg_frage(knoepfe, ueber, doch_nicht)]
             elif teil.phase == UEBUNG and not teil.wartet:
+                # die Übung läuft: keine Wege — erst „Fertig“ (`knoepfe` sagt nur, ob es die
+                # letzte Übung ist)
                 haupt = fertig_knopf(not knoepfe)
-            elif not knoepfe:
-                teile.append(
+            elif knoepfe:
+                # die Übung ist beendet (Zeit ab, wartet, Pause): die Wege rücken nach vorn
+                vorn.append(ft.Column(spacing=8, tight=True, controls=knoepfe, data="wege"))
+            else:
+                vorn.append(
                     ft.FilledButton(
                         "Workout beenden",
                         icon=ft.Icons.CHECK,
@@ -1238,8 +1307,6 @@ def workout_view(
                         style=rund,
                     )
                 )
-            if not frage_offen:
-                teile.extend(knoepfe)
             if wartend:
                 nochmal = wiederholen_knopf()
         else:
@@ -1251,7 +1318,7 @@ def workout_view(
                 erfuellt = erf is None or erf.erfuellt
                 ziel_text = f"Weiter: {naechster_name}" if naechster_name else "Workout beenden"
                 if erfuellt:
-                    teile.append(
+                    vorn.append(
                         ft.FilledButton(
                             ziel_text,
                             icon=ft.Icons.SKIP_NEXT,
@@ -1261,7 +1328,7 @@ def workout_view(
                         )
                     )
                 elif weich and not b.hart:
-                    teile.append(
+                    vorn.append(
                         ft.OutlinedButton(
                             f"Trotzdem weiter: {naechster_name}"
                             if naechster_name
@@ -1294,6 +1361,9 @@ def workout_view(
             else None,
             abbrechen_knopf(abbrechen, "Workout abbrechen"),
         )
+        # erst der Hinweis und die Wege als Erstes in den scrollenden Teil, dann die Steuerzeile
+        # davor in den festen Kopf
+        teile[stand["oben"] : stand["oben"]] = vorn
         teile.insert(stand["oben"], steuer)
         stand["oben"] += 1
         return teile
@@ -1469,6 +1539,9 @@ def workout_view(
                 teil.skala_wert,
                 teil.wdh_hand,
                 wdh_jetzt(teil) is None,
+                # hart | weich lässt sich im Lauf umschalten — der Umschalter zeigt den Stand,
+                # und weich lässt andere Wege zu als hart
+                teil.uebergang,
             )
         einheit_id = state.plan_ablaeufe.get(plan.id)
         if einheit_id and not wahl["noch_einmal"]:

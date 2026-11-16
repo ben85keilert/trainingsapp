@@ -309,3 +309,184 @@ wird gesammelt … HRV braucht es dort nicht.“
 - Keine HRV-Kacheln oder Kurven. Der Block im Plan und im Nachtrag ist unverändert.
 
 Tests: `tests/test_ui_einzel_seite.py`.
+
+---
+
+## 10. Korrekturen am Workout-Bildschirm (15.11.2026) — gebaut 16.11.2026, Stand §10.6
+
+Ben, 15.11.2026, mit einem Bildschirmfoto („Daily · Workout“, Schritt 1 „Aufstehen vom Stuhl“,
+weich, Uhr läuft bei 0:32, darunter „Weiter: Atmen“, „Weiter: Ausfallschritt“, „Weiter:
+Atemführung Hände“):
+
+1. „Mitten in der Übung werden bereits die Folgewege angezeigt. Die gehören hier nicht rein.
+   Wie es weiter geht, ist erst nach der Übung. Man muss die Übung beenden: ‚Fertig‘.“
+2. „Die Übungen erhalten ganz oben einen ‚Gemachtbalken‘ … Das macht nur Sinn, wenn man linear
+   durch den Ablauf geht. Bei nicht linearen Übungen sind die Balken störend, da irritierend.“
+3. „Der Überblick über die Sätze muss unter die Eintragefenster.“
+
+Das Workout ist ein Plan (Ablauf) — nach Bens Setzung vom 21.10.2026 wartet der Bau auf sein Ja
+(ob die reine Darstellung mitgemeint ist, blieb offen: im Zweifel fragen). Alle drei Punkte sind
+klein und unabhängig, je ein Commit.
+
+### 10.1 Die Wege erst nach „Fertig“
+
+**Befund** (`ui/views/workout.py:1220-1243`): Im gezeichneten Zweig hängt `if not frage_offen:
+teile.extend(knoepfe)` die Wege in **jeder** Phase an, auch während der Übung (`phase == UEBUNG`);
+`kanten_knoepfe` (`:790`) bietet im weichen Übergang sogar unerfüllte Wege wählbar an. Das war
+Absicht (E6, „Zweig mitten in der Übung“, `devices/plan_ablauf.py:616`), gegen Bens Wunsch von
+heute.
+
+**Änderung:** Die Wege stehen, **sobald die Übung beendet ist**: `teil.phase in (UEBERZEIT,
+PAUSE)`, `teil.wartet`, oder nach „Überspringen“ (`ueber`). Solange `phase == UEBUNG` und die
+Uhr läuft, stehen sie nicht da. `knoepfe` wird weiter gebaut (`fertig_knopf(not knoepfe)` braucht
+es, damit die letzte Übung „Fertig“ mit dem Hinweis „das Workout endet hier“ behält), nur nicht
+angehängt. Ein **Frage-Knoten** (`s.frage`, `:1218`) bleibt unverändert — dort sind die
+Antworten die Wege.
+
+Was nach „Fertig“ passiert, ändert sich nicht (`gemacht()` → `_ende_versuchen`,
+`devices/plan_ablauf.py:677`, `:297`): genau ein erfüllter Weg → es geht von selbst weiter;
+mehrere gleichwertige → die Karte „Wie geht es weiter?“ oben (`weg_frage`); keiner erfüllt →
+`wartet`, die Uhr steht, die Wege erscheinen mit „Noch nicht erfüllt — du bleibst bei der
+Übung“. Läuft die Uhr ab (weich: Überzeit), gilt die Übung als beendet; dort stehen die Wege wie
+bisher. Hart: Wege mit „von selbst“ gehen unverändert sofort.
+
+**Folgen:**
+
+- Im weichen Übergang kann man nicht mehr mitten in der Übung „Weiter: X“ tippen — erst
+  „Fertig“, dann der Weg. Der Ausweg „Überspringen“ (⏭) bleibt und fragt bei mehreren Wegen.
+- `PlanAblaufBaustein.weiter(ziel)` mitten in der Übung (`plan_ablauf.py:616`) bleibt im Baustein;
+  die Ansicht erreicht den Pfad nicht mehr. Nicht entfernen.
+- §9.4 oben sagt „Wohin es geht … bleibt unter der Karte ‚Eintragen‘“ — die **Stelle** bleibt,
+  neu ist das **Wann**.
+
+**Tests:** `tests/test_ui_ablauf_workout.py:135-150, 198, 209` lesen die Wege in der **Überzeit**
+bzw. am Frage-Knoten — sie bleiben gültig. Neu: In der laufenden Übung (`UEBUNG`) gibt es keine
+„Weiter: …“-Knöpfe; nach „Fertig“ (ohne Weg erfüllt) stehen sie da.
+
+### 10.2 Der Fortschrittsstreifen nur bei linearem Ablauf
+
+**Befund** (`ui/views/workout.py:897-907`, eingesetzt `:1028`): `fortschritt(teil)` zeichnet je
+Schritt einen Streifen — gefüllt, sobald die Planübung in `teil.ergebnisse` steht, der laufende
+rosa. Der Streifen **gibt es also schon**. Zwei Unterschiede zu dem, was Ben beschreibt:
+
+- Er steht **immer**, auch bei einem Ablauf mit Abzweigen (Bens Foto: fünf Streifen bei einem
+  Workout mit drei Wegen).
+- `ergebnisse` hält jeden Grund — fertig, gemacht, **übersprungen**, gewechselt, beendet
+  (`devices/plan_ablauf.py:815`; `ui/plan_ablauf.py:50`: nur `("fertig", "gemacht")` zählt als
+  eingetragen). Eine übersprungene Übung ist heute **gefüllt**, als wäre sie gemacht.
+
+**Änderung:**
+
+- **Nur bei linearem Ablauf.** Neu `core.ablauf.ist_linear(ablauf, items)` (flet-frei, mit
+  Doctests): wahr ohne Ablauf (Liste) und wenn der Ablauf der Liste folgt (`folgt_der_liste`);
+  sonst nur, wenn es keine Frage gibt, jede Planübung höchstens eine Kante hat, keine Schleife
+  und kein `zurück` vorkommt und `hauptpfad(…)` alle Schritte genau einmal enthält.
+- **Reihenfolge der Streifen = Hauptpfad** (bei der Liste wie bisher die Planfolge).
+- **Gefüllt nur, wenn wirklich gemacht** (`grund in EINTRAGEN`); übersprungen oder gewechselt
+  bleibt Umriss. Der laufende Schritt bleibt hervorgehoben.
+- Bei nicht linearem Ablauf entfällt der Streifen; das Ablaufbild (Symbol oben rechts im Kopf)
+  bleibt der Überblick. `stand["oben"]` zählt die festen Controls aus der Liste (`:1029`) und
+  passt sich an.
+- Der passende Ersatz bei Abzweigen wäre das **kleine Ablaufbild im Fokus** („wo bin ich“) —
+  das ist **P112**, seit dem 8.11.2026 offen (`plan_verzweigungen.md` §7 und §8.7 „nicht gebaut“).
+  Nicht Teil dieser Korrektur; mit Bens Entscheidung zu P112 wieder aufzunehmen.
+
+### 10.3 Der Überblick über die Sätze unter „Eintragen“
+
+**Befund:** `Fokus.bauen` gibt die Sätze-Karte als **letztes** Element zurück
+(`components/fokus.py:390`; eine Zeile je Satz, `:586-621`); das Workout hängt die Karte
+„Eintragen“ erst danach an (`views/workout.py:1186`). Die Sätze stehen also **über** „Eintragen“
+und schieben es bei sechs Sätzen aus dem Blick — auf Bens Foto ist von der Sätze-Karte nur die
+Unterkante zu sehen. Der Übungs-Timer ist genauso gebaut (`views/uebung_timer.py:866-883`).
+
+**Änderung:** `Fokus.bauen` gibt die Sätze-Karte **nicht mehr in der Liste** zurück, sondern
+als `fokus.saetze_karte` (einmal gebaut, `nachziehen` füllt sie weiter, V1). Der Aufrufer setzt
+sie **hinter „Eintragen“** — Workout: Eintragen → Wege/„Weiter“ → Sätze; Übungs-Timer: Eintragen →
+Sätze. Der Balken der Abschnitte unter der Uhr (`balken_platz`, `:378`) steht im festen Kopf und
+bleibt.
+
+**Tests:** neu die Reihenfolge — „Eintragen“ vor den Sätzen, im Workout und im Übungs-Timer.
+
+### 10.4 Nach dem Bau und offene Fragen
+
+Web-Fotos (`web-fotos`) von: laufender Übung ohne Wege · nach „Fertig“ mit Wegen · linearem
+Workout mit Streifen · Workout mit Abzweig ohne Streifen · Sätze unter „Eintragen“. Gerätetest im
+Katalog (T141). Fragen an Ben im Katalog als **P208**; meine Empfehlung jeweils zuerst:
+
+- **a)** Der „Gemachtbalken“ ist der vorhandene Streifen (10.2) — gemeint ist also: nur bei
+  linearem Ablauf, nur wirklich Gemachtes gefüllt, Übersprungenes nicht? *Ja, so gelesen.* Soll
+  er anders aussehen, mache ich eine Skizze.
+- **b)** Die Unterzeile „· danach ‹Übung›“ (`views/workout.py:994-997`, §9.3) sagt ebenfalls, wie
+  es weitergeht. *Bei einem Ablauf mit Abzweig weglassen* (der „regelmäßige“ Weg kann bedingt
+  sein), im linearen Ablauf lassen.
+- **c)** „Der Überblick über die Sätze“ = die Karte mit den Zeilen „Satz 1 · läuft …“, nicht der
+  Balken unter der Uhr? *Ja, so gelesen.* Und **auch im Übungs-Timer** (gleiche Komponente)?
+  *Ja.* Im Workout steht sie nach den Wegen, damit die Knöpfe direkt unter „Eintragen“ bleiben.
+
+### 10.5 Hart | Weich jederzeit umschalten (Ben, 16.11.2026) — gebaut, Stand §10.6
+
+Ben, auf die Frage, ob ein Kurs „hart/weich“ festlegen darf (`plan_kurs_ablauf.md` §2.1): „Der
+Charakter der Übung ist Eigenverantwortung. Man soll auch jederzeit hin und her wechseln können.“
+
+**Befund:** Gewählt wird heute nur **vor dem Start** („Heute: Hart | Weich“,
+`ui/views/workout.py:212-215`, `:314-321`, gemerkt in `AppState.workout_uebergang`). Der
+Baustein bekommt den Übergang beim Anlegen (`devices/plan_ablauf.py:100-130`) und kennt kein
+Umschalten; im Lauf steht er nur als Wort in der Unterzeile („Workout Daily · weich“).
+
+**Änderung:**
+
+- `PlanAblaufBaustein.uebergang_setzen(HART | WEICH)` setzt `uebergang` und
+  `weiter_automatisch`, schreibt `plan/uebergang` in die Zeitleiste (der Workout-Eintrag weiß
+  dann, was wann galt) und prüft sofort `_weiter_wenn_frei` — wer wartet und auf „hart“ stellt,
+  geht weiter, sobald es reicht.
+- In der Ansicht wird das Wort in der Unterzeile zum Umschalter; kein weiteres Element im
+  Fokus. Die Wahl gilt für heute wie die am Start (`workout_uebergang`).
+- Unberührt: Die **Pflicht** an einem Weg gilt in beiden Übergängen. Der Ausweg in eigener
+  Verantwortung ist „Überspringen“ (⏭) — es geht weiter, öffnet aber kein Tor (`pflicht_offen`,
+  `devices/plan_ablauf.py:764-775`, `data/einheiten.py:347-360`).
+
+**Tests:** Baustein — im Warten auf „hart“ stellen (geht weiter, wenn ein Weg frei ist), in der
+Überzeit auf „weich“ (bleibt); Ansicht — Tipp auf die Unterzeile. Gerätetest mit T141.
+
+### 10.6 Stand: gebaut (16.11.2026)
+
+Bens Antworten vom 16.11.2026 zu den Fragen aus §10.4: a) „ja, nur bei linear und nur
+Gemachtes“ · b) „ja, erstmal weg, bis die Übung wirklich beendet ist. Dann rücken die Pfade in
+den Vordergrund“ · c) „ja“. Dazu: „Fang an, und arbeite dich soweit wie möglich durch.“
+
+| Punkt | Gebaut | Wo |
+|---|---|---|
+| 10.1 Wege nach „Fertig“ | Solange die Übung läuft, stehen weder Wege noch „Weiter: …“ da. Ist sie beendet (Zeit ab, wartet, Pause), stehen sie **vorn**: als Erstes im scrollenden Teil, direkt unter Uhr und Steuerzeile — erst der Hinweis, wie es steht, dann die Wege (`data="wege"`); bei mehreren gleichwertigen die Abfrage „Wie geht es weiter?“ (`data="weg_frage"`) | `ui/views/workout.py` (`waehrend`: `vorn`) |
+| Unterzeile | Kein „· danach ‹Übung›“ mehr, in keinem Workout — auch nicht im linearen (Bens Antwort b ging weiter als meine Frage) | ebenda |
+| 10.2 Streifen | Nur bei linearem Ablauf (`core.ablauf.ist_linear`, mit Doctests), in der Reihenfolge des Hauptpfads; gefüllt nur, was gemacht ist (`EINTRAGEN`), der laufende hervorgehoben | `fortschritt()` |
+| 10.3 Sätze | `Fokus.bauen` gibt die Sätze-Karte nicht mehr zurück; sie steht als `fokus.saetze_karte` hinter „Eintragen“ — im Workout und im Timer der Übung | `ui/components/fokus.py`, `views/uebung_timer.py` |
+| 10.5 Hart \| Weich | Umschalter in der Unterzeile („weich ⇄“), gilt für heute; `PlanAblaufBaustein.uebergang_setzen` | `devices/plan_ablauf.py` |
+
+**Abweichungen vom Plan:**
+
+- **Kein Ereignis `plan/uebergang`.** §10.5 wollte den Wechsel in die Zeitleiste schreiben. Die
+  Zeitleiste hat einen festen Vertrag für Arten und Datenfelder (`core/einheit.py`: `ARTEN`,
+  `DATEN_SCHLUESSEL`; `docs/plan_einheit.md`); für eine Einstellung der Ansicht habe ich ihn
+  nicht erweitert. Der Workout-Eintrag weiß also nicht, wann umgeschaltet wurde. Wenn das
+  gewünscht ist: eine Art und ein Feld dazu.
+- **Die Wege stehen vorn, nicht „unter ‚Eintragen‘“** (§9.4, §10.1 erste Fassung) — Bens
+  Antwort b.
+- **Fehlt nur die Wahl, entfällt der Hinweis** „Noch nicht erfüllt — du bleibst bei der Übung“.
+  Er stand dort schon vorher und war falsch (die Übung ist fertig); am Web-Foto fiel er auf,
+  weil er jetzt direkt unter der Abfrage gestanden hätte.
+- **Ein Fehler, den erst das Web-Foto zeigte:** Der Umschalter blieb nach dem Tipp auf „weich“
+  stehen — die Ansicht baut sich nur neu, wenn sich ihr Schlüssel ändert, und der Übergang
+  stand nicht darin. Behoben (`schluessel()`), der Test prüft jetzt dieselbe Ansicht statt
+  einer neu gebauten.
+
+**§9.3 und §9.4 gelten damit an zwei Stellen nicht mehr:** „Was danach kommt, steht knapp in
+der Unterzeile“ und „Wohin es geht … bleibt unter der Karte ‚Eintragen‘“.
+
+Tests: `tests/test_ablauf_baustein.py` (Umschalten), `tests/test_ui_workout.py`,
+`tests/test_ui_ablauf_workout.py` (Wege, Streifen, Umschalter, Sätze), `tests/test_ui_uhr_fokus.py`
+(Sätze im Timer der Übung), Doctests in `core/ablauf.py`. Web-Fotos am 16.11.2026: lineares
+Workout mit Streifen, Workout mit Abzweigen ohne, Abfrage nach „Fertig“, Sätze unter
+„Eintragen“, Umschalter. Gerätetest **T141**.
+
+**Nicht gebaut:** das kleine Ablaufbild im Fokus (P112) als Ersatz für den Streifen bei
+Abzweigen.

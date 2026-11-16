@@ -82,4 +82,10 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   `core.ablauf.fortsetzung`); in der Liste ist nur frei, was keine nie erfüllte Pflicht versperrt
   (`core.ablauf.gesperrt`, Tore aus `plan/kante`, Migration 051 zum Zurücksetzen) — wie ein
   Kurs; „Trainieren“ öffnet so einen Plan als Workout (`plan_durchlauf.startet_als_workout`),
-  oben wechselt **Workout · Liste** (`components/modus_wahl.py`).
+  oben wechselt **Workout · Liste** (`components/modus_wahl.py`). **Workout-Bildschirm** (Ben,
+  15./16.11.2026, `docs/plan_uhr_fokus.md` §10): **Wege erst nach der Übung** — solange sie
+  läuft, weder Wege noch „danach“; beendet rücken sie nach vorn (`views/workout.waehrend`:
+  `vorn`). Der **Streifen je Übung nur bei linearem Ablauf** (`core.ablauf.ist_linear`), gefüllt
+  nur Gemachtes. **Hart | Weich jederzeit** (`PlanAblaufBaustein.uebergang_setzen`, Umschalter
+  in der Unterzeile; der Übergang steht im Schlüssel des Aufbaus) — ein Kurs setzt ihn nur als
+  Vorgabe („Eigenverantwortung“); kein Ereignis in der Zeitleiste.

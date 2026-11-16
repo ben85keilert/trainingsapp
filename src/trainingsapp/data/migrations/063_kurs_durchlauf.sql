@@ -1,0 +1,11 @@
+-- Ein Durchlauf eines Kurses, der zu Ende ging (Ben, 16.11.2026, docs/plan_kurs_ablauf.md §5.2).
+--
+-- `plan.course_run_ended_at`: Beginnt die Person einen Kurs „von vorn“, bleibt der Plan eines
+-- Kapitels **mit Test oder Auswahl** als abgeschlossener Durchlauf stehen — deaktiviert,
+-- umbenannt („… · Durchlauf 1“) und mit diesem Zeitstempel. Die Kapitelherkunft
+-- (`course_chapter_id`) bleibt, damit sich die Wahl vom letzten Mal finden lässt. Das Kapitel
+-- legt beim nächsten Mal einen neuen Plan an und fragt Test und Auswahl neu. Bis hierher
+-- holte „Von vorn“ den alten Plan mit der alten Wahl zurück; die neue galt nie.
+-- NULL = der laufende Plan des Kapitels (und jeder Plan ohne Kurs). Gerätelokal wie
+-- `freischaltung_seit`: `PlanRepo.speichern` fasst die Spalte nicht an.
+ALTER TABLE plan ADD COLUMN course_run_ended_at TEXT;

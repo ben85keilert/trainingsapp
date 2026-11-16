@@ -170,6 +170,35 @@ def test_test_und_auswahl_bauen_den_plan(page, state) -> None:
     assert _daten(ansicht, ("wahl", "wahl", uebungen["Käfer"].id)).disabled is True
 
 
+def test_von_vorn_fragt_neu_und_bietet_die_wahl_vom_letzten_mal_an(page, state) -> None:
+    """Ben, 16.11.2026: Beginnt der Kurs von vorn, wird in einem Kapitel mit Test und Auswahl
+    neu gefragt — der Plan vom letzten Mal steht als früherer Durchlauf darunter, und „Wie beim
+    letzten Mal“ belegt die Wahl nur vor."""
+    kurs, kapitel, uebungen = _kurs(state)
+    profil = state.profil.id
+    kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())  # öffnen erreicht das Kapitel
+    gewaehlt = [uebungen["Käfer"].id, uebungen["Brücke"].id]
+    state.kurse.plaene_anlegen(kapitel, profil, {"test": 48}, {"wahl": gewaehlt})
+    # Im laufenden Durchlauf gibt es den Knopf nicht
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    assert not [
+        x for x in _alle(ansicht) if getattr(x, "data", None) == ("wie_letztes_mal", "wahl")
+    ]
+
+    state.kurse.zuruecksetzen(kurs, profil)
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    # wieder offen, nichts vorgewählt; der Plan von damals steht als früherer Durchlauf da
+    assert _daten(ansicht, "plan_anlegen").disabled is True
+    assert _daten(ansicht, ("wahl", "wahl", uebungen["Käfer"].id)).selected is False
+    assert "Rumpf Woche 1 · Durchlauf 1" in _texte(ansicht)
+    _daten(ansicht, ("wie_letztes_mal", "wahl")).on_click()
+    assert _daten(ansicht, ("wahl", "wahl", uebungen["Käfer"].id)).selected is True
+    assert _daten(ansicht, ("wahl", "wahl", uebungen["Brücke"].id)).selected is True
+    assert _daten(ansicht, ("wahl", "wahl", uebungen["Seitstütz"].id)).selected is False
+    # ohne neuen Test bleibt „Plan anlegen“ zu — die Wahl allein reicht nicht
+    assert _daten(ansicht, "plan_anlegen").disabled is True
+
+
 # -- Editor --------------------------------------------------------------------------------
 
 

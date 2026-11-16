@@ -803,6 +803,48 @@ def hauptpfad(ablauf: Ablauf, items: Sequence[str]) -> list[str]:
     return pfad
 
 
+def ist_linear(ablauf: Ablauf, items: Sequence[str]) -> bool:
+    """Geht das Workout **einen** Weg — vom Start an ohne Abzweig, Frage, Schleife und Zurück?
+    Nur dann sagt ein Streifen je Übung, wie weit man ist (Ben, 15.11.2026: „Das macht nur Sinn,
+    wenn man linear durch den Ablauf geht. Bei nicht linearen Übungen sind die Balken störend“).
+    Ein einzelner Weg mit Bedingung oder Pflicht bleibt linear; was vom Start aus nie erreicht
+    wird, zählt nicht. Die Reihenfolge der Streifen ist dann der `hauptpfad`.
+
+    >>> ist_linear(kette(["a", "b", "c"]), ["a", "b", "c"]), ist_linear(Ablauf(), [])
+    (True, True)
+    >>> tor = Ablauf(True, "a", (Kante("a", "b", SKALA, 5, pflicht=True), Kante("b", ENDE)))
+    >>> ist_linear(tor, ["a", "b"])
+    True
+    >>> ist_linear(Ablauf(True, "a", (Kante("a", "b"), Kante("a", "c"))), ["a", "b", "c"])
+    False
+    >>> ist_linear(Ablauf(True, "a", (Kante("a", "b"), Kante("b", "a"))), ["a", "b"])  # Kreis
+    False
+    >>> ist_linear(Ablauf(True, "a", (Kante("a", "a"),)), ["a"])  # Schleife
+    False
+    >>> ist_linear(Ablauf(True, "a", (Kante("a", "b"), Kante("b", ZURUECK))), ["a", "b"])
+    False
+    >>> frage = Ablauf(True, "a", (Kante("a", "f"), Kante("f", "b")), (Frage("f"),))
+    >>> ist_linear(frage, ["a", "b"])
+    False
+    """
+    fragen = {f.id for f in ablauf.fragen}
+    k = ablauf.startknoten(items)
+    gesehen: set[str] = set()
+    while k is not None:
+        if k in gesehen or k in fragen:
+            return False
+        gesehen.add(k)
+        kanten = ablauf.von(k)
+        if len(kanten) > 1:
+            return False
+        if not kanten or kanten[0].zum_ende:
+            return True
+        if kanten[0].zurueck:
+            return False
+        k = kanten[0].nach
+    return True
+
+
 def ohne_ausweg(ablauf: Ablauf, items: Sequence[str]) -> list[str]:
     """Knoten, von denen aus das Ende nie erreichbar ist — ein Hinweis, kein Verbot (Ben:
     „Endlosschleife ist nur dann ein Problem, wenn es keinen Weg raus gibt“). Ein Knoten ohne
@@ -1475,6 +1517,7 @@ __all__ = [
     "hauptpfad",
     "hauptwege_spiegeln",
     "im_bild",
+    "ist_linear",
     "kante_aus_bedingung",
     "kante_pruefen",
     "kanten_pruefen",

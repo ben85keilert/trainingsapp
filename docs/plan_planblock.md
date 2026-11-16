@@ -82,6 +82,11 @@ Titel „Fokus · Übung“.
 
 ## C. Medien einer Übung — Kategorien (Vorschlag, noch nicht gebaut)
 
+> **Stand 16.11.2026:** zur Hälfte überholt — `erklaerung` ist gebaut, `mitmachen` ist gebaut
+> und heißt `begleitung` (12.11.2026, `core/material.py`). Was offen ist und wie die Wortliste
+> zusammengeht, steht in `plan_medienrollen.md` (Katalog P209). Die Tabelle unten bleibt als
+> Herkunft stehen.
+
 Ben: „überlege, welche Kategorien an Medien man für eine Übung hinterlegen kann … und wie man
 diese in die Ausführung einbindet“. Vorschlag für `core.models.Media` ein Feld **`rolle`**
 (Paketfeld `medien[].rolle`, fehlt = `erklaerung`), statt eines zweiten Mechanismus je Art:

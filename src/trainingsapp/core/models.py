@@ -562,6 +562,11 @@ class Plan:
     #: Von welchem Kurskapitel der Plan angelegt wurde (Migration 016, `core/kurse.py`);
     #: beim Abschluss des Kapitels wird er deaktiviert, nicht gelöscht. ``None`` = eigener Plan
     kurs_kapitel_id: str | None = None
+    #: Der Plan gehört zu einem **früheren Durchlauf** des Kurses (Migration 063, Ben
+    #: 16.11.2026): „Von vorn beginnen“ ließ ihn stehen, das Kapitel legt einen neuen an.
+    #: ``None`` = der laufende Plan. Nur gelesen — gesetzt von `KursRepo.zuruecksetzen`,
+    #: `PlanRepo.speichern` fasst die Spalte nicht an
+    kurs_durchlauf_beendet: datetime | None = None
     #: Regel für den Vorschlag nach der Belastung (Ben, 12.11.2026, `core.anpassung.Regel.
     #: als_dict`) — ``None`` = keine. Kommt aus dem Kurs oder Paket
     anpassung: dict[str, Any] | None = None

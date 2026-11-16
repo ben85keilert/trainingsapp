@@ -429,3 +429,42 @@ def test_zweimal_fertig_verliert_den_letzten_satz_nicht(hart, tipps) -> None:
     b = next(n for n, x in enumerate(ev) if x.art == "uebung_ende")
     assert ergebnis(gelaufene_zeiten(ev[a : b + 1]), "hold") == {"hold": [30, 30, 12]}
     assert teil.k == 1  # der zweite Tipp hat den nächsten Schritt nicht auch beendet
+
+
+def test_uebergang_laesst_sich_im_lauf_umschalten() -> None:
+    """Ben, 16.11.2026: „Der Charakter der Übung ist Eigenverantwortung. Man soll auch jederzeit
+    hin und her wechseln können“ — hart und weich mitten im Workout."""
+    teil, uhr = _baustein(ab.kette(["w", "k", "p"]), WEICH)
+    _lauf(teil, uhr, 12)
+    assert teil.schritt.item_id == "w" and teil.phase == UEBERZEIT  # weich: läuft über
+    assert teil.uebergang_setzen(WEICH) is False  # nichts zu tun
+    assert teil.uebergang_setzen("irgendwie") is False
+    # auf hart: Die Übung ist mit ihrem Timer zu Ende — der Weg ist frei, es geht weiter
+    assert teil.uebergang_setzen(HART) is True and teil.weiter_automatisch
+    teil.takt(uhr[0])
+    assert teil.schritt.item_id == "k" and teil.ergebnisse["w"] == "fertig"
+    teil.gemacht()
+    teil.takt(uhr[0])
+    assert teil.schritt.item_id == "p"
+    # zurück auf weich: Der nächste Timer läuft wieder über, statt weiterzugehen
+    assert teil.uebergang_setzen(WEICH) is True and not teil.weiter_automatisch
+    _lauf(teil, uhr, 12)
+    assert teil.schritt.item_id == "p" and teil.phase == UEBERZEIT and not teil.wartet
+
+
+def test_auf_hart_bei_unerfuellter_bedingung_bleibt_bei_der_uebung() -> None:
+    a = Ablauf(True, "w", (Kante("w", "k", ab.SKALA, 7),))
+    teil, uhr = _baustein(a, WEICH)
+    _lauf(teil, uhr, 12)
+    assert teil.phase == UEBERZEIT and not teil.wartet
+    teil.uebergang_setzen(HART)
+    # die Skala fehlt noch: wie hart am Ende des Timers — bleiben, es läuft über
+    assert teil.schritt.item_id == "w" and teil.wartet and teil.phase == UEBERZEIT
+    teil.antworten(7)
+    teil.takt(uhr[0])
+    assert teil.schritt.item_id == "k"  # hart: von selbst weiter, sobald es reicht
+
+
+def test_ohne_workout_gibt_es_keinen_uebergang_zum_umschalten() -> None:
+    teil = PlanAblaufBaustein("p1", "Liste", _schritte())
+    assert teil.uebergang_setzen(HART) is False and teil.uebergang is None

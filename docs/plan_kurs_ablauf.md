@@ -487,6 +487,11 @@ die sich Bausteine beziehen (`aus`, `ziel_aus`). Ein Baustein mit `ziel`, `timer
     stehen da, Vorgabe „lassen“ (K3);
   - **Anker fehlt** — die Planübung, hinter die etwas soll, gibt es nicht mehr: ans Ende, mit
     Hinweis (K3); ein `plan_einstellen` oder `plan_weg` ohne seine Marke entfällt mit Hinweis.
+    Der Hinweis nennt, **warum** sie fehlt (N172, Ben 16.11.2026; `_Lauf._fehlt`): „… ist
+    nicht mehr in deinem Plan.“ nur, wenn der Kurs sie gebracht und die Person sie
+    herausgenommen hat; „Deine Auswahl fehlt noch.“, wenn sie aus einer Auswahl kommt und die
+    Wahl fehlt (auch die eines früheren Kapitels); sonst „… ist noch nicht in deinem Plan.“
+    (nie übernommen, oder sie wartet hinter einer Auswahl). Der Stand der Zeile bleibt.
 - `anwenden(plan, bloecke, werte, wahl, gewaehlt, uebernehmen_trotz, kurs_stand) -> (Plan,
   kurs_stand)` — nur die gewählten Zeilen; **zweimal anwenden ändert nichts** (Marken).
   Wege entstehen im Ablauf des Plans (`core.ablauf`); folgt der Ablauf noch der Liste, bleibt

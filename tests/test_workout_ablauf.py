@@ -142,20 +142,47 @@ def test_geleerter_ablauf_bleibt_leer(plaene) -> None:
 
 
 def test_start_aus_dem_plan_genommen_setzt_keine_andere_uebung(plaene) -> None:
-    """Fällt die Startübung eines eigenen Ablaufs aus dem Plan, rückt ihr Hauptweg nach; hat
-    sie keinen, bleibt der Start leer — die erste Planübung wird nicht von selbst zum Start."""
+    """Ben, 16.11.2026: „nimm diese automatischen Setzungen erstmal raus. Start wird selbst
+    verbunden … Wenn was fehlt, kommt eine Fehlermeldung, dass der Plan nachkorrigiert werden
+    muss, sonst ändert sich was und man merkt es nicht.“ — fällt die Startübung eines eigenen
+    Ablaufs aus dem Plan, bleibt der Start leer: weder ihr Hauptweg noch die erste Planübung
+    rückt nach, und der Plan sagt, dass er korrigiert werden muss."""
     repo, plan, _ = plaene
     a, b, c = (it.id for it in plan.items)
-    # Start „b“ mit einem Weg nach „c“; „a“ steht nur in der Leiste
-    repo.ablauf_setzen(plan.id, Ablauf(True, b, (Kante(b, c),)))
-    repo.uebung_entfernen(b)
+    # Ein eigener Ablauf: Start „a“, von dort nach „b“ oder gleich nach „c“, „b“ → „c“
+    repo.ablauf_setzen(plan.id, Ablauf(True, a, (Kante(a, b), Kante(a, c), Kante(b, c))))
+    repo.uebung_entfernen(a)
     plan = repo.laden(plan.id)
-    assert plan.ablauf.start == c and plan.ablauf.kanten == ()
+    ids = [it.id for it in plan.items]
+    assert ids == [b, c]
+    assert plan.ablauf == Ablauf(True, kanten=(Kante(b, c),), ohne_start=True)
+    assert plan.ablauf.startknoten(ids) is None
+    assert ab.warnungen(plan.ablauf, ids, {}) == [ab.START_FEHLT]
+    assert "muss korrigiert werden" in ab.START_FEHLT
+    # Die Person setzt ihn selbst — mit dem, was schon da ist (hier „c“; mit „b“ wäre es
+    # wieder die Kette der Liste, und die folgt der Liste)
+    repo.ablauf_setzen(plan.id, replace(plan.ablauf, start=c))
+    plan = repo.laden(plan.id)
+    assert plan.ablauf == Ablauf(True, c, (Kante(b, c),)) and not ab.warnungen(plan.ablauf, ids, {})
+    # Fällt auch dieser Start weg, ist das Bild leer — „b“ steht nur noch in der Leiste
     repo.uebung_entfernen(c)
     plan = repo.laden(plan.id)
-    assert [it.id for it in plan.items] == [a]
     assert plan.ablauf == Ablauf(an=True, ohne_start=True)
-    assert ab.im_bild(plan.ablauf, [a]) == []
+    assert ab.im_bild(plan.ablauf, [b]) == []
+
+
+def test_start_den_es_nicht_mehr_gibt_faellt_nicht_auf_die_erste_planuebung() -> None:
+    """Auch beim Bereinigen (Speichern im Reiter, alte Zeichnung wieder einschalten): Ein Start,
+    den es unter den Planübungen nicht mehr gibt, wird nicht still durch die erste ersetzt."""
+    alt = Ablauf(True, "x", (Kante("x", "a"), Kante("a", "b")))
+    neu = alt.bereinigt(["a", "b"])
+    assert neu == Ablauf(True, kanten=(Kante("a", "b"),), ohne_start=True)
+    assert neu.startknoten(["a", "b"]) is None
+    # „Lücke schließen“ am Start: die Wege schließen sich, der Start bleibt leer
+    kreis = Ablauf(True, "a", (Kante("a", "b"), Kante("b", "c"), Kante("c", "a")))
+    zu = ab.luecke_schliessen(kreis, "a")
+    assert [(k.von, k.nach) for k in zu.kanten] == [("b", "c"), ("c", "b")]
+    assert (zu.start, zu.ohne_start) == ("", True)
 
 
 def test_zwei_planuebungen_derselben_uebung_sind_zwei_knoten(plaene) -> None:
@@ -187,4 +214,5 @@ def test_zwei_planuebungen_derselben_uebung_sind_zwei_knoten(plaene) -> None:
         (c, ab.ENDE, "genug"),
         (c, c, ""),
     ]
-    assert plan.ablauf.start == b  # der Hauptweg des alten Starts rückt nach
+    # der Start war die erste Kniebeuge: Er bleibt leer, niemand rückt nach (Ben, 16.11.2026)
+    assert (plan.ablauf.start, plan.ablauf.ohne_start) == ("", True)

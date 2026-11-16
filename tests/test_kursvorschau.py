@@ -234,7 +234,9 @@ def test_bezug_auf_eine_wahl_aus_einem_frueheren_kapitel_ist_offen() -> None:
         ("raus#weg", kp.ENTFAELLT),
         ("hart#uebergang", kp.NEU),
     ]
-    assert roh[1].unter == "Die Übung ist nicht mehr in deinem Plan."
+    # N172 (16.11.2026): der Satz nennt den Grund — die Wahl fehlt, nichts wurde weggenommen
+    assert roh[1].unter == "Deine Auswahl fehlt noch."
+    assert roh[2].unter == "Deine Auswahl, hinter die es gehört, fehlt noch."
 
     (vorschau,) = kommt_noch(kurs, plan, stand, {}, {}, 3, NAMEN)
     assert als_text([vorschau]) == [
@@ -284,7 +286,7 @@ def test_was_hinter_der_gewaehlten_wartet_heisst_beim_namen() -> None:
         ("lang", kp.ENTFAELLT),
         ("hin#weg", kp.OFFEN),
     ]
-    assert roh[2].unter == "Rolle ist nicht mehr in deinem Plan."
+    assert roh[2].unter == "Rolle ist noch nicht in deinem Plan."  # sie wartet (N172)
 
     vorschau = kommt_noch(kurs, plan, stand, {}, {}, 2, NAMEN)  # Kapitel 3 läuft
     assert als_text(vorschau) == [

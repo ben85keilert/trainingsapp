@@ -457,11 +457,45 @@ def test_einstellen_und_weg_an_fehlender_marke_entfallen() -> None:
     # Entfallenes lässt sich nicht erzwingen, der Rest gilt
     neu, _ = anwenden(plan, bloecke, {}, {}, {"e", "e#ziel", "e#uebergang", "w#weg"}, (), stand)
     assert neu.uebergang_hart and len(neu.items) == 1
-    # Eine Marke, die es nie gab: „Die Übung“
+    # Eine Marke, die es nie gab: „Die Übung“ — und nicht „nicht mehr“ (N172)
     (nie,) = aenderungen(
         plan, [Block(PLAN_WEG, id="w2", von="a", zu="gibtsnicht")], {}, {}, stand, NAMEN
     )
-    assert (nie.stand, nie.unter) == (ENTFAELLT, "Die Übung ist nicht mehr in deinem Plan.")
+    assert (nie.stand, nie.unter) == (ENTFAELLT, "Die Übung ist noch nicht in deinem Plan.")
+
+
+def test_warum_eine_planuebung_fehlt_sagt_die_zeile_richtig() -> None:
+    """N172 (Ben, 16.11.2026: Wortlaut richten): „ist nicht mehr in deinem Plan“ stimmt nur,
+    wenn der Kurs die Übung gebracht und die Person sie herausgenommen hat. Wartet sie auf
+    eine Auswahl — auch die eines früheren Kapitels — oder wurde sie nie übernommen, sagt die
+    Zeile das. Der Stand der Zeile bleibt, wie er war."""
+    plan, stand = nach_kapitel_1()  # nur die Planke (Baustein „a“) ist übernommen
+    frueher = [
+        Block(AUSWAHL, id="wahl", uebungen=["kaefer", "bruecke"]),
+        Block(PLAN_UEBUNG, id="dazu", aus="wahl", hinter="a"),
+        Block(PLAN_UEBUNG, id="fest", uebung="seit"),
+    ]
+    bloecke = [
+        Block(PLAN_UEBUNG, id="d", uebung="dehnen", hinter="dazu"),
+        Block(PLAN_EINSTELLEN, id="e", an="dazu", ziel={"reps": [40]}),
+        Block(PLAN_WEG, id="w", von="a", zu="fest"),
+    ]
+
+    def saetze(wahl: dict[str, list[str]]) -> list[tuple[str, str, str]]:
+        zeilen = aenderungen(plan, bloecke, {}, wahl, stand, NAMEN, bezug=frueher)
+        return [(z.id, z.stand, z.unter) for z in zeilen if z.stand in (ANKER_FEHLT, ENTFAELLT)]
+
+    # Die Wahl aus dem früheren Kapitel fehlt; der Seitstütz wurde dort nie übernommen
+    assert saetze({}) == [
+        ("d", ANKER_FEHLT, "Deine Auswahl, hinter die es gehört, fehlt noch."),
+        ("e", ENTFAELLT, "Deine Auswahl fehlt noch."),
+        ("w#weg", ENTFAELLT, "Seitstütz ist noch nicht in deinem Plan."),
+    ]
+    # Gewählt, aber nicht übernommen: die Gewählte beim Namen
+    assert saetze({"wahl": ["kaefer"]})[:2] == [
+        ("d", ANKER_FEHLT, "Käfer, hinter die es gehört, ist noch nicht in deinem Plan."),
+        ("e", ENTFAELLT, "Käfer ist noch nicht in deinem Plan."),
+    ]
 
 
 def test_fehlende_wahl_und_fehlender_test_sind_offen() -> None:

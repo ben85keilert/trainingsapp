@@ -92,14 +92,22 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   **Reiter „Ablauf“, drei Punkte** (Ben, 16.11.2026, §8.13): **Die Palette ist ein Vorrat an
   Übungen** — eine Kachel je Übung, „2×“ bei Mehrfachverwendung; Tippen oder Ziehen nimmt eine
   freie Planübung, sonst entsteht eine neue derselben Übung (`core.ablauf.vorrat`,
-  `views/ablauf.ins_bild`; auf „Start“ nie eine neue), im Bild bleibt jede Planübung ein Knoten
-  mit Nummer = Stelle in der Liste. **Ein eindeutiger Weg hat einen Punkt:** Der Abzweig steht
-  nur ab zwei Wegen (`Geometrie.abzweige`; `austritte` für alle), sonst nur der Griff — er
+  `views/ablauf.ins_bild`), im Bild bleibt jede Planübung ein Knoten mit Nummer = Stelle in der
+  Liste. **Eine Kachel bringt immer einen neuen Knoten** (Ben, 16.11.2026 abends: „einheitlich,
+  neue Übung erstellen“) — hinter den gewählten (die Wahl geht auf den neuen: Kachel für Kachel
+  eine Kette), in einen Slot oder auf „Start“; ein Weg zwischen Knoten, die schon im Bild
+  stehen, entsteht nur über „Routing“. **Ein eindeutiger Weg hat einen Punkt:** Der Abzweig
+  steht nur ab zwei Wegen (`Geometrie.abzweige`; `austritte` für alle), sonst nur der Griff — er
   öffnet im Reiter alle Wege der Übung (`on_abzweig`), ohne den Rückruf meldet er `on_kante`.
-  **Leeren heißt leer:** `Ablauf.ohne_start` (``{"an": true, "ohne_start": true}``) — fällt der
-  Start weg und rückt kein Hauptweg nach, setzt sich nichts von selbst hinein (kein Rückfall auf
-  die erste Planübung, folgt nicht der Liste), und ohne Start beginnt kein Workout
-  (`core.ablauf.ohne_start_text`, `PlanAblaufBaustein` lehnt ab).
+  **Leeren heißt leer, den Start setzt die Person:** `Ablauf.ohne_start` (``{"an": true,
+  "ohne_start": true}``) — fällt die Startübung weg (herausgenommen, gelöscht, „Lücke
+  schließen“, beim Bereinigen nicht mehr da), **rückt nichts nach**: weder ihr Hauptweg noch
+  die erste Planübung (`Ablauf.ohne_knoten`, `luecke_schliessen`, `bereinigt`; Ben: „Start wird
+  selbst verbunden … sonst ändert sich was und man merkt es nicht“). Ohne Start beginnt kein
+  Workout und sagt, dass der Plan korrigiert werden muss (`core.ablauf.START_FEHLT`,
+  `ohne_start_text`, `PlanAblaufBaustein` lehnt ab; rote Karte im Reiter „Plan“ und über dem
+  Bild, Knopf „Als Start“ am gewählten Knoten). Ein Workout, das der Liste folgt, beginnt
+  weiter bei ihrer ersten Übung.
 
 - **Neue Ereignisse der Zeitleiste** (Ben, 16.11.2026): Wer eines plant, sieht **vorher** in
   `core/einheit.py` nach — `ARTEN` und `DATEN_SCHLUESSEL` sind eine feste Liste, alles andere

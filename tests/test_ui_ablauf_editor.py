@@ -393,14 +393,38 @@ def test_aus_dem_ablauf_nehmen_laesst_die_uebung_im_plan(umgebung) -> None:
     assert [(k.von, k.nach) for k in plan.ablauf.kanten] == [(iw, ip), (ip, id_)]
     kniebeuge = next(it.exercise_id for it in plan.items if it.id == ik)
     assert kniebeuge in [x.data for x in _alle(ansicht) if isinstance(x, ft.Draggable)]
-    # Auch der Start: der Hauptweg rückt nach, die Übung bleibt im Plan
+    # Auch der Start — die Übung bleibt im Plan, aber **nichts rückt nach** (Ben, 16.11.2026:
+    # „Start wird selbst verbunden … sonst ändert sich was und man merkt es nicht“)
     _mit_daten(ansicht, "knoten", iw).content.on_tap(None)
     _klick(_knopf(ansicht, "Aus dem Ablauf nehmen").on_click, None)
     dialog = seite.dialoge[-1]
+    assert "Sie ist der Start — danach setzt du einen neuen." in _texte(dialog)
     zeilen = {x.title.value: x for x in _alle(dialog) if isinstance(x, ft.ListTile)}
     _klick(zeilen["Nur diese herausnehmen"].on_click, None)
+    _klick(dialog.on_dismiss, None)
     plan = state.plaene.laden(plan.id)
-    assert plan.ablauf.start == ip and iw in [it.id for it in plan.items]
+    assert (plan.ablauf.start, plan.ablauf.ohne_start) == ("", True)
+    assert [(k.von, k.nach) for k in plan.ablauf.kanten] == [(ip, id_)]
+    assert iw in [it.id for it in plan.items]
+    assert any("Der Ablauf hat jetzt keinen Start." in t for t in _texte(seite.dialoge[-1]))
+    # Die rote Karte steht über dem Bild, bis ein Start gesetzt ist — das Workout beginnt nicht
+    warnung = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.Container) and x.data == "ablauf_warnung"
+    )
+    assert _texte(warnung) == [ab.START_FEHLT]
+    with pytest.raises(AssertionError, match="kein Knopf"):
+        _knopf(workout_view(_Seite(), state, plan, route=f"/plan/{plan.id}"), "Workout starten")
+    # Mit dem, was schon da ist: Übung im Bild antippen, „Als Start“ — der Knopf steht nur,
+    # solange der Start fehlt
+    _mit_daten(ansicht, "knoten", ip).content.on_tap(None)
+    _klick(_knopf(ansicht, "Als Start").on_click, None)
+    plan = state.plaene.laden(plan.id)
+    assert (plan.ablauf.start, plan.ablauf.ohne_start) == (ip, False)
+    with pytest.raises(AssertionError, match="kein Knopf"):
+        _knopf(ansicht, "Als Start")
+    assert not [
+        x for x in _alle(ansicht) if isinstance(x, ft.Container) and x.data == "ablauf_warnung"
+    ]
     # Gedrückt halten in der Auswahl: aus dem Plan — erst nach der Rückfrage
     kachel = next(x for x in _alle(ansicht) if isinstance(x, ft.Draggable) and x.data == kniebeuge)
     _klick(kachel.content.on_long_press, None)
@@ -564,13 +588,19 @@ def test_leiste_ist_ein_vorrat_an_uebungen(umgebung) -> None:
     plan = state.plaene.laden(plan.id)
     assert len(plan.items) == 5
     assert [k.nach for k in plan.ablauf.von(iw)] == [ik, zweite.id]
-    # Noch einmal: keine ist mehr frei — eine dritte Kniebeuge entsteht am Ende der Liste
+    # Die Wahl geht auf den neuen Knoten: Kachel für Kachel angetippt entsteht eine Kette
+    assert state.ablauf_wahl[plan.id] == zweite.id
+    # Noch einmal: keine ist mehr frei — eine dritte Kniebeuge entsteht am Ende der Liste,
+    # hinter der zweiten. Nie ein Weg zu einer, die schon im Bild steht (Ben, 16.11.2026:
+    # „Ich brauche das einheitlich, neue Übung erstellen“)
     _klick(_kacheln(ansicht)[uk].content.on_click, None)
     plan = state.plaene.laden(plan.id)
     dritte = plan.items[-1]
     assert len(plan.items) == 6 and dritte.exercise_id == uk
     assert dritte.target is None and dritte.felder is None  # sie folgt der Übung (P79)
-    assert [k.nach for k in plan.ablauf.von(iw)] == [ik, zweite.id, dritte.id]
+    assert [k.nach for k in plan.ablauf.von(iw)] == [ik, zweite.id]
+    assert [k.nach for k in plan.ablauf.von(zweite.id)] == [dritte.id]
+    assert state.ablauf_wahl[plan.id] == dritte.id
     assert _texte(_kacheln(ansicht)[uk]) == ["3×", "Kniebeuge"]
     assert any("neu im Plan" in t for d in seite.dialoge for t in _texte(d))
     # Im Bild: drei Knoten derselben Übung, jeder mit seiner Nummer (Stelle in der Liste)
@@ -604,9 +634,9 @@ def test_leiste_ist_ein_vorrat_an_uebungen(umgebung) -> None:
 
 
 def test_kachel_in_slot_und_auf_start(umgebung) -> None:
-    """Ziehen wie Tippen: In einen Slot kommt eine freie Planübung, sonst eine neue. Auf
-    „Start“ wird die Übung der Start — steht sie schon im Bild, dieser Knoten; dort entsteht
-    nie eine neue Planübung."""
+    """Ziehen wie Tippen: In einen Slot kommt eine freie Planübung, sonst eine neue — und auf
+    „Start“ genauso (Ben, 16.11.2026: „Ich brauche das einheitlich, neue Übung erstellen“).
+    Eine Kachel verbindet nie mit einem Knoten, der schon im Bild steht."""
     state, plan = umgebung
     basis = f"/plan/{plan.id}/bearbeiten"
     iw, ik, ip, _id = (it.id for it in plan.items)
@@ -625,14 +655,26 @@ def test_kachel_in_slot_und_auf_start(umgebung) -> None:
     assert len(plan.items) == 5 and neu.exercise_id == uw
     assert [k.nach for k in plan.ablauf.von(ip)] == [neu.id]
     assert state.ablauf_wahl[plan.id] == neu.id and state.ablauf_slots[plan.id] == []
-    # Die Kniebeuge auf „Start“: der Knoten, der schon im Bild steht, wird der Start
+    # Der Start aus dem Ablauf: jetzt nimmt „Start“ eine Kachel an. Die Kniebeuge steht schon
+    # im Bild — auf „Start“ gezogen entsteht eine **neue** Kniebeuge und wird der Start; die
+    # im Bild bleibt, wo sie ist
+    _mit_daten(ansicht, "knoten", iw).content.on_tap(None)
+    _klick(_knopf(ansicht, "Aus dem Ablauf nehmen").on_click, None)
+    dialog = seite.dialoge[-1]
+    zeilen = {x.title.value: x for x in _alle(dialog) if isinstance(x, ft.ListTile)}
+    _klick(zeilen["Nur diese herausnehmen"].on_click, None)
+    _klick(dialog.on_dismiss, None)
     start = next(
         x.content for x in _alle(ansicht) if isinstance(x, ft.Container) and x.data == ("start",)
     )
     assert isinstance(start, ft.DragTarget)
     start.on_accept(SimpleNamespace(src=SimpleNamespace(data=uk)))
     plan = state.plaene.laden(plan.id)
-    assert plan.ablauf.start == ik and len(plan.items) == 5
+    neuer_start = plan.items[-1]
+    assert len(plan.items) == 6 and neuer_start.exercise_id == uk
+    assert plan.ablauf.start == neuer_start.id != ik
+    assert not plan.ablauf.von(neuer_start.id) and not plan.ablauf.zu(neuer_start.id)
+    assert [k.nach for k in plan.ablauf.von(ik)] == [ip]  # die alte Kette steht noch
 
 
 def test_eindeutiger_weg_hat_einen_punkt(umgebung) -> None:
@@ -772,15 +814,16 @@ def test_geleertes_bild_bleibt_leer(umgebung, tmp_path) -> None:
     assert plan.ablauf == ab.Ablauf(True, ik) and len(plan.items) == 5
     assert _daten(ansicht, "knoten") == [("knoten", ik)] and _daten(ansicht, "startplatz") == []
     _knopf(workout_view(_Seite(), state, plan, route=f"/plan/{plan.id}"), "Workout starten")
-    # … und wieder heraus: leer; in den leeren Platz gezogen ist sie wieder der Start
-    _mit_daten(ansicht, "knoten", ik).content.on_tap(None)
+    # … und wieder heraus (der neue Start ist gewählt): leer; in den leeren Platz gezogen ist
+    # sie wieder der Start
+    assert state.ablauf_wahl[plan.id] == ik
     _klick(_knopf(ansicht, "Aus dem Ablauf nehmen").on_click, None)
     assert state.plaene.ablauf_laden(plan.id) == leer
     platz = _mit_daten(ansicht, "startplatz").content
     assert isinstance(platz, ft.DragTarget)
     platz.on_accept(SimpleNamespace(src=SimpleNamespace(data=up)))
     assert state.plaene.laden(plan.id).ablauf == ab.Ablauf(True, ip)
-    _mit_daten(ansicht, "knoten", ip).content.on_tap(None)
+    assert state.ablauf_wahl[plan.id] == ip  # der neue Start ist gewählt, wie nach einem Slot
     _klick(_knopf(ansicht, "Aus dem Ablauf nehmen").on_click, None)
     # „Wie die Liste“ unter dem leeren Bild holt die Kette der Liste zurück
     _klick(_knopf(ansicht, "Wie die Liste").on_click, None)
@@ -807,3 +850,35 @@ def test_liste_und_zurueck_holt_die_liste_in_den_geleerten_ablauf(umgebung) -> N
     plan = state.plaene.laden(plan.id)
     assert state.plaene.ablauf_laden(plan.id) == ab.Ablauf(an=True)
     assert len(plan.ablauf.kanten) == 3 and plan.ablauf.start == plan.items[0].id
+
+
+def test_start_herausgenommen_der_platz_liegt_wo_der_start_war(umgebung) -> None:
+    """Web-Foto 16.11.2026: Der leere Platz unter „Start“ lag links von allem und schob den
+    Rest aus dem Blick. Ist die oberste Ebene frei, liegt er dort, wo der Start war — und eine
+    Kachel, die hineinfällt, landet als neuer Knoten genau dort, ohne Weg zum Rest."""
+    state, plan = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    iw, ik, ip, id_ = (it.id for it in plan.items)
+    _uw, _uk, _up, ud = (it.exercise_id for it in plan.items)
+    state.plaene.ablauf_setzen(plan.id, ab.Ablauf(True, iw, (Kante(iw, ik), Kante(ik, ip))))
+    plan = state.plaene.laden(plan.id)
+    seite = _Seite()
+    ansicht = ablauf_view(seite, state, plan, basis)
+    vorher = dict(state.ablauf_lagen[plan.id])
+    _mit_daten(ansicht, "knoten", iw).content.on_tap(None)
+    _klick(_knopf(ansicht, "Aus dem Ablauf nehmen").on_click, None)
+    dialog = seite.dialoge[-1]
+    zeilen = {x.title.value: x for x in _alle(dialog) if isinstance(x, ft.ListTile)}
+    _klick(zeilen["Nur diese herausnehmen"].on_click, None)
+    _klick(dialog.on_dismiss, None)
+    # die übrigen Knoten bleiben, wo sie waren; der Platz steht über ihnen
+    lagen = state.ablauf_lagen[plan.id]
+    assert lagen == {ik: vorher[ik], ip: vorher[ip]}
+    platz = _mit_daten(ansicht, "startplatz")
+    oben = _mit_daten(ansicht, "knoten", ik)
+    assert platz.top < oben.top and abs(platz.left - oben.left) < KNOTEN
+    # die Dehnung in den Platz: ein neuer Knoten an der Stelle des alten Starts
+    platz.content.on_accept(SimpleNamespace(src=SimpleNamespace(data=ud)))
+    plan = state.plaene.laden(plan.id)
+    assert plan.ablauf.start == id_ and not plan.ablauf.von(id_)
+    assert state.ablauf_lagen[plan.id][id_] == vorher[iw]

@@ -17,7 +17,11 @@ neu aus — Ben: „Ansicht neu ausrichten nur mit dem Button“).
   „2×“, „3×“, wenn sie mehrfach im Plan steht, „frei“, solange keine ihrer Planübungen im Bild
   ist. Ziehen oder Tippen setzt eine **Planübung** dieser Übung ins Bild: zuerst eine freie;
   gibt es keine, entsteht eine neue Planübung derselben Übung am Ende der Liste
-  (`core.ablauf.vorrat`). Im Bild ist jede Planübung ein eigener Knoten mit ihrer Nummer (Frage
+  (`core.ablauf.vorrat`). **Eine Kachel bringt immer einen neuen Knoten** (Ben, 16.11.2026:
+  „Ich brauche das einheitlich, neue Übung erstellen“) — hinter den gewählten, in einen Slot
+  oder auf „Start“; nie entsteht dabei ein Weg zu einem Knoten, der schon im Bild steht (das
+  macht „Routing“). Nach dem Antippen ist der neue Knoten gewählt: Kachel für Kachel entsteht
+  eine Kette. Im Bild ist jede Planübung ein eigener Knoten mit ihrer Nummer (Frage
   5: die Stelle in der Liste, ein Alias der festen ID). „+“ daneben fügt eine weitere Übung hinzu
   (wie im Reiter „Plan“), „i“ erklärt alles Übrige. Waagerecht scrollt die Palette, nach unten
   zieht man eine Übung in einen **Slot** (oder auf „Start“).
@@ -34,6 +38,10 @@ neu aus — Ben: „Ansicht neu ausrichten nur mit dem Button“).
   und einen leeren Platz — nichts setzt sich von selbst wieder hinein
   (`core.ablauf.Ablauf.ohne_start`). „Wie die Liste“ unter dem leeren Bild holt die Kette der
   Liste zurück.
+- **Den Start setzt die Person** (Ben, 16.11.2026: „Start wird selbst verbunden … Wenn was
+  fehlt, kommt eine Fehlermeldung, dass der Plan nachkorrigiert werden muss“): Fällt die
+  Startübung weg, rückt nichts nach. Über dem Bild steht die rote Karte
+  (`core.ablauf.START_FEHLT`), unter dem Bild steht am gewählten Knoten **„Als Start“**.
 
 Gespeichert wird sofort (`ablauf_speichern`): der Ablauf und, gespiegelt, die Hauptwege als
 Bedingungen der Planübungen — so stimmt auch „Der Reihe nach“.
@@ -258,13 +266,17 @@ def entfernen_fragen(
     reihe = ab.nachfolgereihe(a, ids, knoten) if a.an else []
     name = namen.get(knoten, "?")
     nachher = Nachher()
+    # Mit der Startübung geht der Start: Nichts rückt von selbst nach (Ben, 16.11.2026) — die
+    # Meldung sagt es gleich, die Warnung über dem Bild bleibt stehen, bis einer gesetzt ist
+    war_start = a.an and a.startknoten(ids) == knoten
+    ohne_start = " Der Ablauf hat jetzt keinen Start." if war_start else ""
 
     def weg(k: str) -> None:
         if nur_ablauf or a.frage(k) is not None or k not in ids:
             jetzt = state.plaene.laden(plan_id)
             if jetzt is not None:
-                # War sie der Start, rückt ihr Hauptweg nach; hat sie keinen, bleibt der Start
-                # leer — nichts setzt sich von selbst hinein (`Ablauf.ohne_knoten`)
+                # War sie der Start, bleibt der Start leer — nichts setzt sich von selbst
+                # hinein (`Ablauf.ohne_knoten`)
                 ablauf_speichern(state, plan_id, jetzt.ablauf.ohne_knoten(k))
         else:
             state.plaene.uebung_entfernen(k)  # nimmt die Kanten von und zu ihr mit
@@ -278,7 +290,7 @@ def entfernen_fragen(
     raus_text = "aus dem Ablauf genommen — sie bleibt im Plan" if nur_ablauf else "entfernt"
     if not a.an or not ((rein and raus) or reihe):
         weg(knoten)
-        melden(f"„{name}“ {raus_text} — Einträge bleiben.")
+        melden(f"„{name}“ {raus_text} — Einträge bleiben.{ohne_start}")
         danach()
         return
 
@@ -295,16 +307,16 @@ def entfernen_fragen(
             state.plaene.uebung_entfernen(knoten)
         if state.ablauf_wahl.get(plan_id) == knoten:
             state.ablauf_wahl[plan_id] = None
-        fertig(f"„{name}“ {raus_text}, die Lücke ist geschlossen.")
+        fertig(f"„{name}“ {raus_text}, die Lücke ist geschlossen.{ohne_start}")
 
     def mit_reihe(_e: Any = None) -> None:
         for k in [knoten, *reihe]:
             weg(k)
-        fertig(f"„{name}“ und {len(reihe)} danach {raus_text} — Einträge bleiben.")
+        fertig(f"„{name}“ und {len(reihe)} danach {raus_text} — Einträge bleiben.{ohne_start}")
 
     def nur(_e: Any = None) -> None:
         weg(knoten)
-        fertig(f"„{name}“ {raus_text} — Einträge bleiben.")
+        fertig(f"„{name}“ {raus_text} — Einträge bleiben.{ohne_start}")
 
     def zeile(
         titel: str, unter: str, aktion: Callable[[Any], None], gefahr: bool = False
@@ -345,7 +357,13 @@ def entfernen_fragen(
             tight=True,
             spacing=0,
             controls=[
-                ft.Text("Sie steht mitten in einer Reihe.", size=13, opacity=0.8),
+                ft.Text(
+                    "Sie ist der Start — danach setzt du einen neuen."
+                    if war_start
+                    else "Sie steht mitten in einer Reihe.",
+                    size=13,
+                    opacity=0.8,
+                ),
                 *zeilen,
             ],
         ),
@@ -624,14 +642,18 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         return item_id, neu
 
     def palette_getippt(uebung_id: str) -> None:
-        """Ohne Ziehen: mit gewähltem Knoten ein Weg dorthin, sonst in den ersten Slot — im
-        leeren Bild wird sie der Start."""
+        """Ohne Ziehen — immer ein **neuer Knoten** (`ins_bild`), nie ein Weg zu einem, der
+        schon im Bild steht (Ben, 16.11.2026: „Ich brauche das einheitlich, neue Übung
+        erstellen“): mit gewähltem Knoten hinter diesem, sonst im ersten Slot; ohne Start wird
+        sie der Start. **Die Wahl geht auf den neuen Knoten** — Kachel für Kachel angetippt
+        entsteht so eine Kette; für einen Abzweig wählt man die Übung noch einmal."""
         p = frisch()
         von = gewaehlt()
         if von is not None and von in knoten_namen(state, p):
             item_id, neu = ins_bild(uebung_id, lambda a, i: a.mit_kante(Kante(von, i)))
             if item_id:
                 namen = knoten_namen(state, frisch())
+                state.ablauf_wahl[plan.id] = item_id
                 melden(
                     f"Weg {namen.get(von, '?')} → {namen.get(item_id, '?')}"
                     + (" — neu im Plan" if neu else "")
@@ -644,7 +666,10 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         if p.ablauf.startknoten([it.id for it in p.items]) is None:
             start_ablegen(uebung_id)
             return
-        melden("Erst eine Übung im Bild antippen — oder nach unten in einen Slot ziehen.")
+        melden(
+            "Erst eine Übung im Bild antippen — die neue kommt dahinter. Oder nach unten in "
+            "einen Slot ziehen."
+        )
 
     # -- Zeichnung ------------------------------------------------------------------------------
 
@@ -660,16 +685,15 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         neu_zeichnen()
 
     def start_ablegen(uebung_id: str) -> None:
-        """Eine Kachel auf „Start“ (oder den leeren Platz darunter): Die Übung wird der Start —
-        eine freie Planübung zuerst; steht sie schon im Bild, **dieser Knoten** (bei mehreren
-        der erste), wie bisher. Hier entsteht nie eine neue Planübung: Ein neuer, einzelner
-        Start ließe alles Übrige ohne Weg dorthin zurück."""
-        p = frisch()
-        v = vorrat_jetzt(p).get(uebung_id)
-        if v is None:
+        """Eine Kachel auf „Start“ (oder den leeren Platz darunter): wie überall kommt ein
+        **neuer Knoten** ins Bild (`ins_bild`) und wird der Start (Ben, 16.11.2026: „Ich
+        brauche das einheitlich, neue Übung erstellen“). Mit dem, was schon im Bild steht,
+        verbindet sich nichts von selbst — einen Knoten von dort macht „Als Start“ zum Start."""
+        item_id, neu = ins_bild(uebung_id, lambda a, i: replace(a, start=i))
+        if not item_id:
             return
-        speichern(replace(p.ablauf, start=v.naechste or v.planuebungen[0]))
-        melden("Neuer Start")
+        state.ablauf_wahl[plan.id] = item_id
+        melden("Neuer Start" + (" — neu im Plan" if neu else ""))
         neu_zeichnen()
 
     def knoten_getippt(knoten: str) -> None:
@@ -858,8 +882,9 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                 (
                     "Der Ablauf ist leer — tippe oben eine Übung an oder zieh sie auf „Start“."
                     if ganz_leer
-                    else "Der Ablauf hat keinen Start — zieh oben eine Übung auf „Start“ oder "
-                    "wähle eine im Bild und „Routing → Als Start“."
+                    else "Der Ablauf hat keinen Start — tippe eine Übung im Bild an und dann "
+                    "„Als Start“. Eine Kachel von oben (antippen oder auf „Start“ ziehen) "
+                    "setzt eine neue Übung dorthin."
                 ),
                 size=12,
                 opacity=0.65,
@@ -903,11 +928,26 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             # Nur aus der Zeichnung (9.11.2026) — die Übung bleibt oben in der Palette
             entfernen_fragen(page, state, plan.id, knoten, neu_zeichnen, nur_ablauf=True)
 
+        def als_start(_e: Any = None) -> None:
+            speichern(replace(frisch().ablauf, start=knoten))
+            melden("Neuer Start")
+            neu_zeichnen()
+
         knoepfe: list[ft.Control] = [
             ft.Text(namen[knoten], size=13, weight=ft.FontWeight.W_600),
             routing(knoten, p),
             ft.TextButton("Neuer Slot", icon=ft.Icons.ADD_BOX_OUTLINED, on_click=neuer_slot),
         ]
+        if ab.ohne_start_text(p.ablauf, [it.id for it in p.items]):
+            # Kein Start (Ben, 16.11.2026: „Start wird selbst verbunden. Wenn man möchte mit
+            # dem, was schon da ist“): der Knopf steht vorn, solange einer fehlt — sonst nur
+            # unter „Routing“
+            knoepfe.insert(
+                1,
+                ft.FilledTonalButton(
+                    "Als Start", icon=ft.Icons.PLAY_ARROW, on_click=als_start, data="als_start"
+                ),
+            )
         if ist_frage:
             frage = p.ablauf.frage(knoten)
             knoepfe.append(
@@ -1264,10 +1304,12 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         # braucht es in der Planerstellung eine Warnung“)
         ids = [it.id for it in p.items]
         gefahr = ab.warnungen(p.ablauf, ids, knoten_namen(state, p))
-        # „kein Start“ steht hier unter dem Bild, mit dem, was zu tun ist (`leer_hinweis`) —
-        # die rote Karte dazu gehört in den Reiter „Plan“
+        # Ein ganz **leeres** Bild sagt unter sich, was zu tun ist (`leer_hinweis`) — die rote
+        # Karte dazu gehört in den Reiter „Plan“. Fehlt der Start, während noch Wege im Bild
+        # stehen, bleibt die Karte: Der Plan muss korrigiert werden (Ben, 16.11.2026)
         kein_start = ab.ohne_start_text(p.ablauf, ids)
-        gefahr = [g for g in gefahr if g != kein_start]
+        if kein_start != ab.START_FEHLT:
+            gefahr = [g for g in gefahr if g != kein_start]
         warnung.visible = bool(gefahr)
         warnung.content = warn_karte(gefahr) if gefahr else None
         abbild.aktualisieren(bild, zeichnung_jetzt(p))

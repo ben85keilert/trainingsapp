@@ -206,9 +206,10 @@ class _Saetze:
     (`wartet`): die Gewählte selbst, solange die Wahl fehlt, und was hinter sie gehört.
     `core.kursplan` kennt das nur innerhalb eines Kapitels und nur für die Gewählte: Bezieht
     sich ein Baustein auf die Gewählte eines früheren Kapitels und die Wahl fehlt noch — oder
-    auf eine feste Übung, die hinter ihr wartet —, meldet es „entfällt — nicht mehr in deinem
-    Plan“ (nachgestellt: `tests/test_kursvorschau.py`). In der Vorschau ist das eine offene
-    Zeile.
+    auf eine feste Übung, die hinter ihr wartet —, meldet es die Zeile als „entfällt“ bzw.
+    „kommt ans Ende“ (nachgestellt: `tests/test_kursvorschau.py`; den Grund sagt es seit
+    N172 richtig: „Deine Auswahl fehlt noch.“, „… ist noch nicht in deinem Plan.“). In der
+    Vorschau ist das eine offene Zeile.
     """
 
     def __init__(

@@ -345,14 +345,16 @@ möglich | neu
     'Planke: Du hast 45 s eingestellt. Der Kurs schlägt 75 s vor.'
 
     Fehlt die Planübung, hinter die etwas soll, kommt es ans Ende (`ANKER_FEHLT`); fehlt die,
-    an der etwas eingestellt werden soll, entfällt es (`ENTFAELLT`):
+    an der etwas eingestellt werden soll, entfällt es (`ENTFAELLT`). Der Satz darunter nennt
+    den Grund (`_Lauf._fehlt`): „nicht mehr“, wenn der Kurs sie gebracht hat — hier war sie
+    nie da:
 
     >>> vier = [Block(PLAN_UEBUNG, id="b5", uebung="b", hinter="weg"),
     ...         Block(PLAN_EINSTELLEN, id="b6", an="weg", ziel={"hold": 30})]
     >>> zeigen(aenderungen(plan, vier, {}, {}, stand, namen))
-    b5 | Brücke kommt ans Ende | Die Übung, hinter die es gehört, ist nicht mehr in deinem \
+    b5 | Brücke kommt ans Ende | Die Übung, hinter die es gehört, ist noch nicht in deinem \
 Plan. | anker_fehlt
-    b6 | Eine Einstellung entfällt | Die Übung ist nicht mehr in deinem Plan. | entfaellt
+    b6 | Eine Einstellung entfällt | Die Übung ist noch nicht in deinem Plan. | entfaellt
     """
     lauf = _Lauf(plan, bloecke, werte, wahl, kurs_stand, namen, feld_von, bezug)
     # Zur Vorschau gilt jede neue Zeile als gewählt: Ein Baustein darf sich auf die Planübung
@@ -510,6 +512,8 @@ class _Lauf:
         self.tests = {b.id: b for b in alle if b.art == TEST}
         #: Block-ID → die feste Übung eines ``plan_uebung`` (für den Namen einer Marke)
         self.feste = {b.id: b.uebung for b in alle if b.art == PLAN_UEBUNG and b.uebung}
+        #: Block-ID → die Auswahl, aus der ein ``plan_uebung`` seine Übung nimmt (`_fehlt`)
+        self.aus = {b.id: b.aus for b in alle if b.art == PLAN_UEBUNG and b.aus}
         self.zeilen: list[Aenderung] = []
         #: Marken von Bausteinen, deren Wahl noch fehlt
         self.offen: set[str] = set()
@@ -568,6 +572,33 @@ class _Lauf:
         if len(ids) == 1 and (name := (self.namen or {}).get(next(iter(ids)))):
             return name
         return "Die Übung"
+
+    def _fehlt(self, marke: str, einschub: str = "") -> str:
+        """Der Satz, warum es zu einer Marke **keine Planübung gibt** (N172, Ben 16.11.2026:
+        „nicht mehr in deinem Plan“ stimmte nur für eines von dreien):
+
+        - Der Kurs hat sie gebracht, die Person hat sie herausgenommen: „… ist **nicht mehr**
+          in deinem Plan.“
+        - Sie kommt aus einer Auswahl, und die Wahl fehlt — auch die eines früheren Kapitels:
+          „Deine Auswahl fehlt noch.“
+        - Sonst war sie nie da (nicht übernommen, oder sie wartet hinter einer Auswahl):
+          „… ist **noch nicht** in deinem Plan.“
+
+        ``einschub``: „, hinter die es gehört,“ für die Zeile „kommt ans Ende“. Der Stand der
+        Zeile (`ANKER_FEHLT`, `ENTFAELLT`) bleibt, wie er war — hier ändert sich nur der Satz.
+        """
+        vorsatz = f"{marke}:"
+        if any(m == marke or m.startswith(vorsatz) for m in self.stand):
+            return f"{self._marke_name(marke)}{einschub} ist nicht mehr in deinem Plan."
+        gewaehlt = list(dict.fromkeys(self.wahl.get(self.aus.get(marke, "")) or ()))
+        if marke in self.aus and not gewaehlt:
+            return f"Deine Auswahl{einschub} fehlt noch."
+        namen = [name for u in gewaehlt if (name := (self.namen or {}).get(u))]
+        if marke in self.aus:
+            wer = namen[0] if len(namen) == 1 else "Deine Auswahl"
+        else:
+            wer = self._marke_name(marke)
+        return f"{wer}{einschub} ist noch nicht in deinem Plan."
 
     def _feld(self, uebung: str, key: str) -> FieldSpec:
         feld = self.feld_von(uebung, key) if self.feld_von is not None else None
@@ -655,13 +686,12 @@ class _Lauf:
         else:
             anker = self._gruppe(b.hinter)
             if b.hinter and not anker:
-                wer = self._marke_name(b.hinter)
                 zeile = Aenderung(
                     marke,
                     b.id,
                     UEBUNG,
                     f"{name} kommt ans Ende",
-                    f"{wer}, hinter die es gehört, ist nicht mehr in deinem Plan.",
+                    self._fehlt(b.hinter, ", hinter die es gehört,"),
                     ANKER_FEHLT,
                 )
             else:
@@ -838,14 +868,13 @@ class _Lauf:
                 titel = "Einstellungen für deine Auswahl"
                 self._zeile(Aenderung(b.id, b.id, EINSTELLEN, titel, _WAHL_FEHLT, OFFEN))
             elif not gruppe:
-                wer = self._marke_name(b.an)
                 self._zeile(
                     Aenderung(
                         b.id,
                         b.id,
                         EINSTELLEN,
                         "Eine Einstellung entfällt",
-                        f"{wer} ist nicht mehr in deinem Plan.",
+                        self._fehlt(b.an),
                         ENTFAELLT,
                     )
                 )
@@ -896,14 +925,13 @@ class _Lauf:
         von = self._gruppe(b.von)
         zu: list[PlanItem | None] = [None] if b.zu == ZU_ENDE else [*self._gruppe(b.zu)]
         if not von or not zu:
-            wer = self._marke_name(b.zu if von else b.von)
             self._zeile(
                 Aenderung(
                     zid,
                     b.id,
                     WEG,
                     "Ein Weg entfällt",
-                    f"{wer} ist nicht mehr in deinem Plan.",
+                    self._fehlt(b.zu if von else b.von),
                     ENTFAELLT,
                 )
             )

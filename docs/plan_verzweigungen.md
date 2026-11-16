@@ -582,9 +582,9 @@ Ben, drei Punkte zum Reiter „Ablauf“ — alle gebaut:
      Liste, hängt die neue Planübung nicht zusätzlich von selbst hinten an — sie kommt dorthin,
      wohin sie gesetzt wurde. Ein Weg zu einem Knoten, der **schon im Bild steht**, geht wie
      bisher über „Routing → Weg zu einer Übung im Bild …“ oder das Wege-Blatt.
-   - **Auf „Start“ gezogen** wird die Übung der Start: eine freie Planübung zuerst; steht sie
-     schon im Bild, **dieser Knoten** (bei mehreren der erste), wie bisher. Dort entsteht nie
-     eine neue Planübung — ein neuer, einzelner Start ließe alles Übrige ohne Weg zurück.
+   - **Auf „Start“ gezogen** wird die Übung der Start — seit dem Abend des 16.11. wie überall
+     als **neuer Knoten** (Punkt 4 unten); die erste Fassung nahm einen Knoten, der schon im
+     Bild stand.
    - **Im Bild** ist jede Planübung ein eigener Knoten mit ihrer **Nummer = Stelle in der
      Liste** (`core.ablauf.nummern`): Sie ändert sich beim Umordnen und Löschen, die Wege hängen
      an der festen ID und bleiben (`tests/test_workout_ablauf.py`).
@@ -610,10 +610,10 @@ Ben, drei Punkte zum Reiter „Ablauf“ — alle gebaut:
      Start ist **ausdrücklich leer**. Dann gibt es keinen Startknoten (`startknoten` → ``None``,
      kein Rückfall auf die erste Planübung), und der Ablauf folgt nicht der Liste
      (`folgt_der_liste`, `fuer_plan`). Ein gesetzter Start hebt den Vermerk auf.
-   - Gesetzt wird er, wo der Start wegfällt und **kein Hauptweg nachrückt**: beim Herausnehmen
-     aus dem Bild und beim Entfernen aus dem Plan (`Ablauf.ohne_knoten` — war sie der Start,
-     wird das Ziel ihrer ersten Kante der Start, sonst bleibt er leer) und bei „Lücke
-     schließen“ (`luecke_schliessen`). Vorher rückte beim Entfernen aus dem Plan die erste
+   - Gesetzt wird er, **wo immer der Start wegfällt** (Punkt 4 unten — die erste Fassung ließ
+     noch den Hauptweg nachrücken): beim Herausnehmen aus dem Bild und beim Entfernen aus dem
+     Plan (`Ablauf.ohne_knoten`), bei „Lücke schließen“ (`luecke_schliessen`) und beim
+     Bereinigen (`Ablauf.bereinigt`). Vorher rückte beim Entfernen aus dem Plan die erste
      Planübung der Liste nach — das war derselbe Automatismus.
    - **Im Reiter:** „Start“ steht über einem **leeren Platz** („hierher“, eine Ablage —
      `core.ablauf.startplatz`, links von allem, was noch im Bild steht), alle Kacheln sind
@@ -636,6 +636,50 @@ Ben, drei Punkte zum Reiter „Ablauf“ — alle gebaut:
      Export → Import kommt leer an (`tests/test_pakete.py`). Eine App vor dieser Fassung kennt
      den Schlüssel nicht und liest ``{"an": true}``: Dort folgt das Workout der Liste. Die
      Formatversion bleibt (`docs/uebungspakete.md`).
+4. **Den Start setzt die Person, eine Kachel ist immer eine neue Übung** (Ben, 16.11.2026
+   abends, auf die Rückfragen zu P215) — „nimm diese automatischen Setzungen erstmal raus.
+   Start wird selbst verbunden. Wenn man möchte mit dem was schon da ist aber nicht
+   automatisch. Wenn was fehlt, kommt eine Fehlermeldung, dass der Plan nachkorrigiert werden
+   muss, sonst ändert sich was und man merkt es nicht“ · „Im Moment, wenn eine Übung
+   ausgewählt ist und man klickt oben in die Leiste passiert es, dass zwei bestehende Übungen
+   verbunden werden und nicht eine neue gesetzt wird. Ich brauche das einheitlich, neue Übung
+   erstellen“.
+   - **Nichts rückt nach.** Fällt die Startübung eines eigenen Ablaufs weg, bleibt der Start
+     leer — weder ihr Hauptweg noch die erste Planübung wird der Start. Das gilt für
+     `Ablauf.ohne_knoten` (aus dem Bild genommen; aus dem Plan entfernt, auch bei endgültig
+     gelöschten Übungen und entfallenen Paketübungen über `PlanRepo.uebung_entfernen`), für
+     `luecke_schliessen` (die Wege schließen sich, der Start nicht) und für `Ablauf.bereinigt`
+     (ein Start, den es unter den Planübungen nicht mehr gibt, fiel dort still auf die erste
+     zurück). Die Wege der übrigen Übungen bleiben stehen.
+   - **Die Fehlermeldung:** `core.ablauf.START_FEHLT` — „Der Ablauf hat keinen Start — der
+     Plan muss korrigiert werden: im Reiter „Ablauf“ eine Übung als Start setzen.“ Sie steht
+     als rote Karte im Reiter „Plan“ unter dem Schalter und im Reiter „Ablauf“ über dem Bild,
+     am Start-Bild des Workouts (ohne Startknopf), und der Baustein lehnt den Beginn mit ihr
+     ab. Beim Herausnehmen sagt der Dialog „Sie ist der Start — danach setzt du einen neuen.“
+     und die Meldung danach „… Der Ablauf hat jetzt keinen Start.“ Ein **ganz geleertes** Bild
+     behält seinen eigenen Satz („Der Ablauf ist leer — …“).
+   - **Mit dem, was schon da ist:** Übung im Bild antippen → **„Als Start“** — der Knopf
+     steht vorn in der Leiste unter dem Bild, solange der Start fehlt (sonst unter „Routing“).
+   - **Der leere Platz steht, wo der Start war:** Ist die oberste Ebene frei, liegt „hierher“
+     mittig über dem Rest (`core.ablauf.startplatz`); „Neu anordnen“ und das erste Öffnen
+     lassen ohne Start die oberste Ebene frei (`layout`), und ein neuer Start landet genau auf
+     dem Platz (`lagen_ergaenzen`). Die erste Fassung stellte den Platz links von allem — das
+     schob den Rest aus dem Bild (Web-Foto bei 412 px).
+   - **Eine Kachel bringt immer einen neuen Knoten** — hinter den gewählten, in einen Slot
+     oder auf „Start“ (`views/ablauf.ins_bild`: eine Planübung, die noch nicht im Bild steht,
+     sonst eine neue derselben Übung). Auch auf „Start“ wird kein Knoten genommen, der schon im
+     Bild steht. Nach dem Antippen ist **der neue Knoten gewählt**: Kachel für Kachel entsteht
+     eine Kette; für einen Abzweig wählt man die Übung noch einmal. Ein Weg zwischen zwei
+     Knoten im Bild entsteht nur über „Routing → Weg zu einer Übung im Bild …“ und das
+     Wege-Blatt.
+   - **Was bleibt:** Ein Workout, das **der Liste folgt**, beginnt bei ihrer ersten Übung —
+     wer dort die erste Übung löscht, hat die zweite als erste; das ist die Liste, kein
+     eigener Start. Ein von Hand gezeichneter Ablauf, der genau der Liste gleicht, gilt
+     weiter als „folgt“ (§8.12). Altbestand und Pakete mit Wegen ohne ``start`` beginnen bei
+     der ersten Planübung. **Nicht angefasst:** Ist die Startübung nur **verborgen** (Übung
+     im Papierkorb, Paket ausgeschaltet), geht das Workout wie bisher durch sie hindurch
+     (`PlanAblaufBaustein._ziel`) und das Bild zeigt die erste sichtbare als Start — offen
+     als P216.
 
 **Offen / nur am Gerät:** Ziehen mit dem Finger in den leeren Platz und auf „Start“ (im
 Browser mit der Maus geprüft), Treffen des einen Punkts mit dem Finger, „2×“ neben dem Rand der

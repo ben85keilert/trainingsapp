@@ -307,25 +307,23 @@ class Ablauf:
 
     def ohne_knoten(self, knoten: str) -> Ablauf:
         """Eine Planübung oder Frage verschwindet — mit allen Kanten von und zu ihr. War sie der
-        Start, rückt ihr Hauptweg nach (das Ziel ihrer ersten Kante, Ben 9.11.2026); hat sie
-        keinen, bleibt der Start **leer** (``ohne_start``) — keine andere Planübung rückt von
-        selbst an ihre Stelle (Ben, 16.11.2026).
+        Start, bleibt der Start **leer** (``ohne_start``): Nichts rückt von selbst nach, weder
+        ihr Hauptweg noch eine andere Planübung — den Start setzt die Person (Ben, 16.11.2026:
+        „Start wird selbst verbunden … Wenn was fehlt, kommt eine Fehlermeldung, dass der Plan
+        nachkorrigiert werden muss, sonst ändert sich was und man merkt es nicht“).
 
         >>> a = Ablauf(True, "a", (Kante("a", "b"), Kante("b", "c")), (Frage("b"),))
-        >>> a.ohne_knoten("b").kanten, a.ohne_knoten("b").fragen, a.ohne_knoten("a").start
-        ((), (), 'b')
-        >>> leer = a.ohne_knoten("b").ohne_knoten("a")  # der Start ohne Weg weiter
-        >>> leer.start, leer.ohne_start, leer.startknoten(["a", "c"])
-        ('', True, None)
+        >>> a.ohne_knoten("b").kanten, a.ohne_knoten("b").fragen, a.ohne_knoten("b").start
+        ((), (), 'a')
+        >>> ohne = a.ohne_knoten("a")  # der Start fällt weg: leer, auch mit einem Weg weiter
+        >>> ohne.start, ohne.ohne_start, len(ohne.kanten), ohne.startknoten(["a", "c"])
+        ('', True, 1, None)
         >>> Ablauf(an=True).ohne_knoten("a").ohne_start  # folgt der Liste: bleibt dabei
         False
         """
         start, ohne_start = self.start, self.ohne_start
         if start == knoten:
-            folge = [
-                k.nach for k in self.von(knoten) if not k.schleife and k.nach not in (ENDE, ZURUECK)
-            ]
-            start, ohne_start = (folge[0], False) if folge else ("", True)
+            start, ohne_start = "", True
         return replace(
             self,
             start=start,
@@ -335,16 +333,28 @@ class Ablauf:
         )
 
     def bereinigt(self, items: Iterable[str]) -> Ablauf:
-        """Nur Kanten zwischen bekannten Knoten (Planübungen, Fragen, Ende, zurück)."""
+        """Nur Kanten zwischen bekannten Knoten (Planübungen, Fragen, Ende, zurück). Gibt es
+        die Startübung nicht mehr, bleibt der Start **leer** (``ohne_start``) — vorher fiel er
+        still auf die erste Planübung zurück (Ben, 16.11.2026: kein Start von selbst).
+
+        >>> a = Ablauf(True, "x", (Kante("x", "a"), Kante("a", "b")))
+        >>> neu = a.bereinigt(["a", "b"])
+        >>> neu.start, neu.ohne_start, [(k.von, k.nach) for k in neu.kanten]
+        ('', True, [('a', 'b')])
+        >>> a.bereinigt(["x", "a", "b"]) == a, Ablauf(True).bereinigt(["a"]).ohne_start
+        (True, False)
+        """
         bekannt = set(items) | {f.id for f in self.fragen}
+        fehlt = bool(self.start) and self.start not in bekannt
         return replace(
             self,
-            start=self.start if self.start in bekannt else "",
+            start="" if fehlt else self.start,
             kanten=tuple(
                 k
                 for k in self.kanten
                 if k.von in bekannt and (k.nach in bekannt or k.nach in (ENDE, ZURUECK))
             ),
+            ohne_start=self.ohne_start or fehlt,
         )
 
     def als_dict(self) -> dict[str, Any]:
@@ -966,22 +976,33 @@ def kreis_von_selbst(ablauf: Ablauf, items: Sequence[str]) -> list[str]:
     return out
 
 
+#: Der Ablauf hat Wege, aber keinen Start — die Startübung ist herausgenommen oder gelöscht
+#: (Ben, 16.11.2026: „… eine Fehlermeldung, dass der Plan nachkorrigiert werden muss“)
+START_FEHLT = (
+    "Der Ablauf hat keinen Start — der Plan muss korrigiert werden: im Reiter „Ablauf“ eine "
+    "Übung als Start setzen."
+)
+
+
 def ohne_start_text(ablauf: Ablauf, items: Sequence[str]) -> str:
     """Was ein Workout sagt, dessen Ablauf keinen Start hat (Ben, 16.11.2026: Leeren heißt leer
-    — niemand setzt von selbst eine Übung) — leer, wenn es einen Start gibt, der Plan eine
-    Liste ist oder noch keine Übung hat.
+    — niemand setzt von selbst eine Übung; „Wenn was fehlt, kommt eine Fehlermeldung, dass der
+    Plan nachkorrigiert werden muss“) — leer, wenn es einen Start gibt, der Plan eine Liste ist
+    oder noch keine Übung hat.
 
     >>> ohne_start_text(Ablauf(True, ohne_start=True), ["a"])
     'Der Ablauf ist leer — im Reiter „Ablauf“ eine Übung auf „Start“ setzen.'
-    >>> ohne_start_text(Ablauf(True, kanten=(Kante("b", "c"),), ohne_start=True), ["a", "b", "c"])
-    'Der Ablauf hat keinen Start — im Reiter „Ablauf“ eine Übung auf „Start“ setzen.'
+    >>> ohne = Ablauf(True, kanten=(Kante("b", "c"),), ohne_start=True)
+    >>> ohne_start_text(ohne, ["a", "b", "c"]) == START_FEHLT
+    True
     >>> ohne_start_text(Ablauf(True), ["a"]), ohne_start_text(Ablauf(True, ohne_start=True), [])
     ('', '')
     """
     if not ablauf.an or not items or ablauf.startknoten(items) is not None:
         return ""
-    was = "hat keinen Start" if ablauf.kanten or ablauf.fragen else "ist leer"
-    return f"Der Ablauf {was} — im Reiter „Ablauf“ eine Übung auf „Start“ setzen."
+    if ablauf.kanten or ablauf.fragen:
+        return START_FEHLT
+    return "Der Ablauf ist leer — im Reiter „Ablauf“ eine Übung auf „Start“ setzen."
 
 
 def warnungen(ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str]) -> list[str]:
@@ -1252,6 +1273,15 @@ def layout(ablauf: Ablauf, items: Sequence[str]) -> dict[str, Lage]:
     >>> a = Ablauf(True, "a", (Kante("a", "b"), Kante("b", "c"), Kante("c", "a")))
     >>> [(k, v.x, v.ebene) for k, v in layout(a, ["a", "b", "c"]).items()]
     [('a', 0.0, 0), ('b', 0.0, 1), ('c', 0.0, 2)]
+
+    **Ohne Start** bleibt die oberste Ebene frei: Dort steht der leere Platz unter „Start“
+    (`startplatz`), mittig über dem Rest — links daneben stünde der Rest halb außerhalb des
+    Bildes (Web-Foto 16.11.2026):
+
+    >>> ohne = Ablauf(True, kanten=(Kante("b", "c"),), ohne_start=True)
+    >>> lage = layout(ohne, ["a", "b", "c"])
+    >>> [(k, v.x, v.ebene) for k, v in lage.items()], startplatz(lage.values())
+    ([('b', 0.0, 1), ('c', 0.0, 2)], Lage(x=0.0, ebene=0))
     """
     knoten = im_bild(ablauf, items)
     if not knoten:
@@ -1281,6 +1311,8 @@ def layout(ablauf: Ablauf, items: Sequence[str]) -> dict[str, Lage]:
     for k in knoten:
         if k not in ebene:
             baum(k)
+    # ohne Start eine Ebene tiefer — oben ist Platz für „Start“ und den leeren Platz
+    tiefer = 1 if start is None else 0
     breite: dict[str, float] = {}
 
     def messen(k: str) -> float:
@@ -1292,13 +1324,13 @@ def layout(ablauf: Ablauf, items: Sequence[str]) -> dict[str, Lage]:
     def setzen(k: str, links: float) -> None:
         ks = kinder.get(k, [])
         if not ks:
-            lage[k] = Lage(links, ebene[k])
+            lage[k] = Lage(links, ebene[k] + tiefer)
             return
         pos = links
         for c in ks:
             setzen(c, pos)
             pos += breite[c]
-        lage[k] = Lage((lage[ks[0]].x + lage[ks[-1]].x) / 2, ebene[k])
+        lage[k] = Lage((lage[ks[0]].x + lage[ks[-1]].x) / 2, ebene[k] + tiefer)
 
     links = 0.0
     for w in wurzeln:
@@ -1313,10 +1345,21 @@ def startplatz(belegt: Iterable[Lage]) -> Lage:
     16.11.2026: geleert bleibt das Bild leer — „Start“ und ein leerer Platz): ganz oben, links
     von allem, was noch im Bild steht — so sieht kein Knoten wie der Start aus.
 
+    Ist die oberste Ebene **frei** (die Startübung ist eben herausgenommen, der Rest steht
+    noch darunter), liegt der Platz **dort, wo der Start war**: mittig über dem, was jetzt
+    oben steht. Links daneben schöbe er den Rest aus dem Blick (Web-Foto 16.11.2026).
+
     >>> startplatz([]), startplatz([Lage(1.0, 0), Lage(0.5, 1)])
     (Lage(x=0.0, ebene=0), Lage(x=-1.0, ebene=0))
+    >>> startplatz([Lage(1.0, 1), Lage(0.5, 2), Lage(1.5, 2)])  # der Start fehlt über „1.0“
+    Lage(x=1.0, ebene=0)
     """
-    links = min((b.x for b in belegt), default=1.5)
+    lagen = list(belegt)
+    oben = min((b.ebene for b in lagen), default=0)
+    if oben > 0:
+        kopf = [b.x for b in lagen if b.ebene == oben]
+        return Lage(sum(kopf) / len(kopf), 0)
+    links = min((b.x for b in lagen), default=1.5)
     return Lage(links - 1.5, 0)
 
 
@@ -1341,12 +1384,16 @@ def lagen_ergaenzen(
     """Die Lagen bleiben stehen, bis jemand „Neu anordnen“ tippt (Ben, 8.11.2026: „Ansicht neu
     ausrichten nur mit dem Button“): bekannte Knoten behalten ihre Lage, neue kommen unter ihren
     ersten Vorgänger auf den nächsten freien Platz (ohne Vorgänger rechts oben), weggefallene
-    verschwinden. Ohne alte Lagen gilt `layout`.
+    verschwinden. Ohne alte Lagen gilt `layout`. Ein **neuer Start** ohne Vorgänger kommt auf
+    den leeren Platz unter „Start“ (`startplatz`) — dorthin, wo er abgelegt wurde.
 
     >>> a = Ablauf(True, "a", (Kante("a", "b"),))
     >>> neu = lagen_ergaenzen({"a": Lage(3.0, 0)}, a.mit_kante(Kante("a", "c")), ["a", "b", "c"])
     >>> neu["a"], neu["b"], neu["c"]
     (Lage(x=3.0, ebene=0), Lage(x=3.0, ebene=1), Lage(x=4.0, ebene=1))
+    >>> ohne = {"b": Lage(3.0, 1), "c": Lage(3.0, 2)}  # „a“ ist heraus, „n“ wird der Start
+    >>> lagen_ergaenzen(ohne, Ablauf(True, "n", (Kante("b", "c"),)), ["b", "c", "n"])["n"]
+    Lage(x=3.0, ebene=0)
     """
     knoten = im_bild(ablauf, items)
     lage = {k: v for k, v in alt.items() if k in knoten}
@@ -1372,6 +1419,8 @@ def lagen_ergaenzen(
         if vorher:
             oben = lage[vorher[0]]
             lage[k] = freie_lage(lage.values(), oben.x, oben.ebene + 1)
+        elif k == start:
+            lage[k] = startplatz(lage.values())
         else:
             rechts = max((v.x for v in lage.values()), default=-1.0) + 1.5
             lage[k] = Lage(rechts, 0)
@@ -1452,19 +1501,16 @@ def luecke_schliessen(ablauf: Ablauf, knoten: str) -> Ablauf:
     """Eine Übung fällt aus der Reihe, die Lücke schließt sich (Ben, 8.11.2026, Frage 4): jede
     Kante, die zu ihr führte, führt jetzt dorthin, wohin ihr Hauptweg (erste Kante) ging — mit
     ihren eigenen Bedingungen; die übrigen Wege der Übung fallen mit ihr weg. War sie der Start,
-    wird es ihr Nachfolger.
+    bleibt der Start **leer** — auch hier rückt niemand von selbst nach (Ben, 16.11.2026,
+    `Ablauf.ohne_knoten`).
 
     >>> ks = (Kante("a", "x", WDH, 5), Kante("x", "b"), Kante("x", "d"), Kante("b", "c"))
     >>> neu = luecke_schliessen(Ablauf(True, "a", ks), "x")
-    >>> [(k.von, k.nach, k.ausloeser) for k in neu.kanten]
-    [('a', 'b', 'wdh'), ('b', 'c', 'frei')]
-    >>> luecke_schliessen(Ablauf(True, "x", (Kante("x", "b"),)), "x").start
-    'b'
-
-    Führt der Hauptweg des Starts ins Ende, gibt es keinen Nachfolger — der Start bleibt leer:
-
-    >>> luecke_schliessen(Ablauf(True, "x", (Kante("x", ENDE),)), "x").ohne_start
-    True
+    >>> [(k.von, k.nach, k.ausloeser) for k in neu.kanten], neu.start
+    ([('a', 'b', 'wdh'), ('b', 'c', 'frei')], 'a')
+    >>> ohne = luecke_schliessen(Ablauf(True, "x", (Kante("x", "b"), Kante("b", "x"))), "x")
+    >>> ohne.start, ohne.ohne_start, ohne.kanten  # der Weg b → x führte auf b selbst: fällt weg
+    ('', True, ())
     """
     raus = [k for k in ablauf.von(knoten) if not k.schleife]
     haupt = raus[0] if raus else None
@@ -1483,8 +1529,7 @@ def luecke_schliessen(ablauf: Ablauf, knoten: str) -> Ablauf:
         kanten.append(k)
     start, ohne_start = ablauf.start, ablauf.ohne_start
     if start == knoten:
-        start = ziel if ziel is not None and ziel != ENDE else ""
-        ohne_start = not start
+        start, ohne_start = "", True
     fragen = tuple(f for f in ablauf.fragen if f.id != knoten)
     return replace(ablauf, start=start, kanten=tuple(kanten), fragen=fragen, ohne_start=ohne_start)
 
@@ -1658,6 +1703,7 @@ __all__ = [
     "ENDE",
     "FREI",
     "SKALA",
+    "START_FEHLT",
     "VIELE_WEGE",
     "WDH",
     "WDH_IN_ZEIT",

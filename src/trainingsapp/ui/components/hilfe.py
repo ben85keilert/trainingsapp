@@ -417,10 +417,12 @@ Abzweig, eine Frage, ein anderes Ziel), ist es ein **eigener Ablauf**: Neue Plan
 dann in der Palette, bis du sie einsetzt.
 
 - **Palette** oben: die **Übungen** des Plans, jede einmal — **„2×“, „3×“**, wenn sie mehrfach
-  im Plan steht, **„frei“**, solange sie nicht im Bild ist. **Antippen** (mit gewählter Übung im
-  Bild: ein Weg dorthin) oder **nach unten ziehen** in einen **Slot** setzt sie ein: zuerst
-  eine, die noch nicht im Bild steht — sonst kommt die Übung **noch einmal** in den Plan. Auf
-  „Start“ gezogen wird sie der Start. „+“ fügt eine andere Übung hinzu.
+  im Plan steht, **„frei“**, solange sie nicht im Bild ist. Eine Kachel bringt immer einen
+  **neuen Knoten** ins Bild: **Antippen** (mit gewählter Übung im Bild: die neue kommt
+  dahinter) oder **nach unten ziehen** in einen **Slot** oder auf „Start“. Dabei kommt zuerst
+  eine Planübung, die noch nicht im Bild steht — sonst kommt die Übung **noch einmal** in den
+  Plan. Zwei Übungen, die schon im Bild stehen, verbindest du unter **Routing**. „+“ fügt eine
+  andere Übung hinzu.
 - Im Bild ist **jede Verwendung ein eigener Knoten** mit ihrer **Nummer** (die Stelle in der
   Liste — sie ändert sich beim Umordnen, die Wege bleiben).
 - **Tipp auf eine Übung im Bild** wählt sie. Darunter: **Routing** (Wege einstellen, Weg zu
@@ -431,6 +433,9 @@ dann in der Palette, bis du sie einsetzt.
 - **Leer bleibt leer:** Nimmst du alles aus dem Bild, stehen dort „Start“ und ein leerer Platz
   — nichts setzt sich von selbst hinein. Eine Übung antippen oder auf „Start“ ziehen beginnt
   neu; „Wie die Liste“ holt die Reihenfolge der Liste zurück.
+- **Den Start setzt du selbst:** Nimmst du die Startübung heraus oder löschst sie, rückt keine
+  andere nach — der Ablauf hat keinen Start, das Workout beginnt nicht und sagt, dass der Plan
+  korrigiert werden muss. Übung im Bild antippen und **„Als Start“** setzt einen neuen.
 - Hat eine Übung **einen** Weg, steht zwischen ihr und der nächsten **ein Punkt** — er öffnet
   ihre Wege (dort kommt auch ein zweiter dazu). Mit **mehreren** Wegen beginnen alle an ihrem
   **Abzweig**, dem Punkt unter ihr: **Tipp auf den Abzweig** öffnet alle ihre Wege, **Tipp auf

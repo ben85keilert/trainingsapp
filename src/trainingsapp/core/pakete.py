@@ -1439,7 +1439,8 @@ def paketmedien_in(
 
 def nutzt_kursplan(kurs: Kurs) -> bool:
     """Nutzt der Kurs, was es erst seit Formatversion 6 gibt — einen Kursplan
-    (``kurse[].kursplan``) oder einen Baustein (``plan_*``-Block, `core.kursbloecke`)?
+    (``kurse[].kursplan``), einen Baustein (``plan_*``-Block, `core.kursbloecke`) oder einen
+    Test, der „die gewählte“ misst (``test`` mit ``aus`` — eine ältere App ließe ihn fallen)?
 
     >>> nutzt_kursplan(Kurs(name="K", kapitel=[Kapitel(titel="A", bloecke=[Block("text")])]))
     False
@@ -1448,8 +1449,13 @@ def nutzt_kursplan(kurs: Kurs) -> bool:
     >>> stein = Block("plan_uebung", id="a", uebung="u1")
     >>> nutzt_kursplan(Kurs(name="K", kapitel=[Kapitel(titel="A", bloecke=[stein])]))
     True
+    >>> test = Block("test", id="t", aus="wahl")
+    >>> nutzt_kursplan(Kurs(name="K", kapitel=[Kapitel(titel="A", bloecke=[test])]))
+    True
     """
-    return kurs.kursplan is not None or any(b.baustein for kap in kurs.kapitel for b in kap.bloecke)
+    return kurs.kursplan is not None or any(
+        b.baustein or (b.art == "test" and bool(b.aus)) for kap in kurs.kapitel for b in kap.bloecke
+    )
 
 
 def noetige_version(

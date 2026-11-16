@@ -176,6 +176,9 @@ def kursplan_karte(
         """„Dein Plan weicht ab“ — zwei Knöpfe, einer ist gewählt (Vorgabe: lassen)."""
         farbe = ft.Colors.ON_TERTIARY_CONTAINER
         reihe = ft.Row(wrap=True, spacing=8, run_spacing=8)
+        # schmaler als die Vorgabe: So stehen „Planke übernehmen“ und „Plan so lassen“ bei
+        # Handybreite nebeneinander (Web-Foto 16.11.2026); lange Werte brechen weiter um
+        innen = ft.Padding.symmetric(horizontal=14)
 
         def wahlknopf(text: str, an: bool, wert: bool, kennung: str) -> ft.Control:
             def tippen(_e: Any = None) -> None:
@@ -190,13 +193,15 @@ def kursplan_karte(
                     icon=ft.Icons.CHECK,
                     on_click=tippen,
                     data=(kennung, z.id),
-                    style=ft.ButtonStyle(bgcolor=farbe, color=ft.Colors.TERTIARY_CONTAINER),
+                    style=ft.ButtonStyle(
+                        bgcolor=farbe, color=ft.Colors.TERTIARY_CONTAINER, padding=innen
+                    ),
                 )
             return ft.OutlinedButton(
                 text,
                 on_click=tippen,
                 data=(kennung, z.id),
-                style=ft.ButtonStyle(color=farbe, side=ft.BorderSide(1.5, farbe)),
+                style=ft.ButtonStyle(color=farbe, side=ft.BorderSide(1.5, farbe), padding=innen),
             )
 
         def knoepfe() -> None:
@@ -275,7 +280,9 @@ def kursplan_karte(
         sichtbar = [z for z in alle if z.stand != UEBERNOMMEN]
         schon = sum(1 for z in alle if z.stand == UEBERNOMMEN)
         if not sichtbar:
-            # nichts anzubieten, nichts offen: nur der eine Satz
+            # nichts anzubieten, nichts offen: nur der eine Satz. Er sagt nicht, der Plan sei
+            # „auf dem Stand des Kapitels“ — nach „lassen“ (eine Übung aus dem Plan genommen,
+            # ein eigener Wert) ist er das nicht, offen ist trotzdem nichts mehr
             spalte.controls = [
                 ft.Row(
                     spacing=10,
@@ -288,7 +295,7 @@ def kursplan_karte(
                             tight=True,
                             expand=True,
                             controls=[
-                                ft.Text("Dein Plan ist auf dem Stand dieses Kapitels."),
+                                ft.Text("Aus diesem Kapitel ist nichts mehr offen."),
                                 unterzeile(),
                             ],
                         ),

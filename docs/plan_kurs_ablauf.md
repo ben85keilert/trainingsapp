@@ -366,6 +366,8 @@ ist.“
 | 3 | Antworten speichern, Folgen (`zeige`, `baustein`), `zeigen_wenn`; Tabelle `course_answer`; Editor (Liste mit „Wenn …“) = **K1**; im laufenden Kurs nur der eigene Weg (§6 „Zwei Sichten“) | Frage 3: **ja** |
 | 4 | Kursbild lesend **im Kurs-Editor** = **K2** (Knoten-Darsteller aus `ablaufbild` herauslösen) | Frage 5: **ja**; Stufe 3 |
 | 5 | Kursbild zeichnen = **K3**, gemeinsame Graph-Schicht, Kapitel-Auslöser „Tor offen“ | Entscheidung nach Stufe 4 |
+| A1 | **Vorschau „Das kommt noch“** auf der Kursseite: was spätere Kapitel am Plan ändern werden, gerechnet aus ihren Bausteinen — ohne Sperren (§12) | Skizze; Bens Wort |
+| A2 | **Autorenwerkzeug „vom fertigen Plan aus“**: Zielplan im Plan- und Ablauf-Editor bauen, jede Übung, jeden Weg und jede Einstellung einem Kapitel zuordnen („ab Kapitel 2“); der Editor erzeugt daraus die Bausteine (§12) | Skizzen; Bens Wort |
 
 Vor Stufe 1: **T134** (Material, Kurse aus Blöcken am Gerät, `offene_fragen.md` §2) sollte
 durch sein — alles hier baut auf den Blöcken auf, und am Gerät ist sie ungeprüft. (Ben,
@@ -624,13 +626,78 @@ Maßgeblich ist der Code (`core/kursplan.py`, `data/kurse.py`, `tests/test_kursp
   (`core.eigenes_paket.noetige_uebungen`); Dateien an den Planübungen der Vorlage reisen mit und
   bleiben beim Aufräumen (`core.paketdatei.medienlisten`, `data/paketmedien.py`).
 
+**Nachgezogen am 16.11.2026** — Ben zu drei Grenzen der ersten Fassung: „gleichwertige Wege
+müssen gleichwertig sein; Verkettung ist dann nicht gegeben, in der Liste aber machbar“ · „muss
+behoben werden“ (Test) · „muss ebenfalls behoben werden“ (Editor); dazu P212 („Ja“).
+
+- **Gleichwertige Wege:** Führen von einer Planübung mehrere Wege zu den Gewählten desselben
+  Bausteins, geht man im Workout einen davon — die Kette der Liste zwischen den Gewählten
+  entfällt, jede führt dorthin, wohin die letzte von ihnen führt, mit ihrer eigenen Bedingung
+  (`core.kursplan._Lauf._gleichwertig`; nur, wenn in diesem Gang ein Weg übernommen wurde — was
+  die Person sonst gezeichnet hat, bleibt). In der Liste stehen alle und lassen sich abhaken.
+  Wählt die Person nur einen der Wege, bleibt die Kette. So macht es `vorlage_anwenden` für
+  Kapitelpläne seit dem 12.11.
+- **Der Test misst die gewählte Übung:** Ein `test` darf statt `uebung` ein `aus` tragen (die
+  `id` einer Auswahl, auch aus einem früheren Kapitel). Je Übung der Auswahl gibt es einen Wert
+  (`<test>:<übung>`, `core.kursbloecke.wert_schluessel`, `KursRepo.testwerte`); ein Baustein
+  mit `ziel_aus` nimmt den seiner Übung, im Kapitelplan bekommt die Gewählte ihr Ziel aus ihrem
+  eigenen Test. Formatversion 6. Ein Test mit fester `uebung` bleibt, wie er war.
+- **Die offene Wahl bleibt für die Sitzung** (P212): `AppState.kurs_wahl`, je Profil und
+  Kapitel, nur im Speicher; verworfen, sobald sie übernommen ist, bei „Von vorn“, wenn der Kurs
+  gespeichert oder entfernt wird (Stempel aus `updated_at` und dem Erreichen des Kapitels) und
+  mit dem Neustart der App. Gilt auch für Kapitelpläne („Plan anlegen“).
+- **Editor:** Parameter (Knöpfe wie in „Im Plan einstellen“, „wie die Übung“ · „nur abhaken“ ·
+  auswählen), Takt (das Takt-Blatt, über dem Baustein-Blatt) und ein **eigener Timer** je
+  Baustein (der volle Timer-Editor, eingebettet; daneben weiter „keiner“ und die Bibliothek)
+  sind einstellbar. Der Test-Dialog bietet „die gewählte aus ‹Auswahl›“ — im Kursplan-Kurs aus
+  diesem oder einem früheren Kapitel, mit Kapitelplänen nur aus demselben (ein späteres Kapitel
+  kennt die Wahl eines früheren dort nicht; `Kurssicht.auswahlen_fuer_test`, das Werkzeug meldet
+  es als Fehler). „Was wird gemessen“ bietet die Felder, die alle Übungen der Auswahl haben.
+
 **Bekannte Grenzen** (Katalog N171)
 
-- Mehrere Gewählte als gleichwertige Wege: Die Kette zwischen den Gewählten bleibt stehen —
-  ein `plan_weg` setzt Wege, er nimmt keine weg.
 - Hat die Person den Ablauf selbst gezeichnet, ist eine neue Planübung dort unverbunden, bis
   ein `plan_weg` sie anschließt.
-- Der Test misst die Übung, die er nennt — auch wenn die Person in der Auswahl eine andere
-  wählt (Stufe 2 und 3).
-- Die offene Wahl einer Auswahl hält nur die Ansicht: Wer zum Test in die Übung geht und
-  zurückkommt, wählt noch einmal (Katalog P212).
+- Steht zwischen zwei Gewählten eine Übung, die die Person selbst eingefügt hat, bleibt deren
+  Kette stehen (die Gewählten sind dann über sie verbunden).
+- Ein Test mit fester Übung gilt weiter dieser Übung, auch wenn ein Baustein sein Ergebnis an
+  einer anderen Planübung als Ziel setzt — gewollt ist dann `aus`.
+- Ein Test mit `aus` hat **ein** Feld für alle Übungen der Auswahl; hat eine es nicht, bekommt
+  sie keinen Wert und ihr Ziel bleibt offen (der Editor sagt es, das Werkzeug gibt einen Hinweis).
+- Übernommenes gilt als erledigt: Eine Korrektur an einem früheren Kapitel (Paket-Update)
+  erreicht niemanden mehr, der schon weiter ist (§12).
+
+## 12. Wachsen oder bereitliegen? (Ben, 16.11.2026)
+
+Bens Frage: Macht es mehr Sinn, wenn sich der Plan durch den Kurs erst aufbaut — oder wenn er
+vorher existiert und der Kurs ihn editiert bzw. freigibt („Manipulation“ oder „doch eher
+kreationistisch“)? Betrachtet für die Erstellung, die Änderung und den Umgang im Verlauf.
+Ben danach: „Nimm die letzten Überlegungen mit rein.“ — als Richtung aufgenommen; gebaut ist
+davon nichts außer dem, was Stufe 1 schon tut.
+
+**Richtung:** Für die **Teilnehmenden wächst** der Plan (Stufe 1). Für die **Autorin oder den
+Autor** wäre es besser, **vom fertigen Plan auszugehen**. Gesperrte Übungen kommen **nicht**
+in den Plan der Person.
+
+| | Wachsend (Bausteine je Kapitel) | Bereitliegend (fertiger Plan, Kurs schaltet frei) |
+|---|---|---|
+| **Erstellung** | mühsam: Der Zielplan ist nie als Ganzes zu sehen, Verweise werden von Hand gepflegt | leicht: Plan- und Ablauf-Editor gibt es, der Plan lässt sich als Workout ausprobieren |
+| **Änderung durch die Person** | klar im Vorteil: Der Kurs weiß je Planübung, was er zuletzt gesetzt hat, und fragt nur bei Abweichung | der ganze Plan müsste mit dem geänderten abgeglichen werden; bei gezeichnetem Ablauf gewinnt heute die eigene Fassung — Updates kämen nicht an |
+| **Änderung durch den Kurs** | jede Änderung bleibt in ihrem Kapitel; aber Übernommenes gilt als erledigt | ein Abgleich für alle auf einmal, mit denselben Konflikten wie bei Paketplänen |
+| **Im Verlauf** | es gibt nichts, bevor es dran ist — nichts durchzusetzen; „Trotzdem freischalten“ am Kapitel gibt es schon | braucht einen Sperrzustand je Planübung, der überall gelten muss (Heute, Liste, Workout, Plan-Editor, Kopieren, Export, Bedingung „Tage“) — jede vergessene Stelle ist ein Schlupfloch |
+
+**Was daraus folgt**
+
+- **Keine Sperren im Plan.** Freischalten hat seinen Platz **innerhalb** eines Workouts
+  (Pflichtwege, Tore) und am Kapitel („Trotzdem freischalten“), nicht zwischen den Kapiteln im
+  Plan der Person — das passt zu Bens Linie der Eigenverantwortung.
+- **Auswahl und Test bleiben Bausteine** — die gewählte Übung und ihr Ziel gibt es vorher nicht.
+- **A2, das Autorenwerkzeug** (§7): Man baut den Zielplan im Plan- und Ablauf-Editor und ordnet
+  jede Übung, jeden Weg und jede Einstellung einem Kapitel zu; der Editor erzeugt die Bausteine.
+  So verbindet sich beides: bauen wie ein fertiger Plan, ausliefern als wachsender.
+- **A1, die Vorschau „Das kommt noch“** (§7): Der eine echte Vorteil des fertigen Plans — man
+  sieht, was kommt — geht ohne Sperren: gerechnet aus den Bausteinen der späteren Kapitel
+  (`core.kursplan.aenderungen` auf dem Plan, wie er nach den Kapiteln davor wäre — der Editor
+  rechnet seine Vorschau schon so, `core.kursbau.Kurssicht.vorschau`).
+- **Offen:** wie eine Korrektur an einem schon übernommenen Kapitel die Person erreicht (heute
+  gar nicht) — Katalog P213.

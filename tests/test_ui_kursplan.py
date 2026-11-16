@@ -38,10 +38,11 @@ from trainingsapp.core.kurse import (  # noqa: E402
 from trainingsapp.core.models import Exercise, Session  # noqa: E402
 from trainingsapp.core.result_spec import ResultSpec, vorrat_feld  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
-from trainingsapp.ui.views.kurse import kapitel_view, kurs_view  # noqa: E402
+from trainingsapp.ui.views.kurse import kapitel_view, kurs_view, kurse_liste  # noqa: E402
 
 UEBERNEHMEN = "kursplan_uebernehmen"
-STAND = "Dein Plan ist auf dem Stand dieses Kapitels."
+#: Der eine Satz, wenn nichts mehr anzubieten und nichts offen ist — auch nach „lassen“ wahr
+STAND = "Aus diesem Kapitel ist nichts mehr offen."
 
 
 @pytest.fixture
@@ -114,9 +115,19 @@ def _uebungen(state: AppState) -> dict[str, Exercise]:
     return uebungen
 
 
-def _kurs(state: AppState, kursplan: Kursplan | None = None) -> tuple[Kurs, dict[str, Exercise]]:
-    """Bens Beispiel als Kurs mit Kursplan — gespeichert und wieder geladen."""
+def _kurs(
+    state: AppState, kursplan: Kursplan | None = None, *, test_aus: bool = False
+) -> tuple[Kurs, dict[str, Exercise]]:
+    """Bens Beispiel als Kurs mit Kursplan — gespeichert und wieder geladen. ``test_aus``: Der
+    Test in Kapitel 2 misst nicht den Käfer, sondern **die gewählte** Übung (``aus``), und
+    Kapitel 3 testet sie noch einmal (die Auswahl steht dann in einem früheren Kapitel)."""
     ue = _uebungen(state)
+    test = (
+        Block(TEST, id="test", aus="wahl", feld="reps")
+        if test_aus
+        else Block(TEST, id="test", uebung=ue["Käfer"].id, feld="reps")
+    )
+    nochmal = [Block(TEST, id="test3", aus="wahl", feld="reps")] if test_aus else []
     kurs = Kurs(
         name="Rumpf-Kurs",
         kursplan=kursplan or Kursplan("Rumpf", [0, 2, 4]),
@@ -137,7 +148,7 @@ def _kurs(state: AppState, kursplan: Kursplan | None = None) -> tuple[Kurs, dict
                         uebungen=[ue[n].id for n in ("Seitstütz", "Käfer", "Brücke")],
                         anzahl=1,
                     ),
-                    Block(TEST, id="test", uebung=ue["Käfer"].id, feld="reps"),
+                    test,
                     Block(PLAN_UEBUNG, id="dazu", aus="wahl", hinter="a", ziel_aus="test"),
                     Block(
                         PLAN_WEG,
@@ -151,7 +162,10 @@ def _kurs(state: AppState, kursplan: Kursplan | None = None) -> tuple[Kurs, dict
             ),
             Kapitel(
                 titel="Steigern",
-                bloecke=[Block(PLAN_EINSTELLEN, id="mehr", an="a", ziel={"hold": [75]})],
+                bloecke=[
+                    Block(PLAN_EINSTELLEN, id="mehr", an="a", ziel={"hold": [75]}),
+                    *nochmal,
+                ],
             ),
         ],
     )
@@ -171,6 +185,11 @@ def _test_eintragen(state: AppState, uebung: Exercise, werte: dict) -> None:
 def _meldung(page) -> str:
     assert isinstance(page.dialoge[-1], ft.SnackBar)
     return str(page.dialoge[-1].content.value)
+
+
+def _offene_wahl(state: AppState) -> dict[tuple[str, str], dict[str, list[str]]]:
+    """Was die Sitzung an offener Wahl hält: (Profil, Kapitel) → {Auswahl-Block: Übungen}."""
+    return {schluessel: wahl for schluessel, (_stempel, wahl) in state.kurs_wahl.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -232,12 +251,20 @@ def test_kapitel_2_ohne_wahl_offen_mit_wahl_zeilen_und_nur_gewaehltes_gilt(page,
     assert "Brücke kommt dazu" in _texte(ansicht) and "Käfer kommt dazu" not in _texte(ansicht)
     assert state.kurse.kursplan(kurs, profil).items[-1].exercise_id == ue["Planke"].id
 
-    # Der Test: ein gewöhnlicher Eintrag. Die neue Ansicht hat die Wahl nicht mehr — sie
-    # hält nur, bis übernommen ist
+    # Der Test: ein gewöhnlicher Eintrag. Wer dafür das Kapitel verlässt und zurückkommt —
+    # die Ansicht wird neu gebaut, wie nach jeder Route —, findet Wahl und Zeilen wieder
+    # (Ben, 16.11.2026, P212): Die Sitzung hält die offene Wahl, bis sie übernommen ist
+    assert _offene_wahl(state) == {(profil, zwei.id): {"wahl": [bruecke.id]}}
     _test_eintragen(state, kaefer, {"reps": [24, 30]})
     ansicht = _kapitel(page, state, kurs, zwei)
-    assert _daten(ansicht, ("wahl", "wahl", bruecke.id)).selected is False
-    _daten(ansicht, ("wahl", "wahl", kaefer.id)).on_select()
+    chip = _daten(ansicht, ("wahl", "wahl", bruecke.id))
+    assert chip.selected is True and chip.disabled is False  # gewählt und weiter änderbar
+    assert _daten(ansicht, ("wahl", "wahl", kaefer.id)).selected is False
+    assert "Brücke kommt dazu" in _texte(ansicht)  # die Karte zeigt sofort die Zeilen dazu
+    assert "Deine Auswahl kommt dazu" not in _texte(ansicht)
+    assert _hat(ansicht, UEBERNEHMEN)
+    _daten(ansicht, ("wahl", "wahl", kaefer.id)).on_select()  # umentscheiden geht weiter
+    assert _offene_wahl(state) == {(profil, zwei.id): {"wahl": [kaefer.id]}}
     marke = f"dazu:{kaefer.id}"
     texte = _texte(ansicht)
     assert "Ziel für Käfer: 30 Wiederholungen" in texte and "aus deinem Test" in texte
@@ -266,6 +293,7 @@ def test_kapitel_2_ohne_wahl_offen_mit_wahl_zeilen_und_nur_gewaehltes_gilt(page,
         (kaefer.id, marke, {"reps": [30]}),
     ]
     assert not plan.ablauf.an  # der Weg blieb weg: weiter eine Liste
+    assert _offene_wahl(state) == {}  # im Kursplan fest — keine offene Wahl mehr
 
     # Danach: die Wahl ist fest, zwei sind übernommen, der Weg bleibt angeboten
     ansicht = _kapitel(page, state, kurs, zwei)
@@ -334,6 +362,58 @@ def test_dein_plan_weicht_ab_uebernehmen_setzt_den_kurswert(page, state) -> None
     assert state.plaene.item_laden(planke).target == {"hold": [75]}
     assert _meldung(page) == "Plan geändert — er steht auf „Heute“"
     assert STAND in _texte(_kapitel(page, state, kurs, drei))
+
+
+def test_aus_dem_plan_genommen_fragt_und_das_ziel_haengt_an_der_antwort(page, state) -> None:
+    """Die Person hat eine Übung, die der Kurs brachte, aus dem Plan genommen: Das Kapitel
+    fragt („Planke übernehmen“ · „Plan so lassen“, Vorgabe lassen). Das Ziel der Übung gilt
+    nur mit ihr — solange „lassen“ gewählt ist, ist seine Zeile aus."""
+    kurs, _ue = _kurs(state)
+    eins = kurs.kapitel[0]
+    profil = state.profil.id
+    state.kurse.starten(kurs, profil)
+    plan = state.kurse.plan_uebernehmen(kurs, eins, profil, {"a", "a#ziel"})
+    state.plaene.uebung_entfernen(plan.items[0].id)  # im Plan-Editor entfernt
+
+    ansicht = _kapitel(page, state, kurs, eins)
+    texte = _texte(ansicht)
+    assert "Dein Plan weicht ab" in texte
+    assert (
+        "Planke: Du hast die Übung aus deinem Plan genommen. Der Kurs bringt sie wieder mit."
+        in texte
+    )
+    trotz = _daten(ansicht, ("kursplan_trotz", "a"))
+    lassen = _daten(ansicht, ("kursplan_lassen", "a"))
+    assert (trotz.content, lassen.content) == ("Planke übernehmen", "Plan so lassen")
+    assert lassen.icon == ft.Icons.CHECK and trotz.icon is None
+    ziel = _daten(ansicht, ("kursplan_zeile", "a#ziel"))
+    assert ziel.value is False and ziel.disabled is True
+    trotz.on_click()
+    assert ziel.value is True and ziel.disabled is False
+    _daten(ansicht, ("kursplan_lassen", "a")).on_click()
+    assert ziel.value is False and ziel.disabled is True
+
+    # „Plan so lassen“: nichts kommt zurück, und gefragt wird nicht wieder
+    _daten(ansicht, UEBERNEHMEN).on_click()
+    assert state.kurse.kursplan(kurs, profil).items == []
+    assert _meldung(page) == "Dein Plan bleibt, wie er ist"
+    ansicht = _kapitel(page, state, kurs, eins)
+    assert "Dein Plan weicht ab" not in _texte(ansicht) and not _hat(ansicht, UEBERNEHMEN)
+
+
+def test_aus_dem_plan_genommen_uebernehmen_bringt_die_uebung_mit_ziel_zurueck(page, state) -> None:
+    kurs, ue = _kurs(state)
+    eins = kurs.kapitel[0]
+    profil = state.profil.id
+    state.kurse.starten(kurs, profil)
+    plan = state.kurse.plan_uebernehmen(kurs, eins, profil, {"a", "a#ziel"})
+    state.plaene.uebung_entfernen(plan.items[0].id)
+    ansicht = _kapitel(page, state, kurs, eins)
+    _daten(ansicht, ("kursplan_trotz", "a")).on_click()
+    _daten(ansicht, UEBERNEHMEN).on_click()
+    wieder = state.kurse.kursplan(kurs, profil)
+    assert [(i.exercise_id, i.target) for i in wieder.items] == [(ue["Planke"].id, {"hold": [60]})]
+    assert _meldung(page) == "Plan geändert — er steht auf „Heute“"
 
 
 def test_anker_fehlt_und_entfaellt_sind_hinweiszeilen_ohne_haken(page, state) -> None:
@@ -498,6 +578,198 @@ def test_von_vorn_frueherer_durchlauf_und_wie_beim_letzten_mal(page, state) -> N
     # Die Kursseite zeigt den neuen Plan und darunter den früheren
     ansicht = kurs_view(page, state, kurs)
     assert _hat(ansicht, ("kursplan", neu.id)) and _hat(ansicht, ("frueherer_plan", alt.id))
+
+
+def _bis_kapitel_2(state: AppState, kurs: Kurs) -> None:
+    """Für das aktive Profil: Kapitel 1 übernommen und abgeschlossen, Kapitel 2 ist dran."""
+    eins = kurs.kapitel[0]
+    profil = state.profil.id
+    state.kurse.starten(kurs, profil)
+    state.kurse.plan_uebernehmen(kurs, eins, profil, {"a", "a#ziel"})
+    state.kurse.kapitel_abschliessen(kurs, eins, profil)
+
+
+def _test_knoepfe(ansicht) -> list[tuple]:
+    """Die „Zur Übung“-Knöpfe aller Testkarten — ihre Kennungen."""
+    return [
+        x.data
+        for x in _alle(ansicht)
+        if isinstance(getattr(x, "data", None), tuple) and x.data[0] == "test_oeffnen"
+    ]
+
+
+def test_test_misst_die_gewaehlte_und_die_karte_folgt_der_wahl(page, state) -> None:
+    """Ben, 16.11.2026: Der Test gilt der Übung, die die Person gewählt hat (``aus``) — nicht
+    einer, die der Kurs fest nennt. Ohne Wahl nur die Aufforderung; mit Wahl Name, Wert und
+    „Zur Übung“ **der Gewählten**; wechselt die Wahl, folgt die Karte, und das Ziel in der
+    Sammelkarte kommt aus ihrem Wert."""
+    kurs, ue = _kurs(state, test_aus=True)
+    zwei = kurs.kapitel[1]
+    profil = state.profil.id
+    kaefer, bruecke = ue["Käfer"], ue["Brücke"]
+    _bis_kapitel_2(state, kurs)
+
+    # Ohne Wahl: die Aufforderung und der Hinweis — kein Knopf, es gibt noch keine Übung
+    ansicht = _kapitel(page, state, kurs, zwei)
+    texte = _texte(ansicht)
+    assert "Deine Auswahl: was schaffst du?" in texte
+    assert "Triff zuerst deine Auswahl — der Test gilt der Übung, die du wählst." in texte
+    assert _hat(ansicht, ("test_wahl_fehlt", "test")) and _test_knoepfe(ansicht) == []
+
+    # Käfer gewählt: Die Karte nennt ihn, „Zur Übung“ führt zu ihm — nicht zu einer anderen
+    _daten(ansicht, ("wahl", "wahl", kaefer.id)).on_select()
+    texte = _texte(ansicht)
+    assert "Käfer: was schaffst du?" in texte
+    assert "Noch kein Eintrag bei „Käfer“, seit du dieses Kapitel öffnest." in texte
+    assert not _hat(ansicht, ("test_wahl_fehlt", "test"))
+    assert _test_knoepfe(ansicht) == [("test_oeffnen", "test", kaefer.id)]
+    knopf = _daten(ansicht, ("test_oeffnen", "test", kaefer.id))
+    assert knopf.content == "Zur Übung"
+    asyncio.run(knopf.on_click())
+    assert page.route == f"/uebung/{kaefer.id}"
+
+    # Eingetragen und zurück: Die Wahl steht noch (P212), der Wert der Gewählten erscheint,
+    # und die Sammelkarte setzt ihr Ziel daraus
+    _test_eintragen(state, kaefer, {"reps": [24, 30]})
+    ansicht = _kapitel(page, state, kurs, zwei)
+    assert _daten(ansicht, ("testwert", "test", kaefer.id)).value == "30 Wdh."
+    assert _daten(ansicht, ("test_oeffnen", "test", kaefer.id)).content == "Nochmal"
+    assert "Ziel für Käfer: 30 Wiederholungen" in _texte(ansicht)
+
+    # Wahl wechseln: Die Karte folgt — die Brücke hat noch keinen Eintrag, der Wert des
+    # Käfers zählt für sie nicht
+    _daten(ansicht, ("wahl", "wahl", bruecke.id)).on_select()
+    texte = _texte(ansicht)
+    assert "Brücke: was schaffst du?" in texte and "Käfer: was schaffst du?" not in texte
+    assert "Noch kein Eintrag bei „Brücke“, seit du dieses Kapitel öffnest." in texte
+    assert not _hat(ansicht, ("testwert", "test", kaefer.id))
+    assert _test_knoepfe(ansicht) == [("test_oeffnen", "test", bruecke.id)]
+    assert "Ziel für Brücke" in texte and "aus deinem Test — mach ihn zuerst" in texte
+    assert "Ziel für Käfer: 30 Wiederholungen" not in texte
+
+    _test_eintragen(state, bruecke, {"reps": [12]})
+    ansicht = _kapitel(page, state, kurs, zwei)
+    assert _daten(ansicht, ("testwert", "test", bruecke.id)).value == "12 Wdh."
+    assert "Ziel für Brücke: 12 Wiederholungen" in _texte(ansicht)
+    _daten(ansicht, UEBERNEHMEN).on_click()
+    plan = state.kurse.kursplan(kurs, profil)
+    assert [(i.exercise_id, i.target) for i in plan.items][1] == (bruecke.id, {"reps": [12]})
+    # Fest im Kursplan: Die Testkarte nennt weiter die Gewählte
+    ansicht = _kapitel(page, state, kurs, zwei)
+    assert _daten(ansicht, ("testwert", "test", bruecke.id)).value == "12 Wdh."
+    assert _test_knoepfe(ansicht) == [("test_oeffnen", "test", bruecke.id)]
+
+
+def test_test_der_gewaehlten_mit_auswahl_im_frueheren_kapitel(page, state) -> None:
+    """Steht die Auswahl in einem früheren Kapitel, gilt für den Test, was dort in den
+    Kursplan übernommen ist — bis dahin sagt die Karte, wo zu wählen ist."""
+    kurs, ue = _kurs(state, test_aus=True)
+    _eins, zwei, drei = kurs.kapitel
+    profil = state.profil.id
+    bruecke = ue["Brücke"]
+    _bis_kapitel_2(state, kurs)
+    state.kurse.kapitel_abschliessen(kurs, zwei, profil, uebersprungen=True)
+
+    # Kapitel 2 übersprungen, nichts gewählt: Kapitel 3 kann die Übung nicht nennen
+    ansicht = _kapitel(page, state, kurs, drei)
+    hinweis = _daten(ansicht, ("test_wahl_fehlt", "test3"))
+    assert hinweis.value == (
+        "Der Test gilt der Übung, die du in einem früheren Kapitel wählst — "
+        "übernimm deine Wahl dort zuerst in deinen Kursplan."
+    )
+    assert _test_knoepfe(ansicht) == []
+
+    # In Kapitel 2 gewählt und übernommen: Kapitel 3 nennt die Gewählte
+    ansicht = _kapitel(page, state, kurs, zwei)
+    _daten(ansicht, ("wahl", "wahl", bruecke.id)).on_select()
+    _daten(ansicht, UEBERNEHMEN).on_click()
+    ansicht = _kapitel(page, state, kurs, drei)
+    assert "Brücke: was schaffst du?" in _texte(ansicht)
+    assert not _hat(ansicht, ("test_wahl_fehlt", "test3"))
+    knopf = _daten(ansicht, ("test_oeffnen", "test3", bruecke.id))
+    asyncio.run(knopf.on_click())
+    assert page.route == f"/uebung/{bruecke.id}"
+    _test_eintragen(state, bruecke, {"reps": [15]})
+    ansicht = _kapitel(page, state, kurs, drei)
+    assert _daten(ansicht, ("testwert", "test3", bruecke.id)).value == "15 Wdh."
+
+
+def test_offene_wahl_gilt_je_profil_und_von_vorn_verwirft_sie(page, state) -> None:
+    """P212: Die offene Wahl gehört dem Profil, das sie traf — ein zweites sieht sie nicht,
+    und wer zurück wechselt, findet seine wieder. „Von vorn“ verwirft sie: Im neuen Durchlauf
+    ist nichts vorgewählt. Gehalten wird nur im Speicher."""
+    kurs, ue = _kurs(state)
+    zwei = kurs.kapitel[1]
+    erstes = state.profil.id
+    kaefer, bruecke = ue["Käfer"], ue["Brücke"]
+    _bis_kapitel_2(state, kurs)
+    ansicht = _kapitel(page, state, kurs, zwei)
+    _daten(ansicht, ("wahl", "wahl", kaefer.id)).on_select()
+    _daten(ansicht, ("wahl", "wahl", kaefer.id)).on_select()  # wieder abgewählt: kein Eintrag
+    assert _offene_wahl(state) == {}
+    _daten(ansicht, ("wahl", "wahl", kaefer.id)).on_select()
+    # nichts davon steht in der Datenbank: Ohne die Sitzung ist die Wahl nicht getroffen
+    assert {z.stand for z in state.kurse.plan_aenderungen(kurs, zwei, erstes)} == {"offen"}
+
+    # Ein zweites Profil sieht sie nicht — und hält seine eigene
+    zweites = state.profil_anlegen("Zweite").id
+    _bis_kapitel_2(state, kurs)
+    ansicht = _kapitel(page, state, kurs, zwei)
+    assert _daten(ansicht, ("wahl", "wahl", kaefer.id)).selected is False
+    assert "Deine Auswahl kommt dazu" in _texte(ansicht)
+    _daten(ansicht, ("wahl", "wahl", bruecke.id)).on_select()
+    assert _offene_wahl(state) == {
+        (erstes, zwei.id): {"wahl": [kaefer.id]},
+        (zweites, zwei.id): {"wahl": [bruecke.id]},
+    }
+    state.profil_wechseln(erstes)
+    ansicht = _kapitel(page, state, kurs, zwei)
+    assert _daten(ansicht, ("wahl", "wahl", kaefer.id)).selected is True
+    assert _daten(ansicht, ("wahl", "wahl", bruecke.id)).selected is False
+    assert "Käfer kommt dazu" in _texte(ansicht)
+
+    # „Von vorn“ im Menü der Kursseite verwirft die Wahl dieses Profils
+    seite = kurs_view(page, state, kurs)
+    menue = next(a for a in seite.appbar.actions if isinstance(a, ft.PopupMenuButton))
+    next(i for i in menue.items if i.content == "Von vorn beginnen").on_click()
+    next(x for x in page.dialoge[-1].actions if isinstance(x, ft.FilledButton)).on_click()
+    assert _offene_wahl(state) == {(zweites, zwei.id): {"wahl": [bruecke.id]}}
+    _bis_kapitel_2(state, kurs)
+    ansicht = _kapitel(page, state, kurs, zwei)
+    assert _daten(ansicht, ("wahl", "wahl", kaefer.id)).selected is False
+    assert "Deine Auswahl kommt dazu" in _texte(ansicht)
+
+    # Beginnt der Kurs nicht über das Menü von vorn, gilt die alte Wahl trotzdem nicht: Das
+    # Kapitel wird neu erreicht, der Stempel passt nicht mehr
+    state.profil_wechseln(zweites)
+    state.kurse.zuruecksetzen(kurs, zweites)
+    _bis_kapitel_2(state, kurs)
+    ansicht = _kapitel(page, state, kurs, zwei)
+    assert _daten(ansicht, ("wahl", "wahl", bruecke.id)).selected is False
+    assert _offene_wahl(state) == {}
+
+
+def test_offene_wahl_ist_weg_wenn_der_kurs_entfernt_wird(page, state) -> None:
+    """P212: Mit dem Kurs geht seine offene Wahl — die Kursliste räumt auf; und käme der
+    Kurs wieder, bevor sie das tat, gälte die alte Wahl nicht mehr (Stempel)."""
+    kurs, ue = _kurs(state)
+    zwei = kurs.kapitel[1]
+    kaefer = ue["Käfer"]
+    _bis_kapitel_2(state, kurs)
+    _daten(_kapitel(page, state, kurs, zwei), ("wahl", "wahl", kaefer.id)).on_select()
+    assert _offene_wahl(state) == {(state.profil.id, zwei.id): {"wahl": [kaefer.id]}}
+    state.kurse.entfernen(kurs)
+    state.kurse.wiederherstellen(kurs.id)
+    wieder = state.kurse.laden(kurs.id)
+    ansicht = _kapitel(page, state, wieder, wieder.kapitel[1])
+    assert _daten(ansicht, ("wahl", "wahl", kaefer.id)).selected is False
+    assert _offene_wahl(state) == {}
+
+    _daten(ansicht, ("wahl", "wahl", kaefer.id)).on_select()
+    assert _offene_wahl(state)
+    state.kurse.entfernen(wieder)
+    kurse_liste(page, state)
+    assert _offene_wahl(state) == {}
 
 
 def test_kurs_ohne_kursplan_sieht_aus_wie_vorher(page, state) -> None:

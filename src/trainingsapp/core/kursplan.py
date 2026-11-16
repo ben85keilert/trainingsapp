@@ -58,6 +58,7 @@ from .kursbloecke import (
     WEICH,
     ZU_ENDE,
     Block,
+    wert_schluessel,
     ziel_aus_test,
 )
 from .kurse import Kapitel, Kurs, Kursplan, PlanVorlage, plan_aus_vorlage
@@ -743,7 +744,8 @@ class _Lauf:
         „jüngste Eintrag“ des Tests ändert sich mit jedem Training."""
         name = self._name(uebung)
         test = self.tests.get(b.ziel_aus)
-        wert = self.werte.get(b.ziel_aus)
+        # ein Test, der „die gewählte“ misst, hat je Übung einen Wert — der dieser Planübung zählt
+        wert = self.werte.get(wert_schluessel(test, uebung)) if test is not None else None
         if item is not None and zid in self._erledigt(marke):
             nur = (test.feld,) if test is not None else ()
             text = self._ziel_text(uebung, item.target or {}, nur)
@@ -895,10 +897,48 @@ class _Lauf:
             )
             return
         paare = [(v, z) for v in von for z in zu]
+        gesetzt = False
         for v, z in paare:
             ziel_marke = z.kurs_marke if z is not None else ZU_ENDE
             eigene = zid if len(paare) == 1 else f"{zid}:{v.kurs_marke}>{ziel_marke}"
-            self._ein_weg(b, eigene, v, z, ziel_marke)
+            gesetzt = self._ein_weg(b, eigene, v, z, ziel_marke) or gesetzt
+        if gesetzt:  # nie von selbst: nur, wenn in diesem Gang ein Weg übernommen wurde
+            for v in von:
+                self._gleichwertig(v, [z for z in zu if z is not None])
+
+    def _gleichwertig(self, v: PlanItem, gruppe: Sequence[PlanItem]) -> None:
+        """Führen von ``v`` mehrere Wege zu Planübungen desselben Bausteins (den Gewählten einer
+        Auswahl), sind sie **gleichwertig** — man geht einen davon (Ben, 16.11.2026:
+        „gleichwertige Wege müssen gleichwertig sein; Verkettung ist dann nicht gegeben, in der
+        Liste aber machbar“). Die Kette der Liste zwischen ihnen entfällt: Jede führt dorthin,
+        wohin die letzte von ihnen führt, mit ihrer eigenen Bedingung. In der Liste stehen
+        weiter alle und lassen sich abhaken."""
+        ablauf = self.plan.ablauf
+        ziele = sorted(
+            (z for z in gruppe if any(k.nach == z.id for k in ablauf.von(v.id))),
+            key=lambda i: i.order,
+        )
+        if not ablauf.an or len(ziele) < 2:
+            return
+        ids = {z.id for z in ziele}
+        folge = {a.id: b.id for a, b in zip(self.plan.items, self.plan.items[1:], strict=False)}
+        letzte = ziele[-1]
+        hinaus = [k for k in ablauf.von(letzte.id) if not k.schleife and k.nach not in ids]
+        for z in ziele[:-1]:
+            for kante in ablauf.von(z.id):
+                # nur die Kette der Liste — was die Person sonst gezeichnet hat, bleibt
+                if kante.nach not in ids or kante.nach != folge.get(z.id):
+                    continue
+                ablauf = ablauf.ohne_kante(kante)
+                wohin = hinaus[0].nach if hinaus else ab.ENDE
+                schon = any(k.nach == wohin for k in ablauf.von(z.id))
+                schlicht = kante == ab.Kante(z.id, kante.nach)
+                if not schon and (hinaus or not schlicht):
+                    # ohne Fortsetzung endet das Workout nach ihr — ihre Bedingung liegt dann,
+                    # wie bei der letzten Übung einer Kette, auf dem Weg zum Ende
+                    ablauf = ablauf.mit_kante(replace(kante, nach=wohin))
+        self.plan.ablauf = ablauf
+        self.folgt = ab.folgt_der_liste(ablauf, self._paare())
 
     def _ablauf_an(self) -> ab.Ablauf:
         """Der Ablauf, wie er als Workout gilt: die eigene Zeichnung — sonst die Kette der
@@ -914,7 +954,9 @@ class _Lauf:
 
     def _ein_weg(
         self, b: Block, zid: str, v: PlanItem, z: PlanItem | None, ziel_marke: str
-    ) -> None:
+    ) -> bool:
+        """Eine Zeile für den Weg von ``v`` nach ``z`` — wahr, wenn er in diesem Gang gesetzt
+        wurde."""
         nach = z.id if z is not None else ab.ENDE
         neu = ab.Kante.aus_dict({**b.kante, "von": v.id, "nach": nach})
         assert neu is not None  # ``von`` und ``nach`` stehen da
@@ -926,7 +968,7 @@ class _Lauf:
         # der erste macht sie zum Workout
         if zid in self._erledigt(v.kurs_marke) or (self.plan.ablauf.an and neu in vorhanden):
             self._zeile(Aenderung(zid, b.id, WEG, titel, unter, UEBERNOMMEN))
-            return
+            return False
         alt = vorhanden[0] if vorhanden else None
         kette = self.folgt or not (self.plan.ablauf.an or self.plan.ablauf.kanten)
         vom_kurs = self.stand.get(v.kurs_marke, {}).get("wege", {})
@@ -950,7 +992,7 @@ class _Lauf:
             zeile = Aenderung(zid, b.id, WEG, abweichung, unter, WEICHT_AB, eigen, kurs)
         if not self._zeile(zeile):
             self._gelassen(zeile, v.kurs_marke)
-            return
+            return False
         ablauf = ablauf.kante_ersetzen(alt, neu) if alt is not None else ablauf.mit_kante(neu)
         self.plan.ablauf = ablauf
         self.plan.workout = True
@@ -961,6 +1003,7 @@ class _Lauf:
             v.bedingung = ab.bedingung_aus_kante(raus[0], v.bedingung)
         self.folgt = ab.folgt_der_liste(self.plan.ablauf, self._paare())
         self._merken(v.kurs_marke, zid).setdefault("wege", {})[ziel_marke] = _kante_dict(neu)
+        return True
 
     def _weg_titel(self, v: PlanItem, z: PlanItem | None, kante: ab.Kante) -> str:
         wohin = f"zu {self._name(z.exercise_id)}" if z is not None else "zum Ende"

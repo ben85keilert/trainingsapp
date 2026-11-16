@@ -110,6 +110,12 @@ def kurse_liste(page: ft.Page, state: AppState) -> ft.Control:
     """Alle Kurse mit ihrem Stand — antippen öffnet den Kurs."""
     kurse = state.kurse.alle()
     staende = state.kurse.alle_staende(state.profil.id)
+    # Offene Wahlen (P212) zu Kapiteln, die es hier nicht mehr gibt — der Kurs wurde entfernt
+    # oder sein Paket abgeschaltet: verwerfen, für alle Profile
+    kapitel_da = {kapitel.id for kurs in kurse for kapitel in kurs.kapitel}
+    state.kurs_wahl_verwerfen(
+        {kapitel_id for _profil, kapitel_id in state.kurs_wahl} - kapitel_da, alle_profile=True
+    )
 
     def zeile(kurs: Kurs) -> ft.Control:
         stand = fortschritt_text(kurs, staende.get(kurs.id, {}))
@@ -291,6 +297,8 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
     def zuruecksetzen_fragen() -> None:
         def ausfuehren() -> None:
             state.kurse.zuruecksetzen(kurs, state.profil.id)
+            # im neuen Durchlauf ist nichts vorgewählt (P212)
+            state.kurs_wahl_verwerfen(k.id for k in kurs.kapitel)
             nachher.danach(state.neu_zeichnen)
             page.pop_dialog()
             melden(f"„{kurs.name}“ beginnt von vorn")
@@ -514,8 +522,14 @@ def kapitel_view(
 
     In einem Kurs mit Kursplan (`Kurs.kursplan`) steht unter den Blöcken die Sammelkarte „Das
     ändert sich an deinem Plan“, sobald das Kapitel erreicht ist — auch in einem fertigen
-    Kapitel: Was man dort mit „Später“ liegen ließ, lässt sich noch übernehmen. Die Wahl einer
-    Auswahl hält die Ansicht, bis sie übernommen ist; ändert sie sich, rechnet die Karte neu.
+    Kapitel: Was man dort mit „Später“ liegen ließ, lässt sich noch übernehmen. Ändert sich
+    die Wahl einer Auswahl, rechnet die Karte neu.
+
+    Die **offene Wahl** einer Auswahl — getroffen, aber noch nicht übernommen bzw. noch kein
+    „Plan anlegen“ — hält die Sitzung (`AppState.kurs_wahl`, Ben 16.11.2026, P212): Sie
+    überlebt das Verlassen des Kapitels (zum Test in die Übung und zurück), nicht den Neustart
+    der App. Verworfen wird sie mit „Von vorn“ und wenn der Kurs sich ändert oder entfernt
+    wird; ein anderes Profil sieht sie nie.
     """
     from trainingsapp.ui.views.uebungen import heute_trainieren  # Kreis: uebungen → kurse
 
@@ -621,29 +635,53 @@ def kapitel_view(
             else {}
         )
 
+        # Die offene Wahl einer Auswahl bleibt für die Sitzung (Ben, 16.11.2026, P212): Wer
+        # zum Test in die Übung geht und zurückkommt, muss nicht neu wählen. Der Stempel
+        # sagt, wofür sie gilt — dieser Stand des Kurses, dieser Durchlauf: Nach „Von vorn“
+        # (das Kapitel wird neu erreicht) und nach jedem Speichern, Entfernen oder
+        # Wiederkommen des Kurses passt er nicht mehr, und die Wahl ist verworfen.
+        stempel = (kurs.updated_at, stand_hier.erreicht) if stand_hier is not None else None
+        vorwahl = state.kurs_wahl_lesen(kapitel.id, stempel) if stempel is not None else {}
+        sammelkarte: KursplanKarte | None = None
+
+        def wahl_halten(wahl: Mapping[str, Sequence[str]]) -> None:
+            if stempel is not None:
+                state.kurs_wahl_merken(kapitel.id, stempel, wahl)
+
+        def aenderungen() -> list[Aenderung]:
+            return state.kurse.plan_aenderungen(kurs, kapitel, profil, gezeichnet.wahl)
+
+        def wahl_geaendert() -> None:
+            wahl_halten(gezeichnet.wahl)
+            if sammelkarte is not None:  # Kursplan-Kurs: die Zeilen hängen an der Wahl
+                sammelkarte.zeigen(aenderungen())
+
         def plan_anlegen(wahl: Mapping[str, Sequence[str]]) -> None:
             state.kurse.plaene_anlegen(kapitel, profil, werte, wahl)
+            if not baut_plan:  # die Wahl steht im Kapitelplan — offen ist nichts mehr
+                state.kurs_wahl_verwerfen([kapitel.id])
             melden("Plan angelegt — er steht auf „Heute“")
             state.neu_zeichnen()
 
         if not baut_plan:
-            bloecke.extend(
-                kapitel_bloecke(
-                    page,
-                    state,
-                    kapitel.bloecke,
-                    katalog=katalog,
-                    werte=werte,
-                    angelegt=angelegt,
-                    offen=s in (AKTUELL, OFFEN),
-                    browser=browser,
-                    text_bauen=markdown,
-                    zur_uebung=lambda uid: _oeffner(page, f"/uebung/{uid}"),
-                    anlegen=plan_anlegen,
-                    # Kurs von vorn: was beim letzten Mal gewählt war, als Vorbelegung
-                    letzte_wahl={} if angelegt else state.kurse.letzte_wahl(kapitel, profil),
-                ).controls
+            gezeichnet = kapitel_bloecke(
+                page,
+                state,
+                kapitel.bloecke,
+                katalog=katalog,
+                werte=werte,
+                angelegt=angelegt,
+                offen=s in (AKTUELL, OFFEN),
+                browser=browser,
+                text_bauen=markdown,
+                zur_uebung=lambda uid: _oeffner(page, f"/uebung/{uid}"),
+                anlegen=plan_anlegen,
+                # Kurs von vorn: was beim letzten Mal gewählt war, als Vorbelegung
+                letzte_wahl={} if angelegt else state.kurse.letzte_wahl(kapitel, profil),
+                bei_wahl=wahl_geaendert,
+                vorwahl=vorwahl,
             )
+            bloecke.extend(gezeichnet.controls)
         else:
             # Kurs mit Kursplan (Ben, 16.11.2026, `docs/plan_kurs_ablauf.md` §11.5): Test und
             # Auswahl liefern Wert und Wahl — was daraus am Plan wird, steht in der Sammelkarte
@@ -651,18 +689,18 @@ def kapitel_view(
             # stehen als ihr Baustein, darum zählen die Blöcke des ganzen Kurses.
             alle_bloecke = [b for k in kurs.kapitel for b in k.bloecke]
             fruehere_kursplaene = state.kurse.fruehere_kursplaene(kurs.id, profil)
-            sammelkarte: KursplanKarte | None = None
-
-            def aenderungen() -> list[Aenderung]:
-                return state.kurse.plan_aenderungen(kurs, kapitel, profil, gezeichnet.wahl)
-
-            def wahl_geaendert() -> None:
-                if sammelkarte is not None:  # die Zeilen hängen an der Wahl
-                    sammelkarte.zeigen(aenderungen())
 
             def uebernehmen(gewaehlt: set[str], trotz: set[str], lassen: set[str]) -> None:
                 danach = state.kurse.plan_uebernehmen(
                     kurs, kapitel, profil, gewaehlt, trotz, wahl=gezeichnet.wahl, lassen=lassen
+                )
+                # Was jetzt im Kursplan steht, ist fest und keine offene Wahl mehr (P212)
+                im_plan = wahl_im_plan(danach, alle_bloecke)
+                wahl_halten(
+                    {
+                        block: [u for u in uebungen if u not in im_plan.get(block, ())]
+                        for block, uebungen in gezeichnet.wahl.items()
+                    }
                 )
                 # nur „lassen“ gewählt: Der Plan ist derselbe, das soll die Meldung auch sagen
                 melden(
@@ -693,6 +731,7 @@ def kapitel_view(
                 kursplan=True,
                 feste_wahl=wahl_im_plan(kursplan, alle_bloecke) if kursplan is not None else {},
                 bei_wahl=wahl_geaendert,
+                vorwahl=vorwahl,
             )
             bloecke.extend(gezeichnet.controls)
             if stand_hier is not None and any(b.art in BAUSTEINE for b in kapitel.bloecke):
@@ -702,6 +741,9 @@ def kapitel_view(
                     uebernehmen=uebernehmen,
                 )
                 bloecke.append(sammelkarte.control)
+        # Bereinigt halten: Was inzwischen fest ist oder sich hier nicht mehr wählen lässt,
+        # ist keine offene Wahl mehr
+        wahl_halten(gezeichnet.wahl)
     elif kapitel.text.strip():
         bloecke.append(markdown(kapitel.text))
 

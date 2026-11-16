@@ -39,6 +39,7 @@ import flet as ft
 from trainingsapp.core import links
 from trainingsapp.core.anpassung import Regel
 from trainingsapp.core.kursbau import (
+    TESTFELDER,
     Folge,
     Kurssicht,
     folgen_anwenden,
@@ -84,8 +85,6 @@ from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 
-#: Felder, die ein Test messen kann (Art aus dem Feldvorrat)
-TESTFELDER = ("hold", "duration", "reps", "weight", "distance")
 BEDINGUNG_NAMEN = {
     GELESEN: "gelesen — „Weiter“ reicht",
     SUMME: "Menge einer Übung",
@@ -175,6 +174,8 @@ def block_kurz(block: Block, katalog: dict[str, Exercise], sicht: Kurssicht | No
     '1 von 2 Übungen'
     >>> block_kurz(Block(PLAN_UEBUNG, id="b", uebung="x"), {})
     'Übung fehlt, ans Ende'
+    >>> block_kurz(Block(TEST, aus="w", feld="reps", faktor=0.8), {})
+    'die gewählte — wird Ziel im Plan (80 %)'
     """
     if block.baustein:
         return (sicht or Kurssicht(Kurs(), "", [block], katalog)).kurz(block)
@@ -184,15 +185,19 @@ def block_kurz(block: Block, katalog: dict[str, Exercise], sicht: Kurssicht | No
         return (block.medium.title or block.medium.uri) if block.medium else "ohne Adresse"
     if block.art == FRAGE:
         return f"{block.titel or 'ohne Frage'} · {len(block.antworten)} Antworten"
-    name = katalog[block.uebung].name if block.uebung in katalog else "Übung wählen"
     if block.art == TEST:
+        # „die gewählte“ einer Auswahl (``aus``) oder die feste Übung
+        umfeld = sicht or Kurssicht(Kurs(), "", [block], katalog)
+        name = (
+            umfeld.wer(block)
+            if block.aus
+            else katalog[block.uebung].name
+            if block.uebung in katalog
+            else "Übung wählen"
+        )
         if sicht is not None and sicht.kurs.kursplan is not None:
-            feld = (
-                katalog[block.uebung].result_spec.field_by_key(block.feld)
-                if (block.uebung in katalog)
-                else None
-            )
-            return f"{name} · {feld.label if feld is not None else block.feld}"
+            feld = umfeld.feld(umfeld.uebungen_von(block), block.feld)
+            return f"{name} · {feld.label}"
         return f"{name} — wird Ziel im Plan" + (
             f" ({round(block.faktor * 100)} %)" if block.faktor != 1.0 else ""
         )
@@ -207,7 +212,7 @@ def block_fehler(block: Block) -> str | None:
         return "Ein Medium braucht eine https-Adresse."
     if block.art == FRAGE and (not block.titel or not block.antworten):
         return "Eine Frage braucht einen Text und mindestens eine Antwort."
-    if block.art == TEST and not block.uebung:
+    if block.art == TEST and not block.uebung and not block.aus:
         return "Ein Test braucht eine Übung."
     if block.art == AUSWAHL and (not block.uebungen or block.anzahl > len(block.uebungen)):
         return "Eine Auswahl braucht Übungen — mindestens so viele, wie man wählt."
@@ -219,7 +224,7 @@ def folgen_zeilen(sicht: Kurssicht, folgen: Sequence[Folge]) -> list[ft.Control]
     if not folgen:
         return []
     return [
-        ft.Text("Darauf beziehen sich andere Bausteine:", size=13, weight=ft.FontWeight.W_600),
+        ft.Text("Darauf beziehen sich andere Blöcke:", size=13, weight=ft.FontWeight.W_600),
         *(ft.Text(f"• {sicht.folge_text(f)}", size=13) for f in folgen),
     ]
 
@@ -799,11 +804,22 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         frisch(block_spalte, bloecke_zeichnen)
         frisch(baustein_spalte, bausteine_zeichnen)
 
-    def uebung_wahl(wert: str, label: str = "Übung") -> ft.Dropdown:
+    def uebung_wahl(
+        wert: str, label: str = "Übung", auswahlen: Sequence[tuple[str, str]] = ()
+    ) -> ft.Dropdown:
+        """Eine Übung aus dem Katalog. ``auswahlen`` (ID, Name): davor „die gewählte aus …“ —
+        der Schlüssel ist dann ``aus:<Block-ID>``, wie im Blatt „Übung in den Plan“."""
+        optionen = [
+            *(
+                ft.DropdownOption(key=f"aus:{k}", text=f"die gewählte aus „{n}“")
+                for k, n in auswahlen
+            ),
+            *(ft.DropdownOption(key=u.id, text=u.name) for u in uebungen),
+        ]
         return ft.Dropdown(
             label=label,
-            value=wert if wert in katalog else None,
-            options=[ft.DropdownOption(key=u.id, text=u.name) for u in uebungen],
+            value=wert if wert in [o.key for o in optionen] else None,
+            options=optionen,
             enable_filter=True,
             editable=True,
             menu_height=320,
@@ -838,8 +854,18 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             multiline=True,
             min_lines=3,
         )
-        uebung = uebung_wahl(block.uebung)
+        # Der Test misst eine feste Übung — oder „die gewählte“ einer Auswahl dieses oder (im
+        # Kursplan-Kurs) eines früheren Kapitels (Ben, 16.11.2026; `Block.aus`), auch einer noch
+        # ungespeicherten
+        uebung = uebung_wahl(
+            f"aus:{block.aus}" if block.aus else block.uebung,
+            auswahlen=sicht().auswahlen_fuer_test() if block.art == TEST else (),
+        )
         feld = ft.Dropdown(label="Was wird gemessen")
+        feld_hinweis = hinweis(
+            "Die Übungen dieser Auswahl haben kein gemeinsames Feld — gemessen wird nur, wo die "
+            "gewählte Übung dieses Feld hat."
+        )
         faktor = ft.TextField(
             label="Ziel in % des Tests",
             value=str(round(block.faktor * 100)),
@@ -861,21 +887,28 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         meldung = ft.Text("", size=12, color=ft.Colors.ERROR, visible=False)
         dialog: ft.AlertDialog
 
+        def gemessen() -> list[str]:
+            """Die Übungen, die der Test messen kann: die feste — oder die der Auswahl."""
+            wert = str(uebung.value or "")
+            if wert.startswith("aus:"):
+                return sicht().uebungen_von(Block(TEST, aus=wert[4:]))
+            return [wert] if wert in katalog else []
+
         def felder_setzen() -> None:
-            u = katalog.get(str(uebung.value or ""))
-            angebot = [
-                f for f in (u.result_spec.fields if u else []) if basis_key(f.key) in TESTFELDER
-            ]
+            # bei „der gewählten“: was alle Übungen der Auswahl haben (`Kurssicht.testfelder`)
+            angebot, gemeinsam = sicht().testfelder(gemessen())
             feld.options = [ft.DropdownOption(key=f.key, text=f.label) for f in angebot]
             schluessel = [f.key for f in angebot]
             feld.value = (
                 block.feld if block.feld in schluessel else (schluessel[0] if schluessel else None)
             )
+            feld_hinweis.visible = not gemeinsam
 
         def uebung_gewaehlt(_e: Any = None) -> None:
             felder_setzen()
-            with contextlib.suppress(Exception):
-                feld.update()
+            for c in (feld, feld_hinweis):
+                with contextlib.suppress(Exception):
+                    c.update()
 
         def wahl_zeichnen() -> None:
             wahl_reihe.controls = [
@@ -919,7 +952,9 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             if block.art == FRAGE:
                 neuer.antworten = antworten_lesen(str(antworten.value or ""))
             if block.art == TEST:
-                neuer.uebung = str(uebung.value or "")
+                gewaehlte = str(uebung.value or "")
+                neuer.aus = gewaehlte[4:] if gewaehlte.startswith("aus:") else ""
+                neuer.uebung = "" if neuer.aus else gewaehlte  # nie beides
                 neuer.feld = str(feld.value or "hold")
                 neuer.faktor = min(max(zahl(faktor, 100) / 100, 0.1), 3.0)
             if block.art == AUSWAHL:
@@ -958,6 +993,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 text,
                 uebung,
                 feld,
+                feld_hinweis,
                 *([] if nur_liefern else [faktor]),
                 hinweis(
                     "Der Test ist ein gewöhnlicher Eintrag der Übung. Was aus dem Wert wird, "

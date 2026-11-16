@@ -336,8 +336,8 @@ Schlüssel, beim Empfänger bleibt es derselbe Plan.
 
 JSON, UTF-8. Version 1 (Übungen); **Version 2** fügt `kurse[]` hinzu, **Version 3**
 `plaene[]` (Ben, 28.10.2026), **Version 4** Dateien (nur in einer ZIP, Abschnitt oben),
-**Version 5** `ergaenzungen[]`, **Version 6** den Kursplan (`kurse[].kursplan` und die
-Bausteine `plan_*`, Ben 16.11.2026 — Abschnitt
+**Version 5** `ergaenzungen[]`, **Version 6** den Kursplan (`kurse[].kursplan`, die
+Bausteine `plan_*` und Tests mit `aus`, Ben 16.11.2026 — Abschnitt
 [Kursplan und Bausteine](#kursplan-und-bausteine-formatversion-6-ben-16112026)). Geschrieben wird
 immer die **kleinste Version, die der Inhalt braucht** (`core.pakete.noetige_version`, das
 Höchste zählt): eine Datei ohne Kurse und Pläne weiter als Version 1, ohne Pläne als
@@ -556,7 +556,21 @@ Ziffern, `-`, `_`, nicht `ende` und nicht `g`; im Kurs eindeutig wie jede Block-
 
 `ziel_aus` geht vor `ziel`: Das Ziel ist der Testwert × `faktor`, im Feld des Tests (bei Sätzen
 als ein Satz). `auswahl` und `test` ändern in einem Kursplan-Kurs nichts von selbst — sie
-liefern Wahl und Wert, auf die sich Bausteine beziehen; der Test misst die Übung, die er nennt.
+liefern Wahl und Wert, auf die sich Bausteine beziehen.
+
+**Ein Test misst die Übung, die er nennt (`uebung`) — oder „die gewählte“** (Ben, 16.11.2026):
+Mit `aus = "<id einer auswahl>"` statt `uebung` gilt er der Übung, die die Person in dieser
+Auswahl gewählt hat (bei `anzahl` ≥ 2 jeder Gewählten einzeln, je mit eigenem Wert). Ein
+Baustein mit `ziel_aus` nimmt dann den Wert **seiner** Übung. Das geht auch in einem Kurs mit
+Kapitelplänen: Die Gewählte bekommt ihr Ziel aus ihrem eigenen Test — dort muss die Auswahl
+aber **im selben Kapitel** stehen wie der Test (im Kursplan-Kurs darf sie in einem früheren
+stehen: die Wahl steht dann im Kursplan). `feld` gilt für alle Übungen der Auswahl; hat eine
+das Feld nicht, bekommt sie keinen Testwert. Ein Test mit `aus` braucht Formatversion 6.
+
+**Gleichwertige Wege:** Führen von einer Planübung mehrere Wege zu den Gewählten desselben
+Bausteins (`zu = "<block-id>"` bei `anzahl` ≥ 2), geht man im Workout **einen** davon — die
+Kette der Liste zwischen den Gewählten entfällt, jede führt dorthin, wohin die letzte von ihnen
+führt. In der Liste stehen alle und lassen sich abhaken.
 
 **Marken** — woran der Kurs seine Planübungen wiederfindet (`plan_item.course_mark`); `hinter`,
 `an`, `von` und `zu` nennen eine:
@@ -576,8 +590,9 @@ verbunden werden sollte, entfällt; die Karte sagt beides. In einem Kurs **ohne*
 Bausteine nichts; hat ein Kapitel eines Kursplan-Kurses trotzdem `plaene`, entstehen sie wie
 bisher als Kapitelpläne neben dem Kursplan.
 
-**Formatversion 6 — was eine ältere App tut:** Ein Paket mit einem `kursplan` oder einem
-`plan_*`-Block wird als Version 6 geschrieben, alle anderen wie bisher. Die veröffentlichten
+**Formatversion 6 — was eine ältere App tut:** Ein Paket mit einem `kursplan`, einem
+`plan_*`-Block oder einem `test` mit `aus` wird als Version 6 geschrieben, alle anderen wie
+bisher. Die veröffentlichten
 Apps bis einschließlich 0.3.94 lesen höchstens Version 5 und **lehnen ein solches Paket ab**
 („Das Paket ist neuer als diese App — bitte die App aktualisieren.“), statt den Kurs ohne
 seinen Plan zu zeigen; kommt es als Update aus einer Quelle, behalten sie ihren Stand. Das gilt
@@ -666,8 +681,8 @@ anzahl = 1
 [[kurse.kapitel.bloecke]]
 art = "test"
 id = "test"
-titel = "Wie viele Käfer schaffst du am Stück?"
-uebung = "kaefer"
+titel = "Wie viele schaffst du am Stück?"
+aus = "wahl"                     # misst die gewählte Übung (statt uebung = "…")
 feld = "reps"
 
 [[kurse.kapitel.bloecke]]
@@ -693,11 +708,16 @@ unten oder in einem späteren Kapitel steht, ein `g:<n>` außerhalb der Grundlag
 einem früheren Kapitel; `plan_uebung` ohne `uebung` und ohne `aus` oder mit beidem; eine
 `grundlage`, die kein Plan des Pakets ist; `grundlage` und `vorlage` zugleich; in `kante`, was
 auch im `ablauf` ein Fehler ist (`n`, `bis` keine Zahl); einen Block `plan_…`, den es nicht
-gibt; eine Marke `<block-id>:<übung>`, deren Übung nicht zur Wahl steht. Die Planübungen einer
+gibt; eine Marke `<block-id>:<übung>`, deren Übung nicht zur Wahl steht; einen `test` mit
+`aus` ohne Auswahl in diesem oder einem früheren Kapitel, mit `uebung` und `aus` zugleich oder
+— ohne `kursplan` — mit der Auswahl in einem anderen Kapitel.
+Die Planübungen einer
 `vorlage` dürfen Dateien mitbringen (`medien = [{ datei = "…" }]`) wie die eines Kapitelplans.
 Als **Hinweis**: Bausteine in einem
 Kurs ohne `kursplan`, Kapitel-`plaene` neben einem `kursplan`, einen unbekannten Auslöser
-(„frei“ gilt), ein `plan_einstellen`, das nichts einstellt, eine `vorlage` ohne Übung — und zu
+(„frei“ gilt), ein `plan_einstellen`, das nichts einstellt, eine `vorlage` ohne Übung, einen
+`test` mit `aus`, dessen `feld` nicht jede Übung der Auswahl hat (geprüft nur an Übungen dieses
+Pakets) — und zu
 jedem solchen Paket die Formatversion 6. Die Übungen in `uebung` prüft das Werkzeug hier so
 wenig wie in `test`, `auswahl` und Planübungen; was die App nicht kennt, ergibt keine Zeile.
 

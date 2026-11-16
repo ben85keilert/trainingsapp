@@ -170,6 +170,211 @@ def test_test_und_auswahl_bauen_den_plan(page, state) -> None:
     assert _daten(ansicht, ("wahl", "wahl", uebungen["Käfer"].id)).disabled is True
 
 
+def test_offene_wahl_ueberlebt_das_verlassen_des_kapitels(page, state) -> None:
+    """Ben, 16.11.2026 (P212): Wer wählt, zum Test in die Übung geht und zurückkommt, muss
+    nicht neu wählen — die Sitzung hält die offene Wahl (nur im Speicher), bis der Plan
+    angelegt ist. Die Ansicht wird nach jeder Route neu gebaut; bis hierher war die Wahl
+    dann weg."""
+    kurs, kapitel, uebungen = _kurs(state)
+    profil = state.profil.id
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    for name in ("Käfer", "Brücke"):
+        _daten(ansicht, ("wahl", "wahl", uebungen[name].id)).on_select()
+    assert [wahl for _stempel, wahl in state.kurs_wahl.values()] == [
+        {"wahl": [uebungen["Käfer"].id, uebungen["Brücke"].id]}
+    ]
+    # Zum Test in die Übung — und zurück
+    session = Session(subject_id=profil)
+    state.sitzungen.anlegen(session)
+    state.sitzungen.eintrag_anlegen(session, uebungen["Planke"], {"hold": [48]})
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    gewaehlt = {
+        name: _daten(ansicht, ("wahl", "wahl", uebungen[name].id)).selected
+        for name in ("Seitstütz", "Käfer", "Brücke")
+    }
+    assert gewaehlt == {"Seitstütz": False, "Käfer": True, "Brücke": True}
+    knopf = _daten(ansicht, "plan_anlegen")
+    assert knopf.disabled is False  # Test und Wahl sind da
+    # weiter änderbar: die dritte Wahl verdrängt die älteste
+    _daten(ansicht, ("wahl", "wahl", uebungen["Seitstütz"].id)).on_select()
+    assert _daten(ansicht, ("wahl", "wahl", uebungen["Käfer"].id)).selected is False
+    knopf.on_click()
+    (plan,) = state.kurse.kapitel_plaene(kapitel.id, profil)
+    namen = {u.id: n for n, u in uebungen.items()}
+    assert [namen[i.exercise_id] for i in plan.items] == ["Planke", "Brücke", "Seitstütz", "Dehnen"]
+    assert state.kurs_wahl == {}  # angelegt: keine offene Wahl mehr
+    # … und nach „Von vorn“ ist nichts vorgewählt
+    state.kurse.zuruecksetzen(kurs, profil)
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    assert _daten(ansicht, ("wahl", "wahl", uebungen["Brücke"].id)).selected is False
+
+
+def _test_knoepfe(ansicht) -> list[tuple]:
+    """Die „Zur Übung“-Knöpfe aller Testkarten — ihre Kennungen."""
+    return [
+        x.data
+        for x in _alle(ansicht)
+        if isinstance(getattr(x, "data", None), tuple) and x.data[0] == "test_oeffnen"
+    ]
+
+
+def _eintragen(state: AppState, uebung: Exercise, werte: dict) -> None:
+    session = Session(subject_id=state.profil.id)
+    state.sitzungen.anlegen(session)
+    state.sitzungen.eintrag_anlegen(session, uebung, werte)
+
+
+def test_fester_test_sieht_aus_wie_bisher(page, state) -> None:
+    """Der Test einer festen Übung ist vom Test „der gewählten“ unberührt: derselbe Titel,
+    der große Wert, ein Knopf zu dieser Übung — egal, was in der Auswahl gewählt ist."""
+    import asyncio
+
+    kurs, kapitel, uebungen = _kurs(state)
+    planke = uebungen["Planke"]
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    assert "Planke: was schaffst du?" in _texte(ansicht)
+    assert "Noch kein Eintrag bei „Planke“, seit du dieses Kapitel öffnest." in _texte(ansicht)
+    assert _test_knoepfe(ansicht) == [("test_oeffnen", "test")]
+    assert _daten(ansicht, ("test_oeffnen", "test")).content == "Zur Übung"
+    _daten(ansicht, ("wahl", "wahl", uebungen["Käfer"].id)).on_select()  # ändert die Karte nicht
+    assert "Planke: was schaffst du?" in _texte(ansicht)
+    asyncio.run(_daten(ansicht, ("test_oeffnen", "test")).on_click())
+    assert page.route == f"/uebung/{planke.id}"
+    _eintragen(state, planke, {"hold": [48]})
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    assert _daten(ansicht, "testwert").value == "48s Haltezeit"
+    assert "Dein Eintrag bei „Planke“. Im Plan wird daraus das Ziel: 48s Haltezeit." in _texte(
+        ansicht
+    )
+    assert _daten(ansicht, ("test_oeffnen", "test")).content == "Nochmal"
+
+
+def test_test_der_gewaehlten_im_kapitelplan(page, state) -> None:
+    """Ben, 16.11.2026: Ein Test mit ``aus`` misst die Übungen, die die Person wählt. Bei
+    mehreren Gewählten hat jede ihre Zeile mit Wert und Knopf; „Plan anlegen“ wird erst frei,
+    wenn jede Gewählte getestet ist, und jede bekommt das Ziel aus **ihrem** Wert. Der Test
+    darf vor seiner Auswahl stehen."""
+    uebungen = {
+        name: Exercise(name=name, result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
+        for name in ("Kniebeuge", "Käfer", "Brücke", "Ausfallschritt")
+    }
+    for u in uebungen.values():
+        state.uebungen.speichern(u)
+    kniebeuge, kaefer, bruecke = (uebungen[n] for n in ("Kniebeuge", "Käfer", "Brücke"))
+    kapitel = Kapitel(
+        titel="Wählen und testen",
+        plaene=[PlanVorlage("Beine", items=[VorlageItem(kniebeuge.id)])],
+        bloecke=[
+            Block(TEST, id="t", aus="w", feld="reps", faktor=0.5),
+            Block(
+                AUSWAHL,
+                id="w",
+                uebungen=[uebungen[n].id for n in ("Käfer", "Brücke", "Ausfallschritt")],
+                anzahl=2,
+            ),
+        ],
+    )
+    kurs = Kurs(name="Kapitelpläne", kapitel=[kapitel])
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    kapitel = kurs.kapitel[0]
+    profil = state.profil.id
+
+    # Ohne Wahl: Aufforderung und Hinweis, kein Knopf
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    assert "Deine Auswahl: was schaffst du?" in _texte(ansicht)
+    assert _daten(ansicht, ("test_wahl_fehlt", "t")).value == (
+        "Triff zuerst deine Auswahl — der Test gilt der Übung, die du wählst."
+    )
+    assert _test_knoepfe(ansicht) == []
+    assert _daten(ansicht, "plan_anlegen").disabled is True
+
+    # Eine gewählt: die Karte wie beim festen Test, mit ihrem Namen
+    _daten(ansicht, ("wahl", "w", kaefer.id)).on_select()
+    assert "Käfer: was schaffst du?" in _texte(ansicht)
+    assert _test_knoepfe(ansicht) == [("test_oeffnen", "t", kaefer.id)]
+    # Zwei gewählt: je Übung eine Zeile mit ihrem Knopf
+    _daten(ansicht, ("wahl", "w", bruecke.id)).on_select()
+    assert "Deine Auswahl: was schaffst du?" in _texte(ansicht)
+    assert _test_knoepfe(ansicht) == [
+        ("test_oeffnen", "t", kaefer.id),
+        ("test_oeffnen", "t", bruecke.id),
+    ]
+    assert _daten(ansicht, ("testwert", "t", kaefer.id)).value == "noch kein Eintrag"
+    assert _daten(ansicht, "plan_anlegen").disabled is True  # gewählt, aber nicht getestet
+
+    # Nur der Käfer getestet: Die Brücke fehlt noch — „Plan anlegen“ bleibt zu
+    _eintragen(state, kaefer, {"reps": [30]})
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    assert _daten(ansicht, ("testwert", "t", kaefer.id)).value == "30 Wdh."
+    assert "im Plan das Ziel: 15 Wdh." in _texte(ansicht)  # die Hälfte, der Faktor des Tests
+    assert _daten(ansicht, ("test_oeffnen", "t", kaefer.id)).content == "Nochmal"
+    assert _daten(ansicht, ("testwert", "t", bruecke.id)).value == "noch kein Eintrag"
+    assert _daten(ansicht, ("test_oeffnen", "t", bruecke.id)).content == "Zur Übung"
+    assert _daten(ansicht, "plan_anlegen").disabled is True
+
+    _eintragen(state, bruecke, {"reps": [12]})
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    knopf = _daten(ansicht, "plan_anlegen")
+    assert knopf.disabled is False
+    knopf.on_click()
+    (plan,) = state.kurse.kapitel_plaene(kapitel.id, profil)
+    assert [(i.exercise_id, (i.target or {}).get("reps")) for i in plan.items] == [
+        (kniebeuge.id, None),
+        (kaefer.id, [15]),  # die Hälfte ihres eigenen Werts
+        (bruecke.id, [6]),
+    ]
+    # Angelegt: Die Auswahl ist fest und zeigt nicht mehr, was gewählt war — die Testkarte
+    # fordert dann nicht mehr zum Wählen auf
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    assert _daten(ansicht, ("test_wahl_fehlt", "t")).value == (
+        "Der Plan ist angelegt — das Ziel aus deinem Test steht darin."
+    )
+    assert _test_knoepfe(ansicht) == []
+
+
+def test_test_der_gewaehlten_auswahl_im_frueheren_kapitel_ohne_kursplan(page, state) -> None:
+    """In einem Kurs mit Kapitelplänen steht die Wahl eines früheren Kapitels nirgends, wo
+    ein späteres sie ablesen könnte: Die Testkarte sagt das, statt eine Übung zu raten."""
+    uebungen = {
+        name: Exercise(name=name, result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
+        for name in ("Kniebeuge", "Käfer", "Brücke")
+    }
+    for u in uebungen.values():
+        state.uebungen.speichern(u)
+    kurs = Kurs(
+        name="Zwei Kapitel",
+        kapitel=[
+            Kapitel(
+                titel="Wählen",
+                plaene=[PlanVorlage("Beine", items=[VorlageItem(uebungen["Kniebeuge"].id)])],
+                bloecke=[
+                    Block(
+                        AUSWAHL,
+                        id="w",
+                        uebungen=[uebungen["Käfer"].id, uebungen["Brücke"].id],
+                        anzahl=1,
+                    )
+                ],
+            ),
+            Kapitel(titel="Später", bloecke=[Block(TEST, id="t2", aus="w", feld="reps")]),
+        ],
+    )
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    eins, zwei = kurs.kapitel
+    profil = state.profil.id
+    state.kurse.starten(kurs, profil)
+    state.kurse.plaene_anlegen(eins, profil, {}, {"w": [uebungen["Brücke"].id]})
+    state.kurse.kapitel_abschliessen(kurs, eins, profil)
+    ansicht = kapitel_view(page, state, kurs, zwei, ft.UrlLauncher())
+    assert _daten(ansicht, ("test_wahl_fehlt", "t2")).value == (
+        "Der Test gilt der Übung, die du in einem früheren Kapitel gewählt hast. "
+        "Welche das war, kann dieses Kapitel nicht ablesen."
+    )
+    assert _test_knoepfe(ansicht) == []
+
+
 def test_von_vorn_fragt_neu_und_bietet_die_wahl_vom_letzten_mal_an(page, state) -> None:
     """Ben, 16.11.2026: Beginnt der Kurs von vorn, wird in einem Kapitel mit Test und Auswahl
     neu gefragt — der Plan vom letzten Mal steht als früherer Durchlauf darunter, und „Wie beim

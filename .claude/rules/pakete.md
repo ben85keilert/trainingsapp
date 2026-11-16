@@ -68,7 +68,8 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   Klartext eines privaten Pakets liegen sie dort nur, bis die Rückfrage zu ist
   (`Paketinhalt.raeumen`). **Kursplan im Paket** (Ben, 16.11.2026, Formatversion 6 — nur
   für Pakete, die ihn nutzen; `core.pakete.noetige_version`): `kurse[].kursplan` und die
-  Blöcke `plan_uebung` · `plan_einstellen` · `plan_weg`; **Bausteine brauchen eine feste
+  Blöcke `plan_uebung` · `plan_einstellen` · `plan_weg`, dazu ein `test` mit `aus` („die
+  gewählte“ — ohne Kursplan nur mit der Auswahl im selben Kapitel); **Bausteine brauchen eine feste
   `id`** (sie ist die Marke der Planübung), Verweise zeigen nur auf Bausteine davor —
   `trainingsapp-paket pruefen` (`kursplan_pruefen`) meldet es; eine ältere App lehnt das Paket
   ab (`docs/uebungspakete.md` „Kursplan und Bausteine“). Paketmanager: Jede

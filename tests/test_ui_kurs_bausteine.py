@@ -18,7 +18,8 @@ import pytest
 ft = pytest.importorskip("flet")
 
 from trainingsapp.core import ablauf as ab  # noqa: E402
-from trainingsapp.core.kursbau import Kurssicht  # noqa: E402
+from trainingsapp.core.eigenes_paket import noetige_uebungen  # noqa: E402
+from trainingsapp.core.kursbau import Kurssicht, timer_kern  # noqa: E402
 from trainingsapp.core.kursbloecke import (  # noqa: E402
     AUSWAHL,
     HART,
@@ -39,11 +40,28 @@ from trainingsapp.core.kurse import (  # noqa: E402
     VorlageItem,
 )
 from trainingsapp.core.models import Exercise, Plan, Session  # noqa: E402
-from trainingsapp.core.pakete import PaketPlan, kurs_stand, paket_lesen  # noqa: E402
+from trainingsapp.core.pakete import (  # noqa: E402
+    Paket,
+    Paketinhalt,
+    PaketPlan,
+    kurs_stand,
+    paket_bauen,
+    paket_id,
+    paket_lesen,
+)
 from trainingsapp.core.result_spec import ResultSpec, vorrat_feld  # noqa: E402
+from trainingsapp.core.takt import AUS, VORLAGEN  # noqa: E402
+from trainingsapp.core.timer import TimerProfil  # noqa: E402
 from trainingsapp.paket_werkzeug import kursplan_pruefen  # noqa: E402
 from trainingsapp.ui.components import baustein_form  # noqa: E402
-from trainingsapp.ui.components.baustein_form import KEIN  # noqa: E402
+from trainingsapp.ui.components.baustein_form import (  # noqa: E402
+    ABHAKEN,
+    EIGEN,
+    KEIN,
+    KEIN_TAKT,
+    TAKT,
+    WAEHLEN,
+)
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views import kurs_bearbeiten as editor  # noqa: E402
 from trainingsapp.ui.views.kurs_bearbeiten import (  # noqa: E402
@@ -99,6 +117,15 @@ def _texte(c) -> list[str]:
 
 def _daten(c, wert):
     return next(x for x in _alle(c) if getattr(x, "data", None) == wert)
+
+
+def _daten_ids(c, art: str) -> list[str]:
+    """Die IDs der Zeilen einer Art (``("block", <id>)``) in ihrer Reihenfolge."""
+    return [
+        x.data[1]
+        for x in _alle(c)
+        if isinstance(getattr(x, "data", None), tuple) and x.data[0] == art and len(x.data) == 2
+    ]
 
 
 def _hat(c, wert) -> bool:
@@ -187,6 +214,52 @@ def _paketpruefung(state: AppState, kurs: Kurs) -> tuple[list[str], list[str]]:
         "kurse": [kurs_stand(kurs)],
     }
     return kursplan_pruefen(roh, paket_lesen(roh))
+
+
+def _rundreise(state: AppState, kurs: Kurs) -> tuple[dict, Paketinhalt, Paketinhalt]:
+    """Der Kurs als eigenes Paket hinaus und wieder herein — wie beim Weitergeben: die Datei
+    (`core.pakete.paket_bauen` mit den Übungen, die der Kurs braucht), gelesen, und noch einmal
+    geschrieben und gelesen."""
+    noetig = noetige_uebungen([], [kurs])
+    uebungen = [u for u in state.uebungen.alle(mit_archivierten=True) if u.id in noetig]
+    paket = Paket(id=paket_id("Prüfpaket"), name="Prüfpaket")
+    roh = paket_bauen(paket, uebungen, kurse=[kurs], mit_zeitstempel=False)
+    gebaut = paket_lesen(roh)
+    wieder = paket_lesen(
+        paket_bauen(gebaut.paket, gebaut.uebungen, kurse=gebaut.kurse, mit_zeitstempel=False)
+    )
+    return roh, gebaut, wieder
+
+
+def _felder(dialog) -> dict[str, object]:
+    """Textfelder und Auswahlfelder eines Dialogs nach ihrer Beschriftung."""
+    return {
+        str(x.label): x
+        for x in _alle(dialog)
+        if isinstance(x, ft.TextField | ft.Dropdown) and isinstance(x.label, str)
+    }
+
+
+def _parameter_knoepfe(blatt) -> list[str]:
+    """Die Parameter-Knöpfe des Blatts in ihrer Reihenfolge (ohne die Chips der Zielmaske)."""
+    return [
+        x.data[1]
+        for x in _alle(blatt)
+        if isinstance(x, ft.Chip) and isinstance(x.data, tuple) and x.data[0] == "baustein_feld"
+    ]
+
+
+def _takt_uebernehmen(page) -> None:
+    """Im Takt-Blatt, das über dem Baustein-Blatt aufgegangen ist, „Übernehmen“ — das Ziel
+    läuft, sobald das Blatt zu ist."""
+    blatt = page.dialoge[-1]
+    assert isinstance(blatt, ft.BottomSheet)
+    assert any(t.startswith("Takt · ") for t in _texte(blatt)), _texte(blatt)[:3]
+    knopf = next(
+        x for x in _alle(blatt) if isinstance(x, ft.FilledTonalButton) and x.content == "Übernehmen"
+    )
+    knopf.on_click()
+    asyncio.run(blatt.on_dismiss(None))
 
 
 def test_doctests_des_editors() -> None:
@@ -574,6 +647,353 @@ def test_abbrechen_im_blatt_aendert_nichts(page, state) -> None:
     assert state.kurse.laden(kurs.id).kapitel[1].bloecke[2].hinter == "b1"
 
 
+def test_parameter_takt_und_eigener_timer(page, state) -> None:
+    """Ben, 16.11.2026 („muss ebenfalls behoben werden“): Parameter, Takt und ein eigener Timer
+    lassen sich am Baustein einstellen — mit den Knöpfen von „Im Plan einstellen“, dem
+    Takt-Blatt und dem Timer-Editor. Anlegen, speichern, wieder öffnen: Die Werte stehen, und
+    die Vorschau nennt die Zeilen der Karte."""
+    kurs, _ = _kurs(state)
+    profil = state.profil.id
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    _daten(ansicht, ("baustein", "b1")).on_click()
+    blatt = page.dialoge[-1]
+    # Vorgabe: nichts davon gesetzt — die Planübung folgt der Übung
+    assert [_daten(blatt, d).value for d in ("baustein_parameter", "baustein_timer")] == [KEIN] * 2
+    assert _daten(blatt, "baustein_takt").value == KEIN
+    assert not [t for t in _texte(blatt) if t.startswith("Bleibt, wie es im Kurs steht")]
+
+    # Parameter: die der Übung als Knöpfe, darunter der übrige Feldvorrat
+    _waehlen(blatt, "baustein_parameter", WAEHLEN)
+    knoepfe = _parameter_knoepfe(blatt)
+    assert knoepfe[0] == "hold" and knoepfe[1:4] == ["duration", "reps", "scale"]
+    assert "Weitere Parameter holen" in _texte(blatt)
+    assert "Kein Parameter gewählt — das heißt „nur abhaken“." in _texte(blatt)
+    assert "Seitstütz: nur abhaken" in _texte(blatt)
+    _daten(blatt, ("baustein_feld", "weight")).on_select()
+    _daten(blatt, ("baustein_feld", "hold")).on_select()
+    assert _daten(blatt, ("baustein_feld", "hold")).selected is True
+    # … in der Ordnung des Angebots, nicht des Antippens
+    assert "Parameter für Seitstütz: Haltezeit, Gewicht" in _texte(blatt)
+
+    # Timer: ein eigener — der Timer-Editor steht im Blatt, jede Änderung gilt sofort
+    _waehlen(blatt, "baustein_timer", EIGEN)
+    assert _hat(blatt, "baustein_timer_editor")
+    assert "Timer für Seitstütz: 0:30 Belastung · 0:15 Pause" in _texte(blatt)
+    _daten(blatt, ("zaehlt", 0, 1)).on_click()  # die Pause zählt nicht
+
+    # Takt: das Takt-Blatt geht über dem Blatt auf; bis „Übernehmen“ bleibt der Entwurf
+    _waehlen(blatt, "baustein_takt", TAKT)
+    assert _daten(blatt, "baustein_takt").value == KEIN
+    _takt_uebernehmen(page)
+    assert _daten(blatt, "baustein_takt").value == TAKT
+    assert "Takt für Seitstütz: 4-6 · 6,0/min" in _texte(blatt)
+    assert _hat(blatt, "baustein_timer_editor")  # der Editor steht noch — mit seinem Stand
+    vorschau = _texte(_daten(blatt, "baustein_vorschau"))
+    _daten(blatt, "baustein_uebernehmen").on_click()
+    _speichern(ansicht)
+
+    kurs = state.kurse.laden(kurs.id)
+    b1 = kurs.kapitel[0].bloecke[1]
+    assert b1.felder == ["hold", "weight"] and b1.takt == VORLAGEN["atmung_4_6"]
+    eigen = TimerProfil.aus_dict(b1.timer)
+    assert eigen is not None and eigen.id == "kurs-b1" and "bibliothek" not in b1.timer
+    assert [(a.name, a.dauer_s, a.zaehlt) for a in eigen.abschnitte] == [
+        ("Belastung", 30, True),
+        ("Pause", 15, False),
+    ]
+    # Die Karte der Teilnehmenden nennt dieselben Zeilen wie die Vorschau
+    karte = state.kurse.plan_aenderungen(kurs, kurs.kapitel[0], profil)
+    assert [z.titel for z in karte] == [
+        "Seitstütz kommt dazu",
+        "Ziel für Seitstütz: 40 s",
+        "Parameter für Seitstütz: Haltezeit, Gewicht",
+        "Timer für Seitstütz: 0:30 Belastung · 0:15 Pause",
+        "Takt für Seitstütz: 4-6 · 6,0/min",
+    ]
+    for z in karte:
+        assert z.titel in vorschau and z.unter in vorschau
+
+    # Wieder öffnen: Die Werte stehen; der eigene Timer ist zugeklappt, ✎ klappt ihn auf
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    _daten(ansicht, ("baustein", "b1")).on_click()
+    blatt = page.dialoge[-1]
+    assert _daten(blatt, "baustein_parameter").value == WAEHLEN
+    assert [
+        k for k in ("reps", "hold", "weight") if _daten(blatt, ("baustein_feld", k)).selected
+    ] == ["hold", "weight"]
+    assert _daten(blatt, "baustein_timer").value == EIGEN
+    assert _daten(blatt, "baustein_timer_kurz").value == "0:30 Belastung · 0:15 Pause · gesamt 0:45"
+    assert not _hat(blatt, "baustein_timer_editor")
+    _daten(blatt, "baustein_timer_editor_auf").on_click()
+    assert _hat(blatt, "baustein_timer_editor")
+    # der Editor zeigt den gespeicherten Stand: die Pause zählt nicht
+    assert _daten(blatt, ("zaehlt", 0, 0)).tooltip.startswith("zählt als Übungszeit")
+    assert _daten(blatt, ("zaehlt", 0, 1)).tooltip.startswith("zählt nicht als Übungszeit")
+    assert _daten(blatt, "baustein_takt").value == TAKT
+
+    # Die andere Richtung: ausdrücklich kein Takt, nur abhaken, ein Timer aus der Bibliothek
+    _waehlen(blatt, "baustein_takt", KEIN_TAKT)
+    assert "Takt für Seitstütz: kein Takt" in _texte(blatt)
+    _waehlen(blatt, "baustein_parameter", ABHAKEN)
+    assert "Seitstütz: nur abhaken" in _texte(blatt)
+    timer = state.timer_profile()[0]
+    _waehlen(blatt, "baustein_timer", f"t:{timer.id}")
+    assert not _hat(blatt, "baustein_timer_kurz")
+    _daten(blatt, "baustein_uebernehmen").on_click()
+    _speichern(ansicht)
+    kurs = state.kurse.laden(kurs.id)
+    b1 = kurs.kapitel[0].bloecke[1]
+    assert (b1.felder, b1.takt, b1.timer["id"]) == ([], AUS, timer.id)
+
+    # … und zurück auf „wie die Übung“: keine Angabe, keine Zeile
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    _daten(ansicht, ("baustein", "b1")).on_click()
+    blatt = page.dialoge[-1]
+    assert _daten(blatt, "baustein_takt").value == KEIN_TAKT
+    assert _daten(blatt, "baustein_parameter").value == ABHAKEN
+    _waehlen(blatt, "baustein_takt", KEIN)
+    _waehlen(blatt, "baustein_parameter", KEIN)
+    _waehlen(blatt, "baustein_timer", KEIN)
+    _daten(blatt, "baustein_uebernehmen").on_click()
+    _speichern(ansicht)
+    b1 = state.kurse.laden(kurs.id).kapitel[0].bloecke[1]
+    assert (b1.felder, b1.takt, b1.timer) == (None, None, {})
+
+
+def test_einstellungen_an_der_gewaehlten_und_am_plan_gehen_durch_das_paket(page, state) -> None:
+    """„Die gewählte“ kann mehrere Übungen sein: Zur Wahl stehen die Parameter aller. Am Plan
+    gibt es Timer und Takt „für alle Übungen“. Was der Editor so baut, nimmt die Paketprüfung
+    an und übersteht die Rundreise als eigenes Paket."""
+    kurs, _ = _kurs(state)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[1])
+    _daten(ansicht, ("baustein", "b2")).on_click()
+    blatt = page.dialoge[-1]
+    _waehlen(blatt, "baustein_parameter", WAEHLEN)
+    knoepfe = _parameter_knoepfe(blatt)
+    # Käfer und Brücke zählen Wiederholungen — das ist ihr Parameter; der Rest ist Vorrat
+    assert knoepfe[:3] == ["reps", "duration", "hold"]
+    _daten(blatt, ("baustein_feld", "scale")).on_select()
+    _daten(blatt, ("baustein_feld", "reps")).on_select()
+    _waehlen(blatt, "baustein_timer", EIGEN)
+    _waehlen(blatt, "baustein_takt", TAKT)
+    _takt_uebernehmen(page)
+    for erwartet in (
+        "Parameter für Käfer: Wiederholungen, Skala 0–10",
+        "Timer für Käfer: 0:30 Belastung · 0:15 Pause",
+        "Takt für Käfer: 4-6 · 6,0/min",
+    ):
+        assert erwartet in _texte(blatt), erwartet
+    _daten(blatt, "baustein_uebernehmen").on_click()
+
+    # Am Plan: Timer und Takt für alle Übungen — Parameter gehören zu einer Übung
+    _daten(ansicht, ("baustein_neu", PLAN_EINSTELLEN)).on_click()
+    blatt = page.dialoge[-1]
+    assert not _hat(blatt, "baustein_parameter")
+    _waehlen(blatt, "baustein_timer", EIGEN)
+    _waehlen(blatt, "baustein_takt", TAKT)
+    _takt_uebernehmen(page)
+    assert "Timer für alle Übungen: 0:30 Belastung · 0:15 Pause" in _texte(blatt)
+    assert "Takt für alle Übungen: 4-6 · 6,0/min" in _texte(blatt)
+    _daten(blatt, "baustein_uebernehmen").on_click()
+    _speichern(ansicht)
+
+    kurs = state.kurse.laden(kurs.id)
+    b2, am_plan = kurs.kapitel[1].bloecke[2], kurs.kapitel[1].bloecke[-1]
+    assert (b2.id, b2.felder, b2.timer["id"]) == ("b2", ["reps", "scale"], "kurs-b2")
+    assert b2.takt == VORLAGEN["atmung_4_6"]
+    assert (am_plan.id, am_plan.an, am_plan.timer["id"]) == (
+        "einstellen-1",
+        "",
+        "kurs-einstellen-1",
+    )
+    assert am_plan.takt == VORLAGEN["atmung_4_6"] and am_plan.felder is None
+
+    # Paketprüfung und Rundreise: hinaus, herein, noch einmal — derselbe Kurs
+    assert _paketpruefung(state, kurs) == ([], [])
+    roh, gebaut, wieder = _rundreise(state, kurs)
+    assert kursplan_pruefen(roh, gebaut) == ([], [])
+    (gelesen,) = gebaut.kurse
+    assert [kurs_stand(k) for k in wieder.kurse] == [kurs_stand(gelesen)]
+
+    def angaben(k: Kurs) -> list[tuple]:
+        return [
+            (b.id, b.felder, b.takt, timer_kern(b.timer))
+            for kapitel in k.kapitel
+            for b in kapitel.bloecke
+            if b.baustein
+        ]
+
+    assert angaben(gelesen) == angaben(kurs)
+    assert [b for b in angaben(gelesen) if b[0] in ("b2", "einstellen-1")] == [
+        ("b2", ["reps", "scale"], VORLAGEN["atmung_4_6"], timer_kern(b2.timer)),
+        ("einstellen-1", None, VORLAGEN["atmung_4_6"], timer_kern(am_plan.timer)),
+    ]
+    assert gelesen.kapitel[1].bloecke[2].timer["id"] == "kurs-b2"  # die ID des eigenen bleibt
+
+
+def test_test_misst_die_gewaehlte(page, state) -> None:
+    """Ben, 16.11.2026 („muss behoben werden“): Der Test-Dialog bietet neben den Übungen des
+    Katalogs „die gewählte aus ‹Auswahl›“ an — aus diesem Kapitel (auch ungespeichert) und
+    früheren. Gespeichert wird ``aus``, die feste Übung ist dann leer. Anlegen, speichern,
+    wieder öffnen; die Vorschau eines Bausteins mit Ziel aus diesem Test nimmt die
+    Beispielübung; Löschen der Auswahl nennt den Test; Paketprüfung und Rundreise."""
+    kurs, u = _kurs(state)
+    profil = state.profil.id
+    eins, zwei = kurs.kapitel
+    ansicht = kapitel_bearbeiten(page, state, kurs, zwei)
+    assert "Käfer · Wiederholungen" in _texte(ansicht)
+
+    # Eine weitere Auswahl, noch ungespeichert: Planke oder Käfer — ohne gemeinsames Feld
+    _daten(ansicht, ("block_neu", AUSWAHL)).on_click()
+    dialog = page.dialoge[-1]
+    dazu = _felder(dialog)["Übung zur Auswahl hinzufügen"]
+    for name in ("Planke", "Käfer"):
+        dazu.value = u[name].id
+        dazu.on_select()
+    _felder(dialog)["Aufforderung (leer = Vorgabe)"].value = "Halten oder zählen"
+    _daten(dialog, "block_uebernehmen").on_click()
+    neue_wahl = next(b for b in _daten_ids(ansicht, "block") if b not in ("w", "t"))
+
+    # Der Test-Dialog: die Übungen des Katalogs — davor „die gewählte aus …“, beide Auswahlen
+    _daten(ansicht, ("block", "t")).on_click()
+    dialog = page.dialoge[-1]
+    uebung = _felder(dialog)["Übung"]
+    assert uebung.value == u["Käfer"].id
+    angebot = {o.key: o.text for o in uebung.options}
+    assert [k for k in angebot if k.startswith("aus:")] == ["aus:w", f"aus:{neue_wahl}"]
+    assert angebot["aus:w"] == "die gewählte aus „1 von 2: Käfer, Brücke“"
+    assert angebot[f"aus:{neue_wahl}"] == "die gewählte aus „Halten oder zählen“"
+    assert "Ziel in % des Tests" not in _felder(dialog)  # Kursplan: Der Baustein sagt es
+    hinweis = next(
+        x for x in _alle(dialog) if isinstance(x, ft.Text) and "kein gemeinsames Feld" in x.value
+    )
+    assert hinweis.visible is False
+    # ohne gemeinsames Feld: was wenigstens eine der Übungen hat — und der Hinweis dazu
+    uebung.value = f"aus:{neue_wahl}"
+    uebung.on_select()
+    feld = _felder(dialog)["Was wird gemessen"]
+    assert [o.key for o in feld.options] == ["reps", "hold"] and hinweis.visible is True
+    # Käfer und Brücke zählen beide Wiederholungen
+    uebung.value = "aus:w"
+    uebung.on_select()
+    assert [o.key for o in feld.options] == ["reps"] and feld.value == "reps"
+    assert hinweis.visible is False
+    _daten(dialog, "block_uebernehmen").on_click()
+    assert "die gewählte · Wiederholungen" in _texte(ansicht)
+
+    # Der Baustein mit dem Ziel aus diesem Test: die Vorschau nimmt die Beispielübung
+    _daten(ansicht, ("baustein", "b2")).on_click()
+    blatt = page.dialoge[-1]
+    assert _daten(blatt, "baustein_ziel").value == "test:t"
+    assert dict((o.key, o.text) for o in _daten(blatt, "baustein_ziel").options)["test:t"] == (
+        "aus dem Test „die gewählte“"
+    )
+    vorschau = _texte(_daten(blatt, "baustein_vorschau"))
+    assert "Ziel für Käfer: 15 Wiederholungen" in vorschau  # 30 Wiederholungen × 0,5
+    assert any(
+        t.startswith("Beispiel mit der Wahl „Käfer“ und dem Testwert 30 Wiederholungen.")
+        for t in vorschau
+    )
+    _daten(blatt, "baustein_abbrechen").on_click()
+    _speichern(ansicht)
+
+    kurs = state.kurse.laden(kurs.id)
+    eins, zwei = kurs.kapitel
+    test = next(b for b in zwei.bloecke if b.id == "t")
+    assert (test.aus, test.uebung, test.feld) == ("w", "", "reps")
+    # Wieder öffnen: „die gewählte“ steht
+    ansicht = kapitel_bearbeiten(page, state, kurs, zwei)
+    _daten(ansicht, ("block", "t")).on_click()
+    assert _felder(page.dialoge[-1])["Übung"].value == "aus:w"
+    assert _felder(page.dialoge[-1])["Was wird gemessen"].value == "reps"
+
+    # Paketprüfung und Rundreise (ein Test mit „aus“ braucht Formatversion 6)
+    assert _paketpruefung(state, kurs) == ([], [])
+    roh, gebaut, wieder = _rundreise(state, kurs)
+    assert roh["version"] == 6 and kursplan_pruefen(roh, gebaut) == ([], [])
+    (gelesen,) = gebaut.kurse
+    assert [kurs_stand(k) for k in wieder.kurse] == [kurs_stand(gelesen)]
+    assert [(b.aus, b.uebung) for b in gelesen.kapitel[1].bloecke if b.art == TEST] == [("w", "")]
+
+    # Die Kopie schreibt „aus“ um
+    kopie = kurs_kopieren(state, kurs)
+    ids = {
+        a.id: n.id
+        for ka, kn in zip(kurs.kapitel, kopie.kapitel, strict=True)
+        for a, n in zip(ka.bloecke, kn.bloecke, strict=True)
+    }
+    kopierter = next(b for b in kopie.kapitel[1].bloecke if b.id == ids["t"])
+    assert (kopierter.aus, kopierter.uebung) == (ids["w"], "") and ids["w"] != "w"
+    assert _paketpruefung(state, kopie) == ([], [])
+
+    # Die Karte: Wer Käfer wählt und 30 Wiederholungen testet, sieht die Zeile der Vorschau
+    state.kurse.starten(kurs, profil)
+    karte = state.kurse.plan_aenderungen(kurs, eins, profil)
+    state.kurse.plan_uebernehmen(kurs, eins, profil, {z.id for z in karte})
+    state.kurse.kapitel_abschliessen(kurs, eins, profil)
+    session = Session(subject_id=profil)
+    state.sitzungen.anlegen(session)
+    state.sitzungen.eintrag_anlegen(session, u["Käfer"], {"reps": [30]})
+    karte = state.kurse.plan_aenderungen(kurs, zwei, profil, {"w": [u["Käfer"].id]})
+    assert [(z.titel, z.unter) for z in karte][:2] == [
+        ("Käfer kommt dazu", "hinter Seitstütz"),
+        ("Ziel für Käfer: 15 Wiederholungen", "aus deinem Test"),
+    ]
+    for z in karte[:2]:
+        assert z.titel in vorschau and z.unter in vorschau
+
+    # Die Auswahl löschen: Die Rückfrage nennt den Test — ohne sie hätte er keine Übung
+    zeile = _daten(ansicht, ("block", "w"))
+    next(x for x in _alle(zeile) if getattr(x, "tooltip", None) == "Entfernen").on_click()
+    frage = page.dialoge[-1]
+    texte = _texte(frage)
+    assert "Darauf beziehen sich andere Blöcke:" in texte
+    assert "• Test — die gewählte · Wiederholungen: wird mit gelöscht" in texte
+    assert any(t.startswith("• Übung dazu — die gewählte, hinter Seitstütz") for t in texte)
+    _daten(frage, "block_loeschen_ja").on_click()
+    assert not _hat(ansicht, ("block", "t")) and not _hat(ansicht, ("baustein", "b2"))
+    _speichern(ansicht)
+    geblieben = [b.id for b in state.kurse.laden(kurs.id).kapitel[1].bloecke]
+    assert "t" not in geblieben and "w" not in geblieben and "b4" in geblieben
+
+
+def test_test_misst_die_gewaehlte_auch_mit_kapitelplan(page, state) -> None:
+    """Ohne Kursplan gilt dasselbe: Der Test darf „die gewählte“ messen; ihr Wert wird ihr Ziel
+    im Kapitelplan (`core.kursbloecke.vorlage_anwenden`) — „Ziel in %“ bleibt dort stehen."""
+    u = _uebungen(state)
+    plan = Plan(name="Rumpf", subject_id=state.profil.id)
+    state.plaene.speichern(plan)
+    state.plaene.uebung_hinzufuegen(plan.id, u["Planke"].id)
+    kurs = editor.kurs_anlegen(state)
+    kapitel = kurs.kapitel[0]
+    kapitel.plaene = [PlanVorlage("Rumpf", items=[VorlageItem(u["Planke"].id)])]
+    kapitel.bloecke = [Block(AUSWAHL, id="w", uebungen=[u["Käfer"].id, u["Brücke"].id])]
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    _daten(ansicht, ("block_neu", TEST)).on_click()
+    dialog = page.dialoge[-1]
+    _daten(dialog, "block_uebernehmen").on_click()
+    assert "Ein Test braucht eine Übung." in _texte(dialog)
+    felder = _felder(dialog)
+    felder["Übung"].value = "aus:w"
+    felder["Übung"].on_select()
+    assert felder["Was wird gemessen"].value == "reps"
+    felder["Ziel in % des Tests"].value = "80"
+    _daten(dialog, "block_uebernehmen").on_click()
+    assert "die gewählte — wird Ziel im Plan (80 %)" in _texte(ansicht)
+    _felder(ansicht)["Titel"].value = "Rumpf"
+    _speichern(ansicht)
+    test = state.kurse.laden(kurs.id).kapitel[0].bloecke[1]
+    assert (test.art, test.aus, test.uebung, test.feld, test.faktor) == (
+        TEST,
+        "w",
+        "",
+        "reps",
+        0.8,
+    )
+
+
 def test_vorschau_zeigt_die_texte_der_karte(page, state) -> None:
     """„So steht es in der Karte“ nennt dieselben Zeilen wie `KursRepo.plan_aenderungen` — für
     eine Person, die Kapitel 1 übernommen, wie im Beispiel gewählt und getestet hat."""
@@ -712,7 +1132,7 @@ def test_loeschen_mit_verweisen_fragt_und_leert(page, state) -> None:
     frage = page.dialoge[-1]
     assert frage.title.value == "„Übung dazu“ löschen?"
     texte = _texte(frage)
-    assert "Darauf beziehen sich andere Bausteine:" in texte
+    assert "Darauf beziehen sich andere Blöcke:" in texte
     assert (
         "• Erweiterung · Übung dazu — die gewählte, hinter Seitstütz · Ziel aus dem Test × 0,5: "
         "kommt ans Ende"

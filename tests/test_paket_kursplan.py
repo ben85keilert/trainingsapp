@@ -191,6 +191,21 @@ def test_version_6_nur_mit_kursplan_oder_baustein() -> None:
     assert noetige_version([u], [ohne, mit_plan], [plan]) == 6 == FORMAT_VERSION
 
 
+def test_version_6_auch_fuer_einen_test_der_die_gewaehlte_misst() -> None:
+    """Ein Test mit ``aus`` braucht Version 6, auch ohne Kursplan — eine ältere App ließe den
+    Block fallen (`Block.from_dict` kannte nur ``uebung``)."""
+    bloecke = [
+        Block("auswahl", id="w", uebungen=["u1", "u2"]),
+        Block("test", id="t", aus="w", feld="reps"),
+    ]
+    kurs = Kurs(name="K", kapitel=[Kapitel(titel="A", bloecke=bloecke)])
+    assert nutzt_kursplan(kurs) and noetige_version(kurse=[kurs]) == 6
+    fest = Kurs(
+        name="K", kapitel=[Kapitel(titel="A", bloecke=[Block("test", id="t", uebung="u1")])]
+    )
+    assert not nutzt_kursplan(fest) and noetige_version(kurse=[fest]) == 2
+
+
 def test_aeltere_app_lehnt_version_6_ab(monkeypatch) -> None:
     """Eine App, die nur Formatversion 5 kennt (bis 0.3.94), liest das Paket nicht — statt
     den Kurs ohne seinen Plan zu zeigen. Dieselbe Schranke gilt hier für Version 7."""
@@ -374,6 +389,18 @@ def _feste_uebung_mit_doppelpunkt(roh: dict[str, Any]) -> None:
     block(roh, "weiter")["von"] = "start:planke"
 
 
+def _test_aus_ohne_auswahl(roh: dict[str, Any]) -> None:
+    block(roh, "test")["aus"] = "fehlt"
+
+
+def _test_mit_uebung_und_aus(roh: dict[str, Any]) -> None:
+    block(roh, "test")["uebung"] = "kaefer"
+
+
+def _test_vor_seiner_auswahl(roh: dict[str, Any]) -> None:
+    kapitel(roh, 1)["bloecke"].append({"art": "test", "id": "frueh", "aus": "wahl", "feld": "reps"})
+
+
 FEHLER: list[tuple[Callable[[dict[str, Any]], None], str]] = [
     (
         _ohne_id,
@@ -500,6 +527,22 @@ FEHLER: list[tuple[Callable[[dict[str, Any]], None], str]] = [
         _feste_uebung_mit_doppelpunkt,
         "Kurs „Rumpf-Kurs“: Kapitel „Erweiterung“, Block 4 „weiter“: `von` „start:planke“: "
         "„start“ bringt eine feste Übung — ihre Marke heißt „start“",
+    ),
+    (
+        _test_aus_ohne_auswahl,
+        "Kurs „Rumpf-Kurs“: Kapitel „Erweiterung“, Block 2 „test“: `aus` „fehlt“ nennt keine "
+        "Auswahl (ein Block `auswahl` mit dieser `id` in diesem oder einem früheren Kapitel)",
+    ),
+    (
+        _test_mit_uebung_und_aus,
+        "Kurs „Rumpf-Kurs“: Kapitel „Erweiterung“, Block 2 „test“: `uebung` und `aus` zugleich "
+        "— nur eines davon (die App nähme `aus`)",
+    ),
+    (
+        _test_vor_seiner_auswahl,
+        "Kurs „Rumpf-Kurs“: Kapitel „Anfang“, Block 3 „frueh“: `aus` „wahl“ steht erst in "
+        "Kapitel 2 („Erweiterung“) — ein Baustein bezieht sich nur auf dieses oder ein früheres "
+        "Kapitel",
     ),
 ]
 
@@ -830,3 +873,37 @@ def test_datei_der_vorlage_eines_eigenen_kurses_bleibt_beim_aufraeumen(tmp_path)
         assert [d.name for d in ablage.ordner.iterdir()] == [dateiname(name)]
     finally:
         con.close()
+
+
+def test_test_der_gewaehlten_ohne_kursplan_nur_im_selben_kapitel(tmp_path) -> None:
+    """Mit Kapitelplänen kennt ein Kapitel nur die Wahl aus seinen eigenen Blöcken — ein Test
+    mit ``aus`` auf eine Auswahl eines früheren Kapitels bliebe dort ohne Wirkung."""
+    roh = beispiel()
+    del roh["kurse"][0]["kursplan"]
+    for kap in roh["kurse"][0]["kapitel"]:  # ohne Kursplan auch keine Bausteine
+        kap["bloecke"] = [b for b in kap["bloecke"] if not b["art"].startswith("plan_")]
+    kapitel(roh, 1)["bloecke"].append(kapitel(roh, 2)["bloecke"].pop(0))  # die Auswahl nach vorn
+    fehler, _hinweise = pruefe(tmp_path, roh)
+    assert fehler == [
+        "Kurs „Rumpf-Kurs“: Kapitel „Erweiterung“, Block 1 „test“: `aus` „wahl“ steht in einem "
+        "anderen Kapitel (Kapitel „Anfang“, Block 2 „wahl“) — ohne `kursplan` muss die Auswahl "
+        "im selben Kapitel stehen wie der Test"
+    ]
+    # im selben Kapitel geht es auch ohne Kursplan
+    roh = beispiel()
+    del roh["kurse"][0]["kursplan"]
+    for kap in roh["kurse"][0]["kapitel"]:
+        kap["bloecke"] = [b for b in kap["bloecke"] if not b["art"].startswith("plan_")]
+    assert pruefe(tmp_path, roh)[0] == []
+
+
+def test_hinweis_wenn_nicht_jede_uebung_der_auswahl_das_feld_des_tests_hat(tmp_path) -> None:
+    roh = beispiel()
+    block(roh, "test")["feld"] = "hold"  # die drei zur Wahl zählen Wiederholungen
+    fehler, hinweise = pruefe(tmp_path, roh)
+    assert fehler == []
+    assert hinweise == [
+        "Kurs „Rumpf-Kurs“: Kapitel „Erweiterung“, Block 2 „test“: Das Feld `hold` hat nicht jede "
+        "Übung der Auswahl „wahl“ (kaefer, bruecke, beinheben) — für sie gibt es keinen "
+        "Testwert, ihr Ziel bliebe offen"
+    ]

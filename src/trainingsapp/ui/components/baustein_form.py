@@ -12,11 +12,20 @@ Kapitel-Formular zurück, gespeichert wird erst dort.
 Verweise ins Leere zeigen, die Zeilen der Vorschau — das Blatt zeichnet sie und reicht die
 Eingaben durch.
 
-Vereinfacht gegenüber dem Plan-Editor (bewusst, 16.11.2026): Der Timer ist eine Wahl aus der
-Timer-Bibliothek (eingebettet als Kopie, `core.timer.ohne_verweise`), kein Editor; der Weg hat
-ein eigenes schmales Formular mit denselben Auslösern wie `components/wege_form.py` (jenes
-bearbeitet alle Wege eines Knotens samt Herkunft — ein Baustein ist genau eine Kante); Takt
-und der Inhalt eines Wegs bleiben, wie sie sind, und stehen nur als Zeile da.
+**Parameter, Takt und Timer** (Ben, 16.11.2026: „muss ebenfalls behoben werden“) stellt das
+Blatt mit dem ein, was es dafür schon gibt:
+
+- Parameter wie in „Im Plan einstellen“: Knöpfe je Parameter der Übung, darunter „Weitere
+  Parameter holen“ aus dem Feldvorrat (`Kurssicht.parameter`) — oder „nur abhaken“.
+- Takt über das Takt-Blatt (`components/takt_blatt.py`), das über diesem Blatt aufgeht.
+- Timer: keiner, einer aus der Timer-Bibliothek oder ein **eigener** — bearbeitet im
+  Timer-Editor (`components/timer_editor.py`: Zeiten · Klänge, Teile, Runden), aufgeklappt an
+  Ort und Stelle wie in „Im Plan einstellen“. Der Baustein trägt ihn eingebettet
+  (`core.kursbau.timer_einbetten`), nie als Verweis in die Bibliothek.
+
+Vereinfacht bleibt der Weg: ein eigenes schmales Formular mit denselben Auslösern wie
+`components/wege_form.py` (jenes bearbeitet alle Wege eines Knotens samt Herkunft — ein
+Baustein ist genau eine Kante); der Inhalt eines Wegs bleibt, wie er ist.
 """
 
 from __future__ import annotations
@@ -31,7 +40,14 @@ from typing import Any, Final
 import flet as ft
 
 from trainingsapp.core import ablauf as ab
-from trainingsapp.core.kursbau import Kurssicht, kante_dict, kante_von, timer_kern, timer_text
+from trainingsapp.core.kursbau import (
+    Kurssicht,
+    kante_dict,
+    kante_von,
+    timer_einbetten,
+    timer_kern,
+    timer_text,
+)
 from trainingsapp.core.kursbloecke import (
     HART,
     PLAN_EINSTELLEN,
@@ -44,13 +60,17 @@ from trainingsapp.core.kursbloecke import (
 )
 from trainingsapp.core.kursplan import ANKER_FEHLT, ENTFAELLT, OFFEN, UEBERNOMMEN
 from trainingsapp.core.models import Exercise
+from trainingsapp.core.result_spec import FieldSpec, ResultSpec
 from trainingsapp.core.standards import ziel_bereinigen
-from trainingsapp.core.timer import TimerProfil, dauer_text, ohne_verweise
-from trainingsapp.core.varianten import ist_variante
+from trainingsapp.core.takt import AUS, Takt
+from trainingsapp.core.timer import TimerProfil, dauer_text
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis
 from trainingsapp.ui.components.spec_form import SpecForm
+from trainingsapp.ui.components.takt_blatt import takt_blatt, takt_zeile_text
+from trainingsapp.ui.components.timer_editor import timer_editor
+from trainingsapp.ui.components.timer_zeile import neuer_timer
 
 #: Titel des Blatts je Art
 BLATT_TITEL: Final[dict[str, str]] = {
@@ -62,9 +82,13 @@ BLATT_TITEL: Final[dict[str, str]] = {
 #: Schlüssel in den Auswahlfeldern für „nichts“ — eine Marke beginnt nie so
 KEIN: Final = "@kein"
 FEST: Final = "@fest"
-BISHER: Final = "@bisher"
 ABHAKEN: Final = "@abhaken"
 WAEHLEN: Final = "@waehlen"
+#: Timer: ein eigener Timer des Bausteins (statt keinem oder einem aus der Bibliothek)
+EIGEN: Final = "@eigen"
+#: Takt: ausdrücklich keiner bzw. ein eingestellter (die Wahl öffnet das Takt-Blatt)
+KEIN_TAKT: Final = "@kein_takt"
+TAKT: Final = "@takt"
 
 _STAND_SYMBOL: Final[dict[str, ft.IconData]] = {
     OFFEN: ft.Icons.HOURGLASS_EMPTY,
@@ -185,14 +209,27 @@ def baustein_blatt(
             ein eigener Dialog).
     """
     entwurf = copy.deepcopy(block)
-    bisher_timer = dict(block.timer)
-    bibliothek: list[TimerProfil] = list(state.timer_profile())
+    #: Die Timer-Bibliothek zur Wahl — ohne die Stoppuhr (sie ist kein Ablauf)
+    bibliothek: list[TimerProfil] = [p for p in state.timer_profile() if not p.ist_stoppuhr]
+
+    def aus_bibliothek(timer: Mapping[str, Any]) -> TimerProfil | None:
+        """Der Timer der Bibliothek mit demselben Inhalt — ``None``: ein eigener."""
+        kern = timer_kern(timer)
+        return next((p for p in bibliothek if timer_kern(p.als_dict()) == kern), None)
+
+    bekannt = aus_bibliothek(block.timer) if block.timer else None
     zustand: dict[str, Any] = {
         "ziel": TEST if block.ziel_aus else FEST if block.ziel else KEIN,
         "parameter": KEIN if block.felder is None else WAEHLEN if block.felder else ABHAKEN,
         "kante": kante_von(block),
         "form": None,
+        #: Der Timer: `KEIN`, ``t:<id>`` (aus der Bibliothek) oder `EIGEN`; ob der Editor des
+        #: eigenen aufgeklappt ist; der Editor selbst, solange er steht
+        "timer": KEIN if not block.timer else f"t:{bekannt.id}" if bekannt is not None else EIGEN,
+        "timer_offen": False,
+        "editor": None,
     }
+    timer_kurz = ft.Text(size=13, expand=True, data="baustein_timer_kurz")
     nachher = Nachher()
     blatt: ft.BottomSheet
     felder = ft.Column(spacing=12, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
@@ -228,12 +265,26 @@ def baustein_blatt(
             b.ziel_aus, b.faktor = "", 1.0
         if zustand["ziel"] != FEST or ohne_uebung:
             b.ziel = {}
-        if b.art == PLAN_EINSTELLEN:
-            if ohne_uebung or zustand["parameter"] == KEIN:
-                b.felder = None
-            elif zustand["parameter"] == ABHAKEN:
-                b.felder = []
+        if ohne_uebung or zustand["parameter"] == KEIN:
+            b.felder = None
+        elif zustand["parameter"] == ABHAKEN:
+            b.felder = []
         return b
+
+    def timer_merken() -> str | None:
+        """Was im aufgeklappten Timer-Editor steht, in den Entwurf — oder der Grund, warum es
+        so nicht geht (eine Dauer fehlt). Der eigene Timer heißt ``kurs-<block>``, wie beim
+        Lesen eines Pakets (`core.kursbau.timer_einbetten`)."""
+        editor = zustand["editor"]
+        if editor is None or zustand["timer"] != EIGEN:
+            return None
+        bisher = TimerProfil.aus_dict(dict(entwurf.timer)) if entwurf.timer else None
+        name = (bisher.name if bisher is not None else "") or "Timer"
+        neu = editor.bauen(f"kurs-{entwurf.id}", name)
+        if isinstance(neu, str):
+            return neu
+        entwurf.timer = timer_einbetten(neu, entwurf.id)
+        return None
 
     def pruefen(b: Block) -> str | None:
         if b.art == PLAN_UEBUNG and not b.aus and not b.uebung:
@@ -241,7 +292,7 @@ def baustein_blatt(
         if b.art == PLAN_WEG and (not b.von or not b.zu):
             return "Ein Weg braucht „Von“ und „Zu“."
         if b.art == PLAN_EINSTELLEN and not b.stellt_ein:
-            return "Stell mindestens eines ein — Ziel, Parameter, Timer, Übergang oder Pause."
+            return "Stell mindestens eines ein — Ziel, Parameter, Timer, Takt, Übergang oder Pause."
         form = zustand["form"]
         if form is not None and zustand["ziel"] == FEST and (probleme := form.pruefen()):
             return "Ungültig: " + ", ".join(probleme)
@@ -411,7 +462,11 @@ def baustein_blatt(
                 )
         return teile
 
-    def parameter_teil() -> list[ft.Control]:
+    def parameter_teil(leer: str) -> list[ft.Control]:
+        """Die Parameter der Planübung wie in „Im Plan einstellen“: ``leer`` (keine Angabe —
+        die Planübung folgt der Übung bzw. bleibt, wie sie ist), „nur abhaken“ oder eine
+        Auswahl — Knöpfe je Parameter der Übung, darunter der übrige Feldvorrat („Weitere
+        Parameter holen“), in der Ordnung des Vorrats (`Kurssicht.parameter`)."""
         uebungen_hier = ziel_uebungen()
 
         def setzen(key: str) -> None:
@@ -424,7 +479,7 @@ def baustein_blatt(
                 "Parameter",
                 str(zustand["parameter"]),
                 [
-                    (KEIN, "keine Angabe"),
+                    (KEIN, leer),
                     (ABHAKEN, "nur abhaken — ohne Eingabe"),
                     (WAEHLEN, "auswählen …"),
                 ],
@@ -435,88 +490,215 @@ def baustein_blatt(
         if zustand["parameter"] != WAEHLEN:
             return teile
         gewaehlt = list(entwurf.felder or [])
-        angebot: dict[str, str] = {}
-        for u in uebungen_hier:
-            for f in sicht.katalog[u].result_spec.fields:
-                if not ist_variante(f):
-                    angebot.setdefault(f.key, f.label)
-        for key in gewaehlt:
-            angebot.setdefault(key, jetzt().feld(uebungen_hier, key).label)
+        eigene, vorrat = jetzt().parameter(uebungen_hier)
+        bekannte = {f.key for f in (*eigene, *vorrat)}
+        #: gewählt, aber nicht (mehr) im Angebot — ein Feld einer Übung von früher: bleibt
+        #: sichtbar, damit man es abwählen kann
+        fremde = [jetzt().feld(uebungen_hier, k) for k in gewaehlt if k not in bekannte]
 
         def schalter(key: str) -> Callable[..., None]:
             def handler(_e: Any = None) -> None:
-                jetzt_gewaehlt = list(entwurf.felder or [])
-                if key in jetzt_gewaehlt:
-                    jetzt_gewaehlt.remove(key)
-                else:
-                    jetzt_gewaehlt.append(key)
-                entwurf.felder = [k for k in angebot if k in jetzt_gewaehlt]
                 ziel_merken()
+                wahl_jetzt = set(entwurf.felder or []) ^ {key}
+                entwurf.felder = jetzt().felder_wahl(
+                    uebungen_hier, [k for k in (*gewaehlt, key) if k in wahl_jetzt]
+                )
                 neu_zeichnen()
 
             return handler
 
-        teile.append(
-            ft.Row(
+        def chips(felder_: Sequence[FieldSpec]) -> ft.Control:
+            return ft.Row(
                 wrap=True,
                 spacing=6,
                 run_spacing=6,
                 controls=[
                     ft.Chip(
-                        label=ft.Text(name),
-                        selected=key in gewaehlt,
-                        on_select=schalter(key),
-                        data=("baustein_feld", key),
+                        label=ft.Text(f.label),
+                        selected=f.key in gewaehlt,
+                        show_checkmark=True,
+                        on_select=schalter(f.key),
+                        data=("baustein_feld", f.key),
                     )
-                    for key, name in angebot.items()
-                ]
-                or [hinweis("Die Übung hat keine Parameter.")],
+                    for f in felder_
+                ],
+            )
+
+        if eigene or fremde:
+            teile.append(chips([*eigene, *fremde]))
+        elif not uebungen_hier:
+            teile.append(hinweis("Wähle zuerst die Übung — dann stehen ihre Parameter hier."))
+        teile += [ft.Text("Weitere Parameter holen", size=12, opacity=0.7), chips(vorrat)]
+        if not gewaehlt:
+            teile.append(hinweis("Kein Parameter gewählt — das heißt „nur abhaken“."))
+        return teile
+
+    def timer_spec() -> ResultSpec | None:
+        """Die Felder der Übung für den Timer-Editor (je Abschnitt eine Ausführung) — nur, wenn
+        es genau eine Übung ist; am Plan und bei „der gewählten“ gibt es keine."""
+        bekannte = [u for u in dict.fromkeys(ziel_uebungen()) if u in sicht.katalog]
+        return sicht.katalog[bekannte[0]].result_spec if len(bekannte) == 1 else None
+
+    def timer_kurz_setzen() -> None:
+        """Der eigene Timer in einer Zeile, wie die Karte ihn nennt — zugeklappt mit der
+        Gesamtzeit (aufgeklappt zeigt sie der Editor darunter)."""
+        profil = TimerProfil.aus_dict(dict(entwurf.timer)) if entwurf.timer else None
+        gesamt = (
+            f" · gesamt {dauer_text(profil.gesamt_s())}"
+            if profil is not None and not zustand["timer_offen"]
+            else ""
+        )
+        timer_kurz.value = f"{timer_text(entwurf.timer)}{gesamt}"
+
+    def timer_geaendert() -> None:
+        """Der Timer-Editor meldet jede Änderung — sie gilt sofort im Entwurf; solange eine
+        Dauer fehlt, bleibt der letzte vollständige Stand."""
+        if timer_merken() is None:
+            timer_kurz_setzen()
+            with contextlib.suppress(Exception):
+                timer_kurz.update()
+            vorschau_neu()
+
+    def timer_umschalten(_e: Any = None) -> None:
+        ziel_merken()
+        timer_merken()
+        zustand["timer_offen"] = not zustand["timer_offen"]
+        neu_zeichnen()
+
+    def timer_teil(label: str) -> list[ft.Control]:
+        """Keiner, einer aus der Timer-Bibliothek — oder ein **eigener** Timer dieses
+        Bausteins, bearbeitet im Timer-Editor an Ort und Stelle (`components/timer_editor.py`,
+        derselbe wie in „Im Plan einstellen“). Ausgangspunkt des eigenen ist der Timer, der
+        gerade gewählt ist, sonst Belastung 30 s · Pause 15 s."""
+        optionen = [
+            (KEIN, "keiner"),
+            *((f"t:{p.id}", f"{p.anzeigename} · {dauer_text(p.gesamt_s())}") for p in bibliothek),
+            (EIGEN, "eigener Timer …"),
+        ]
+
+        def setzen(key: str) -> None:
+            timer_merken()
+            zustand["timer"] = KEIN
+            if key == EIGEN:
+                profil = TimerProfil.aus_dict(dict(entwurf.timer)) if entwurf.timer else None
+                entwurf.timer = timer_einbetten(profil or neuer_timer(), entwurf.id)
+                zustand["timer"], zustand["timer_offen"] = EIGEN, True
+            elif key.startswith("t:"):
+                profil = next((p for p in bibliothek if p.id == key[2:]), None)
+                entwurf.timer = timer_einbetten(profil) if profil is not None else {}
+                zustand["timer"] = key if profil is not None else KEIN
+            else:
+                entwurf.timer = {}
+
+        teile: list[ft.Control] = [
+            wahl(label, str(zustand["timer"]), optionen, setzen, "baustein_timer")
+        ]
+        zustand["editor"] = None
+        if zustand["timer"] != EIGEN:
+            return teile
+        offen = bool(zustand["timer_offen"])
+        timer_kurz_setzen()
+        teile.append(
+            ft.Row(
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Icon(ft.Icons.TIMER_OUTLINED, size=18, opacity=0.8),
+                    timer_kurz,
+                    ft.IconButton(
+                        ft.Icons.EXPAND_LESS if offen else ft.Icons.EDIT_OUTLINED,
+                        tooltip="Editor schließen"
+                        if offen
+                        else "Timer bearbeiten: Zeiten · Klänge",
+                        icon_size=20,
+                        on_click=timer_umschalten,
+                        data="baustein_timer_editor_auf",
+                    ),
+                ],
+            )
+        )
+        if not offen:
+            return teile
+        profil = TimerProfil.aus_dict(dict(entwurf.timer)) or neuer_timer()
+        profil.bibliothek = ""
+        editor = timer_editor(page, state, profil, spec=timer_spec(), geaendert=timer_geaendert)
+        zustand["editor"] = editor
+        teile.append(
+            ft.Container(
+                data="baustein_timer_editor",
+                content=ft.Column(
+                    spacing=8,
+                    tight=True,
+                    controls=[
+                        ft.Row(
+                            spacing=8,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            controls=[
+                                ft.Container(expand=True, content=editor.reiter),
+                                ft.Column(
+                                    spacing=0,
+                                    horizontal_alignment=ft.CrossAxisAlignment.END,
+                                    controls=[
+                                        editor.gesamt,
+                                        ft.Text("gesamt", size=11, opacity=0.7),
+                                    ],
+                                ),
+                            ],
+                        ),
+                        ft.GestureDetector(
+                            on_horizontal_drag_end=editor.gewischt, content=editor.inhalt()
+                        ),
+                    ],
+                ),
             )
         )
         return teile
 
-    def timer_teil(label: str) -> ft.Control:
-        """Keiner, einer aus der Timer-Bibliothek — oder der, den der Baustein schon trägt und
-        den die Bibliothek nicht kennt („aus dem Kurs“)."""
-        angebot = [p for p in bibliothek if not p.ist_stoppuhr]
+    def takt_teil(leer: str, wer: str) -> ft.Control:
+        """Der Takt: ``leer`` (keine Angabe), ausdrücklich keiner — oder einer aus dem
+        Takt-Blatt (`components/takt_blatt.py`: Vorlagen, Phasen, Tempo, Klang), das über
+        diesem Blatt aufgeht. Gerechnet wird nur in `core/takt.py`."""
+        takt = entwurf.takt
+        hat = takt is not None and not takt.leer
 
-        def bekannt(timer: Mapping[str, Any]) -> TimerProfil | None:
-            kern = timer_kern(timer)
-            return next((p for p in angebot if timer_kern(p.als_dict()) == kern), None)
+        def uebernommen(neu_takt: Takt | None) -> None:
+            entwurf.takt = AUS if neu_takt is None or neu_takt.leer else neu_takt
+            neu_zeichnen()
 
-        optionen = [
-            (KEIN, "keiner"),
-            *((f"t:{p.id}", f"{p.anzeigename} · {dauer_text(p.gesamt_s())}") for p in angebot),
-        ]
-        if bisher_timer and bekannt(bisher_timer) is None:
-            optionen.append((BISHER, f"{timer_text(bisher_timer)} — aus dem Kurs"))
-        passend = bekannt(entwurf.timer) if entwurf.timer else None
-        wert = KEIN if not entwurf.timer else f"t:{passend.id}" if passend is not None else BISHER
+        def oeffnen(_e: Any = None) -> None:
+            ziel_merken()
+            timer_merken()
+            start = entwurf.takt if entwurf.takt is not None and not entwurf.takt.leer else None
+            page.show_dialog(
+                takt_blatt(
+                    page,
+                    state,
+                    takt=start or jetzt().takt_vorgabe(ziel_uebungen()),
+                    titel=f"Takt · {wer}",
+                    in_den_plan=uebernommen,
+                )
+            )
 
         def setzen(key: str) -> None:
-            if key == BISHER:
-                entwurf.timer = dict(bisher_timer)
-            elif key.startswith("t:"):
-                profil = next((p for p in angebot if p.id == key[2:]), None)
-                entwurf.timer = dict(ohne_verweise(profil.als_dict())) if profil is not None else {}
+            if key == TAKT:
+                oeffnen()  # der Entwurf bleibt, bis das Takt-Blatt „Übernehmen“ meldet
             else:
-                entwurf.timer = {}
+                entwurf.takt = AUS if key == KEIN_TAKT else None
 
-        return wahl(label, wert, optionen, setzen, "baustein_timer")
-
-    def bleibt_teil() -> list[ft.Control]:
-        """Was der Baustein trägt, das Blatt aber nicht einstellt — es bleibt, wie es ist."""
-        teile: list[str] = []
-        if entwurf.takt is not None:
-            teile.append("kein Takt" if entwurf.takt.leer else f"Takt {entwurf.takt.kurztext()}")
-        if entwurf.art == PLAN_UEBUNG and entwurf.felder is not None:
-            namen = ", ".join(jetzt().feld(ziel_uebungen(), k).label for k in entwurf.felder)
-            teile.append(f"Parameter: {namen}" if entwurf.felder else "nur abhaken")
-        if not teile:
-            return []
-        return [
-            hinweis("Bleibt, wie es im Kurs steht (hier nicht einstellbar): " + " · ".join(teile))
+        optionen = [
+            (KEIN, leer),
+            (KEIN_TAKT, "kein Takt"),
+            # der Takt heißt wie in „Im Plan einstellen“ (`takt_zeile_text`)
+            (TAKT, takt_zeile_text(takt).removeprefix("Takt: ") if hat else "einstellen …"),
         ]
+        wert = KEIN if takt is None else TAKT if hat else KEIN_TAKT
+        stift = ft.IconButton(
+            ft.Icons.EDIT_OUTLINED,
+            tooltip="Takt einstellen: Phasen, Tempo, Klang",
+            on_click=oeffnen,
+            data="baustein_takt_stift",
+        )
+        return wahl("Takt", wert, optionen, setzen, "baustein_takt", daneben=[stift])
 
     # -- Die drei Formulare ------------------------------------------------------------------
 
@@ -556,8 +738,9 @@ def baustein_blatt(
                 "baustein_hinter",
             ),
             *ziel_teil(),
-            timer_teil("Timer"),
-            *bleibt_teil(),
+            *parameter_teil("wie die Übung"),
+            *timer_teil("Timer"),
+            takt_teil("wie die Übung", jetzt().wer(entwurf)),
         ]
 
     def einstellen_form() -> list[ft.Control]:
@@ -580,9 +763,17 @@ def baustein_blatt(
             )
         ]
         if entwurf.an:
-            teile += [*ziel_teil(), *parameter_teil(), timer_teil("Timer der Übung")]
+            teile += [
+                *ziel_teil(),
+                *parameter_teil("keine Angabe"),
+                *timer_teil("Timer der Übung"),
+                takt_teil("keine Angabe", jetzt().marke_name(entwurf.an)),
+            ]
         else:
-            teile.append(timer_teil("Timer für alle Übungen"))
+            teile += [
+                *timer_teil("Timer für alle Übungen"),
+                takt_teil("keine Angabe", "alle Übungen"),
+            ]
         pause = entwurf.pause_ohne_timer
         if not entwurf.an or entwurf.uebergang or pause is not None:
             teile += [
@@ -612,7 +803,7 @@ def baustein_blatt(
                     "baustein_pause",
                 ),
             ]
-        return [*teile, *bleibt_teil()]
+        return teile
 
     def weg_form() -> list[ft.Control]:
         kante: ab.Kante = zustand["kante"]
@@ -775,7 +966,8 @@ def baustein_blatt(
         return teile
 
     def bauen() -> list[ft.Control]:
-        zustand["form"] = None  # die Zielmaske gibt es nur, wenn `ziel_teil` sie neu anlegt
+        # Zielmaske und Timer-Editor gibt es nur, wenn ihr Teil sie neu anlegt
+        zustand["form"] = zustand["editor"] = None
         if entwurf.art == PLAN_UEBUNG:
             return uebung_form()
         if entwurf.art == PLAN_EINSTELLEN:
@@ -786,8 +978,9 @@ def baustein_blatt(
 
     def uebernehmen_getippt(_e: Any = None) -> None:
         ziel_merken()
+        grund = timer_merken()
         ergebnis = fertig()
-        grund = pruefen(ergebnis)
+        grund = grund or pruefen(ergebnis)
         if grund is not None:
             meldung.value, meldung.visible = grund, True
             with contextlib.suppress(Exception):
@@ -859,10 +1052,12 @@ def baustein_blatt(
 
 __all__ = [
     "ABHAKEN",
-    "BISHER",
     "BLATT_TITEL",
+    "EIGEN",
     "FEST",
     "KEIN",
+    "KEIN_TAKT",
+    "TAKT",
     "WAEHLEN",
     "baustein_blatt",
     "vorschau_zeilen",

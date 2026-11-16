@@ -9,7 +9,13 @@ nennt wie `KursRepo.plan_aenderungen` und wie der Editor damit umgeht, prüft
 
 from __future__ import annotations
 
-from trainingsapp.core.kursbau import Kurssicht, folgen_anwenden, kurs_kopie
+from trainingsapp.core.kursbau import (
+    Kurssicht,
+    folgen_anwenden,
+    kurs_kopie,
+    timer_einbetten,
+    timer_kern,
+)
 from trainingsapp.core.kursbloecke import (
     AUSWAHL,
     PLAN_EINSTELLEN,
@@ -23,7 +29,9 @@ from trainingsapp.core.kurse import Kapitel, Kurs, Kursplan, PlanVorlage, Vorlag
 from trainingsapp.core.kursplan import NEU
 from trainingsapp.core.models import Exercise
 from trainingsapp.core.pakete import PaketPlan
-from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+from trainingsapp.core.result_spec import FELDVORRAT, ResultSpec, vorrat_feld
+from trainingsapp.core.takt import AUS, VORLAGEN
+from trainingsapp.core.timer import Abschnitt, TimerProfil
 
 
 def _katalog() -> dict[str, Exercise]:
@@ -223,3 +231,190 @@ def test_kopie_nimmt_die_grundlage_aus_dem_paket_als_vorlage() -> None:
     gefragt.clear()
     kurs.kursplan = Kursplan("Rumpf")
     assert kurs_kopie(kurs, paketplaene).kursplan.vorlage is None and gefragt == []
+
+
+def test_parameter_zur_wahl_wie_im_plan() -> None:
+    """Die Parameter, die ein Baustein anbieten kann: die der Übung und der übrige Feldvorrat,
+    in der Ordnung des Vorrats — bei „der gewählten“ die Parameter aller Übungen der Auswahl."""
+    kurs = _kurs()
+    sicht = _sicht(kurs, kurs.kapitel[1])
+    eigene, vorrat = sicht.parameter(["Seitstütz"])
+    assert [f.key for f in eigene] == ["hold"]
+    assert [f.key for f in vorrat] == [f.key for f in FELDVORRAT if f.key != "hold"]
+    # die Auswahl: Käfer und Brücke zählen Wiederholungen; mit dem Seitstütz käme Halten dazu
+    assert [f.key for f in sicht.parameter(sicht.uebungen_von(kurs.kapitel[1].bloecke[2]))[0]] == [
+        "reps"
+    ]
+    eigene, vorrat = sicht.parameter(["Seitstütz", "Käfer", "Brücke", "fehlt"])
+    assert [f.key for f in eigene] == ["reps", "hold"]  # Ordnung des Vorrats, nicht der Übungen
+    assert not {"reps", "hold"} & {f.key for f in vorrat}
+    assert sicht.parameter([]) == ([], [*FELDVORRAT])
+    # Die Wahl steht in der Ordnung des Angebots; Unbekanntes bleibt am Ende
+    assert sicht.felder_wahl(["Käfer"], ["weight", "alt", "reps", "duration", "weight"]) == [
+        "reps",
+        "duration",
+        "weight",
+        "alt",
+    ]
+
+
+def test_takt_vorgabe_und_eingebetteter_timer() -> None:
+    kurs = _kurs()
+    katalog = _katalog()
+    katalog["Käfer"].takt = VORLAGEN["atmung_4_7_8"]
+    katalog["Brücke"].takt = AUS
+    sicht = Kurssicht(kurs, "k2", kurs.kapitel[1].bloecke, katalog)
+    assert sicht.takt_vorgabe(["Käfer"]) == VORLAGEN["atmung_4_7_8"]
+    assert sicht.takt_vorgabe(["Brücke"]) is None  # ausdrücklich keiner ist kein Ausgangspunkt
+    assert sicht.takt_vorgabe(["Käfer", "Brücke"]) is None  # „die gewählte“: nicht eindeutig
+    assert sicht.takt_vorgabe([]) is None
+
+    runden = TimerProfil(
+        id="runden",
+        name="3 Runden",
+        abschnitte=[Abschnitt("Üben", 40), Abschnitt("Pause", 20, zaehlt=False)],
+        runden=3,
+        bibliothek="runden",
+    )
+    kopie = timer_einbetten(runden)
+    assert kopie["id"] == "runden" and "bibliothek" not in kopie
+    eigen = timer_einbetten(runden, "uebung-1")
+    assert eigen["id"] == "kurs-uebung-1" and "bibliothek" not in eigen
+    assert timer_kern(eigen) == timer_kern(kopie) == timer_kern(runden.als_dict())
+    assert runden.id == "runden" and runden.bibliothek == "runden"  # das Profil bleibt
+    gelesen = TimerProfil.aus_dict(eigen)
+    assert gelesen is not None and gelesen.runden == 3 and gelesen.abschnitte[1].zaehlt is False
+
+
+def test_vorschau_nennt_parameter_takt_und_timer() -> None:
+    """Je Angabe eine Zeile — an der Planübung und am Plan (`core.kursplan.aenderungen`); die
+    Zeile des Bausteins in der Liste nennt sie auch."""
+    kurs = _kurs()
+    eins, zwei = kurs.kapitel
+    timer = timer_einbetten(
+        TimerProfil(id="x", name="Runden", abschnitte=[Abschnitt("Üben", 40)], runden=3), "b1"
+    )
+    b1 = eins.bloecke[1]
+    b1.felder, b1.takt, b1.timer = ["hold", "weight"], VORLAGEN["atmung_4_6"], timer
+    zwei.bloecke[2].felder = []
+    zwei.bloecke[2].takt = AUS
+    zwei.bloecke.append(
+        Block(PLAN_EINSTELLEN, id="b5", takt=VORLAGEN["atmung_4_6"], timer=dict(timer))
+    )
+    sicht = _sicht(kurs, eins)
+    assert [(z.titel, z.unter) for z in sicht.vorschau().zeilen] == [
+        ("Seitstütz kommt dazu", "ans Ende"),
+        ("Ziel für Seitstütz: 40 s", "aus dem Kurs"),
+        ("Parameter für Seitstütz: Haltezeit, Gewicht", "aus dem Kurs"),
+        ("Timer für Seitstütz: 0:40 Üben · 3 Runden", "aus dem Kurs"),
+        ("Takt für Seitstütz: 4-6 · 6,0/min", "aus dem Kurs"),
+    ]
+    assert sicht.kurz(b1) == (
+        "Seitstütz, ans Ende · Ziel 40 s · Parameter: Haltezeit, Gewicht · "
+        "Timer 0:40 Üben · 3 Runden · Takt 4-6 · 6,0/min"
+    )
+    sicht = _sicht(kurs, zwei)
+    titel = [z.titel for z in sicht.vorschau().zeilen]
+    assert titel[:4] == [
+        "Käfer kommt dazu",
+        "Ziel für Käfer: 15 Wiederholungen",
+        "Käfer: nur abhaken",
+        "Takt für Käfer: kein Takt",
+    ]
+    assert titel[-2:] == [
+        "Timer für alle Übungen: 0:40 Üben · 3 Runden",
+        "Takt für alle Übungen: 4-6 · 6,0/min",
+    ]
+    assert sicht.kurz(zwei.bloecke[2]) == (
+        "die gewählte, hinter Seitstütz · Ziel aus dem Test × 0,5 · nur abhaken · kein Takt"
+    )
+    assert sicht.kurz(zwei.bloecke[-1]) == "Plan: Timer 0:40 Üben · 3 Runden · Takt 4-6 · 6,0/min"
+
+
+def test_test_misst_die_gewaehlte() -> None:
+    """Ben, 16.11.2026: Ein Test darf „die gewählte“ einer Auswahl messen (``aus``). Der Editor
+    kennt ihn als Verweis: Name, Zeile, Verweis ins Leere, Löschfolgen, Kopie — und die Vorschau
+    nimmt den Beispielwert der Beispielübung."""
+    kurs = _kurs()
+    zwei = kurs.kapitel[1]
+    test = zwei.bloecke[1]
+    test.uebung, test.aus = "", "w"
+    sicht = _sicht(kurs, zwei)
+    assert sicht.tests() == [("t", "die gewählte")]
+    assert sicht.kurz(test) == "die gewählte · Wiederholungen"
+    assert sicht.uebungen_von(test) == ["Käfer", "Brücke"]
+    assert sicht.haengt(test) == []
+    # Käfer und Brücke zählen Wiederholungen — das ist das gemeinsame Feld
+    assert [f.key for f in sicht.testfelder(sicht.uebungen_von(test))[0]] == ["reps"]
+
+    # Die Vorschau: der Beispielwert steht unter der Beispielübung (die erste der Auswahl)
+    vorschau = sicht.vorschau()
+    assert (vorschau.wahl, vorschau.werte) == ({"w": ["Käfer"]}, {"t:Käfer": 30})
+    assert [(z.block_id, z.titel, z.unter) for z in vorschau.zeilen][:2] == [
+        ("b2", "Käfer kommt dazu", "hinter Seitstütz"),
+        ("b2", "Ziel für Käfer: 15 Wiederholungen", "aus deinem Test"),
+    ]
+    assert sicht.beispiel_text(zwei.bloecke[2], vorschau) == (
+        "Beispiel mit der Wahl „Käfer“ und dem Testwert 30 Wiederholungen."
+    )
+
+    # Die Auswahl fällt weg: Der Test hätte keine Übung mehr — er wird mit gelöscht, und mit ihm
+    # „die gewählte“ samt Weg
+    folgen = sicht.folgen("w")
+    assert [(f.block.id, f.was) for f in folgen] == [
+        ("t", "wird mit gelöscht"),
+        ("b2", "wird mit gelöscht"),
+        ("b3", "wird mit gelöscht"),
+    ]
+    assert sicht.folge_text(folgen[0]) == "Test — die gewählte · Wiederholungen: wird mit gelöscht"
+    assert [b.id for b in folgen_anwenden(zwei.bloecke, folgen) if b.id != "w"] == ["b4"]
+    # Nur der Test fällt weg: Der Baustein verliert sein Ziel
+    assert [(f.block.id, f.was) for f in sicht.folgen("t")] == [
+        ("b2", "verliert das Ziel aus dem Test")
+    ]
+
+    # Die Auswahl steht erst in einem späteren Kapitel: Der Test hängt
+    spaeter = Kapitel(id="k0", titel="Vorab", bloecke=[Block(TEST, id="t0", aus="w", feld="reps")])
+    kurs.kapitel.insert(0, spaeter)
+    assert _sicht(kurs, spaeter).haengt(spaeter.bloecke[0]) == ["Auswahl"]
+    kurs.kapitel.remove(spaeter)
+
+    # Die Kopie schreibt ``aus`` des Tests um wie das der Bausteine
+    kopie = kurs_kopie(kurs)
+    auswahl, kopierter, uebung = kopie.kapitel[1].bloecke[:3]
+    assert auswahl.id != "w" and (kopierter.aus, kopierter.uebung) == (auswahl.id, "")
+    assert uebung.ziel_aus == kopierter.id
+    assert [z.titel for z in _sicht(kopie, kopie.kapitel[1]).vorschau().zeilen][:2] == [
+        "Käfer kommt dazu",
+        "Ziel für Käfer: 15 Wiederholungen",
+    ]
+
+
+def test_testfelder_bei_mehreren_uebungen() -> None:
+    """Was ein Test messen kann: bei „der gewählten“ das, was alle Übungen der Auswahl haben —
+    haben sie nichts gemeinsam, was wenigstens eine hat (und der Editor sagt es)."""
+    kurs = _kurs()
+    sicht = _sicht(kurs, kurs.kapitel[1])
+    assert [f.key for f in sicht.testfelder(["Käfer"])[0]] == ["reps"]
+    felder, gemeinsam = sicht.testfelder(["Käfer", "Brücke"])
+    assert ([f.key for f in felder], gemeinsam) == (["reps"], True)
+    felder, gemeinsam = sicht.testfelder(["Seitstütz", "Käfer"])
+    assert ([f.key for f in felder], gemeinsam) == (["reps", "hold"], False)
+    assert sicht.testfelder(["fehlt"]) == ([], True)
+
+
+def test_test_der_gewaehlten_im_kurs_mit_kapitelplaenen_nur_aus_dem_eigenen_kapitel() -> None:
+    """Im Kursplan-Kurs steht die Wahl eines früheren Kapitels im Kursplan; mit Kapitelplänen
+    kennt ein Kapitel nur seine eigene — so bietet der Test-Dialog die Auswahlen an."""
+    eins = Kapitel(id="k1", bloecke=[Block(AUSWAHL, id="w1", uebungen=["Käfer", "Brücke"])])
+    zwei = Kapitel(id="k2", bloecke=[Block(AUSWAHL, id="w2", uebungen=["Planke", "Seitstütz"])])
+    mit = Kurs(id="a", name="Mit Kursplan", kursplan=Kursplan("Plan"), kapitel=[eins, zwei])
+    ohne = Kurs(id="b", name="Kapitelpläne", kapitel=[eins, zwei])
+    katalog = _katalog()
+    assert [i for i, _ in Kurssicht(mit, "k2", zwei.bloecke, katalog).auswahlen_fuer_test()] == [
+        "w1",
+        "w2",
+    ]
+    assert [i for i, _ in Kurssicht(ohne, "k2", zwei.bloecke, katalog).auswahlen_fuer_test()] == [
+        "w2"
+    ]

@@ -1036,3 +1036,93 @@ def test_kursplan_aus_einem_plan_des_pakets(con, profil) -> None:
     with pytest.raises(ValueError, match="baut keinen Plan"):
         repo.kursplan_anlegen(Kurs(name="Ohne", kapitel=[Kapitel(titel="A")]), profil.id)
     assert repo.plan_aenderungen(Kurs(name="Ohne"), Kapitel(), profil.id) == []
+
+
+def test_test_misst_die_gewaehlte_uebung(con, profil) -> None:
+    """Ben, 16.11.2026: Der Test gilt der Übung, die die Person gewählt hat (``aus``) — nicht
+    einer, die der Kurs fest nennt. Jede Übung der Auswahl hat ihren eigenen Wert; das Ziel
+    der Gewählten kommt aus ihrem."""
+    repo, sitzungen, uebungen = KursRepo(con), SessionRepo(con), ExerciseRepo(con)
+    kurs, ids = rumpf_kurs(con)
+    test = next(b for b in kurs.kapitel[1].bloecke if b.art == TEST)
+    test.uebung, test.aus = "", "wahl"
+    repo.speichern(kurs)
+    kurs = repo.laden(kurs.id)
+    assert kurs is not None
+    eins, zwei, _drei = kurs.kapitel
+    assert [(b.aus, b.uebung) for b in zwei.bloecke if b.art == TEST] == [("wahl", "")]
+
+    repo.starten(kurs, profil.id)
+    alle = {z.id for z in repo.plan_aenderungen(kurs, eins, profil.id)}
+    repo.plan_uebernehmen(kurs, eins, profil.id, alle)
+    repo.kapitel_abschliessen(kurs, eins, profil.id)
+    erreicht = repo.staende(profil.id, kurs.id)[zwei.id].erreicht
+
+    kaefer, bruecke = uebungen.laden(ids["kaefer"]), uebungen.laden(ids["bruecke"])
+    assert kaefer is not None and bruecke is not None
+    session = sitzungen.session_fuer(profil.id, None, datetime.now(UTC).astimezone().date())
+    sitzungen.eintrag_anlegen(session, kaefer, {"reps": [24, 30]})
+    assert repo.testwerte(zwei, profil.id, erreicht) == {f"test:{ids['kaefer']}": 30.0}
+
+    # Gewählt ist die Brücke — der Wert vom Käfer zählt für sie nicht
+    wahl = {"wahl": [ids["bruecke"]]}
+    marke = f"dazu:{ids['bruecke']}"
+    zeilen = repo.plan_aenderungen(kurs, zwei, profil.id, wahl)
+    assert [(z.id, z.stand) for z in zeilen][:2] == [(marke, NEU), (f"{marke}#ziel", OFFEN)]
+
+    sitzungen.eintrag_anlegen(session, bruecke, {"reps": [12]})
+    assert repo.testwerte(zwei, profil.id, erreicht) == {
+        f"test:{ids['kaefer']}": 30.0,
+        f"test:{ids['bruecke']}": 12.0,
+    }
+    zeilen = repo.plan_aenderungen(kurs, zwei, profil.id, wahl)
+    assert [(z.titel, z.unter) for z in zeilen][:2] == [
+        ("Brücke kommt dazu", "hinter Planke"),
+        ("Ziel für Brücke: 12 Wiederholungen", "aus deinem Test"),
+    ]
+    plan = repo.plan_uebernehmen(kurs, zwei, profil.id, {z.id for z in zeilen}, wahl=wahl)
+    assert [(i.exercise_id, i.target) for i in plan.items][1] == (ids["bruecke"], {"reps": [12]})
+
+
+def test_test_der_gewaehlten_im_kapitelplan_und_auswahl_im_kapitel_davor(con, profil) -> None:
+    """Auch ohne Kursplan: Die Gewählte bekommt im Kapitelplan das Ziel aus **ihrem** Test.
+    Die Auswahl darf in einem früheren Kapitel stehen — die Testwerte finden sie."""
+    repo, sitzungen, uebungen = KursRepo(con), SessionRepo(con), ExerciseRepo(con)
+    planke, kaefer, bruecke = proben(con, "Planke", "Käfer", "Brücke")
+    kurs = Kurs(
+        name="Kapitelpläne",
+        kapitel=[
+            Kapitel(
+                titel="Wählen und testen",
+                plaene=[PlanVorlage("Rumpf", [0], [VorlageItem(planke)])],
+                bloecke=[
+                    Block(AUSWAHL, id="w", uebungen=[kaefer, bruecke], anzahl=1),
+                    Block(TEST, id="t", aus="w", feld="reps", faktor=0.5),
+                ],
+            ),
+            Kapitel(titel="Später", bloecke=[Block(TEST, id="t2", aus="w", feld="reps")]),
+        ],
+    )
+    repo.speichern(kurs)
+    kurs = repo.laden(kurs.id)
+    assert kurs is not None
+    eins, zwei = kurs.kapitel
+    repo.starten(kurs, profil.id)
+    erreicht = repo.staende(profil.id, kurs.id)[eins.id].erreicht
+    session = sitzungen.session_fuer(profil.id, None, datetime.now(UTC).astimezone().date())
+    for uid, wdh in ((kaefer, 40), (bruecke, 20)):
+        uebung = uebungen.laden(uid)
+        assert uebung is not None
+        sitzungen.eintrag_anlegen(session, uebung, {"reps": [wdh]})
+    werte = repo.testwerte(eins, profil.id, erreicht)
+    assert werte == {f"t:{kaefer}": 40.0, f"t:{bruecke}": 20.0}
+    (plan,) = repo.plaene_anlegen(eins, profil.id, werte, {"w": [bruecke]})
+    assert [(i.exercise_id, (i.target or {}).get("reps")) for i in plan.items] == [
+        (planke, None),
+        (bruecke, [10]),  # die Hälfte ihres eigenen Werts, nicht des Käfers
+    ]
+    # Kapitel 2 kennt die Auswahl aus Kapitel 1
+    assert repo.testwerte(zwei, profil.id, erreicht) == {
+        f"t2:{kaefer}": 40.0,
+        f"t2:{bruecke}": 20.0,
+    }

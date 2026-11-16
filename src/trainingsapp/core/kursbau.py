@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from . import ablauf as ab
 from .kursbloecke import (
+    ARTEN,
     AUSWAHL,
     BAUSTEINE,
     PLAN_EINSTELLEN,
@@ -40,6 +41,8 @@ from .kursbloecke import (
     TEST,
     ZU_ENDE,
     Block,
+    gemessene_uebungen,
+    wert_schluessel,
 )
 from .kurse import Kapitel, Kurs, Kursplan, PlanVorlage
 from .kursplan import (
@@ -52,9 +55,18 @@ from .kursplan import (
     zielwert_text,
 )
 from .models import Exercise, new_id
-from .result_spec import FieldSpec, FieldType, ResultSpec, basis_key, vorrat_feld
-from .standards import ziel_spec
-from .timer import TimerProfil
+from .result_spec import (
+    FELDVORRAT,
+    FieldSpec,
+    FieldType,
+    ResultSpec,
+    basis_key,
+    geordnet,
+    vorrat_feld,
+)
+from .standards import waehlbare_felder, ziel_spec
+from .takt import Takt
+from .timer import TimerProfil, ohne_verweise
 from .varianten import ist_variante
 
 if TYPE_CHECKING:
@@ -66,12 +78,16 @@ ID_VORSATZ: Final[dict[str, str]] = {
     PLAN_EINSTELLEN: "einstellen",
     PLAN_WEG: "weg",
 }
-#: Welche Felder eines Bausteins auf andere Blöcke zeigen
+#: Welche Felder eines Blocks auf andere Blöcke zeigen — die Bausteine und der Test, der „die
+#: gewählte“ einer Auswahl misst (``aus``, Ben 16.11.2026)
 VERWEISFELDER: Final[dict[str, tuple[str, ...]]] = {
     PLAN_UEBUNG: ("aus", "hinter", "ziel_aus"),
     PLAN_EINSTELLEN: ("an", "ziel_aus"),
     PLAN_WEG: ("von", "zu"),
+    TEST: ("aus",),
 }
+#: Felder, die ein Test messen kann (Art aus dem Feldvorrat)
+TESTFELDER: Final[tuple[str, ...]] = ("hold", "duration", "reps", "weight", "distance")
 #: Wie ein Verweisfeld im Formular heißt (für „Verweis fehlt: …“)
 FELDNAME: Final[dict[str, str]] = {
     "aus": "Auswahl",
@@ -117,6 +133,8 @@ def verweise(block: Block) -> dict[str, str]:
     ({'von': 'b1'}, {})
     >>> verweise(Block(PLAN_WEG, id="b3", von="ende", zu="b1"))
     {'von': 'ende', 'zu': 'b1'}
+    >>> verweise(Block(TEST, id="t", aus="w", feld="reps"))  # der Test misst „die gewählte“
+    {'aus': 'w'}
     """
     ergebnis: dict[str, str] = {}
     for f in VERWEISFELDER.get(block.art, ()):
@@ -208,6 +226,12 @@ def ohne_verweis(block: Block, ziel: str) -> tuple[Block | None, str]:
     (None, 'wird mit gelöscht')
     >>> ohne_verweis(Block(PLAN_EINSTELLEN, id="e", an="b1", ziel_aus="t"), "t")
     (None, 'wird mit gelöscht')
+
+    Dasselbe gilt für einen Test, der „die gewählte“ misst: Ohne seine Auswahl hat er keine
+    Übung.
+
+    >>> ohne_verweis(Block(TEST, id="t", aus="w"), "w")
+    (None, 'wird mit gelöscht')
     """
     felder = [f for f, z in verweise(block).items() if z == ziel]
     if not felder:
@@ -263,6 +287,28 @@ def timer_kern(timer: Mapping[str, Any]) -> dict[str, Any] | None:
     return profil.als_dict()
 
 
+def timer_einbetten(profil: TimerProfil, block_id: str = "") -> dict[str, Any]:
+    """Ein Timer, wie ein Baustein ihn trägt (`Block.timer`): eingebettet, ohne Vermerk der
+    Bibliothek (`core.timer.ohne_verweise`) — ein Paket kennt sie nicht. Mit ``block_id`` ist
+    es der **eigene** Timer dieses Bausteins: Er bekommt die ID ``kurs-<block>``, dieselbe,
+    die `core.kursbloecke` beim Lesen eines Pakets vergibt. Ohne bleibt die ID — eine Kopie
+    aus der Bibliothek.
+
+    >>> from trainingsapp.core.timer import Abschnitt
+    >>> t = TimerProfil(id="x", name="Runden", abschnitte=[Abschnitt("Üben", 40)], runden=3,
+    ...                 bibliothek="x")
+    >>> timer_einbetten(t)["id"], "bibliothek" in timer_einbetten(t)
+    ('x', False)
+    >>> eigen = timer_einbetten(t, "uebung-1")
+    >>> eigen["id"], eigen["runden"], timer_kern(eigen) == timer_kern(t.als_dict()), t.id
+    ('kurs-uebung-1', 3, True, 'x')
+    """
+    d = dict(ohne_verweise(profil.als_dict()))
+    if block_id:
+        d["id"] = f"kurs-{block_id}"
+    return d
+
+
 def auswahl_name(block: Block, katalog: Mapping[str, Exercise]) -> str:
     """Wie eine Auswahl im Editor heißt: ihre Aufforderung, sonst ihre Übungen."""
     if block.titel:
@@ -277,10 +323,21 @@ def auswahl_name(block: Block, katalog: Mapping[str, Exercise]) -> str:
     )
 
 
-def name_des_tests(block: Block, katalog: Mapping[str, Exercise]) -> str:
-    """Wie ein Test im Editor heißt: seine Aufforderung, sonst seine Übung."""
+def name_des_tests(block: Block, katalog: Mapping[str, Exercise], gewaehlte: str = "") -> str:
+    """Wie ein Test im Editor heißt: seine Aufforderung, sonst seine Übung — misst er „die
+    gewählte“ einer Auswahl (``aus``), steht ``gewaehlte`` da (`Kurssicht.wer`).
+
+    >>> name_des_tests(Block(TEST, uebung="u"), {}), name_des_tests(Block(TEST, aus="w"), {})
+    ('Test', 'die gewählte')
+    >>> name_des_tests(Block(TEST, aus="w", titel="Wie viele?"), {}, "die gewählte aus „Wahl“")
+    'Wie viele?'
+    """
+    if block.titel:
+        return block.titel
+    if block.aus:
+        return gewaehlte or "die gewählte"
     uebung = katalog.get(block.uebung)
-    return block.titel or (uebung.name if uebung is not None else "Test")
+    return uebung.name if uebung is not None else "Test"
 
 
 @dataclass(frozen=True, slots=True)
@@ -429,20 +486,35 @@ class Kurssicht:
         """Die Auswahl-Blöcke, aus denen „die gewählte“ kommen kann (ID, Name)."""
         return [(b.id, auswahl_name(b, self.katalog)) for b in self.bis_hier() if b.art == AUSWAHL]
 
+    def auswahlen_fuer_test(self) -> list[tuple[str, str]]:
+        """Die Auswahl-Blöcke, deren Gewählte ein **Test** messen kann: im Kursplan-Kurs wie
+        `auswahlen` (die Wahl eines früheren Kapitels steht im Kursplan); mit Kapitelplänen nur
+        die dieses Kapitels — ein späteres Kapitel kennt die Wahl eines früheren dort nicht."""
+        if self.kurs.kursplan is not None:
+            return self.auswahlen()
+        return [(b.id, auswahl_name(b, self.katalog)) for b in self.bloecke if b.art == AUSWAHL]
+
     def tests(self) -> list[tuple[str, str]]:
         """Die Tests, aus denen ein Ziel kommen kann (ID, Name)."""
-        return [(b.id, name_des_tests(b, self.katalog)) for b in self.bis_hier() if b.art == TEST]
+        return [
+            (b.id, name_des_tests(b, self.katalog, self.wer(b)))
+            for b in self.bis_hier()
+            if b.art == TEST
+        ]
 
     def haengt(self, block: Block) -> list[str]:
-        """Die Verweise des Bausteins, die ins Leere zeigen — mit dem Namen ihres Feldes. Das
+        """Die Verweise des Blocks, die ins Leere zeigen — mit dem Namen ihres Feldes. Das
         gibt es nach dem Umordnen von Kapiteln oder Bausteinen und in Kursen von früher; die
-        Karte sagt dann „… ist nicht mehr in deinem Plan“.
+        Karte sagt dann „… ist nicht mehr in deinem Plan“. Auch ein Test, der „die gewählte“
+        misst, kann so hängen: an einer Auswahl, die es hier nicht (mehr) gibt.
 
         >>> s = Kurssicht(Kurs(kapitel=[Kapitel(id="k")]), "k", [], {})
         >>> s.haengt(Block(PLAN_UEBUNG, id="b", uebung="u", hinter="weg"))
         ['Wohin']
+        >>> s.haengt(Block(TEST, id="t", aus="weg")), s.haengt(Block(TEST, id="t", uebung="u"))
+        (['Auswahl'], [])
         """
-        if not block.baustein:
+        if not verweise(block):
             return []
         marken = {marke for marke, _ in self.marken_davor(block.id)}
         gueltig = {
@@ -456,7 +528,8 @@ class Kurssicht:
     # -- Übungen und Ziele -------------------------------------------------------------------
 
     def uebungen_von(self, block: Block) -> list[str]:
-        """Welche Übungen ein „Übung dazu“ bringen kann: die feste oder die der Auswahl."""
+        """Welche Übungen ein „Übung dazu“ bringen oder ein Test messen kann: die feste oder
+        (``aus``) die der Auswahl."""
         if block.aus:
             auswahl = self.block(block.aus)
             kandidaten = auswahl.uebungen if auswahl is not None else []
@@ -511,6 +584,92 @@ class Kurssicht:
         ]
         return replace(specs[0], fields=gemeinsam)
 
+    def testfelder(self, uebungen: Sequence[str]) -> tuple[list[FieldSpec], bool]:
+        """Was ein Test an diesen Übungen messen kann — Felder der Art `TESTFELDER`. Bei einer
+        Übung ihre Felder in ihrer Folge. Bei mehreren („die gewählte“ einer Auswahl) die, die
+        **alle** haben, in der Ordnung des Vorrats; der zweite Wert sagt, ob es das Feld bei
+        jeder gibt. Haben sie keines gemeinsam, stehen die Felder da, die wenigstens eine hat
+        (zweiter Wert falsch): Gemessen wird dann nur, wo die gewählte Übung das Feld hat.
+
+        >>> felder = (("p", ("hold", "scale")), ("k", ("reps", "hold")), ("b", ("reps",)))
+        >>> katalog = {n: Exercise(id=n, result_spec=ResultSpec(
+        ...     fields=[vorrat_feld(k) for k in keys])) for n, keys in felder}
+        >>> s = Kurssicht(Kurs(), "", [], katalog)
+        >>> [f.key for f in s.testfelder(["k"])[0]], s.testfelder(["k"])[1]
+        (['reps', 'hold'], True)
+        >>> [f.key for f in s.testfelder(["p", "k"])[0]], s.testfelder(["p", "k"])[1]
+        (['hold'], True)
+        >>> [f.key for f in s.testfelder(["p", "b"])[0]], s.testfelder(["p", "b"])[1]
+        (['reps', 'hold'], False)
+        >>> s.testfelder([])
+        ([], True)
+        """
+        je_uebung = [
+            [f for f in self.katalog[u].result_spec.fields if basis_key(f.key) in TESTFELDER]
+            for u in dict.fromkeys(uebungen)
+            if u in self.katalog
+        ]
+        if len(je_uebung) <= 1:
+            return (je_uebung[0] if je_uebung else []), True
+        alle: dict[str, FieldSpec] = {}
+        for felder in je_uebung:
+            for f in felder:
+                alle.setdefault(f.key, f)
+        gemeinsam = [
+            f for f in alle.values() if all(any(g.key == f.key for g in fs) for fs in je_uebung)
+        ]
+        return geordnet(gemeinsam or list(alle.values())), bool(gemeinsam)
+
+    def parameter(self, uebungen: Sequence[str]) -> tuple[list[FieldSpec], list[FieldSpec]]:
+        """Was ein Baustein als Parameter anbieten kann — wie in „Im Plan einstellen“
+        (`core.standards.waehlbare_felder`): die Parameter der Übung und der übrige Feldvorrat,
+        beide in der Ordnung des Vorrats (`core.result_spec.geordnet`).
+
+        Bei mehreren Übungen („die gewählte“ einer Auswahl) gehören die Parameter **aller** in
+        die erste Gruppe: Welche Übung es wird, steht erst mit der Wahl fest — einen Parameter,
+        den sie nicht selbst hat, holt die Planübung aus dem Feldvorrat
+        (`core.standards.zusatzfelder`).
+
+        >>> katalog = {n: Exercise(id=n, result_spec=ResultSpec(
+        ...     fields=[vorrat_feld(k) for k in keys]))
+        ...     for n, keys in (("p", ("hold",)), ("k", ("weight", "reps")))}
+        >>> s = Kurssicht(Kurs(), "", [], katalog)
+        >>> eigene, vorrat = s.parameter(["p", "k", "fehlt"])
+        >>> [f.key for f in eigene], {"hold", "reps", "weight"} & {f.key for f in vorrat}
+        (['reps', 'hold', 'weight'], set())
+        >>> [f.key for f in s.parameter(["p"])[0]], len(vorrat) == len(FELDVORRAT) - 3
+        (['hold'], True)
+        """
+        eigene: dict[str, FieldSpec] = {}
+        for u in dict.fromkeys(uebungen):
+            uebung = self.katalog.get(u)
+            for f in waehlbare_felder(uebung)[0] if uebung is not None else []:
+                eigene.setdefault(f.key, f)
+        vorrat = [replace(f) for f in FELDVORRAT if f.key not in eigene]
+        return geordnet(list(eigene.values())), vorrat
+
+    def felder_wahl(self, uebungen: Sequence[str], gewaehlt: Iterable[str]) -> list[str]:
+        """Die gewählten Parameter in der Ordnung des Angebots (`parameter`) — was das Angebot
+        nicht kennt (ein Feld einer Übung von früher), bleibt am Ende stehen.
+
+        >>> katalog = {"p": Exercise(id="p", result_spec=ResultSpec(fields=[vorrat_feld("hold")]))}
+        >>> Kurssicht(Kurs(), "", [], katalog).felder_wahl(["p"], ["x", "weight", "hold", "x"])
+        ['hold', 'weight', 'x']
+        """
+        wahl = list(dict.fromkeys(gewaehlt))
+        eigene, vorrat = self.parameter(uebungen)
+        angebot = [f.key for f in (*eigene, *vorrat)]
+        return [k for k in angebot if k in wahl] + [k for k in wahl if k not in angebot]
+
+    def takt_vorgabe(self, uebungen: Sequence[str]) -> Takt | None:
+        """Der Takt der Übung, wenn es genau eine ist und sie einen hat — der Ausgangspunkt im
+        Takt-Blatt, solange der Baustein keinen eigenen trägt."""
+        bekannt = [u for u in dict.fromkeys(uebungen) if u in self.katalog]
+        if len(bekannt) != 1:
+            return None
+        takt = self.katalog[bekannt[0]].takt
+        return takt if takt is not None and not takt.leer else None
+
     def ziel_text(self, uebungen: Sequence[str], ziel: Mapping[str, Any]) -> str:
         return " · ".join(zielwert_text(self.feld(uebungen, k), w) for k, w in ziel.items())
 
@@ -518,7 +677,10 @@ class Kurssicht:
 
     def kurz(self, block: Block) -> str:
         """Der Baustein in einer Zeile der Liste „Am Plan“ (K5): „die gewählte, hinter
-        Planke“, „Käfer: Timer …“, „Planke → die gewählte · Zeit ab · Pflicht“."""
+        Planke“, „Käfer: Timer …“, „Planke → die gewählte · Zeit ab · Pflicht“ — und der Test
+        (für die Rückfrage beim Löschen): „die gewählte · Wiederholungen“."""
+        if block.art == TEST:
+            return f"{self.wer(block)} · {self.feld(self.uebungen_von(block), block.feld).label}"
         if block.art == PLAN_UEBUNG:
             wo = f"hinter {self.marke_name(block.hinter)}" if block.hinter else "ans Ende"
             angaben = self._angaben(block, self.uebungen_von(block))
@@ -616,7 +778,7 @@ class Kurssicht:
     def folge_text(self, folge: Folge) -> str:
         """Eine Folge in einer Zeile der Rückfrage — mit dem Kapitel, wenn es ein anderes ist."""
         wo = "" if folge.kapitel_id == self.kapitel_id else f"{folge.kapitel or 'Kapitel'} · "
-        art = BAUSTEINE.get(folge.block.art, folge.block.art)
+        art = BAUSTEINE.get(folge.block.art) or ARTEN.get(folge.block.art) or folge.block.art
         return f"{wo}{art} — {self.kurz(folge.block)}: {folge.was}"
 
     # -- Vorschau --------------------------------------------------------------------------------
@@ -625,8 +787,10 @@ class Kurssicht:
         """Die Zeilen, die Teilnehmende im bearbeiteten Kapitel sähen — auf einem
         **Beispielplan**: die Grundlage, darauf alle Zeilen der Kapitel davor übernommen; je
         Auswahl sind ihre ersten Übungen gewählt, je Test gilt ein Beispielwert
-        (`BEISPIELWERT`). Gerechnet wird mit `core.kursplan.aenderungen` und `anwenden` —
-        wie in `KursRepo.plan_aenderungen`. Ein Kurs ohne Kursplan hat keine Zeilen."""
+        (`BEISPIELWERT`) — bei einem Test, der „die gewählte“ misst, je gewählter Übung
+        (`core.kursbloecke.wert_schluessel`). Gerechnet wird mit `core.kursplan.aenderungen`
+        und `anwenden` — wie in `KursRepo.plan_aenderungen`. Ein Kurs ohne Kursplan hat keine
+        Zeilen."""
         if self.kurs.kursplan is None:
             return Vorschau()
         kapitel = self.kapitel()
@@ -637,7 +801,12 @@ class Kurssicht:
             if b.art == AUSWAHL
             and (gewaehlt := [u for u in b.uebungen if u in self.katalog][: b.anzahl])
         }
-        werte = {b.id: BEISPIELWERT.get(basis_key(b.feld), 30.0) for b in alle if b.art == TEST}
+        werte = {
+            wert_schluessel(b, u): BEISPIELWERT.get(basis_key(b.feld), 30.0)
+            for b in alle
+            if b.art == TEST
+            for u in gemessene_uebungen(b, wahl)
+        }
         namen = {uid: u.name for uid, u in self.katalog.items()}
 
         def feld_von(uebung_id: str, key: str) -> FieldSpec | None:
@@ -666,13 +835,14 @@ class Kurssicht:
 
     def beispiel_text(self, block: Block, vorschau: Vorschau) -> str:
         """„Beispiel mit der Wahl „Käfer“ und dem Testwert 30 Wiederholungen.“ — leer, wenn
-        der Baustein weder an einer Auswahl noch an einem Test hängt."""
+        der Baustein weder an einer Auswahl noch an einem Test hängt. Auch der Test kann an
+        einer Auswahl hängen (er misst „die gewählte“)."""
         auswahlen: list[str] = []
         for f, ziel in verweise(block).items():
             quelle = self.block(ziel)
             if f == "aus":
                 auswahlen.append(ziel)
-            elif quelle is not None and quelle.art == PLAN_UEBUNG and quelle.aus:
+            elif quelle is not None and quelle.art in (PLAN_UEBUNG, TEST) and quelle.aus:
                 auswahlen.append(quelle.aus)
         teile: list[str] = []
         for auswahl in dict.fromkeys(auswahlen):
@@ -680,9 +850,16 @@ class Kurssicht:
             if gewaehlt:
                 teile.append("der Wahl „" + ", ".join(self.name(u) for u in gewaehlt) + "“")
         test = self.block(block.ziel_aus) if block.ziel_aus else None
-        if test is not None and test.id in vorschau.werte:
-            wert = zielwert_text(self.feld([test.uebung], test.feld), vorschau.werte[test.id])
-            teile.append(f"dem Testwert {wert}")
+        if test is not None and test.art == TEST:
+            gemessen = gemessene_uebungen(test, vorschau.wahl)
+            werte = [
+                vorschau.werte[k]
+                for u in gemessen
+                if (k := wert_schluessel(test, u)) in vorschau.werte
+            ]
+            if werte:
+                wert = zielwert_text(self.feld(gemessen, test.feld), werte[0])
+                teile.append(f"dem Testwert {wert}")
         return f"Beispiel mit {' und '.join(teile)}." if teile else ""
 
 
@@ -783,6 +960,7 @@ __all__ = [
     "FELDNAME",
     "ID_VORSATZ",
     "MIT_GELOESCHT",
+    "TESTFELDER",
     "VERWEISFELDER",
     "Folge",
     "Kurssicht",
@@ -796,6 +974,7 @@ __all__ = [
     "name_des_tests",
     "neue_id",
     "ohne_verweis",
+    "timer_einbetten",
     "timer_kern",
     "timer_text",
     "umschreiben",

@@ -14,7 +14,7 @@ import contextlib
 import json
 import sqlite3
 import weakref
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -389,6 +389,14 @@ class AppState:
     workout_uebergang: dict[str, str] = field(default_factory=dict)
     #: … und Workout-Pläne, die für diese Sitzung „als Plan“ geöffnet werden („Als Plan üben“)
     plan_als_plan: set[str] = field(default_factory=set)
+    #: Kurskapitel (Ben, 16.11.2026, P212): die Wahl einer Auswahl, die noch **nicht
+    #: übernommen** ist — ``(Profil, Kapitel)`` → ``(Stempel, {Auswahl-Block: Übungen})``.
+    #: Nur im Speicher: Sie überlebt das Verlassen des Kapitels (zum Test und zurück), nicht
+    #: den Neustart der App; fest wird eine Wahl erst im Plan. Lesen und schreiben nur über
+    #: `kurs_wahl_lesen`, `kurs_wahl_merken`, `kurs_wahl_verwerfen`
+    kurs_wahl: dict[tuple[str, str], tuple[Hashable, dict[str, list[str]]]] = field(
+        default_factory=dict
+    )
     #: Uhrenplan (K3, `views/plan_uhren.py`): je Plan die aufgeklappten Planübungen
     uhren_offen: dict[str, set[str]] = field(default_factory=dict)
     #: Workout, Bedingung „Skala“: die Selbsteinschätzung je Schritt-Durchlauf
@@ -824,6 +832,48 @@ class AppState:
         self.plan_ziel = None
         self.plan_gezeigt.clear()
         self.plan_als_plan.clear()
+
+    # -- Offene Wahl im Kurskapitel (P212) -------------------------------------
+
+    def kurs_wahl_lesen(self, kapitel_id: str, stempel: Hashable) -> dict[str, list[str]]:
+        """Was das aktive Profil in diesem Kapitel gewählt, aber noch nicht übernommen hat —
+        je Auswahl-Block die Übungen (eine Kopie); leer ohne. ``stempel`` sagt, wofür die
+        Wahl gilt (`views/kurse.kapitel_view`: der Stand des Kurses und das Erreichen des
+        Kapitels). Passt er nicht mehr — der Kurs begann von vorn, wurde geändert oder
+        entfernt und kam wieder —, ist die Wahl verworfen.
+
+        Der Schlüssel trägt das Profil: Ein anderes Profil sieht sie nie, und wer zurück
+        wechselt, findet seine wieder."""
+        schluessel = (self.profil.id, kapitel_id)
+        eintrag = self.kurs_wahl.get(schluessel)
+        if eintrag is None:
+            return {}
+        if eintrag[0] != stempel:
+            del self.kurs_wahl[schluessel]
+            return {}
+        return {block: list(uebungen) for block, uebungen in eintrag[1].items()}
+
+    def kurs_wahl_merken(
+        self, kapitel_id: str, stempel: Hashable, wahl: Mapping[str, Sequence[str]]
+    ) -> None:
+        """Die offene Wahl dieses Kapitels für das aktive Profil halten — nur im Speicher,
+        nichts geht in die Datenbank. Ist nichts (mehr) gewählt, gibt es keinen Eintrag."""
+        schluessel = (self.profil.id, kapitel_id)
+        offen = {block: list(uebungen) for block, uebungen in wahl.items() if uebungen}
+        if offen:
+            self.kurs_wahl[schluessel] = (stempel, offen)
+        else:
+            self.kurs_wahl.pop(schluessel, None)
+
+    def kurs_wahl_verwerfen(
+        self, kapitel_ids: Iterable[str], *, alle_profile: bool = False
+    ) -> None:
+        """Die offene Wahl dieser Kapitel verwerfen — für das aktive Profil („Von vorn“, „Plan
+        anlegen“) oder für alle (der Kurs ist entfernt: Kurse gelten für alle Profile)."""
+        weg = set(kapitel_ids)
+        for profil_id, kapitel_id in list(self.kurs_wahl):
+            if kapitel_id in weg and (alle_profile or profil_id == self.profil.id):
+                del self.kurs_wahl[(profil_id, kapitel_id)]
 
     def profil_anlegen(self, name: str, birth_year: int | None = None) -> Subject:
         """Legt ein Profil an und macht es zum aktiven."""

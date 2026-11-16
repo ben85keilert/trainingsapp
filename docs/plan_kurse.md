@@ -194,6 +194,13 @@ Formatversion 6).
   nach „lassen“ nicht noch einmal. Hart | weich aus dem Kurs ist nur eine Vorgabe.
 - Test und Auswahl ändern im Kursplan-Kurs nichts von selbst; sie liefern Wert und Wahl an die
   Bausteine. Gerechnet wird aus Einträgen und Wahl, **nie aus Messwerten** (`core/kursplan.py`).
+- **Ein Test kann „die gewählte“ messen** (`aus` statt `uebung`, Ben 16.11.2026) — auch in
+  Kursen mit Kapitelplänen (dort mit der Auswahl im selben Kapitel): Die Gewählte bekommt ihr
+  Ziel aus ihrem eigenen Wert. **Mehrere Gewählte als Wege sind gleichwertig** — im Workout
+  geht man einen, in der Liste lassen sich alle abhaken. Die noch nicht übernommene Wahl bleibt
+  für die Sitzung erhalten, wenn man das Kapitel verlässt (`AppState.kurs_wahl`).
+- **Wachsen statt bereitliegen** (`docs/plan_kurs_ablauf.md` §12): keine gesperrten Übungen im
+  Plan der Person; für die Autorenseite ist ein Werkzeug „vom fertigen Plan aus“ vorgesehen.
 - Kapitel abschließen deaktiviert den Kursplan nicht; „Von vorn“ macht ihn zum früheren
   Durchlauf (§2, Migration 063); die Bedingung „Tage“ zählt seine Übungen.
 - Ein Kurs **ohne** `kursplan` verhält sich wie in §1–§8 (der Einführungskurs im Paket

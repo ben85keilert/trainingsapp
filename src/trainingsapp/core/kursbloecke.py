@@ -108,7 +108,8 @@ class Block:
     text: str = ""
     medium: Media | None = None
     antworten: list[Antwort] = field(default_factory=list)
-    #: ``test``: die Übung und ihr Feld (Schlüssel aus dem Feldvorrat)
+    #: ``test``: die Übung (oder ``aus``: die gewählte einer Auswahl) und ihr Feld (Schlüssel
+    #: aus dem Feldvorrat)
     uebung: str = ""
     feld: str = "hold"
     #: ``test``: Ziel = Testwert × Faktor (0,8 = „80 % deiner Zeit“)
@@ -121,7 +122,9 @@ class Block:
     #: ``test``, ``auswahl``: der Name des Kapitelplans — leer = der erste
     plan: str = ""
     # -- Bausteine am Kursplan (``plan_uebung``, ``plan_einstellen``, ``plan_weg``) ------------
-    #: ``plan_uebung``: statt ``uebung`` die Block-ID einer Auswahl — „die gewählte(n)“
+    #: ``plan_uebung``, ``test``: statt ``uebung`` die Block-ID einer Auswahl — „die
+    #: gewählte(n)“. Ein Test mit ``aus`` misst die Übung, die die Person gewählt hat (Ben,
+    #: 16.11.2026), je Gewählter einzeln (`gemessene_uebungen`, `wert_schluessel`)
     aus: str = ""
     #: ``plan_uebung``: hinter welche Planübung (Marke) — leer = ans Ende
     hinter: str = ""
@@ -157,6 +160,8 @@ class Block:
         {'art': 'text', 'id': 'b1', 'titel': 'Warum?', 'text': 'Darum.'}
         >>> Block(TEST, id="b2", uebung="u1", faktor=0.8).to_dict()
         {'art': 'test', 'id': 'b2', 'uebung': 'u1', 'feld': 'hold', 'faktor': 0.8}
+        >>> Block(TEST, id="b5", aus="b1", feld="reps").to_dict()
+        {'art': 'test', 'id': 'b5', 'aus': 'b1', 'feld': 'reps'}
         >>> Block(PLAN_UEBUNG, id="b3", aus="b1", hinter="g:1", ziel_aus="b2").to_dict()
         {'art': 'plan_uebung', 'id': 'b3', 'aus': 'b1', 'hinter': 'g:1', 'ziel_aus': 'b2'}
         >>> Block(PLAN_WEG, id="b4", von="g:1", zu="b3", kante={"ausloeser": "zeit"}).to_dict()
@@ -172,7 +177,10 @@ class Block:
         if self.art == FRAGE:
             d["antworten"] = [a.to_dict() for a in self.antworten]
         if self.art == TEST:
-            d["uebung"] = self.uebung
+            if self.aus:
+                d["aus"] = self.aus
+            else:
+                d["uebung"] = self.uebung
             d["feld"] = self.feld
             if self.faktor != 1.0:
                 d["faktor"] = self.faktor
@@ -232,6 +240,9 @@ class Block:
         'u1'
         >>> Block.from_dict({"art": "test"}) is None
         True
+        >>> t = Block.from_dict({"art": "test", "aus": "wahl", "uebung": "planke", "feld": "reps"})
+        >>> t.aus, t.uebung  # „die gewählte“ geht vor
+        ('wahl', '')
 
         Bausteine: Die Übung kommt wie beim Test über ihren Paketschlüssel; ein Baustein, der
         nichts ändern könnte, fällt weg.
@@ -280,11 +291,12 @@ class Block:
             if not block.titel or not block.antworten:
                 return None
         if art == TEST:
+            block.aus = _marke(roh.get("aus"))
             uebung = str(roh.get("uebung") or "").strip()
-            block.uebung = zu_id.get(uebung, uebung)
+            block.uebung = "" if block.aus else zu_id.get(uebung, uebung)
             block.feld = str(roh.get("feld") or "hold").strip() or "hold"
             block.faktor = _zahl(roh.get("faktor"), 1.0, 0.1, 3.0)
-            if not block.uebung:
+            if not block.uebung and not block.aus:
                 return None
         if art == AUSWAHL:
             for u in roh.get("uebungen") or []:
@@ -469,6 +481,34 @@ def wert_im_test(werte: Mapping[str, Any], feld: str) -> float | None:
         return None
 
 
+def gemessene_uebungen(block: Block, wahl: Mapping[str, Sequence[str]]) -> list[str]:
+    """Welche Übungen ein Test misst: seine feste — oder, mit ``aus``, die Gewählten der
+    Auswahl (ohne Wahl keine).
+
+    >>> gemessene_uebungen(Block(TEST, uebung="u"), {})
+    ['u']
+    >>> gemessene_uebungen(Block(TEST, aus="a"), {})
+    []
+    >>> gemessene_uebungen(Block(TEST, aus="a"), {"a": ["x", "y", "x"]})
+    ['x', 'y']
+    """
+    if not block.aus:
+        return [block.uebung] if block.uebung else []
+    return list(dict.fromkeys(wahl.get(block.aus) or ()))
+
+
+def wert_schluessel(block: Block, uebung: str) -> str:
+    """Unter welchem Schlüssel der Wert eines Tests steht (`KursRepo.testwerte`): seine ID —
+    bei einem Test mit ``aus`` je Übung ``<id>:<übung>``.
+
+    >>> wert_schluessel(Block(TEST, id="t", uebung="u"), "u")
+    't'
+    >>> wert_schluessel(Block(TEST, id="t", aus="a"), "x")
+    't:x'
+    """
+    return f"{block.id}:{uebung}" if block.aus else block.id
+
+
 def ziel_aus_test(block: Block, wert: float) -> int:
     """Das Ziel im Plan: Testwert × Faktor, auf ganze Einheiten — mindestens 1.
 
@@ -486,9 +526,18 @@ def fertig(
     >>> b = [Block(TEST, id="t", uebung="u"), Block(AUSWAHL, id="a", uebungen=["x", "y"])]
     >>> fertig(b, {"t": 48}, {}), fertig(b, {"t": 48}, {"a": ["x"]})
     (False, True)
+
+    Ein Test mit ``aus`` braucht den Wert jeder Gewählten:
+
+    >>> b = [Block(AUSWAHL, id="a", uebungen=["x", "y"]), Block(TEST, id="t", aus="a")]
+    >>> wahl = {"a": ["x"]}
+    >>> fertig(b, {}, wahl), fertig(b, {"t:y": 9}, wahl), fertig(b, {"t:x": 9}, wahl)
+    (False, False, True)
     """
     for b in bloecke:
-        if b.art == TEST and b.id not in werte:
+        if b.art == TEST and any(
+            wert_schluessel(b, u) not in werte for u in gemessene_uebungen(b, wahl)
+        ):
             return False
         if b.art == AUSWAHL and len(wahl.get(b.id, ())) != b.anzahl:
             return False
@@ -523,6 +572,13 @@ def vorlage_anwenden(
     [('#1', '#2'), ('#1', '#3'), ('#2', '#4'), ('#3', '#4')]
     >>> [i.exercise_id for i in v.items]
     ['planke', 'dehnen']
+
+    Ein Test mit ``aus`` setzt das Ziel der Gewählten, aus ihrem eigenen Wert:
+
+    >>> b = [Block(AUSWAHL, id="a", uebungen=["s", "k"]), Block(TEST, id="t", aus="a", feld="reps")]
+    >>> (neu,) = vorlage_anwenden([v], b, {"t:k": 30, "t:s": 12}, {"a": ["k"]})
+    >>> [(i.exercise_id, i.target) for i in neu.items]
+    [('planke', {}), ('dehnen', {}), ('k', {'reps': 30})]
     """
     from .kurse import VorlageItem  # hier, weil `core.kurse` dieses Modul lädt
 
@@ -533,8 +589,9 @@ def vorlage_anwenden(
     def gemeint(block: Block) -> Any:
         return next((v for v in ergebnis if v.name == block.plan), ergebnis[0])
 
+    bloecke = list(bloecke)
     for block in bloecke:
-        if block.art == TEST and block.id in werte:
+        if block.art == TEST and not block.aus and block.id in werte:
             for item in gemeint(block).items:
                 if item.exercise_id == block.uebung:
                     ziel = ziel_aus_test(block, werte[block.id])
@@ -554,6 +611,19 @@ def vorlage_anwenden(
                 vorlage.items.extend(neu)
             if verzweigen and stelle:
                 vorlage.ablauf = _wege(len(vorlage.items), stelle, len(gewaehlt))
+    # Tests, die „die gewählte“ messen — erst jetzt, wenn die Gewählten im Plan stehen
+    for block in bloecke:
+        if block.art != TEST or not block.aus:
+            continue
+        for uebung in gemessene_uebungen(block, wahl):
+            wert = werte.get(wert_schluessel(block, uebung))
+            if wert is None:
+                continue
+            ziel = ziel_aus_test(block, wert)
+            liste = je_satz is not None and je_satz(uebung, block.feld)
+            for item in gemeint(block).items:
+                if item.exercise_id == uebung:
+                    item.target = {**item.target, block.feld: [ziel] if liste else ziel}
     return ergebnis
 
 
@@ -595,7 +665,9 @@ __all__ = [
     "bloecke_von",
     "braucht_eingabe",
     "fertig",
+    "gemessene_uebungen",
     "vorlage_anwenden",
     "wert_im_test",
+    "wert_schluessel",
     "ziel_aus_test",
 ]

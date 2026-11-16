@@ -645,9 +645,11 @@ def _kurs_pruefen(
     kurs: Kurs,
     plaene: Mapping[str, int],
     schluessel: Mapping[str, str],
+    felder: Mapping[str, Collection[str]] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Kursplan und Bausteine **eines** Kurses — ``kurs_roh`` aus der Datei, ``kurs`` wie die
-    App ihn liest; ``plaene``: Schlüssel der Paketpläne → Zahl ihrer Planübungen."""
+    App ihn liest; ``plaene``: Schlüssel der Paketpläne → Zahl ihrer Planübungen; ``felder``:
+    Schlüssel der Übungen dieses Pakets → die Felder ihrer Eingabe."""
     fehler: list[str] = []
     hinweise: list[str] = []
     kursplan = kurs_roh.get("kursplan")
@@ -760,6 +762,39 @@ def _kurs_pruefen(
             hinweise.extend(f"{s.ort}: {x}" for x in h_kante)
         fehler.extend(f"{s.ort}: {x}" for x in probleme)
 
+    # Ein Test, der „die gewählte“ misst (`aus`), braucht seine Auswahl — hier oder davor
+    for s in stellen:
+        aus = _marke_roh(s.roh.get("aus")) if s.art == TEST else ""
+        if not aus:
+            continue
+        if str(s.roh.get("uebung") or "").strip():
+            fehler.append(
+                f"{s.ort}: `uebung` und `aus` zugleich — nur eines davon (die App nähme `aus`)"
+            )
+        if text := _verweis_pruefen("aus", aus, AUSWAHL, s, je_id):
+            fehler.append(f"{s.ort}: {text}")
+            continue
+        auswahl = je_id[aus]
+        if grundlage is None and auswahl.kapitel != s.kapitel:
+            # mit Kapitelplänen kennt ein Kapitel nur die Wahl aus seinen eigenen Blöcken — im
+            # Kursplan-Kurs steht sie im Kursplan
+            fehler.append(
+                f"{s.ort}: `aus` „{aus}“ steht in einem anderen Kapitel ({auswahl.ort}) — ohne "
+                "`kursplan` muss die Auswahl im selben Kapitel stehen wie der Test"
+            )
+        feld = str(s.roh.get("feld") or "hold").strip() or "hold"
+        zur_wahl = auswahl.roh.get("uebungen")
+        ohne = [
+            str(u)
+            for u in (zur_wahl if isinstance(zur_wahl, list) else [])
+            if felder is not None and str(u) in felder and feld not in felder[str(u)]
+        ]
+        if ohne:
+            hinweise.append(
+                f"{s.ort}: Das Feld `{feld}` hat nicht jede Übung der Auswahl „{aus}“ "
+                f"({', '.join(ohne)}) — für sie gibt es keinen Testwert, ihr Ziel bliebe offen"
+            )
+
     if steine and grundlage is None:
         hinweise.append(
             f"{len(steine)} Baustein{'' if len(steine) == 1 else 'e'} (`plan_*`) in einem Kurs "
@@ -822,10 +857,15 @@ beginnt leer (keine Grundlage)
         for e, u in zip(eintraege, inhalt.uebungen, strict=False)
         if e.get("key")
     }
+    felder = {
+        str(e["key"]).strip(): {f.key for f in u.result_spec.fields}
+        for e, u in zip(eintraege, inhalt.uebungen, strict=False)
+        if e.get("key")
+    }
     kurse = [k for k in roh.get("kurse") or [] if isinstance(k, dict)]
     for kurs_roh, kurs in zip(kurse, inhalt.kurse, strict=False):
         wo = f"Kurs „{kurs_roh.get('name', kurs_roh.get('key', '?'))}“"
-        f_kurs, h_kurs = _kurs_pruefen(kurs_roh, kurs, plaene, schluessel)
+        f_kurs, h_kurs = _kurs_pruefen(kurs_roh, kurs, plaene, schluessel, felder)
         fehler.extend(f"{wo}: {x}" for x in f_kurs)
         hinweise.extend(f"{wo}: {x}" for x in h_kurs)
     return fehler, hinweise

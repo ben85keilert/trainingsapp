@@ -540,6 +540,104 @@ def test_mehrere_gewaehlte_stehen_in_der_reihenfolge_der_wahl_und_bekommen_je_ei
     )
 
 
+def _zwei_zur_wahl() -> tuple[Plan, dict, list[Block], dict[str, list[str]]]:
+    """Planke, danach Dehnen — und ein Kapitel, das zwei Gewählte hinter die Planke stellt und
+    von ihr zu beiden einen Weg setzt."""
+    plan, stand = nach_kapitel_1()
+    dehnen = [Block(PLAN_UEBUNG, id="de", uebung="dehnen")]
+    plan, stand = anwenden(plan, dehnen, {}, {}, {"de"}, (), stand, NAMEN)
+    bloecke = [
+        Block(PLAN_UEBUNG, id="dazu", aus="wahl", hinter="a"),
+        Block(PLAN_WEG, id="weg", von="a", zu="dazu", kante={"ausloeser": "zeit"}),
+    ]
+    return plan, stand, bloecke, {"wahl": ["bruecke", "seit"]}
+
+
+def test_gleichwertige_wege_sind_nicht_verkettet() -> None:
+    """Ben, 16.11.2026: „gleichwertige Wege müssen gleichwertig sein; Verkettung ist dann nicht
+    gegeben, in der Liste aber machbar“ — von der Planke geht es zu Brücke **oder** Seitstütz,
+    von jeder weiter zum Dehnen; in der Liste stehen beide."""
+    plan, stand, bloecke, wahl = _zwei_zur_wahl()
+    zeilen = aenderungen(plan, bloecke, {}, wahl, stand, NAMEN)
+    neu, neuer_stand = anwenden(plan, bloecke, {}, wahl, alle_ids(zeilen), (), stand, NAMEN)
+    planke, bruecke, seit, dehnen = neu.items
+    assert [i.exercise_id for i in neu.items] == ["planke", "bruecke", "seit", "dehnen"]
+    wege = {(k.von, k.nach) for k in neu.ablauf.kanten}
+    assert wege == {
+        (planke.id, bruecke.id),
+        (planke.id, seit.id),
+        (bruecke.id, dehnen.id),
+        (seit.id, dehnen.id),
+    }
+    assert neu.ablauf.an and neu.workout
+    # noch einmal übernehmen ändert nichts
+    assert anwenden(neu, bloecke, {}, wahl, alle_ids(zeilen), (), neuer_stand, NAMEN) == (
+        neu,
+        neuer_stand,
+    )
+
+
+def test_ein_einzelner_weg_laesst_die_kette_stehen() -> None:
+    """Wählt die Person nur einen der beiden Wege, sind die Gewählten keine Alternativen: Die
+    zweite folgt der ersten wie in der Liste. Kommt der zweite Weg später dazu, entfällt die
+    Kette."""
+    plan, stand, bloecke, wahl = _zwei_zur_wahl()
+    ohne = alle_ids(aenderungen(plan, bloecke, {}, wahl, stand, NAMEN)) - {"weg#weg:a>dazu:seit"}
+    neu, neuer_stand = anwenden(plan, bloecke, {}, wahl, ohne, (), stand, NAMEN)
+    planke, bruecke, seit, dehnen = neu.items
+    assert {(k.von, k.nach) for k in neu.ablauf.kanten} == {
+        (planke.id, bruecke.id),
+        (bruecke.id, seit.id),
+        (seit.id, dehnen.id),
+    }
+    spaeter, _ = anwenden(neu, bloecke, {}, wahl, {"weg#weg:a>dazu:seit"}, (), neuer_stand, NAMEN)
+    assert {(k.von, k.nach) for k in spaeter.ablauf.kanten} == {
+        (planke.id, bruecke.id),
+        (planke.id, seit.id),
+        (bruecke.id, dehnen.id),
+        (seit.id, dehnen.id),
+    }
+
+
+def test_gleichwertige_am_ende_des_plans_enden_beide() -> None:
+    """Ohne Übung danach endet das Workout nach jeder der beiden — keine führt zur anderen."""
+    plan, stand = nach_kapitel_1()
+    bloecke = [
+        Block(PLAN_UEBUNG, id="dazu", aus="wahl", hinter="a"),
+        Block(PLAN_WEG, id="weg", von="a", zu="dazu"),
+    ]
+    wahl = {"wahl": ["bruecke", "seit"]}
+    zeilen = aenderungen(plan, bloecke, {}, wahl, stand, NAMEN)
+    neu, _ = anwenden(plan, bloecke, {}, wahl, alle_ids(zeilen), (), stand, NAMEN)
+    planke, bruecke, seit = neu.items
+    assert {(k.von, k.nach) for k in neu.ablauf.kanten} == {
+        (planke.id, bruecke.id),
+        (planke.id, seit.id),
+    }
+
+
+def test_ziel_aus_einem_test_der_die_gewaehlte_misst() -> None:
+    """Ein Test mit ``aus`` hat je Übung einen Wert (``<test>:<übung>``) — für die Planübung
+    zählt der ihrer eigenen Übung, nicht der einer anderen aus der Auswahl."""
+    plan, stand = nach_kapitel_1()
+    bloecke = [
+        Block(AUSWAHL, id="wahl", uebungen=["seit", "kaefer", "bruecke"], anzahl=1),
+        Block(TEST, id="test", aus="wahl", feld="reps"),
+        Block(PLAN_UEBUNG, id="dazu", aus="wahl", hinter="a", ziel_aus="test"),
+    ]
+    wahl = {"wahl": ["bruecke"]}
+    nur_kaefer = aenderungen(plan, bloecke, {"test:kaefer": 30.0}, wahl, stand, NAMEN)
+    assert [(z.id, z.stand) for z in nur_kaefer] == [
+        ("dazu:bruecke", NEU),
+        ("dazu:bruecke#ziel", OFFEN),
+    ]
+    werte = {"test:kaefer": 30.0, "test:bruecke": 12.0}
+    zeilen = aenderungen(plan, bloecke, werte, wahl, stand, NAMEN)
+    assert zeilen[1].titel == "Ziel für Brücke: 12 Wiederholungen"
+    neu, _ = anwenden(plan, bloecke, werte, wahl, alle_ids(zeilen), (), stand, NAMEN)
+    assert [(i.exercise_id, i.target) for i in neu.items][1] == ("bruecke", {"reps": [12]})
+
+
 def test_uebung_die_es_hier_nicht_gibt_ergibt_keine_zeile() -> None:
     bloecke = [Block(PLAN_UEBUNG, id="x", uebung="unbekannt", ziel={"reps": [5]})]
     assert aenderungen(Plan(), bloecke, {}, {}, {}, NAMEN) == []

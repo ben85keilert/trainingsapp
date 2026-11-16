@@ -44,6 +44,7 @@ from ..core.kursbloecke import (
     bloecke_lesen,
     vorlage_anwenden,
     wert_im_test,
+    wert_schluessel,
 )
 from ..core.kurse import (
     MESSUNG,
@@ -392,19 +393,44 @@ class KursRepo:
 
     def testwerte(self, kapitel: Kapitel, subject_id: str, seit: datetime) -> dict[str, float]:
         """Je Test-Block der Wert aus dem jüngsten Eintrag seiner Übung seit ``seit`` (dem
-        Erreichen des Kapitels) — ein gewöhnlicher Eintrag, kein Messwert."""
+        Erreichen des Kapitels) — ein gewöhnlicher Eintrag, kein Messwert.
+
+        Ein Test mit ``aus`` misst „die gewählte“ (Ben, 16.11.2026): Er bekommt je Übung, die
+        in seiner Auswahl zur Wahl steht, einen Wert unter ``<block>:<übung>``
+        (`core.kursbloecke.wert_schluessel`) — welcher zählt, sagt die Wahl."""
         ergebnis: dict[str, float] = {}
         eintraege = SessionRepo(self.con)
         for block in kapitel.bloecke:
             if block.art != TEST:
                 continue
-            letzter = eintraege.letzter_eintrag(subject_id, block.uebung)
-            if letzter is None or letzter.started_at is None or letzter.started_at < seit:
-                continue
-            wert = wert_im_test(letzter.result, block.feld)
-            if wert is not None and wert > 0:
-                ergebnis[block.id] = wert
+            for uebung in self._zu_messen(kapitel, block):
+                letzter = eintraege.letzter_eintrag(subject_id, uebung)
+                if letzter is None or letzter.started_at is None or letzter.started_at < seit:
+                    continue
+                wert = wert_im_test(letzter.result, block.feld)
+                if wert is not None and wert > 0:
+                    ergebnis[wert_schluessel(block, uebung)] = wert
         return ergebnis
+
+    def _zu_messen(self, kapitel: Kapitel, test: Block) -> list[str]:
+        """Die Übungen, deren Einträge für einen Test zählen können: seine feste — oder alle,
+        die in seiner Auswahl zur Wahl stehen (die Auswahl darf in einem anderen Kapitel
+        desselben Kurses stehen)."""
+        if not test.aus:
+            return [test.uebung]
+        auswahl = next((b for b in kapitel.bloecke if b.id == test.aus and b.art == AUSWAHL), None)
+        if auswahl is None and kapitel.kurs_id:
+            kurs = self.laden(kapitel.kurs_id, mit_geloeschten=True)
+            auswahl = next(
+                (
+                    b
+                    for k in (kurs.kapitel if kurs is not None else [])
+                    for b in k.bloecke
+                    if b.id == test.aus and b.art == AUSWAHL
+                ),
+                None,
+            )
+        return list(auswahl.uebungen) if auswahl is not None else []
 
     def kapitel_abschliessen(
         self, kurs: Kurs, kapitel: Kapitel, subject_id: str, uebersprungen: bool = False

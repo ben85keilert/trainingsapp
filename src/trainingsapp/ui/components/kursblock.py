@@ -9,6 +9,14 @@ Text, Medium, Frage, Test und Auswahl stehen untereinander auf der Seite des Kap
   sie fest (der Plan lässt sich von Hand ändern). Beginnt der Kurs von vorn, wird neu gewählt;
   „Wie beim letzten Mal“ belegt die Wahl des früheren Durchlaufs vor (Ben, 16.11.2026).
 
+In einem Kurs mit **Kursplan** (``kursplan=True``; Ben, 16.11.2026, `docs/plan_kurs_ablauf.md`
+§11.5) liefern Test und Auswahl nur Wert und Wahl; was daraus am Plan wird, steht in der
+Sammelkarte (`components/kursplan_karte.py`). „Plan anlegen“ gibt es dort nicht (die Ansicht
+ruft ohne ``anlegen``) — außer das Kapitel hat daneben eigene Plan-Vorlagen. Fest ist eine
+Auswahl, sobald ihre Wahl im Kursplan steht (``feste_wahl``); jede Änderung der Wahl meldet
+``bei_wahl``, damit die Ansicht die Karte neu rechnet. Die Bausteine (``plan_…``) zeichnet
+dieses Modul nicht — aus ihnen wird die Sammelkarte.
+
 Die Rechnung steht in `core/kursbloecke.py`; hier wird nur gezeichnet.
 """
 
@@ -74,15 +82,35 @@ def kapitel_bloecke(
     zur_uebung: Callable[[str], Callable[..., Any]] | None = None,
     anlegen: Callable[[Mapping[str, Sequence[str]]], Any] | None = None,
     letzte_wahl: Mapping[str, Sequence[str]] | None = None,
+    kursplan: bool = False,
+    feste_wahl: Mapping[str, Sequence[str]] | None = None,
+    bei_wahl: Callable[[], Any] | None = None,
 ) -> KapitelBloecke:
     """Die Controls zu ``bloecke``. ``werte``: je Test-Block der Wert aus dem Eintrag;
     ``angelegt``: die Kapitelpläne gibt es schon (Auswahl fest); ``offen``: das Kapitel ist
     dran — sonst nur lesen. ``text_bauen`` macht aus Markdown ein Control (die Ansicht kennt
     die Regeln für Links und Bilder), ``zur_uebung`` den Weg zur Übung, ``anlegen`` bekommt
     die Wahl. ``letzte_wahl``: je Auswahl-Block, was im früheren Durchlauf des Kurses gewählt
-    war — dann bietet der Block „Wie beim letzten Mal“ an (nur eine Vorbelegung)."""
+    war — dann bietet der Block „Wie beim letzten Mal“ an (nur eine Vorbelegung).
+
+    ``kursplan``: Der Kurs baut einen Kursplan — die Texte nennen die Sammelkarte, und fest
+    ist eine Auswahl nicht mit ``angelegt``, sondern sobald ihre Wahl im Kursplan steht.
+    ``feste_wahl``: je Auswahl-Block, was davon schon im Kursplan steht — diese Chips sind
+    gewählt und gesperrt; `KapitelBloecke.wahl` hält nur, was die Person darüber hinaus
+    antippt. ``bei_wahl`` wird nach jeder Änderung der Wahl gerufen.
+
+    **Ohne ``anlegen`` gibt es den Knopf „Plan anlegen“ nicht** — so ruft die Ansicht ein
+    Kapitel im Kursplan-Kurs, das keine eigenen Plan-Vorlagen hat: Dort wird in der
+    Sammelkarte übernommen. Hat so ein Kapitel doch eigene Vorlagen, bleibt der Knopf für sie
+    (Kapitelpläne neben dem Kursplan, `KursRepo.kapitel_erreichen`)."""
     ergebnis = KapitelBloecke(controls=[])
     wahl = ergebnis.wahl
+    #: je Auswahl-Block, was schon im Kursplan steht (nur Übungen dieser Auswahl)
+    im_kursplan: dict[str, list[str]] = {
+        b.id: [u for u in (feste_wahl or {}).get(b.id, ()) if u in b.uebungen]
+        for b in bloecke
+        if b.art == AUSWAHL
+    }
     knopf = ft.FilledButton(
         "Plan anlegen",
         icon=ft.Icons.PLAYLIST_ADD_CHECK,
@@ -91,8 +119,13 @@ def kapitel_bloecke(
     )
     fehlt = ft.Text(size=12, opacity=0.7)
 
+    def wirksam() -> dict[str, list[str]]:
+        """Die Wahl, wie sie für „Plan anlegen“ gilt: was im Kursplan fest ist und was die
+        Person dazu angetippt hat. Ohne Kursplan ist das `KapitelBloecke.wahl`."""
+        return {bid: [*im_kursplan.get(bid, ()), *dazu] for bid, dazu in wahl.items()}
+
     def stand_zeigen() -> None:
-        bereit = fertig(bloecke, werte, wahl)
+        bereit = fertig(bloecke, werte, wirksam())
         knopf.disabled = not bereit
         fehlt.value = "" if bereit else "Erst den Test machen und die Auswahl treffen."
         fehlt.visible = not bereit
@@ -154,7 +187,11 @@ def kapitel_bloecke(
             )
             teile.append(
                 hinweis(
-                    f"Dein Eintrag bei „{name}“. Im Plan wird daraus das Ziel: "
+                    # im Kursplan-Kurs rechnet der Baustein (eigener Faktor, vielleicht eine
+                    # andere Übung) — was daraus wird, sagt die Sammelkarte
+                    f"Dein Eintrag bei „{name}“. Was daraus an deinem Plan wird, steht unten."
+                    if kursplan
+                    else f"Dein Eintrag bei „{name}“. Im Plan wird daraus das Ziel: "
                     f"{menge_text(feld, ziel)}."
                 )
             )
@@ -162,7 +199,7 @@ def kapitel_bloecke(
             teile.append(
                 hinweis(f"Noch kein Eintrag bei „{name}“, seit du dieses Kapitel öffnest.")
             )
-        if uebung is not None and zur_uebung is not None and offen and not angelegt:
+        if uebung is not None and zur_uebung is not None and offen and (kursplan or not angelegt):
             teile.append(
                 ft.Row(
                     controls=[
@@ -180,7 +217,19 @@ def kapitel_bloecke(
     def auswahl(block: Block) -> ft.Control:
         gewaehlt = wahl.setdefault(block.id, [])
         chips: dict[str, ft.Chip] = {}
-        fest = angelegt or not offen
+        # Kursplan: was schon im Plan steht, ist fest; frei bleibt der Rest bis zur Anzahl
+        im_plan = im_kursplan.get(block.id, [])
+        frei = max(block.anzahl - len(im_plan), 0)
+        fest = (angelegt and not kursplan) or not offen or (bool(im_plan) and frei == 0)
+
+        def gewaehlt_zeigen() -> None:
+            for k, chip in chips.items():
+                chip.selected = k in im_plan or k in gewaehlt
+            with contextlib.suppress(Exception):
+                reihe.update()
+            stand_zeigen()
+            if bei_wahl is not None:
+                bei_wahl()
 
         def umschalten(uid: str) -> Callable[..., None]:
             def handler(_e: Any = None) -> None:
@@ -188,13 +237,9 @@ def kapitel_bloecke(
                     gewaehlt.remove(uid)
                 else:
                     gewaehlt.append(uid)
-                    while len(gewaehlt) > block.anzahl:  # die älteste Wahl weicht
+                    while len(gewaehlt) > frei:  # die älteste Wahl weicht
                         gewaehlt.pop(0)
-                for k, chip in chips.items():
-                    chip.selected = k in gewaehlt
-                with contextlib.suppress(Exception):
-                    reihe.update()
-                stand_zeigen()
+                gewaehlt_zeigen()
 
             return handler
 
@@ -204,23 +249,21 @@ def kapitel_bloecke(
                 continue
             chips[uid] = ft.Chip(
                 label=ft.Text(uebung.name),
-                selected=False,
-                disabled=fest,
+                selected=uid in im_plan,
+                disabled=fest or uid in im_plan,
                 on_select=umschalten(uid),
                 data=("wahl", block.id, uid),
             )
         reihe = ft.Row(wrap=True, spacing=8, run_spacing=8, controls=list(chips.values()))
         # Kurs von vorn (Ben, 16.11.2026): die Wahl vom letzten Mal als Vorbelegung — die
         # Person tippt sie an, nichts ist von selbst gewählt
-        frueher = [u for u in (letzte_wahl or {}).get(block.id, ()) if u in chips]
+        frueher = [
+            u for u in (letzte_wahl or {}).get(block.id, ()) if u in chips and u not in im_plan
+        ]
 
         def wie_letztes_mal(_e: Any = None) -> None:
-            gewaehlt[:] = frueher[: block.anzahl]
-            for k, chip in chips.items():
-                chip.selected = k in gewaehlt
-            with contextlib.suppress(Exception):
-                reihe.update()
-            stand_zeigen()
+            gewaehlt[:] = frueher[:frei]
+            gewaehlt_zeigen()
 
         letztes_mal: list[ft.Control] = (
             [
@@ -248,7 +291,13 @@ def kapitel_bloecke(
             reihe,
             *letztes_mal,
             hinweis(
-                "Der Plan ist angelegt — ändern kannst du ihn in der Planverwaltung."
+                (
+                    "Deine Wahl steht im Kursplan — ändern kannst du ihn in der Planverwaltung."
+                    if im_plan and frei == 0
+                    else "Was du wählst, kommt in deinen Kursplan — unten steht, was sich ändert."
+                )
+                if kursplan
+                else "Der Plan ist angelegt — ändern kannst du ihn in der Planverwaltung."
                 if angelegt
                 else "Mit zwei oder mehr stehen sie im Workout als Wege: Dort wählst du jedes "
                 "Mal einen."
@@ -274,11 +323,13 @@ def kapitel_bloecke(
         elif block.art == AUSWAHL:
             ergebnis.controls.append(auswahl(block))
 
-    if any(b.art in (TEST, AUSWAHL) for b in bloecke) and offen and not angelegt:
+    hat_eingabe = any(b.art in (TEST, AUSWAHL) for b in bloecke)
+    # ohne ``anlegen`` kein Knopf: im Kursplan-Kurs übernimmt man in der Sammelkarte
+    if anlegen is not None and hat_eingabe and offen and not angelegt:
 
         def druecken(_e: Any = None) -> Any:
-            if anlegen is not None and fertig(bloecke, werte, wahl):
-                return anlegen(wahl)
+            if fertig(bloecke, werte, wirksam()):
+                return anlegen(wirksam())
             return None
 
         knopf.on_click = druecken

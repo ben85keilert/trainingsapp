@@ -40,7 +40,7 @@ import sys
 import tempfile
 import tomllib
 import uuid
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -50,7 +50,19 @@ from trainingsapp.core.ablauf import ablauf_pruefen
 from trainingsapp.core.bedingung import bedingung_pruefen
 from trainingsapp.core.ergaenzungen import ERGAENZBAR
 from trainingsapp.core.gps_wahl import gps_pruefen
+from trainingsapp.core.kursbloecke import (
+    ARTEN,
+    AUSWAHL,
+    BAUSTEINE,
+    PLAN_EINSTELLEN,
+    PLAN_UEBUNG,
+    PLAN_WEG,
+    TEST,
+    ZU_ENDE,
+    Block,
+)
 from trainingsapp.core.kurse import Kapitel, Kurs, PlanVorlage, VorlageItem
+from trainingsapp.core.kursplan import GRUNDLAGE
 from trainingsapp.core.links import erlaubt as links_erlaubt
 from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.core.paketdatei import (
@@ -68,6 +80,8 @@ from trainingsapp.core.pakete import (
     PaketFehler,
     Paketinhalt,
     dateiname,
+    noetige_version,
+    nutzt_kursplan,
     paket_json,
     paket_lesen,
     stand,
@@ -166,6 +180,8 @@ def _texte(roh: dict[str, Any]) -> list[tuple[str, str]]:
         wo = f"Kurs „{k.get('name', k.get('key', '?'))}“"
         texte.append((f"{wo}, Name", str(k.get("name") or "")))
         texte.append((f"{wo}, Beschreibung", str(k.get("beschreibung") or "")))
+        if isinstance(k.get("kursplan"), dict):  # so heißt der Plan, den der Kurs baut
+            texte.append((f"{wo}, Kursplan, Name", str(k["kursplan"].get("name") or "")))
         for kap in k.get("kapitel", []):
             if isinstance(kap, dict):
                 titel = kap.get("titel", kap.get("key", "?"))
@@ -175,12 +191,13 @@ def _texte(roh: dict[str, Any]) -> list[tuple[str, str]]:
 
 
 def _plaene_mit_ort(roh: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    """``(Wo, Plan)`` aller Pläne eines Pakets: ``plaene[]`` und die der Kurskapitel.
+    """``(Wo, Plan)`` aller Pläne eines Pakets: ``plaene[]``, die der Kurskapitel und die
+    Vorlage eines Kursplans (``kurse[].kursplan.vorlage``).
 
     >>> roh = {"plaene": [{"name": "Morgen"}], "kurse": [{"name": "K", "kapitel": [
-    ...     {"titel": "T", "plaene": [{"name": "Stehen"}]}]}]}
+    ...     {"titel": "T", "plaene": [{"name": "Stehen"}]}], "kursplan": {"vorlage": {}}}]}
     >>> [wo for wo, _ in _plaene_mit_ort(roh)]
-    ['Plan „Morgen“', 'Kurs „K“, Kapitel „T“, Plan „Stehen“']
+    ['Plan „Morgen“', 'Kurs „K“, Kursplan, Vorlage', 'Kurs „K“, Kapitel „T“, Plan „Stehen“']
     """
     out: list[tuple[str, dict[str, Any]]] = []
     for pl in roh.get("plaene") or []:
@@ -190,6 +207,9 @@ def _plaene_mit_ort(roh: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
         if not isinstance(k, dict):
             continue
         wo = f"Kurs „{k.get('name', k.get('key', '?'))}“"
+        kursplan = k.get("kursplan")
+        if isinstance(kursplan, dict) and isinstance(kursplan.get("vorlage"), dict):
+            out.append((f"{wo}, Kursplan, Vorlage", kursplan["vorlage"]))
         for kap in k.get("kapitel") or []:
             if not isinstance(kap, dict):
                 continue
@@ -288,7 +308,10 @@ def pruefen(
     sind eine fehlende Rechenart und unbrauchbare Tempo-Grenzen Fehler, eine unbekannte
     Rechenart ein Hinweis. Sensor und Takt auch **je Planübung** in
     ``plaene[].uebungen[]`` und ``kurse[].kapitel[].plaene[].uebungen[]`` (A6) — mit dem Weg
-    dorthin; ein unlesbarer Takt heißt dort „die Planübung folgt der Übung“."""
+    dorthin; ein unlesbarer Takt heißt dort „die Planübung folgt der Übung“. **Kursplan und
+    Bausteine** (Formatversion 6) prüft `kursplan_pruefen`: feste und eindeutige Block-IDs,
+    Marken, die es an ihrer Stelle schon gibt, ``aus`` mit Auswahl, ``ziel_aus`` mit Test,
+    eine ``grundlage``, die ein Plan des Pakets ist."""
     fehler: list[str] = []
     hinweise: list[str] = []
     try:
@@ -398,6 +421,14 @@ def pruefen(
                 "eingeschobenes Kapitel verschiebt dann Fortschritt und Kapitelpläne aller "
                 "dahinter auf das falsche Kapitel"
             )
+    f_kurs, h_kurs = kursplan_pruefen(roh, inhalt)
+    fehler.extend(f_kurs)
+    hinweise.extend(h_kurs)
+    if any(nutzt_kursplan(k) for k in inhalt.kurse):
+        hinweise.append(
+            "Formatversion 6 (Kursplan) — eine App, die sie nicht kennt, lehnt das Paket ab "
+            "(„… neuer als diese App“) und behält ihren Stand"
+        )
     if inhalt.paket.version is None:
         hinweise.append("Kopf ohne `version` — ohne sie erkennt kein Gerät ein Update")
     angenommen = 0
@@ -451,6 +482,353 @@ def _planmedien_pruefen(roh: Any) -> list[str]:
         elif not links_erlaubt(uri):
             out.append(f"medien: „{uri}“ fällt weg (nur https-Adressen)")
     return out
+
+
+#: Eine Block-ID, die als Marke taugt — wie jede ID im Paket (`core.pakete`): Die Marke im
+#: Plan trennt Block und Übung mit „:“ (`core.kursplan`), die Zeilen der Karte hängen „#…“ an
+_MARKEN_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_GRUNDLAGE_NR = re.compile(r"[1-9][0-9]*")
+#: Je Baustein die Felder, die eine Marke nennen
+_MARKENFELDER: dict[str, tuple[str, ...]] = {
+    PLAN_UEBUNG: ("hinter",),
+    PLAN_EINSTELLEN: ("an",),
+    PLAN_WEG: ("von", "zu"),
+}
+
+
+@dataclass(frozen=True)
+class _Blockstelle:
+    """Ein Block und wo er im Kurs steht — Kapitel und Block von 1 gezählt."""
+
+    kapitel: int
+    block: int
+    titel: str
+    art: str
+    roh: dict[str, Any]
+
+    @property
+    def id(self) -> str:
+        """Die ``id``, wie `core.kursbloecke.Block.from_dict` sie liest — leer = keine."""
+        return str(self.roh.get("id") or "")
+
+    @property
+    def ort(self) -> str:
+        return f"Kapitel „{self.titel}“, Block {self.block}" + (f" „{self.id}“" if self.id else "")
+
+    def vor(self, andere: _Blockstelle) -> bool:
+        return (self.kapitel, self.block) < (andere.kapitel, andere.block)
+
+
+def _marke_roh(roh: Any) -> str:
+    """Eine Marke oder Block-ID aus den Rohdaten — gelesen wie in `core.kursbloecke`: Text
+    ohne Rand (auch eine Zahl), alles andere ist keine.
+
+    >>> _marke_roh(" a "), _marke_roh(7), _marke_roh(True), _marke_roh(None)
+    ('a', '7', '', '')
+    """
+    return str(roh).strip() if isinstance(roh, str | int) and not isinstance(roh, bool) else ""
+
+
+def _marke_pruefen(
+    feld: str,
+    wert: str,
+    hier: _Blockstelle,
+    je_id: Mapping[str, _Blockstelle],
+    grundlage: int | None,
+    schluessel: Mapping[str, str],
+) -> str | None:
+    """Fehlertext, wenn ``wert`` keine Marke ist, die es an dieser Stelle schon gibt — sonst
+    ``None``. Marken: die ``id`` eines ``plan_uebung`` davor (in diesem oder einem früheren
+    Kapitel), ``<id>:<übung>`` für eine der Gewählten, ``g:<n>`` für die n-te Planübung der
+    Grundlage (``grundlage``: wie viele sie hat — ``None``: der Kurs hat keinen Kursplan),
+    bei ``zu`` auch ``ende``."""
+    if feld == "zu" and wert.lower() == ZU_ENDE:
+        return None
+    vorn = f"`{feld}` „{wert}“"
+    if wert.startswith(GRUNDLAGE):
+        if grundlage is None:
+            return f"{vorn}: Der Kurs hat keinen `kursplan`, also keine Grundlage"
+        nummer = wert[len(GRUNDLAGE) :]
+        if _GRUNDLAGE_NR.fullmatch(nummer) and int(nummer) <= grundlage:
+            return None
+        if not grundlage:
+            return f"{vorn} gibt es nicht — der Kursplan beginnt leer (keine Grundlage)"
+        return (
+            f"{vorn} gibt es nicht — die Grundlage hat {grundlage} "
+            f"Planübung{'' if grundlage == 1 else 'en'} (`g:1` bis `g:{grundlage}`)"
+        )
+    kopf, trenner, uebung = wert.partition(":")
+    ziel = je_id.get(kopf)
+    if ziel is None:
+        ende = ", `ende`" if feld == "zu" else ""
+        return (
+            f"{vorn} nennt keine bekannte Marke (die `id` eines `plan_uebung` davor, `g:<n>`{ende})"
+        )
+    if ziel.art != PLAN_UEBUNG:
+        return (
+            f"{vorn} ist ein Block `{ziel.art}`, kein `plan_uebung` — nur der bringt eine "
+            "Planübung in den Plan"
+        )
+    if ziel.kapitel > hier.kapitel:
+        return (
+            f"{vorn} steht erst in Kapitel {ziel.kapitel} („{ziel.titel}“) — die Planübung "
+            "gibt es hier noch nicht"
+        )
+    if not ziel.vor(hier):
+        return (
+            f"{vorn} steht nicht vor diesem Baustein — Bausteine gelten in der Reihenfolge, "
+            "in der sie dastehen"
+        )
+    if trenner:
+        aus = _marke_roh(ziel.roh.get("aus"))
+        if not aus:
+            return f"{vorn}: „{kopf}“ bringt eine feste Übung — ihre Marke heißt „{kopf}“"
+        auswahl = je_id.get(aus)
+        zur_wahl = auswahl.roh.get("uebungen") if auswahl is not None else None
+        if isinstance(zur_wahl, list) and schluessel.get(uebung, uebung) not in {
+            schluessel.get(str(u), str(u)) for u in zur_wahl
+        }:
+            return f"{vorn}: „{uebung}“ steht in der Auswahl „{aus}“ nicht zur Wahl"
+    return None
+
+
+def _verweis_pruefen(
+    feld: str,
+    wert: str,
+    art: str,
+    hier: _Blockstelle,
+    je_id: Mapping[str, _Blockstelle],
+) -> str | None:
+    """Fehlertext, wenn ``wert`` nicht die ``id`` eines Blocks der Art ``art`` in diesem oder
+    einem früheren Kapitel ist (``aus`` → ``auswahl``, ``ziel_aus`` → ``test``) — sonst
+    ``None``. Im selben Kapitel darf der Block auch weiter unten stehen: Wahl und Testwert
+    gelten für das ganze Kapitel."""
+    vorn = f"`{feld}` „{wert}“"
+    wort = "keine Auswahl" if art == AUSWAHL else "keinen Test"
+    ziel = je_id.get(wert)
+    if ziel is None:
+        return (
+            f"{vorn} nennt {wort} (ein Block `{art}` mit dieser `id` in diesem oder einem "
+            "früheren Kapitel)"
+        )
+    if ziel.art != art:
+        return f"{vorn} nennt {wort}, sondern einen Block `{ziel.art}`"
+    if ziel.kapitel > hier.kapitel:
+        return (
+            f"{vorn} steht erst in Kapitel {ziel.kapitel} („{ziel.titel}“) — ein Baustein "
+            "bezieht sich nur auf dieses oder ein früheres Kapitel"
+        )
+    return None
+
+
+def _kante_pruefen(roh: Any) -> tuple[list[str], list[str]]:
+    """Die ``kante`` eines ``plan_weg`` — geprüft wie eine Kante im Ablauf eines Plans
+    (`core.ablauf.ablauf_pruefen`), nur ohne ``von`` und ``nach``: Die stehen als Marken am
+    Baustein.
+
+    >>> _kante_pruefen({"ausloeser": "tanz", "n": "x"})
+    (['kante: n ist keine Zahl'], ['kante: Auslöser „tanz“ unbekannt — „frei“ gilt'])
+    >>> _kante_pruefen({"ausloeser": "zeit", "pflicht": True}), _kante_pruefen("zeit")[0]
+    (([], []), ['kante: keine Tabelle — es gälte ein freier Weg'])
+    """
+    if not isinstance(roh, dict):
+        return ["kante: keine Tabelle — es gälte ein freier Weg"], []
+    f_ab, h_ab = ablauf_pruefen({"kanten": [{**roh, "von": "#1", "nach": "#2"}]})
+    return (
+        ["kante: " + x.removeprefix("Kante 1: ") for x in f_ab],
+        ["kante: " + x.removeprefix("Kante 1: ") for x in h_ab],
+    )
+
+
+def _kurs_pruefen(
+    kurs_roh: Mapping[str, Any],
+    kurs: Kurs,
+    plaene: Mapping[str, int],
+    schluessel: Mapping[str, str],
+) -> tuple[list[str], list[str]]:
+    """Kursplan und Bausteine **eines** Kurses — ``kurs_roh`` aus der Datei, ``kurs`` wie die
+    App ihn liest; ``plaene``: Schlüssel der Paketpläne → Zahl ihrer Planübungen."""
+    fehler: list[str] = []
+    hinweise: list[str] = []
+    kursplan = kurs_roh.get("kursplan")
+    grundlage: int | None = None  # wie viele Planübungen die Grundlage hat — None: kein Kursplan
+    if isinstance(kursplan, dict):
+        g_roh, vorlage = kursplan.get("grundlage"), kursplan.get("vorlage")
+        g = g_roh.strip() if isinstance(g_roh, str) else ""
+        if g_roh is not None and not g:
+            fehler.append(
+                "kursplan: `grundlage` ist kein Schlüssel — gemeint ist der `key` eines Plans "
+                "aus `plaene`"
+            )
+        if g and vorlage is not None:
+            fehler.append(
+                "kursplan: `grundlage` und `vorlage` zugleich — nur eines davon (die App nähme "
+                "die Vorlage)"
+            )
+        if g and g not in plaene:
+            bekannt = ", ".join(sorted(plaene)) or "das Paket hat keine `plaene`"
+            fehler.append(
+                f"kursplan: `grundlage` „{g}“ nennt keinen Plan des Pakets (bekannt: {bekannt})"
+            )
+        gelesen = kurs.kursplan.vorlage if kurs.kursplan is not None else None
+        if vorlage is not None and gelesen is None:
+            hinweise.append("kursplan: `vorlage` ohne Übung — der Plan beginnt leer")
+        grundlage = len(gelesen.items) if gelesen is not None else plaene.get(g, 0)
+
+    # Erst alle Blöcke des Kurses: Ein Baustein darf auf einen Block weiter vorn zeigen, und
+    # die Meldung soll sagen können, wo der gemeinte steht
+    stellen: list[_Blockstelle] = []
+    je_id: dict[str, _Blockstelle] = {}
+    mit_plaenen: list[str] = []
+    kapitel = kurs_roh.get("kapitel")
+    for kn, kap in enumerate(kapitel if isinstance(kapitel, list) else [], start=1):
+        if not isinstance(kap, dict):
+            continue
+        titel = str(kap.get("titel", kap.get("key", "?")))
+        if kap.get("plaene"):
+            mit_plaenen.append(titel)
+        bloecke = kap.get("bloecke")
+        for bn, b in enumerate(bloecke if isinstance(bloecke, list) else [], start=1):
+            if not isinstance(b, dict):
+                continue
+            s = _Blockstelle(kn, bn, titel, str(b.get("art") or ""), b)
+            if s.art.startswith("plan_") and s.art not in BAUSTEINE:
+                fehler.append(
+                    f"{s.ort}: unbekannter Baustein `{s.art}` (bekannt: {', '.join(BAUSTEINE)}) "
+                    "— der Block fällt weg"
+                )
+            if s.art not in ARTEN and s.art not in BAUSTEINE:
+                continue  # überliest die App
+            stellen.append(s)
+            if not s.id:
+                continue
+            if s.id in je_id:
+                fehler.append(
+                    f"{s.ort}: Die `id` gibt es im Kurs schon ({je_id[s.id].ort}) — Block-IDs "
+                    "sind je Kurs eindeutig"
+                )
+            else:
+                je_id[s.id] = s
+
+    steine = [s for s in stellen if s.art in BAUSTEINE]
+    for s in steine:
+        b = s.roh
+        probleme: list[str] = []
+        if not s.id:
+            probleme.append(
+                "Baustein ohne feste `id` — andere Bausteine zeigen auf sie, und sie steht als "
+                "Marke im Plan (die App vergäbe bei jedem Lesen eine andere)"
+            )
+        elif not _MARKEN_ID.fullmatch(s.id) or s.id.lower() == ZU_ENDE or s.id + ":" == GRUNDLAGE:
+            # „ende“ ist das Ziel eines Wegs, „g:…“ sind die Marken der Grundlage
+            probleme.append(
+                "Die `id` taugt nicht als Marke: nur Buchstaben, Ziffern, „-“ und „_“ (1–64 "
+                "Zeichen), nicht „ende“ und nicht „g“"
+            )
+        if s.art == PLAN_UEBUNG:
+            uebung, aus = str(b.get("uebung") or "").strip(), _marke_roh(b.get("aus"))
+            if uebung and aus:
+                probleme.append(
+                    "`uebung` und `aus` zugleich — nur eines davon (die App nähme `aus`)"
+                )
+            elif not uebung and not aus:
+                probleme.append(
+                    "weder `uebung` (eine feste Übung) noch `aus` (die `id` einer Auswahl) — "
+                    "der Baustein fällt weg"
+                )
+            if aus and (text := _verweis_pruefen("aus", aus, AUSWAHL, s, je_id)):
+                probleme.append(text)
+        for feld in _MARKENFELDER[s.art]:
+            wert = _marke_roh(b.get(feld))
+            if wert:
+                text = _marke_pruefen(feld, wert, s, je_id, grundlage, schluessel)
+                if text is not None:
+                    probleme.append(text)
+            elif s.art == PLAN_WEG:  # `hinter` und `an` dürfen fehlen: ans Ende, am Plan
+                probleme.append(
+                    f"`{feld}` fehlt — ein Weg braucht `von` und `zu`, der Baustein fällt weg"
+                )
+        if s.art == PLAN_EINSTELLEN and Block.from_dict(b) is None:
+            hinweise.append(f"{s.ort}: stellt nichts ein — der Baustein fällt weg")
+        if s.art in (PLAN_UEBUNG, PLAN_EINSTELLEN):
+            ziel_aus = _marke_roh(b.get("ziel_aus"))
+            if ziel_aus and (text := _verweis_pruefen("ziel_aus", ziel_aus, TEST, s, je_id)):
+                probleme.append(text)
+        if s.art == PLAN_WEG and "kante" in b:
+            f_kante, h_kante = _kante_pruefen(b["kante"])
+            probleme.extend(f_kante)
+            hinweise.extend(f"{s.ort}: {x}" for x in h_kante)
+        fehler.extend(f"{s.ort}: {x}" for x in probleme)
+
+    if steine and grundlage is None:
+        hinweise.append(
+            f"{len(steine)} Baustein{'' if len(steine) == 1 else 'e'} (`plan_*`) in einem Kurs "
+            "ohne `kursplan` — sie bewirken dort nichts"
+        )
+    if grundlage is not None and mit_plaenen:
+        hinweise.append(
+            "`kursplan` und `plaene` in Kapiteln ("
+            + ", ".join(f"„{t}“" for t in mit_plaenen)
+            + ") — beides gilt nebeneinander: Die Kapitelpläne entstehen wie bisher, der "
+            "Kursplan wächst daneben"
+        )
+    return fehler, hinweise
+
+
+def kursplan_pruefen(roh: Mapping[str, Any], inhalt: Paketinhalt) -> tuple[list[str], list[str]]:
+    """``(Fehler, Hinweise)`` zu **Kursplan und Bausteinen** aller Kurse einer Paketdatei
+    (Formatversion 6; `docs/uebungspakete.md`, „Kursplan“; `docs/plan_kurs_ablauf.md` §11) —
+    ``roh`` ist die Datei, ``inhalt`` dieselbe, wie die App sie liest. Die App liest
+    nachsichtig: Was sie nicht versteht, fällt still weg oder ergibt später die Zeile „… ist
+    nicht mehr in deinem Plan“. Darum hier **Fehler**:
+
+    - ein Baustein (``plan_uebung``, ``plan_einstellen``, ``plan_weg``) ohne feste ``id``
+      oder mit einer, die nicht als Marke taugt; eine Block-ID, die es im Kurs zweimal gibt;
+    - ``hinter``, ``an``, ``von``, ``zu`` ohne bekannte Marke — die ``id`` eines
+      ``plan_uebung`` **davor** (früheres Kapitel oder weiter oben), ``g:<n>`` innerhalb der
+      Grundlage, bei ``zu`` auch ``ende``; ein ``plan_weg`` ohne ``von`` oder ``zu``;
+    - ``aus`` ohne Auswahl, ``ziel_aus`` ohne Test in diesem oder einem früheren Kapitel;
+    - ``plan_uebung`` ohne ``uebung`` und ohne ``aus`` — oder mit beidem;
+    - ``kursplan.grundlage`` ohne Plan dieses Schlüssels in ``plaene[]``; ``grundlage`` und
+      ``vorlage`` zugleich;
+    - in der ``kante`` eines Wegs, was `core.ablauf.ablauf_pruefen` als Fehler meldet.
+
+    **Hinweise:** Bausteine in einem Kurs ohne ``kursplan`` (sie bewirken dort nichts),
+    Kapitel-Vorlagen (``plaene``) neben einem ``kursplan`` (beides gilt nebeneinander), ein
+    unbekannter Auslöser einer ``kante`` (es gilt „frei“), ein ``plan_einstellen``, das
+    nichts einstellt, eine ``vorlage`` ohne Übung.
+
+    >>> from trainingsapp.core.pakete import paket_lesen
+    >>> roh = {"paket": {"name": "Q"}, "exercises": [{"key": "planke", "name": "Planke"}],
+    ...        "kurse": [{"name": "Rumpf", "kursplan": {"grundlage": "basis"}, "kapitel": [
+    ...            {"titel": "Eins", "bloecke": [
+    ...                {"art": "plan_uebung", "uebung": "planke", "hinter": "g:1"}]}]}]}
+    >>> for zeile in kursplan_pruefen(roh, paket_lesen(roh))[0]:
+    ...     print(zeile)
+    Kurs „Rumpf“: kursplan: `grundlage` „basis“ nennt keinen Plan des Pakets (bekannt: das \
+Paket hat keine `plaene`)
+    Kurs „Rumpf“: Kapitel „Eins“, Block 1: Baustein ohne feste `id` — andere Bausteine zeigen \
+auf sie, und sie steht als Marke im Plan (die App vergäbe bei jedem Lesen eine andere)
+    Kurs „Rumpf“: Kapitel „Eins“, Block 1: `hinter` „g:1“ gibt es nicht — der Kursplan \
+beginnt leer (keine Grundlage)
+    """
+    fehler: list[str] = []
+    hinweise: list[str] = []
+    plaene = {pp.key: len(pp.vorlage.items) for pp in inhalt.plaene}
+    # Paketschlüssel → ID, wie der Leser sie auflöst (dieselbe Datei, dieselbe Reihenfolge)
+    eintraege = [e for e in roh.get("exercises") or [] if isinstance(e, dict)]
+    schluessel = {
+        str(e["key"]).strip(): u.id
+        for e, u in zip(eintraege, inhalt.uebungen, strict=False)
+        if e.get("key")
+    }
+    kurse = [k for k in roh.get("kurse") or [] if isinstance(k, dict)]
+    for kurs_roh, kurs in zip(kurse, inhalt.kurse, strict=False):
+        wo = f"Kurs „{kurs_roh.get('name', kurs_roh.get('key', '?'))}“"
+        f_kurs, h_kurs = _kurs_pruefen(kurs_roh, kurs, plaene, schluessel)
+        fehler.extend(f"{wo}: {x}" for x in f_kurs)
+        hinweise.extend(f"{wo}: {x}" for x in h_kurs)
+    return fehler, hinweise
 
 
 def gegen_pruefen(
@@ -663,15 +1041,13 @@ def index(
                 "plaene": len(inhalt.plaene),
                 "neuigkeiten": inhalt.paket.neuigkeiten,
                 "veroeffentlicht": bekannt.get(sha256) or datetime.now(UTC).date().isoformat(),
-                "format_version": 5
-                if inhalt.ergaenzungen
-                else 4
-                if inhalt.medien
-                else 3
-                if inhalt.plaene
-                else 2
-                if inhalt.kurse
-                else 1,
+                # wie `paket_bauen` sie schreibt; eine ZIP ist immer mindestens Version 4
+                "format_version": max(
+                    noetige_version(
+                        inhalt.uebungen, inhalt.kurse, inhalt.plaene, inhalt.ergaenzungen
+                    ),
+                    4 if inhalt.medien else 1,
+                ),
                 "signatur": None,
             }
         )

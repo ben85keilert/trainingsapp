@@ -128,6 +128,20 @@ weil sein Kapitel einen Test oder eine Auswahl hat; NULL = der laufende Plan. Ge
 `fruehere_plaene`). Bedingungen rechnen aus `session_entry` und `hrv_recording`, nie aus
 Messwerten (`core/kurse.py`, `data/kurse.py`).
 
+**Kursplan** (Migration 064, Ben 16.11.2026, `docs/plan_kurs_ablauf.md` §11): Ein Kurs mit
+`course.kursplan_json` (Name, Wochentage, Grundlage: Schlüssel eines Paketplans oder eine
+Vorlage, die sonst nirgends erscheint) baut mit der Person **einen** Plan, der über die Kapitel
+wächst; NULL = Kapitelpläne wie bisher. Der Plan trägt `plan.course_id` (Herkunft ist der Kurs,
+`course_chapter_id` bleibt NULL) und `plan.course_state_json` — den **Kurs-Stand**: was der Kurs
+je Marke zuletzt gesetzt hat und welche Zeilen schon übernommen oder gelassen sind; daran
+erkennt er, was die Person selbst geändert hat. Beide Spalten sind gerätelokal
+(`PlanRepo.kurs_setzen`, `kurs_stand`, `kurs_stand_setzen`, nie über `speichern`).
+`plan_item.course_mark` ist die **Marke**, an der der Kurs seine Planübung wiederfindet
+(Block-ID des Bausteins, bei einer Auswahl `<block>:<übung>`, in der Grundlage `g:<n>`; leer =
+von der Person hinzugefügt) — `PlanRepo.speichern` schreibt sie mit, weil es die Übungsliste
+ersetzt. Der laufende Kursplan eines Profils hat `course_run_ended_at IS NULL`; „Von vorn“
+macht ihn zum früheren Durchlauf. Rechnung: `core/kursplan.py`.
+
 **Einheit** (Migration 018, `docs/plan_einheit.md`): was zusammen lief — HRV-Messung,
 Timer, Ausdauertraining, Plan-Ablauf. `einheit.started_at` ist der Nullpunkt (`t_s` = 0),
 `ended_at` `NULL` heißt „läuft“ bzw. beim nächsten Start abgebrochen.

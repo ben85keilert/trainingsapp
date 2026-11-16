@@ -311,7 +311,13 @@ def paket_oeffnen(
 
 def medienlisten(roh: Mapping[str, Any]) -> Iterator[list[Any]]:
     """Alle Medienlisten der Rohdaten: Übungen (``media``), Planübungen (``medien``), Kapitel
-    (``media``) und die Planübungen in Kapiteln."""
+    (``media``), die Planübungen in Kapiteln und die in der Vorlage eines Kursplans
+    (``kurse[].kursplan.vorlage``).
+
+    >>> vorlage = {"uebungen": [{"uebung": "a", "medien": [{"datei": "x.jpg"}]}]}
+    >>> list(medienlisten({"kurse": [{"kursplan": {"vorlage": vorlage}}]}))
+    [[{'datei': 'x.jpg'}]]
+    """
 
     def aus_plaenen(plaene: Any) -> Iterator[list[Any]]:
         for pl in plaene if isinstance(plaene, list) else []:
@@ -327,6 +333,9 @@ def medienlisten(roh: Mapping[str, Any]) -> Iterator[list[Any]]:
         if isinstance(e, dict) and isinstance(e.get("media"), list):
             yield e["media"]
     for k in roh.get("kurse") or []:
+        kursplan = k.get("kursplan") if isinstance(k, dict) else None
+        if isinstance(kursplan, dict):
+            yield from aus_plaenen([kursplan.get("vorlage")])
         for kap in (k.get("kapitel") if isinstance(k, dict) else None) or []:
             if not isinstance(kap, dict):
                 continue

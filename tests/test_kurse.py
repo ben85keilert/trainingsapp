@@ -11,7 +11,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from trainingsapp.core.kursbloecke import AUSWAHL, TEST, Block
+from trainingsapp.core.kursbloecke import (
+    AUSWAHL,
+    PLAN_EINSTELLEN,
+    PLAN_UEBUNG,
+    PLAN_WEG,
+    TEST,
+    Block,
+)
 from trainingsapp.core.kurse import (
     AKTUELL,
     FERTIG,
@@ -25,6 +32,7 @@ from trainingsapp.core.kurse import (
     Kapitel,
     Kapitelstand,
     Kurs,
+    Kursplan,
     PlanVorlage,
     Stand,
     VorlageItem,
@@ -36,6 +44,7 @@ from trainingsapp.core.kurse import (
     stand_text,
     status,
 )
+from trainingsapp.core.kursplan import NEU, OFFEN, UEBERNOMMEN, WEICHT_AB, wahl_im_plan
 from trainingsapp.core.models import Exercise, HrvRecording, Media, MediaKind, Plan, Subject
 from trainingsapp.core.pakete import (
     GRUNDAUSSTATTUNG,
@@ -594,3 +603,436 @@ def test_abgeschlossenes_kapitel_wird_beim_erreichen_nicht_wieder_aktiv(con, pro
     assert not plaene.laden(plan.id).aktiv
     repo.kapitel_abschliessen(k, lesen, profil.id)  # erreicht Kapitel 2 noch einmal
     assert not plaene.laden(plan.id).aktiv
+
+
+# ---------------------------------------------------------------------------
+# Kursplan (Migration 064, `docs/plan_kurs_ablauf.md` §11) — die Rechnung prüft
+# `tests/test_kursplan.py`, hier die Datenbank
+# ---------------------------------------------------------------------------
+
+
+def proben(con, *namen: str) -> list[str]:
+    """Eigene Übungen mit Wiederholungen je Satz — ihre IDs."""
+    uebungen = ExerciseRepo(con)
+    ids = []
+    for name in namen:
+        u = Exercise(name=name, result_spec=SPEC_SAETZE_WDH)
+        uebungen.speichern(u)
+        ids.append(u.id)
+    return ids
+
+
+def rumpf_kurs(con, vorlage: PlanVorlage | None = None) -> tuple[Kurs, dict[str, str]]:
+    """Bens Beispiel: Kapitel 1 bringt die Planke (Ziel 20 Wdh.), Kapitel 2 lässt eine von
+    drei Übungen wählen, hängt sie hinter die Planke, setzt ihr Ziel aus dem Test und verbindet
+    beide; Kapitel 3 steigert die Planke. Gespeichert und wieder geladen."""
+    planke, seit, kaefer, bruecke = proben(con, "Planke", "Seitstütz", "Käfer", "Brücke")
+    kurs = Kurs(
+        name="Rumpf-Kurs",
+        kursplan=Kursplan("Rumpf", [0, 2, 4], vorlage=vorlage),
+        kapitel=[
+            Kapitel(
+                titel="Anfang",
+                bloecke=[Block(PLAN_UEBUNG, id="a", uebung=planke, ziel={"reps": [20]})],
+            ),
+            Kapitel(
+                titel="Erweiterung",
+                bloecke=[
+                    Block(AUSWAHL, id="wahl", uebungen=[seit, kaefer, bruecke], anzahl=1),
+                    Block(TEST, id="test", uebung=kaefer, feld="reps"),
+                    Block(PLAN_UEBUNG, id="dazu", aus="wahl", hinter="a", ziel_aus="test"),
+                    Block(
+                        PLAN_WEG,
+                        id="weg",
+                        von="a",
+                        zu="dazu",
+                        kante={"ausloeser": "zeit", "pflicht": True},
+                    ),
+                ],
+                bedingung=Bedingung(TAGE, soll=2),
+            ),
+            Kapitel(
+                titel="Steigern",
+                bloecke=[Block(PLAN_EINSTELLEN, id="mehr", an="a", ziel={"reps": [40]})],
+            ),
+        ],
+    )
+    repo = KursRepo(con)
+    repo.speichern(kurs)
+    geladen = repo.laden(kurs.id)
+    assert geladen is not None
+    return geladen, {"planke": planke, "seit": seit, "kaefer": kaefer, "bruecke": bruecke}
+
+
+def test_kurs_mit_kursplan_und_bausteinen_speichern_und_laden(con) -> None:
+    kurs, ids = rumpf_kurs(con, PlanVorlage("egal", [1], [VorlageItem(seed_id("kniebeuge"))]))
+    assert kurs.kursplan is not None
+    assert (kurs.kursplan.name, kurs.kursplan.wochentage) == ("Rumpf", [0, 2, 4])
+    assert kurs.kursplan.vorlage.items[0].exercise_id == seed_id("kniebeuge")
+    eins, zwei, drei = kurs.kapitel
+    assert [b.art for b in zwei.bloecke] == [AUSWAHL, TEST, PLAN_UEBUNG, PLAN_WEG]
+    assert (eins.bloecke[0].uebung, eins.bloecke[0].ziel) == (ids["planke"], {"reps": [20]})
+    assert zwei.bloecke[3].kante == {"ausloeser": "zeit", "pflicht": True}
+    assert drei.bloecke[0].an == "a"
+    # Der Paketstand nimmt den Kursplan mit — eine Kopie über den Stand verliert ihn nicht
+    kopie = kurs_aus_stand(kurs.id, "p1", kurs_stand(kurs))
+    assert kopie.kursplan == kurs.kursplan
+    assert [b.to_dict() for b in kopie.kapitel[1].bloecke] == [b.to_dict() for b in zwei.bloecke]
+    # … und die Paketdatei auch
+    roh = paket_bauen(Paket(id="p1", name="Rumpf"), ExerciseRepo(con).alle(), kurse=[kurs])
+    assert paket_lesen(roh).kurse[0].kursplan == kurs.kursplan
+    # Ohne Kursplan bleibt die Spalte leer: Kapitelpläne wie bisher
+    ohne = Kurs(name="Ohne", kapitel=[Kapitel(titel="A")])
+    KursRepo(con).speichern(ohne)
+    assert KursRepo(con).laden(ohne.id).kursplan is None
+    kurs.kursplan = None
+    KursRepo(con).speichern(kurs)
+    assert KursRepo(con).laden(kurs.id).kursplan is None
+
+
+def test_kursplan_entsteht_beim_start_wenn_die_grundlage_uebungen_hat(con, profil) -> None:
+    repo, plaene = KursRepo(con), PlanRepo(con)
+    knie = seed_id("kniebeuge")
+    kurs, ids = rumpf_kurs(con, PlanVorlage("egal", [1], [VorlageItem(knie, {"reps": [10]})]))
+    assert repo.kursplan(kurs, profil.id) is None
+    repo.starten(kurs, profil.id)
+    plan = repo.kursplan(kurs, profil.id)
+    assert plan is not None and plan.aktiv and plan.kurs_id == kurs.id
+    assert (plan.name, plan.wochentage, plan.kurs_kapitel_id) == ("Rumpf", [0, 2, 4], None)
+    assert [(i.exercise_id, i.kurs_marke, i.target) for i in plan.items] == [
+        (knie, "g:1", {"reps": [10]})
+    ]
+    # ein gewöhnlicher Plan des Profils — und kein Kapitelplan
+    assert plan.id in {p.id for p in plaene.alle(profil.id)}
+    assert all(repo.kapitel_plaene(k.id, profil.id) == [] for k in kurs.kapitel)
+    assert plaene.kurs_stand(plan.id)["g:1"]["ziel"] == {"reps": [10]}
+    # anlegen ist idempotent, ein zweiter Start auch
+    assert repo.kursplan_anlegen(kurs, profil.id).id == plan.id
+    repo.starten(kurs, profil.id)
+    assert repo.kursplan(kurs, profil.id).id == plan.id
+    # ein anderes Profil bekommt seinen eigenen
+    zweites = Subject(name="Zweites")
+    SubjectRepo(con).speichern(zweites)
+    assert repo.kursplan(kurs, zweites.id) is None
+    assert repo.kursplan_anlegen(kurs, zweites.id).id != plan.id
+
+    # Kapitel 1 hängt die Planke an die Grundlage
+    (dazu, ziel) = repo.plan_aenderungen(kurs, kurs.kapitel[0], profil.id)
+    assert (dazu.titel, dazu.unter, dazu.stand) == ("Planke kommt dazu", "ans Ende", NEU)
+    assert ziel.titel == "Ziel für Planke: 20 Wiederholungen"
+    neu = repo.plan_uebernehmen(kurs, kurs.kapitel[0], profil.id, {"a", "a#ziel"})
+    assert neu.id == plan.id
+    assert [i.exercise_id for i in neu.items] == [knie, ids["planke"]]
+    # Die Grundlage erkennt der Kurs als seine: Ändert die Person sie, weicht der Plan ab
+    grund = [Block(PLAN_EINSTELLEN, id="g", an="g:1", ziel={"reps": [15]})]
+    kapitel = Kapitel(id="frei", bloecke=grund)
+    assert repo.plan_aenderungen(kurs, kapitel, profil.id)[0].stand == NEU
+    plaene.ziel_setzen(neu.items[0].id, {"reps": [12]})
+    assert repo.plan_aenderungen(kurs, kapitel, profil.id)[0].stand == WEICHT_AB
+    assert repo.plan_uebernehmen(kurs, kapitel, profil.id, {"g#ziel"}).items[0].target == {
+        "reps": [12]
+    }
+    mit = repo.plan_uebernehmen(kurs, kapitel, profil.id, {"g#ziel"}, trotz={"g#ziel"})
+    assert mit.items[0].target == {"reps": [15]}
+
+
+def test_kursplan_ohne_grundlage_entsteht_mit_dem_ersten_uebernehmen(con, profil) -> None:
+    """Bens Beispiel durch die Datenbank: Nichts ändert sich ohne Tipp — auch der Plan selbst
+    entsteht erst mit „Übernehmen“."""
+    repo, plaene, sitzungen = KursRepo(con), PlanRepo(con), SessionRepo(con)
+    kurs, ids = rumpf_kurs(con)
+    eins, zwei, drei = kurs.kapitel
+    repo.starten(kurs, profil.id)
+    assert repo.kursplan(kurs, profil.id) is None  # leere Grundlage: noch kein Plan
+    zeilen = repo.plan_aenderungen(kurs, eins, profil.id)
+    assert [(z.id, z.stand) for z in zeilen] == [("a", NEU), ("a#ziel", NEU)]
+    assert repo.kursplan(kurs, profil.id) is None  # vorrechnen legt nichts an
+
+    plan = repo.plan_uebernehmen(kurs, eins, profil.id, {z.id for z in zeilen})
+    assert plan.aktiv and plan.kurs_id == kurs.id and plan.name == "Rumpf"
+    assert [(i.exercise_id, i.kurs_marke, i.target) for i in plan.items] == [
+        (ids["planke"], "a", {"reps": [20]})
+    ]
+    assert not plan.ablauf.an  # eine Liste
+    assert {z.stand for z in repo.plan_aenderungen(kurs, eins, profil.id)} == {UEBERNOMMEN}
+
+    # Kapitel 2: Solange nichts gewählt ist, sind die Zeilen offen
+    repo.kapitel_abschliessen(kurs, eins, profil.id)
+    assert repo.kursplan(kurs, profil.id).aktiv  # abschließen deaktiviert den Kursplan nicht
+    assert {z.stand for z in repo.plan_aenderungen(kurs, zwei, profil.id)} == {OFFEN}
+    # Gewählt (die Oberfläche hält die Wahl), noch nicht getestet
+    wahl = {"wahl": [ids["kaefer"]]}
+    marke = f"dazu:{ids['kaefer']}"
+    assert [(z.id, z.stand) for z in repo.plan_aenderungen(kurs, zwei, profil.id, wahl)] == [
+        (marke, NEU),
+        (f"{marke}#ziel", OFFEN),
+        ("weg#weg", NEU),
+    ]
+    # Der Test ist ein gewöhnlicher Eintrag seit dem Erreichen des Kapitels — der beste Satz
+    kaefer = ExerciseRepo(con).laden(ids["kaefer"])
+    session = sitzungen.session_fuer(profil.id, None, datetime.now(UTC).astimezone().date())
+    sitzungen.eintrag_anlegen(session, kaefer, {"reps": [24, 30]})
+    zeilen = repo.plan_aenderungen(kurs, zwei, profil.id, wahl)
+    assert [(z.titel, z.unter) for z in zeilen] == [
+        ("Käfer kommt dazu", "hinter Planke"),
+        ("Ziel für Käfer: 30 Wiederholungen", "aus deinem Test"),
+        (
+            "Von Planke weiter zu Käfer, wenn die Zeit ab ist",
+            "Pflicht — Überspringen bleibt möglich",
+        ),
+    ]
+    # Eine unvollständige oder fremde Wahl gilt als nicht getroffen
+    assert {z.stand for z in repo.plan_aenderungen(kurs, zwei, profil.id, {"wahl": []})} == {OFFEN}
+    fremd = {"wahl": [ids["planke"]]}
+    assert {z.stand for z in repo.plan_aenderungen(kurs, zwei, profil.id, fremd)} == {OFFEN}
+
+    plan = repo.plan_uebernehmen(kurs, zwei, profil.id, {z.id for z in zeilen}, wahl=wahl)
+    planke, gewaehlt = plan.items
+    assert (gewaehlt.exercise_id, gewaehlt.kurs_marke, gewaehlt.target) == (
+        ids["kaefer"],
+        marke,
+        {"reps": [30]},
+    )
+    assert plan.ablauf.an and plan.workout  # der Weg macht den Plan zum Workout
+    (kante,) = plan.ablauf.kanten
+    assert (kante.von, kante.nach, kante.ausloeser, kante.pflicht) == (
+        planke.id,
+        gewaehlt.id,
+        "zeit",
+        True,
+    )
+    # Die Wahl steht jetzt im Plan: Sie gilt ohne Argument — und eine andere ändert sie nicht
+    assert {z.stand for z in repo.plan_aenderungen(kurs, zwei, profil.id)} == {UEBERNOMMEN}
+    andere = {"wahl": [ids["bruecke"]]}
+    assert [z.id for z in repo.plan_aenderungen(kurs, zwei, profil.id, andere)] == [
+        marke,
+        f"{marke}#ziel",
+        "weg#weg",
+    ]
+    # Zweimal übernehmen ändert nichts — auch nicht, wenn sich der jüngste Eintrag ändert
+    sitzungen.eintrag_anlegen(session, kaefer, {"reps": [50]})
+    wieder = repo.plan_uebernehmen(kurs, zwei, profil.id, {marke, f"{marke}#ziel", "weg#weg"})
+    assert [(i.id, i.target) for i in wieder.items] == [(i.id, i.target) for i in plan.items]
+    assert wieder.ablauf == plan.ablauf
+
+    # Kapitel 3: Die Person hat das Ziel der Planke selbst geändert — ihr Wert bleibt
+    plaene.ziel_setzen(planke.id, {"reps": [25]})
+    (zeile,) = repo.plan_aenderungen(kurs, drei, profil.id)
+    assert (zeile.stand, zeile.eigen, zeile.kurs) == (
+        WEICHT_AB,
+        "25 Wiederholungen",
+        "40 Wiederholungen",
+    )
+    assert zeile.titel == (
+        "Planke: Du hast 25 Wiederholungen eingestellt. Der Kurs schlägt 40 Wiederholungen vor."
+    )
+    assert repo.plan_uebernehmen(kurs, drei, profil.id, {"mehr#ziel"}).items[0].target == {
+        "reps": [25]
+    }
+    mit = repo.plan_uebernehmen(kurs, drei, profil.id, {"mehr#ziel"}, trotz={"mehr#ziel"})
+    assert mit.items[0].target == {"reps": [40]}
+
+
+def test_lassen_steht_im_kurs_stand_und_wird_nicht_wieder_gefragt(con, profil) -> None:
+    """„… lassen“ in der Karte „Dein Plan weicht ab“: Der Plan bleibt — er wird nicht einmal
+    gespeichert —, der Kurs-Stand merkt die Zeile, und beim nächsten Öffnen steht sie nicht
+    mehr da."""
+    repo, plaene = KursRepo(con), PlanRepo(con)
+    kurs, _ids = rumpf_kurs(con)
+    eins, _zwei, drei = kurs.kapitel
+    repo.starten(kurs, profil.id)
+    plan = repo.plan_uebernehmen(kurs, eins, profil.id, {"a", "a#ziel"})
+    plaene.ziel_setzen(plan.items[0].id, {"reps": [25]})
+    (zeile,) = repo.plan_aenderungen(kurs, drei, profil.id)
+    assert zeile.stand == WEICHT_AB
+    vorher = plaene.laden(plan.id)
+
+    gelassen = repo.plan_uebernehmen(kurs, drei, profil.id, set(), lassen={"mehr#ziel"})
+    assert gelassen == vorher and gelassen.items[0].target == {"reps": [25]}
+    assert plaene.kurs_stand(plan.id)["a"]["erledigt"] == ["a#ziel", "mehr#ziel"]
+    assert [z.stand for z in repo.plan_aenderungen(kurs, drei, profil.id)] == [UEBERNOMMEN]
+    # Ein spätes „übernehmen“ derselben Zeile ändert nichts mehr
+    spaet = repo.plan_uebernehmen(kurs, drei, profil.id, {"mehr#ziel"}, trotz={"mehr#ziel"})
+    assert spaet == vorher
+
+
+def test_plan_speichern_erhaelt_marken_herkunft_und_kurs_stand(con, profil) -> None:
+    """`PlanRepo.speichern` ersetzt die Übungsliste — die Marken reisen mit; Herkunft und
+    Kurs-Stand fasst es nicht an (wie `course_run_ended_at`)."""
+    repo, plaene = KursRepo(con), PlanRepo(con)
+    kurs, ids = rumpf_kurs(con)
+    eins, zwei, _drei = kurs.kapitel
+    repo.starten(kurs, profil.id)
+    repo.plan_uebernehmen(kurs, eins, profil.id, {"a", "a#ziel"})
+    repo.kapitel_abschliessen(kurs, eins, profil.id)
+    wahl = {"wahl": [ids["bruecke"]]}
+    marke = f"dazu:{ids['bruecke']}"
+    plan = repo.plan_uebernehmen(kurs, zwei, profil.id, {marke, "weg#weg"}, wahl=wahl)
+    stand = plaene.kurs_stand(plan.id)
+    assert stand["a"]["erledigt"] == ["a#ziel", "weg#weg"]
+
+    # aus dem Plan-Editor: Beschreibung ändern, eine eigene Übung dazu, Reihenfolge umdrehen
+    plan.description = "Mein Rumpf"
+    eigene = plaene.uebung_hinzufuegen(plan.id, seed_id("kniebeuge"))
+    assert eigene.kurs_marke == ""
+    plan = plaene.laden(plan.id)
+    plan.description = "Mein Rumpf"
+    plan.items = list(reversed(plan.items))
+    plaene.speichern(plan)
+    nachher = plaene.laden(plan.id)
+    assert nachher.description == "Mein Rumpf" and nachher.kurs_id == kurs.id
+    assert [i.kurs_marke for i in nachher.items] == ["", marke, "a"]
+    assert plaene.kurs_stand(plan.id) == stand
+    assert repo.kursplan(kurs, profil.id).id == plan.id
+    # … auch über die einzelnen Schreibwege
+    plaene.reihenfolge_setzen(plan.id, [i.id for i in reversed(nachher.items)])
+    plaene.item_speichern(plaene.laden(plan.id).items[0])
+    plaene.umbenennen(plan.id, "Rumpf, meiner")
+    wieder = plaene.laden(plan.id)
+    assert [i.kurs_marke for i in wieder.items] == ["a", marke, ""]
+    assert plaene.item_laden(wieder.items[1].id).kurs_marke == marke
+    assert wieder.kurs_id == kurs.id and plaene.kurs_stand(plan.id) == stand
+    # Der Kurs findet seine Planübungen an den Marken wieder, wo immer sie stehen
+    assert {z.stand for z in repo.plan_aenderungen(kurs, eins, profil.id)} == {UEBERNOMMEN}
+    assert wahl_im_plan(wieder, zwei.bloecke) == wahl
+    # Ein Plan ohne Kurs hat weder Herkunft noch Stand
+    frei = Plan(name="Frei", subject_id=profil.id)
+    plaene.speichern(frei)
+    assert plaene.laden(frei.id).kurs_id is None and plaene.kurs_stand(frei.id) == {}
+
+
+def test_kursplan_von_vorn_wird_zum_frueheren_durchlauf(con, profil) -> None:
+    """„Von vorn“ macht den Kursplan immer zum früheren Durchlauf — der neue Start beginnt
+    wieder mit der Grundlage, die Nummer zählt weiter."""
+    repo, plaene = KursRepo(con), PlanRepo(con)
+    knie = seed_id("kniebeuge")
+    kurs, ids = rumpf_kurs(con, PlanVorlage("egal", items=[VorlageItem(knie)]))
+    eins, zwei, _drei = kurs.kapitel
+    repo.starten(kurs, profil.id)
+    repo.plan_uebernehmen(kurs, eins, profil.id, {"a"})
+    wahl = {"wahl": [ids["seit"]]}
+    erster = repo.plan_uebernehmen(kurs, zwei, profil.id, {f"dazu:{ids['seit']}"}, wahl=wahl)
+    assert repo.fruehere_kursplaene(kurs.id, profil.id) == []
+
+    repo.zuruecksetzen(kurs, profil.id)
+    assert repo.kursplan(kurs, profil.id) is None
+    (frueher,) = repo.fruehere_kursplaene(kurs.id, profil.id)
+    assert frueher.id == erster.id and not frueher.aktiv
+    assert frueher.name == "Rumpf · Durchlauf 1" and frueher.kurs_durchlauf_beendet is not None
+    assert [i.exercise_id for i in frueher.items] == [knie, ids["planke"], ids["seit"]]
+    # was damals gewählt war, sagt der Plan von damals
+    assert wahl_im_plan(frueher, zwei.bloecke) == wahl
+    # Speichern nimmt ihm weder Herkunft noch Marke des Durchlaufs
+    frueher.description = "vom ersten Mal"
+    plaene.speichern(frueher)
+    assert plaene.laden(frueher.id).kurs_durchlauf_beendet is not None
+    assert plaene.laden(frueher.id).kurs_id == kurs.id
+
+    # Neuer Start: ein neuer Kursplan aus der Grundlage, mit dem Namen des Kursplans
+    repo.starten(kurs, profil.id)
+    zweiter = repo.kursplan(kurs, profil.id)
+    assert zweiter is not None and zweiter.id != erster.id
+    assert (zweiter.name, zweiter.aktiv) == ("Rumpf", True)
+    assert [i.exercise_id for i in zweiter.items] == [knie]
+    # … und alles wird neu gefragt
+    assert [z.stand for z in repo.plan_aenderungen(kurs, eins, profil.id)] == [NEU, NEU]
+    assert {z.stand for z in repo.plan_aenderungen(kurs, zwei, profil.id)} == {OFFEN}
+
+    # Noch einmal von vorn, der zweite Plan liegt dabei im Papierkorb: Die Nummer zählt weiter
+    plaene.loeschen(zweiter.id)
+    repo.zuruecksetzen(kurs, profil.id)
+    plaene.aus_papierkorb(zweiter.id)
+    assert repo.kursplan(kurs, profil.id) is None  # er gilt nicht wieder als der laufende
+    namen = [p.name for p in repo.fruehere_kursplaene(kurs.id, profil.id)]
+    assert sorted(namen) == ["Rumpf · Durchlauf 1", "Rumpf · Durchlauf 2"]
+
+
+def test_kursplan_und_kapitelplaene_nebeneinander(con, profil) -> None:
+    """Hat ein Kapitel eines Kurses mit Kursplan trotzdem Plan-Vorlagen, gelten sie wie bisher
+    — als Kapitelpläne neben dem Kursplan. „Von vorn“ zählt beide in denselben Durchlauf."""
+    repo, plaene = KursRepo(con), PlanRepo(con)
+    kurs, _ids = rumpf_kurs(con)
+    kurs.kapitel[0].plaene = [PlanVorlage("Kapitelplan", items=[VorlageItem(seed_id("kniebeuge"))])]
+    kurs.kapitel[1].plaene = [PlanVorlage("Mit Wahl", items=[VorlageItem(seed_id("kniebeuge"))])]
+    repo.speichern(kurs)
+    eins, zwei, _drei = kurs.kapitel
+    repo.starten(kurs, profil.id)
+    (kapitelplan,) = repo.kapitel_plaene(eins.id, profil.id)
+    assert kapitelplan.kurs_id is None and kapitelplan.kurs_kapitel_id == eins.id
+    kursplan = repo.plan_uebernehmen(kurs, eins, profil.id, {"a"})
+    assert kursplan.id != kapitelplan.id
+    repo.kapitel_abschliessen(kurs, eins, profil.id)
+    assert not plaene.laden(kapitelplan.id).aktiv  # der Kapitelplan wie bisher
+    assert plaene.laden(kursplan.id).aktiv  # der Kursplan bleibt
+    (mit_wahl,) = repo.plaene_anlegen(zwei, profil.id, {"test": 12}, {"wahl": []})
+    repo.zuruecksetzen(kurs, profil.id)
+    assert plaene.laden(kursplan.id).name == "Rumpf · Durchlauf 1"
+    assert plaene.laden(mit_wahl.id).name == "Mit Wahl · Durchlauf 1"
+    assert plaene.laden(kapitelplan.id).name == "Kapitelplan"  # ohne Test/Auswahl: nur deaktiviert
+
+
+def test_kurs_entfernen_deaktiviert_den_kursplan(con, profil) -> None:
+    repo, plaene = KursRepo(con), PlanRepo(con)
+    kurs, _ids = rumpf_kurs(con)
+    repo.starten(kurs, profil.id)
+    plan = repo.plan_uebernehmen(kurs, kurs.kapitel[0], profil.id, {"a"})
+    zweites = Subject(name="Zweites")
+    SubjectRepo(con).speichern(zweites)
+    anderer = repo.kursplan_anlegen(kurs, zweites.id)
+    assert repo.entfernen(kurs) == 2
+    assert not plaene.laden(plan.id).aktiv and not plaene.laden(anderer.id).aktiv
+    assert plaene.laden(plan.id).deleted_at is None  # bleibt in der Planliste
+    assert repo.laden(kurs.id) is None
+
+
+def test_stand_tage_zaehlt_die_uebungen_des_kursplans(con, profil) -> None:
+    """„an 2 Tagen geübt — zählt, sobald der Plan steht“: nur, was im Kursplan steht, nicht
+    alles, was die Auswahl anbietet."""
+    repo, sitzungen, uebungen = KursRepo(con), SessionRepo(con), ExerciseRepo(con)
+    kurs, ids = rumpf_kurs(con)
+    eins, zwei, _drei = kurs.kapitel
+    repo.starten(kurs, profil.id)
+    repo.kapitel_abschliessen(kurs, eins, profil.id)  # ohne Übernehmen: noch kein Kursplan
+    staende = repo.staende(profil.id, kurs.id)
+    heute = datetime.now(UTC).astimezone().date()
+    session = sitzungen.session_fuer(profil.id, None, heute)
+    seit, planke = uebungen.laden(ids["seit"]), uebungen.laden(ids["planke"])
+    sitzungen.eintrag_anlegen(session, seit, {"reps": [5]})
+    assert repo.stand(zwei, profil.id, staende) == Stand(0.0, 2.0)  # der Plan steht noch nicht
+    repo.plan_uebernehmen(kurs, eins, profil.id, {"a"})
+    # Seitstütz steht nur zur Wahl, nicht im Plan — zählt nicht
+    assert repo.stand(zwei, profil.id, staende, kurs) == Stand(0.0, 2.0)
+    sitzungen.eintrag_anlegen(session, planke, {"reps": [5]})
+    assert repo.stand(zwei, profil.id, staende) == Stand(1.0, 2.0)
+    assert repo.stand(zwei, profil.id, staende, kurs) == Stand(1.0, 2.0)
+
+
+def test_kursplan_aus_einem_plan_des_pakets(con, profil) -> None:
+    """Grundlage = ein Plan des Pakets (über seinen Schlüssel): Der Kursplan ist eine Kopie —
+    der Paketplan des Profils bleibt, wie er ist."""
+    roh = paket_mit_kurs()
+    roh["plaene"] = [
+        {"key": "basis", "name": "Basis", "wochentage": [1], "uebungen": [{"uebung": "baum"}]}
+    ]
+    roh["kurse"][0]["kursplan"] = {"name": "Mein Stehen", "grundlage": "basis"}
+    roh["kurse"][0]["kapitel"][1].pop("plaene")
+    inhalt = paket_lesen(roh)
+    assert inhalt.kurse[0].kursplan == Kursplan("Mein Stehen", grundlage="basis")
+    pakete, repo, plaene = PaketRepo(con), KursRepo(con), PlanRepo(con)
+    pakete.importieren(inhalt, subject_id=profil.id)
+    (kurs,) = pakete.kurse(inhalt.paket.id)
+    (paketplan,) = plaene.des_pakets(inhalt.paket.id, profil.id)
+    repo.starten(kurs, profil.id)
+    plan = repo.kursplan(kurs, profil.id)
+    assert plan is not None and plan.id != paketplan.id
+    assert (plan.name, plan.package_key, plan.kurs_id) == ("Mein Stehen", None, kurs.id)
+    assert [(i.exercise_id, i.kurs_marke) for i in plan.items] == [(inhalt.uebungen[0].id, "g:1")]
+    assert plaene.laden(paketplan.id).name == "Basis" and plaene.laden(paketplan.id).kurs_id is None
+    # Ein Schlüssel, den das Paket nicht hat: Der Plan beginnt leer und entsteht erst später
+    kurs.kursplan.grundlage = "gibt-es-nicht"
+    repo.zuruecksetzen(kurs, profil.id)
+    repo.starten(kurs, profil.id)
+    assert repo.kursplan(kurs, profil.id) is None
+    with pytest.raises(ValueError, match="baut keinen Plan"):
+        repo.kursplan_anlegen(Kurs(name="Ohne", kapitel=[Kapitel(titel="A")]), profil.id)
+    assert repo.plan_aenderungen(Kurs(name="Ohne"), Kapitel(), profil.id) == []

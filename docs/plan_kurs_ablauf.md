@@ -361,14 +361,16 @@ ist.“
 | Stufe | Inhalt | Braucht |
 |---|---|---|
 | 0 | **Von vorn bei Test/Auswahl** (§5.2): Marke „Durchlauf beendet“ (Migration 063, `plan.course_run_ended_at`), neu fragen, „Wie beim letzten Mal“; Tests `tests/test_kurse.py`, `tests/test_ui_kursbloecke.py` | **gebaut 16.11.2026** — Gerätetest T141 |
-| 1 | Kursplan wächst (`plan = wachsend`, Marken, Spalte `plan.course_id`), Bausteine `plan_uebung`, `plan_einstellen`, `plan_weg`; Rest von B2 (Timer, Übergang … in `VorlageItem`/`PlanVorlage`); Sammelkarte „Das ändert sich an deinem Plan“; **Kurs-Editor** (`views/kurs_bearbeiten.py`: Baustein hinzufügen) und **Werkzeug** (`trainingsapp-paket pruefen`); neue Formatversion nur für Pakete, die das nutzen (heute `FORMAT_VERSION = 5`, geprüft in `core/pakete.py:516`) | Frage 1: **ja**; Stufe 0; Skizzen |
+| 1 | Kursplan wächst (`plan = wachsend`, Marken, Spalte `plan.course_id`), Bausteine `plan_uebung`, `plan_einstellen`, `plan_weg`; Rest von B2 (Timer, Übergang … in `VorlageItem`/`PlanVorlage`); Sammelkarte „Das ändert sich an deinem Plan“; **Kurs-Editor** (`views/kurs_bearbeiten.py`: Baustein hinzufügen) und **Werkzeug** (`trainingsapp-paket pruefen`); neue Formatversion nur für Pakete, die das nutzen (Formatversion 6) | **gebaut 16.11.2026** — Bauplan §11, Abweichungen §11.8; Gerätetest T142; P211 und P212 entschieden (Ben: „Ja“), P212 noch zu bauen; Grenzen N171 |
 | 2 | Test im Fokus mit Vorgabe Menge · Zeit · Skala ab/bis/dazwischen (§3.3), „Als Ziel übernehmen“ | Frage 4: beantwortet; Stufe 1 |
 | 3 | Antworten speichern, Folgen (`zeige`, `baustein`), `zeigen_wenn`; Tabelle `course_answer`; Editor (Liste mit „Wenn …“) = **K1**; im laufenden Kurs nur der eigene Weg (§6 „Zwei Sichten“) | Frage 3: **ja** |
 | 4 | Kursbild lesend **im Kurs-Editor** = **K2** (Knoten-Darsteller aus `ablaufbild` herauslösen) | Frage 5: **ja**; Stufe 3 |
 | 5 | Kursbild zeichnen = **K3**, gemeinsame Graph-Schicht, Kapitel-Auslöser „Tor offen“ | Entscheidung nach Stufe 4 |
 
 Vor Stufe 1: **T134** (Material, Kurse aus Blöcken am Gerät, `offene_fragen.md` §2) sollte
-durch sein — alles hier baut auf den Blöcken auf, und am Gerät ist sie ungeprüft.
+durch sein — alles hier baut auf den Blöcken auf, und am Gerät ist sie ungeprüft. (Ben,
+16.11.2026: T134 „nach dem nächsten Build“ — Stufe 1 ist davor gebaut; T134 und T142 stehen
+zusammen an.)
 
 Jede Stufe: Tests zuerst für die flet-freie Rechnung (`core/`), dann die Ansicht, danach
 Web-Fotos (`web-fotos`) der Karten; Gerätetest im Katalog; Doku in `plan_kurse.md` §7 nachführen.
@@ -527,3 +529,108 @@ die sich Bausteine beziehen (`aus`, `ziel_aus`). Ein Baustein mit `ziel`, `timer
 4. Paketformat, Werkzeug + Tests · 5. Editor + Tests + Web-Fotos · 6. voller Testlauf
 (Migration), Doku (`plan_kurse.md`, `datenmodell.md`, `uebungspakete.md`, Katalog, Gerätetest).
 Nach jedem Schritt ist der Baum grün.
+
+### 11.8 Gebaut am 16.11.2026 — was anders ist als oben geplant
+
+Der Bauplan oben bleibt, wie er vor dem Bau stand; hier steht, wo der Code davon abweicht.
+Maßgeblich ist der Code (`core/kursplan.py`, `data/kurse.py`, `tests/test_kursplan.py`,
+`tests/test_kurse.py`, `tests/test_ui_kursplan.py`, `tests/test_paket_kursplan.py`).
+
+**Rechnung und Datenbank**
+
+- **Übernommenes bleibt übernommen.** Der Kurs-Stand merkt je Marke die angewendeten Zeilen
+  (`erledigt`); eine solche Zeile wird nicht wieder angeboten, auch wenn der Wert später anders
+  ist. „Weicht ab“ gibt es darum nur für Zeilen, die noch nie übernommen wurden — sonst böte
+  Kapitel 1 seine 60 s nach Kapitel 3 wieder an, und ein Ziel aus dem Test wäre nach jedem
+  Training wieder „neu“ (der Testwert ist der jüngste Eintrag).
+- **„Lassen“ wird gemerkt** (`anwenden(..., lassen=)`, `KursRepo.plan_uebernehmen(..., lassen=)`):
+  Die Zeile gilt als erledigt, der Plan bleibt; ein späteres Kapitel mit einem anderen Vorschlag
+  fragt wieder.
+- **Aus dem Plan genommen** (nicht im Bauplan): Eine feste Übung, die der Kurs gebracht und die
+  Person aus dem Plan genommen hat, kommt nicht als „neu“ mit Haken wieder — der Kurs fragt als
+  Abweichung („… übernehmen“ · „Plan so lassen“, Vorgabe lassen), nach „lassen“ nicht noch
+  einmal. Eine **gewählte** Übung gibt ihre Auswahl wieder frei; noch einmal gewählt ist sie neu.
+- **Marke bei `aus` ist immer `<block>:<übung>`**, auch bei einer einzigen Gewählten.
+- **Was an einer Übung hängt, die erst dazukommt** (Ziel, Timer, Weg), nennt deren Zeile
+  (`Aenderung.braucht`) — die Karte wählt es mit ab. Kommen bei einem Weg beide Enden erst dazu,
+  steht nur das Ziel darin.
+- **Wahl einer Auswahl:** Was als Marke im Kursplan steht, gilt und ist fest
+  (`wahl_im_plan`, über die Blöcke des ganzen Kurses); bis dahin gibt die Ansicht die Wahl mit
+  (`plan_aenderungen(..., wahl=)`).
+- **Wege:** Der Hauptweg wird in die Bedingung der Planübung gespiegelt wie im Ablauf-Editor;
+  solange nur Hauptwege gesetzt sind, folgt der Ablauf weiter der Liste. „Weicht ab“ gibt es
+  auch für einen Weg, den die Person geändert hat.
+- **Texte:** „30 Wiederholungen“, „45 s“ (eigener Formatierer statt der Kurzformen); „nach 60 s“
+  am Weg nur, wenn die Planübung einen eigenen Timer hat, sonst „…, wenn die Zeit ab ist“.
+- Der Kursplan entsteht beim Start des Kurses nur, wenn die Grundlage Übungen hat, sonst mit
+  dem ersten „Übernehmen“; im Kursplan-Kurs ruft der Tipp auf das erste Kapitel `starten`.
+
+**Teilnehmer-Seite**
+
+- Die Karte steht in jedem erreichten Kapitel, auch in abgeschlossenen — sonst ginge verloren,
+  was man mit „Später“ liegen ließ. „Später“ klappt sie zu („Wieder zeigen“).
+- Nur „lassen“ gewählt: Meldung „Dein Plan bleibt, wie er ist“ statt „Plan geändert“.
+- **„Plan anlegen“ bleibt in einem Sonderfall:** Kapitel mit eigenen Plan-Vorlagen **und** Test
+  oder Auswahl in einem Kursplan-Kurs (die Kapitelpläne entstünden sonst nie).
+- „Anker fehlt“ lässt sich nicht einzeln abwählen (Symbol statt Haken, gilt mit „Übernehmen“).
+
+**Kurs-Editor**
+
+- **Die Formulare der Bausteine sind Blätter**, keine eigene Seite (K6): Das Kapitel-Formular
+  hält seine Liste ungespeichert; „Übernehmen“ im Blatt, Wegtippen verwirft. Die Vorschau „So
+  steht es in der Karte“ rechnet mit `core.kursplan.aenderungen` auf einem Beispielplan
+  (Grundlage, Kapitel davor übernommen, erste Übung jeder Auswahl gewählt, Beispielwert je Test).
+- **Baustein-IDs** sind lesbar und fest: `uebung-<n>`, `einstellen-<n>`, `weg-<n>`, eindeutig im
+  ganzen Kurs; die Nummer ist die höchste bekannte + 1 (auch gegenüber den Marken in den
+  Kursplänen dieses Profils). Die Auswahllisten bieten nur an, was `trainingsapp-paket pruefen`
+  annimmt (nur Bausteine davor, „Ende“ nur bei „Zu“).
+- **Löschen mit Verweisen:** Die Rückfrage nennt jeden betroffenen Baustein mit Kapitel und
+  Folge. Geleert wird ein Verweis nur, wo der Baustein danach noch etwas ist (`hinter` → ans
+  Ende, `ziel_aus` → ohne Ziel); verliert er `aus`, `an`, `von`/`zu` oder seine letzte Angabe,
+  wird er **mit gelöscht** — `Block.from_dict` verwürfe ihn beim nächsten Laden sonst still, und
+  ein leeres `an` hieße „am ganzen Plan“. Dieselbe Rückfrage beim Löschen eines Kapitels und
+  beim Entfernen oder Verkürzen der Grundlage (`g:<n>`).
+- **Zwei Speicherprüfungen gelten im Kursplan-Kurs nicht:** „Test und Auswahl brauchen einen
+  Plan im Kapitel“ und „Tage zählt die Pläne des Kapitels“. Dort liefern Test und Auswahl an
+  die Bausteine (§11.2), und „Tage“ zählt die Übungen des Kursplans
+  (`tests/test_kurse.py::test_stand_tage_zaehlt_die_uebungen_des_kursplans`). Ohne Kursplan
+  gelten beide weiter (getestet in `tests/test_ui_kurs_bausteine.py`).
+- **Wege:** ein eigenes schmales Formular für genau eine Kante statt `wege_karte`; **Timer** nur
+  aus der Bibliothek (eingebettet, `ohne_verweise`); **Takt und Parameter** eines Bausteins sind
+  im Editor nicht einstellbar, vorhandene Werte bleiben.
+- `kurs_kopieren` nimmt den Kursplan mit und schreibt alle Verweise auf die neuen Block-IDs um;
+  ein Paketplan als Grundlage wird in der Kopie zur Vorlage.
+- **Die Rechnung des Editors liegt im Kern** (`core/kursbau.py`, flet-frei, Tests
+  `tests/test_kursbau.py`): Verweise lesen und umschreiben, Baustein-IDs, Löschfolgen, die
+  Vorschau (`Kurssicht`) und die Kopie eines Kurses (`kurs_kopie`). In `ui/` bleibt das Blatt
+  (`components/baustein_form.py`). Noch in der Ansicht, obwohl flet-frei: `block_kurz`,
+  `block_fehler`, `antworten_text`/`antworten_lesen` in `views/kurs_bearbeiten.py` (lagen zum
+  Teil schon vorher dort).
+
+**Paket (Formatversion 6)**
+
+- `core.pakete.noetige_version` bestimmt die Version aus dem Inhalt; 6 nur mit `kursplan` oder
+  einem `plan_*`-Block. Die App 0.3.94 lehnt Version 6 ab („Das Paket ist neuer als diese
+  App“, nachgesehen in `git show v0.3.94:src/trainingsapp/core/pakete.py`).
+- Marken `<block-id>:<übung>` mit Paketschlüssel werden beim Lesen zur Übungs-ID.
+- `trainingsapp-paket pruefen` prüft mehr als geplant (Liste in `docs/uebungspakete.md`), u. a.
+  Verweise auf Bausteine weiter unten im selben Kapitel und Baustein-IDs, die nicht als Marke
+  taugen (`ende`, `g`).
+- **Update-Stufe** (`core/paketstufe.py`, Ben 16.11.2026: „Ja“, Katalog P211,
+  `docs/plan_paketversionen.md` §2): Kursplan kommt
+  dazu oder fällt weg → groß; geänderte Blöcke eines Kapitels → mittel; Name, Wochentage,
+  Grundlage → klein. Vorher galt ein Update, das nur Blöcke änderte, als „unverändert“.
+- Eigene Pakete nehmen die Übungen aus Blöcken und Kursplan-Vorlage mit
+  (`core.eigenes_paket.noetige_uebungen`); Dateien an den Planübungen der Vorlage reisen mit und
+  bleiben beim Aufräumen (`core.paketdatei.medienlisten`, `data/paketmedien.py`).
+
+**Bekannte Grenzen** (Katalog N171)
+
+- Mehrere Gewählte als gleichwertige Wege: Die Kette zwischen den Gewählten bleibt stehen —
+  ein `plan_weg` setzt Wege, er nimmt keine weg.
+- Hat die Person den Ablauf selbst gezeichnet, ist eine neue Planübung dort unverbunden, bis
+  ein `plan_weg` sie anschließt.
+- Der Test misst die Übung, die er nennt — auch wenn die Person in der Auswahl eine andere
+  wählt (Stufe 2 und 3).
+- Die offene Wahl einer Auswahl hält nur die Ansicht: Wer zum Test in die Übung geht und
+  zurückkommt, wählt noch einmal (Katalog P212).

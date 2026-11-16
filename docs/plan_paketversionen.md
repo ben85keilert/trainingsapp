@@ -52,6 +52,15 @@ noch nicht:
 | Kurs kommt dazu; Kapitel kommt ans Ende | minor |
 | Name, Beschreibung; Titel, Text und Medien der Kapitel | minor |
 | Plan-Vorlagen | patch — Pläne, die ein Kapitel schon angelegt hat, sind gewöhnliche Pläne und bleiben |
+| Kurs bekommt oder verliert seinen **Kursplan** (Ben, 16.11.2026, P211) | major — die Bedingung „Tage“ zählt danach andere Übungen, und die Bausteine der Kapitel gelten bzw. ruhen |
+| **Blöcke** eines Kapitels (Text, Medium, Frage, Test, Auswahl und die Bausteine am Kursplan) | minor — wie Text und Medien; Bausteine gelten ohnehin erst auf Tipp |
+| Name, Wochentage oder Grundlage eines Kursplans | patch — ein Kursplan, den es schon gibt, bleibt, wie er ist |
+
+Bis zum 16.11.2026 zählten Blöcke und Kursplan gar nicht: Ein Update, das nur sie änderte,
+galt als „unverändert“ — `pruefen --gegen` verlangte keine neue Nummer, kein Gerät hätte es
+geholt. Die `id` eines Blocks, der kein Baustein ist, zählt beim Vergleich nicht (der Leser
+vergibt sie ohne Angabe bei jedem Lesen neu); die eines Bausteins zählt — sie ist die Marke
+seiner Planübung (`core/paketstufe.py`, `tests/test_paketstufe.py`).
 
 Der Paketkopf (Name, Beschreibung, Neuigkeiten) geht mit jeder Stufe mit. Den Namen nur mit
 fester `paket.id` ändern — sonst ist es ein neues Paket (A1).

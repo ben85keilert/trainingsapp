@@ -31,6 +31,8 @@ _ABFRAGEN: Final = (
     "SELECT package_standard_json FROM plan WHERE package_standard_json LIKE '%medien/%'",
     "SELECT plans_json FROM package WHERE plans_json LIKE '%medien/%'",
     "SELECT package_standard_json FROM course WHERE package_standard_json LIKE '%medien/%'",
+    # die Vorlage eines Kursplans (Migration 064) — ein eigener Kurs hat keinen Paketstand
+    "SELECT kursplan_json FROM course WHERE kursplan_json LIKE '%medien/%'",
     "SELECT media_json FROM course_chapter WHERE media_json LIKE '%medien/%'",
     "SELECT plans_json FROM course_chapter WHERE plans_json LIKE '%medien/%'",
     "SELECT blocks_json FROM course_chapter WHERE blocks_json LIKE '%medien/%'",

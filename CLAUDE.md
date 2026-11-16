@@ -276,6 +276,11 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   (rechtlich wie `physiologische_steuerung`). Kurse reisen in Paketen
   (`kurse[]`, Formatversion 2). Vertrag: `docs/plan_kurse.md`.
 
+- **Der Kurs baut einen Plan** (Ben, 16.11.2026, Vertrag `docs/plan_kurs_ablauf.md` §11): Ein Kurs
+  mit `kursplan` baut **einen** Plan, der über die Kapitel wächst (Bausteine, Rechnung nur in
+  `core/kursplan.py`). **Nichts ändert sich am Plan ohne Tipp; was die Person geändert hat, bleibt**
+  (der Kurs fragt, Vorgabe „lassen“). Paket-Formatversion 6, Bausteine mit fester `id`.
+
 - **Tagesfelder** (Ben, 21.10.2026): Parameter und Tags an der Tagesnotiz. Das sind frei
   benannte Felder je Profil:
   - Art: Skala, Anzahl, Menge, Dauer, Ja/Nein oder nur Text;

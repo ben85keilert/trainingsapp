@@ -335,9 +335,15 @@ Schlüssel, beim Empfänger bleibt es derselbe Plan.
 ## Dateiformat
 
 JSON, UTF-8. Version 1 (Übungen); **Version 2** fügt `kurse[]` hinzu, **Version 3**
-`plaene[]` (Ben, 28.10.2026), **Version 4** Dateien (nur in einer ZIP, Abschnitt oben) — eine
-Datei ohne Kurse und Pläne wird weiter als Version 1 geschrieben, ohne Pläne als Version 2;
-ältere Apps lesen sie:
+`plaene[]` (Ben, 28.10.2026), **Version 4** Dateien (nur in einer ZIP, Abschnitt oben),
+**Version 5** `ergaenzungen[]`, **Version 6** den Kursplan (`kurse[].kursplan` und die
+Bausteine `plan_*`, Ben 16.11.2026 — Abschnitt
+[Kursplan und Bausteine](#kursplan-und-bausteine-formatversion-6-ben-16112026)). Geschrieben wird
+immer die **kleinste Version, die der Inhalt braucht** (`core.pakete.noetige_version`, das
+Höchste zählt): eine Datei ohne Kurse und Pläne weiter als Version 1, ohne Pläne als
+Version 2 — ältere Apps lesen sie. Eine Datei mit höherer Version, als die App kennt, lehnt
+sie ab („Das Paket ist neuer als diese App — bitte die App aktualisieren.“). Eine Datei der
+Version 1:
 
 ```json
 {
@@ -414,6 +420,7 @@ Je Kurs (`kurse[]`, Formatversion 2):
 | `id` / `key` | nein | wie bei Übungen: ID = UUIDv5 aus Paket-ID und `kurs:<key>` |
 | `beschreibung` | nein | |
 | `freischaltung` | nein | `frei`, `rueckfrage` (Vorgabe), `streng` |
+| `kursplan` | nein | der Kurs baut **einen Plan**, der über die Kapitel wächst (Formatversion 6, Abschnitt [Kursplan und Bausteine](#kursplan-und-bausteine-formatversion-6-ben-16112026)); fehlt = jedes Kapitel legt wie bisher seine eigenen Pläne an |
 | `kapitel[]` | ja | mindestens eines, in dieser Reihenfolge |
 
 Je Kapitel: `titel` (Pflicht), `key` (nie ändern — die Kapitel-ID folgt daraus und
@@ -429,7 +436,10 @@ beides auch hier, mit Plan und Übung als Ort. Ältere Apps übergehen beide, de
 sie nur, wo die Planübung eigene hat) und
 `bedingung` (`{art: "gelesen"}` Vorgabe · `{art: "summe", uebung, feld, soll}` ·
 `{art: "tage", soll}` · `{art: "messung", soll}` in Minuten). `uebung` ist der
-Schlüssel einer Übung desselben Pakets oder eine ID.
+Schlüssel einer Übung desselben Pakets oder eine ID. Statt `text` und `media` kann ein Kapitel
+eine Folge von **Blöcken** tragen (`bloecke[]`, je Block `art` und `id`): `text`, `medium`,
+`frage`, `test`, `auswahl` — Felder in `docs/plan_kurse.md` §7 — und die drei Bausteine am
+Kursplan (Abschnitt unten). Ältere Apps überlesen `bloecke`.
 
 Import: Kurse folgen den Regeln der Übungen (neu → anlegen; gleiches Paket →
 Stand der Datei, Kapitel gleicher ID behalten den Fortschritt; eigene/fremde →
@@ -508,6 +518,189 @@ Namen „Grundausstattung“ (Konstante `GRUNDAUSSTATTUNG`). Für alle anderen P
 gehört die Paket-ID in die Ableitung, damit zwei Pakete denselben Schlüssel
 verwenden dürfen.
 
+### Kursplan und Bausteine (Formatversion 6, Ben 16.11.2026)
+
+`docs/plan_kurs_ablauf.md` §3 und §11; Rechnung `core/kursplan.py`, Blöcke
+`core/kursbloecke.py`, Datenbank `data/kurse.py` (Migration 064). Bisher legt jedes Kapitel
+eigene Pläne an und deaktiviert sie beim Abschluss. Ein Kurs mit **`kursplan`** baut
+stattdessen je Profil **einen** Plan, der über die Kapitel wächst — die Kapitel tragen dafür
+**Bausteine**: Blöcke, die man nicht liest, sondern die den Plan ändern. Jeder Baustein wird
+eine oder mehrere Zeilen der Karte „Das ändert sich an deinem Plan“; **nichts ändert sich ohne
+Tipp**, jede Zeile lässt sich abwählen, und was die Person selbst eingestellt hat, bleibt
+(„Dein Plan weicht ab“). Gerechnet wird aus dem Plan, der eigenen Wahl und Einträgen, nie aus
+Messwerten.
+
+`kurse[].kursplan` (eine Tabelle; schon die leere `[kurse.kursplan]` schaltet den Kursplan ein):
+
+| Feld | Bedeutung |
+|---|---|
+| `name` | Name des Plans — fehlt er, heißt der Plan wie der Kurs |
+| `wochentage` | `[0..6]`, fehlt = jeden Tag |
+| `grundlage` | der Schlüssel (`key`) eines Plans aus `plaene[]` **dieses Pakets** — der Kursplan beginnt als Kopie davon (Planübungen, Beschreibung, Timer, Übergang); der Paketplan selbst bleibt daneben, wie er ist |
+| `vorlage` | eine Plan-Vorlage wie in `kapitel[].plaene[]` (`uebungen[]`, wahlweise `ablauf`, `anpassung`), die **sonst nirgends erscheint**; ihr `name` und ihre `wochentage` zählen nicht |
+
+Die **Grundlage** hat damit drei Arten: **leer** (weder `grundlage` noch `vorlage` — der Plan
+entsteht mit dem ersten „Übernehmen“), **ein Plan des Pakets** (`grundlage`) oder **eine
+Vorlage im Kurs** (`vorlage`); beides zugleich ist ein Fehler. Hat die Grundlage Übungen,
+entsteht der Plan beim Start des Kurses. Kapitel abschließen deaktiviert ihn nicht; „Von vorn“
+macht ihn zum früheren Durchlauf.
+
+Die drei **Bausteine** in `kapitel[].bloecke[]` — jeder braucht eine feste `id` (Buchstaben,
+Ziffern, `-`, `_`, nicht `ende` und nicht `g`; im Kurs eindeutig wie jede Block-ID):
+
+| `art` | Felder | Zeile in der Karte |
+|---|---|---|
+| `plan_uebung` | `uebung` (Schlüssel oder ID) **oder** `aus` (`id` einer `auswahl`: „die gewählte“ — bei `anzahl` ≥ 2 alle Gewählten), `hinter` (Marke; fehlt = ans Ende), dazu wahlweise `ziel` (Tabelle Feld → Wert) oder `ziel_aus` (`id` eines `test`) mit `faktor` (0,1–3, Vorgabe 1), `felder` (Liste der Parameter; `[]` = nur abhaken), `timer` (ein Timer-Profil wie in `timer[]` der Übung), `takt` (wie an der Planübung, `{}` = ausdrücklich keiner) | „Käfer kommt dazu — hinter Planke“, je Angabe eine weitere: „Ziel für Käfer: 30 Wiederholungen — aus deinem Test“ |
+| `plan_einstellen` | `an` (Marke; fehlt = der Plan selbst) und mindestens eine Angabe: an der Planübung `ziel` oder `ziel_aus` + `faktor`, `felder`, `timer`, `takt`; am Plan `timer` (für alle Übungen) und `takt`; immer am Plan `uebergang` (`hart` oder `weich` — nur die Vorgabe, umschalten kann die Person jederzeit) und `pause_ohne_timer` (`true`/`false`) | „Timer für Käfer: 3 Runden …“ · „Übergang im Workout: weich“ |
+| `plan_weg` | `von`, `zu` (Marken; `zu` auch `ende`), `kante` — wie eine Kante im `ablauf` eines Plans, ohne `von` und `nach`: `ausloeser` (`frei`, `zeit`, `wdh`, `wdh_in_zeit`, `skala`), `n`, `sekunden`, `bis`, `pflicht`, `ausfuehren`, `wiederholen`, `text`, `inhalt`; fehlt sie, ist der Weg frei. Der erste Weg macht den Plan zum Workout | „Von Planke weiter zu Käfer nach 60 s — Pflicht“ |
+
+`ziel_aus` geht vor `ziel`: Das Ziel ist der Testwert × `faktor`, im Feld des Tests (bei Sätzen
+als ein Satz). `auswahl` und `test` ändern in einem Kursplan-Kurs nichts von selbst — sie
+liefern Wahl und Wert, auf die sich Bausteine beziehen; der Test misst die Übung, die er nennt.
+
+**Marken** — woran der Kurs seine Planübungen wiederfindet (`plan_item.course_mark`); `hinter`,
+`an`, `von` und `zu` nennen eine:
+
+| Marke | Meint |
+|---|---|
+| `<block-id>` | die Planübung(en), die der `plan_uebung` mit dieser `id` angelegt hat — bei `aus` alle Gewählten (ein `plan_weg` ergibt dann je Paar einen Weg, ein `plan_einstellen` je Planübung eine Zeile) |
+| `<block-id>:<übung>` | bei `aus`: eine bestimmte der Gewählten (Schlüssel oder ID der Übung) — so steht die Marke auch im Plan |
+| `g:<n>` | die n-te Planübung der Grundlage, von 1 gezählt wie in `uebungen[]` (Platzhalter `$…` zählen nicht) |
+| `ende` | nur in `zu`: das Ende des Workouts |
+
+Bausteine gelten **in der Reihenfolge, in der sie dastehen**: Eine Marke zeigt nur auf einen
+`plan_uebung` weiter oben oder in einem früheren Kapitel; `aus` und `ziel_aus` auf eine Auswahl
+bzw. einen Test in diesem oder einem früheren Kapitel. Marken sind nie Positionen — löscht die
+Person eine Planübung, kommt, was hinter sie sollte, ans Ende, und was an ihr eingestellt oder
+verbunden werden sollte, entfällt; die Karte sagt beides. In einem Kurs **ohne** `kursplan` tun
+Bausteine nichts; hat ein Kapitel eines Kursplan-Kurses trotzdem `plaene`, entstehen sie wie
+bisher als Kapitelpläne neben dem Kursplan.
+
+**Formatversion 6 — was eine ältere App tut:** Ein Paket mit einem `kursplan` oder einem
+`plan_*`-Block wird als Version 6 geschrieben, alle anderen wie bisher. Die veröffentlichten
+Apps bis einschließlich 0.3.94 lesen höchstens Version 5 und **lehnen ein solches Paket ab**
+(„Das Paket ist neuer als diese App — bitte die App aktualisieren.“), statt den Kurs ohne
+seinen Plan zu zeigen; kommt es als Update aus einer Quelle, behalten sie ihren Stand. Das gilt
+für das ganze Paket: Auch seine Übungen und seine Kurse ohne Kursplan bekommt eine ältere App
+dann nicht mehr.
+
+Ein Beispiel (TOML wie im Inhalte-Repo; `trainingsapp-paket pruefen` nimmt es so an,
+`tests/test_paket_kursplan.py` liest es aus dieser Datei): Kapitel 1 bringt die Planke mit
+60 Sekunden; Kapitel 2 lässt eine von drei Übungen wählen, hängt sie hinter die Planke, nimmt
+ihr Ziel aus einem Test und setzt den Weg Planke → Gewählte, „Zeit ab“, Pflicht.
+
+```toml
+[paket]
+name = "Rumpf"
+version = "1.0.0"
+
+[[exercises]]
+key = "planke"
+name = "Planke"
+description = "Unterarmstütz, der Körper eine Linie."
+typen = ["Kräftigung"]
+regionen = ["Rumpf"]
+spec = "halten"
+icon_key = "fitness_center"
+
+[[exercises]]
+key = "kaefer"
+name = "Käfer"
+description = "Rückenlage, Arm und Bein gegengleich strecken."
+typen = ["Kräftigung"]
+regionen = ["Rumpf"]
+icon_key = "fitness_center"
+
+[[exercises]]
+key = "bruecke"
+name = "Brücke"
+description = "Rückenlage, Becken heben und senken."
+typen = ["Kräftigung"]
+regionen = ["Rumpf", "Hüfte"]
+icon_key = "fitness_center"
+
+[[exercises]]
+key = "beinheben"
+name = "Beinheben"
+description = "Rückenlage, gestreckte Beine heben und senken."
+typen = ["Kräftigung"]
+regionen = ["Rumpf"]
+icon_key = "fitness_center"
+
+[[kurse]]
+key = "rumpf"
+name = "Rumpf-Kurs"
+
+[kurse.kursplan]                 # der Kurs baut einen Plan — ohne Grundlage beginnt er leer
+name = "Rumpf"
+wochentage = [0, 2, 4]
+
+# ── Kapitel 1: die Planke kommt in den Plan, Ziel 60 Sekunden ──
+[[kurse.kapitel]]
+key = "anfang"
+titel = "Anfang"
+
+[[kurse.kapitel.bloecke]]
+art = "text"
+id = "warum"
+text = "Die Planke ist die Grundlage. Halte sie einmal, so lange es sauber geht."
+
+[[kurse.kapitel.bloecke]]
+art = "plan_uebung"
+id = "start"                     # Block-ID = Marke der Planübung im Plan
+uebung = "planke"
+ziel = { hold = [60] }           # ein Satz, 60 s
+
+# ── Kapitel 2: eine von dreien wählen, hinter die Planke, Ziel aus dem Test, Weg dorthin ──
+[[kurse.kapitel]]
+key = "erweiterung"
+titel = "Erweiterung"
+
+[[kurse.kapitel.bloecke]]
+art = "auswahl"
+id = "wahl"
+titel = "Wähle eine Übung dazu"
+uebungen = ["kaefer", "bruecke", "beinheben"]
+anzahl = 1
+
+[[kurse.kapitel.bloecke]]
+art = "test"
+id = "test"
+titel = "Wie viele Käfer schaffst du am Stück?"
+uebung = "kaefer"
+feld = "reps"
+
+[[kurse.kapitel.bloecke]]
+art = "plan_uebung"
+id = "dazu"
+aus = "wahl"                     # „die gewählte“ — im Plan trägt sie die Marke dazu:<übung>
+hinter = "start"
+ziel_aus = "test"                # Testwert × faktor, im Feld des Tests (reps)
+
+[[kurse.kapitel.bloecke]]
+art = "plan_weg"
+id = "weiter"
+von = "start"
+zu = "dazu"
+kante = { ausloeser = "zeit", pflicht = true }   # „Zeit ab“, Pflicht
+```
+
+`trainingsapp-paket pruefen` (`paket_werkzeug.kursplan_pruefen`) meldet als **Fehler**: einen
+Baustein ohne feste `id` oder mit einer, die nicht als Marke taugt; eine Block-ID, die es im
+Kurs zweimal gibt; `hinter`, `an`, `von`, `zu` ohne bekannte Marke — auch eine, die erst weiter
+unten oder in einem späteren Kapitel steht, ein `g:<n>` außerhalb der Grundlage und einen
+`plan_weg` ohne `von` oder `zu`; `aus` ohne Auswahl und `ziel_aus` ohne Test in diesem oder
+einem früheren Kapitel; `plan_uebung` ohne `uebung` und ohne `aus` oder mit beidem; eine
+`grundlage`, die kein Plan des Pakets ist; `grundlage` und `vorlage` zugleich; in `kante`, was
+auch im `ablauf` ein Fehler ist (`n`, `bis` keine Zahl); einen Block `plan_…`, den es nicht
+gibt; eine Marke `<block-id>:<übung>`, deren Übung nicht zur Wahl steht. Die Planübungen einer
+`vorlage` dürfen Dateien mitbringen (`medien = [{ datei = "…" }]`) wie die eines Kapitelplans.
+Als **Hinweis**: Bausteine in einem
+Kurs ohne `kursplan`, Kapitel-`plaene` neben einem `kursplan`, einen unbekannten Auslöser
+(„frei“ gilt), ein `plan_einstellen`, das nichts einstellt, eine `vorlage` ohne Übung — und zu
+jedem solchen Paket die Formatversion 6. Die Übungen in `uebung` prüft das Werkzeug hier so
+wenig wie in `test`, `auswahl` und Planübungen; was die App nicht kennt, ergibt keine Zeile.
+
 ## Inhalte pflegen (Inhalte-Repo, `TRAININGSAPP_PAKETE`, `trainingsapp-paket`)
 
 Eigene Pakete entstehen im privaten Repo `trainingsapp-inhalte` als TOML wie
@@ -544,7 +737,9 @@ Hinweise — einer je Typ mit der Zahl der Übungen, bei einer einzelnen mit ihr
 Ausgabe nennt je Datei erst das Urteil, darunter eingerückt Fehler und Hinweise. In `beschleunigung` ist ein falscher Typ ein Fehler (die App läse ihn still als
 Vorgabe), ein unbekannter Schlüssel ein Hinweis — an Übungen wie an Planübungen
 (`plaene[].uebungen[]`, auch in Kurskapiteln; seit Prüfrunde A6). In `gps` sind eine fehlende
-Rechenart und unbrauchbare Tempo-Grenzen Fehler, eine unbekannte Rechenart ein Hinweis. `--wortliste DATEI` sucht Begriffe, die in Pakettexten nichts verloren haben
+Rechenart und unbrauchbare Tempo-Grenzen Fehler, eine unbekannte Rechenart ein Hinweis. Kursplan
+und Bausteine (Formatversion 6): Block-IDs, Marken, `aus`, `ziel_aus`, `grundlage` — die Liste
+steht im Abschnitt [Kursplan und Bausteine](#kursplan-und-bausteine-formatversion-6-ben-16112026). `--wortliste DATEI` sucht Begriffe, die in Pakettexten nichts verloren haben
 (Sprachregelung der Praxis-Website: erklären, nicht bewerten — die Liste liegt im privaten
 Repo der Homepage, `docs/wortliste-zone3.txt`); Treffer sind Hinweise, mit `--streng`
 Fehler. `--geprueft DATEI` nennt Stellen, die ein Mensch angesehen hat und die keine Bewertung
@@ -589,7 +784,9 @@ Eine **Quelle** ist eine HTTPS-Adresse, unter der ein **Index** liegt — die JS
 `trainingsapp-paket index` schreibt: je Paket `id`, `name`, `beschreibung`, `version`,
 `url` (Paketdatei), `sha256`, `bytes`, `uebungen`, `kurse`, `neuigkeiten`,
 `veroeffentlicht` (Datum des letzten Inhaltswechsels: bei gleicher Prüfsumme bleibt es
-aus dem vorigen Index am `--ziel` stehen, K30), `signatur` (reserviert, `null`). Kopf:
+aus dem vorigen Index am `--ziel` stehen, K30), `format_version` (die Formatversion der
+Paketdatei, 1–6 — nur zur Information, die App liest sie nicht), `signatur` (reserviert,
+`null`). Kopf:
 `format = "trainingsapp-paketindex"`, `version = 1`, `quelle.name`. Das Format ist bewusst so
 einfach, dass es von jedem Webserver, von GitHub Pages oder aus einem Release kommen
 kann (`core/paketquelle.py`).
@@ -607,9 +804,12 @@ kann (`core/paketquelle.py`).
 - **Stufe aus dem Unterschied** (U6, Ben 9.11.2026, F8 c, `core/paketstufe.py`): Die App lädt
   ein Update (nicht bei „Manuell“, nicht über 20 MB) und vergleicht es mit dem gespeicherten
   Paketstand — **groß**: etwas fällt weg (Übung, Kurs, Kapitel, Plan, Ergänzung), ein Kapitel
-  wandert oder wird dazwischengeschoben, eine Kapitelbedingung oder Freischaltung ändert sich;
-  **mittel**: etwas kommt dazu, Texte, Medien, Felder der Eingabe, Pläne; **klein**: nur
-  Vorgaben (Chips, Ziel, Timer, Symbol, Typen, Regionen, Takt, Plan-Vorlagen). Die Nummer
+  wandert oder wird dazwischengeschoben, eine Kapitelbedingung oder Freischaltung ändert sich,
+  ein Kurs bekommt oder verliert seinen Kursplan; **mittel**: etwas kommt dazu, Texte, Medien,
+  Felder der Eingabe, Pläne, die Blöcke eines Kapitels (auch Bausteine; seit 16.11.2026 —
+  vorher galt ein Update, das nur Blöcke änderte, als „unverändert“); **klein**: nur
+  Vorgaben (Chips, Ziel, Timer, Symbol, Typen, Regionen, Takt, Plan-Vorlagen, Name, Wochentage
+  und Grundlage eines Kursplans). Die Nummer
   entscheidet nichts — das Werkzeug hält sie ehrlich (`trainingsapp-paket pruefen --gegen
   <Datei|Link|Index>`: „Wandsitz fällt weg → mindestens 2.0.0, steht 1.4.1“).
 - **Modus je Paket:** **Alle** (`auto`, Vorgabe) spielt kleine und mittlere Updates beim Start

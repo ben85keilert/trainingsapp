@@ -16,6 +16,12 @@ Ein Kapitel gilt als **erreicht**, sobald man es öffnet (das legt seine Pläne
 an); **abgeschlossen** mit „Weiter“. Was man dabei übersprungen hat, bleibt als
 „übersprungen“ sichtbar. Alles Rechnen steht in `core/kurse.py` und
 `data/kurse.py`; hier wird nur gezeigt.
+
+Ein Kurs mit **Kursplan** (Ben, 16.11.2026, `docs/plan_kurs_ablauf.md` §11.5) baut mit der
+Person einen Plan, der über die Kapitel wächst: Das Kapitel zeigt unter seinen Blöcken die
+Sammelkarte „Das ändert sich an deinem Plan“ (`components/kursplan_karte.py`) — geändert wird
+erst mit „Übernehmen“ —, die Kursseite die Karte „Dein Kursplan“ mit „Trainieren“. Gerechnet
+wird in `core/kursplan.py` und `KursRepo.plan_aenderungen`/`plan_uebernehmen`.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from datetime import datetime
 import flet as ft
 
 from trainingsapp.core.kapiteltext import bilder_zu_links
+from trainingsapp.core.kursbloecke import BAUSTEINE
 from trainingsapp.core.kurse import (
     AKTUELL,
     FERTIG,
@@ -35,6 +42,7 @@ from trainingsapp.core.kurse import (
     GESPERRT,
     OFFEN,
     STRENG,
+    TAGE,
     UEBERSPRUNGEN,
     Kapitel,
     Kapitelstand,
@@ -48,11 +56,14 @@ from trainingsapp.core.kurse import (
     stand_text,
     status,
 )
+from trainingsapp.core.kursplan import Aenderung, kursplan_name, wahl_im_plan
 from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.core.plaene import erledigte, tage_text
+from trainingsapp.core.plan_durchlauf import startet_als_workout
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.kursblock import kapitel_bloecke
+from trainingsapp.ui.components.kursplan_karte import KursplanKarte, kursplan_karte
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
 from trainingsapp.ui.components.medienliste import medium_zeile
@@ -166,8 +177,94 @@ def kurse_liste(page: ft.Page, state: AppState) -> ft.Control:
 # ---------------------------------------------------------------------------
 
 
+def _frueherer_plan(page: ft.Page, plan: Plan) -> ft.Control:
+    """Eine blasse Zeile für einen Plan aus einem früheren Durchlauf des Kurses (Migration
+    063) — deaktiviert, zum Nachsehen; Tipp öffnet ihn."""
+    return ft.ListTile(
+        leading=ft.Icon(ft.Icons.HISTORY, opacity=0.6),
+        title=ft.Text(plan.name, opacity=0.8),
+        subtitle=ft.Text("früherer Durchlauf · deaktiviert", size=12),
+        on_click=_oeffner(page, f"/plaene/{plan.id}"),
+        content_padding=ft.Padding.only(left=0, right=0),
+        data=("frueherer_plan", plan.id),
+    )
+
+
+def _dein_kursplan(
+    page: ft.Page,
+    state: AppState,
+    kurs: Kurs,
+    katalog: Mapping[str, Exercise],
+    *,
+    waechst: bool,
+) -> ft.Control | None:
+    """Die Karte „Dein Kursplan“ der Kursseite (Skizze K4): der Name, die Übungen in einer
+    Zeile und „Trainieren“; ein Tipp öffnet den Plan. Darunter blass die Kurspläne früherer
+    Durchläufe. ``None``, solange es weder den einen noch die anderen gibt — so sieht ein Kurs
+    ohne Kursplan aus wie bisher. ``waechst``: Es stehen noch Kapitel aus."""
+    from trainingsapp.ui.views.uebungen import heute_trainieren  # Kreis: uebungen → kurse
+
+    profil = state.profil.id
+    plan = state.kurse.kursplan(kurs, profil)
+    fruehere = state.kurse.fruehere_kursplaene(kurs.id, profil)
+    if plan is None and not fruehere:
+        return None
+    inhalt: list[ft.Control] = []
+    if plan is None:
+        inhalt += [
+            titel("Dein Kursplan"),
+            hinweis("Im neuen Durchlauf baut der Kurs mit dir einen neuen Plan."),
+        ]
+    else:
+        namen = [katalog[i.exercise_id].name for i in plan.items if i.exercise_id in katalog]
+        teile = [" · ".join(namen) or "noch leer"]
+        if not plan.aktiv:
+            teile.append("deaktiviert")
+        elif waechst:
+            teile.append("wächst mit den Kapiteln")
+        als_workout = startet_als_workout(plan)
+        links = ft.Column(
+            expand=True,
+            spacing=2,
+            tight=True,
+            controls=[
+                titel("Dein Kursplan"),
+                ft.Text(plan.name, size=16, weight=ft.FontWeight.W_600),
+                ft.Text(
+                    " — ".join(teile),
+                    size=12,
+                    opacity=0.7,
+                    max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+            ],
+        )
+        knopf = trainieren_knopf(
+            heute_trainieren(page, state, plan.id),
+            "Heute als Workout trainieren — Schritt für Schritt"
+            if als_workout
+            else "Heute trainieren — auch wenn der Plan heute nicht ansteht",
+            workout=als_workout,
+        )
+        inhalt.append(
+            # Tipp auf die Zeile öffnet den Plan, der Knopf daneben das Training
+            ft.Container(
+                on_click=_oeffner(page, f"/plaene/{plan.id}"),
+                data=("kursplan", plan.id),
+                content=ft.Row(
+                    spacing=12,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[links, *([knopf] if plan.items else [])],
+                ),
+            )
+        )
+    inhalt.extend(_frueherer_plan(page, p) for p in fruehere)
+    return karte(*inhalt, abstand=6)
+
+
 def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
-    """Die Kapitel untereinander mit Status; „Kurs beginnen“, Menü „Von vorn beginnen“."""
+    """Die Kapitel untereinander mit Status; „Kurs beginnen“, Menü „Von vorn beginnen“;
+    darunter die Karte „Dein Kursplan“, wenn der Kurs einen baut (`_dein_kursplan`)."""
     route = f"/kurse/{kurs.id}"
     staende = state.kurse.staende(state.profil.id, kurs.id)
     stati = status(kurs, staende)
@@ -205,9 +302,16 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
                 title=ft.Text("Kurs von vorn beginnen?"),
                 content=ft.Text(
                     "Dein Fortschritt in diesem Kurs wird gelöscht und die Pläne des Kurses "
-                    "werden deaktiviert. Ein Plan aus einem Test oder einer Auswahl bleibt als "
-                    "„… · Durchlauf“ stehen — beim nächsten Mal testest und wählst du neu. "
-                    "Einträge im Verlauf bleiben."
+                    "werden deaktiviert. "
+                    + (
+                        # der Kursplan wird immer zum früheren Durchlauf (`zuruecksetzen`)
+                        "Dein Kursplan bleibt als „… · Durchlauf“ stehen — beim nächsten Mal "
+                        "baut der Kurs mit dir einen neuen, und du testest und wählst neu. "
+                        if kurs.kursplan is not None
+                        else "Ein Plan aus einem Test oder einer Auswahl bleibt als "
+                        "„… · Durchlauf“ stehen — beim nächsten Mal testest und wählst du neu. "
+                    )
+                    + "Einträge im Verlauf bleiben."
                 ),
                 actions=[
                     ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
@@ -353,6 +457,16 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
             )
         )
 
+    # Der Plan, den der Kurs mit der Person baut (K4) — unter den Kapiteln
+    plankarte = _dein_kursplan(
+        page,
+        state,
+        kurs,
+        katalog,
+        waechst=kurs.kursplan is not None
+        and any(stati[k.id] not in (FERTIG, UEBERSPRUNGEN) for k in kurs.kapitel),
+    )
+
     return ft.View(
         route=route,
         appbar=ft.AppBar(title=ft.Text(kurs.name), actions=aktionen),
@@ -368,6 +482,16 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
                             content=ft.Column(spacing=10, controls=kopf),
                         ),
                         *[zeile(nr, k) for nr, k in enumerate(kurs.kapitel, start=1)],
+                        *(
+                            [
+                                ft.Container(
+                                    padding=ft.Padding.only(left=16, right=16, top=10),
+                                    content=plankarte,
+                                )
+                            ]
+                            if plankarte is not None
+                            else []
+                        ),
                     ],
                 )
             )
@@ -387,22 +511,35 @@ def kapitel_view(
 
     Öffnen heißt erreichen: Ist das Kapitel dran (oder offen), merkt die App
     das und legt seine Pläne an. ``browser`` ist der Flet-Dienst aus `main()`.
+
+    In einem Kurs mit Kursplan (`Kurs.kursplan`) steht unter den Blöcken die Sammelkarte „Das
+    ändert sich an deinem Plan“, sobald das Kapitel erreicht ist — auch in einem fertigen
+    Kapitel: Was man dort mit „Später“ liegen ließ, lässt sich noch übernehmen. Die Wahl einer
+    Auswahl hält die Ansicht, bis sie übernommen ist; ändert sie sich, rechnet die Karte neu.
     """
     from trainingsapp.ui.views.uebungen import heute_trainieren  # Kreis: uebungen → kurse
 
     basis = f"/kurse/{kurs.id}"
     route = f"{basis}/{kapitel.id}"
     profil = state.profil.id
+    baut_plan = kurs.kursplan is not None
     staende = state.kurse.staende(profil, kurs.id)
     s = status(kurs, staende)[kapitel.id]
     if s in (AKTUELL, OFFEN) and kapitel.id not in staende:
-        state.kurse.kapitel_erreichen(kurs, kapitel, profil)
+        if baut_plan and kapitel.id == kurs.kapitel[0].id:
+            # wie „Kurs beginnen“: Hat der Kursplan eine Grundlage mit Übungen, entsteht er
+            # hier — auch wenn man das erste Kapitel gleich in der Liste antippt
+            state.kurse.starten(kurs, profil)
+        else:
+            state.kurse.kapitel_erreichen(kurs, kapitel, profil)
         staende = state.kurse.staende(profil, kurs.id)
     stand_hier: Kapitelstand | None = staende.get(kapitel.id)
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
     uebung: Exercise | None = katalog.get(kapitel.bedingung.exercise_id)
     bedingung = kapitel.bedingung
-    stand: Stand = state.kurse.stand(kapitel, profil, staende)
+    stand: Stand = state.kurse.stand(kapitel, profil, staende, kurs)
+    #: der Plan, den der Kurs mit der Person baut — ``None`` ohne Kursplan und bis er entsteht
+    kursplan: Plan | None = state.kurse.kursplan(kurs, profil) if baut_plan else None
     folgend = naechstes(kurs, kapitel)
     nummer = kurs.kapitel.index(kapitel) + 1
     nachher = Nachher()
@@ -489,23 +626,82 @@ def kapitel_view(
             melden("Plan angelegt — er steht auf „Heute“")
             state.neu_zeichnen()
 
-        bloecke.extend(
-            kapitel_bloecke(
+        if not baut_plan:
+            bloecke.extend(
+                kapitel_bloecke(
+                    page,
+                    state,
+                    kapitel.bloecke,
+                    katalog=katalog,
+                    werte=werte,
+                    angelegt=angelegt,
+                    offen=s in (AKTUELL, OFFEN),
+                    browser=browser,
+                    text_bauen=markdown,
+                    zur_uebung=lambda uid: _oeffner(page, f"/uebung/{uid}"),
+                    anlegen=plan_anlegen,
+                    # Kurs von vorn: was beim letzten Mal gewählt war, als Vorbelegung
+                    letzte_wahl={} if angelegt else state.kurse.letzte_wahl(kapitel, profil),
+                ).controls
+            )
+        else:
+            # Kurs mit Kursplan (Ben, 16.11.2026, `docs/plan_kurs_ablauf.md` §11.5): Test und
+            # Auswahl liefern Wert und Wahl — was daraus am Plan wird, steht in der Sammelkarte
+            # und gilt erst mit „Übernehmen“. Eine Auswahl darf in einem anderen Kapitel
+            # stehen als ihr Baustein, darum zählen die Blöcke des ganzen Kurses.
+            alle_bloecke = [b for k in kurs.kapitel for b in k.bloecke]
+            fruehere_kursplaene = state.kurse.fruehere_kursplaene(kurs.id, profil)
+            sammelkarte: KursplanKarte | None = None
+
+            def aenderungen() -> list[Aenderung]:
+                return state.kurse.plan_aenderungen(kurs, kapitel, profil, gezeichnet.wahl)
+
+            def wahl_geaendert() -> None:
+                if sammelkarte is not None:  # die Zeilen hängen an der Wahl
+                    sammelkarte.zeigen(aenderungen())
+
+            def uebernehmen(gewaehlt: set[str], trotz: set[str], lassen: set[str]) -> None:
+                danach = state.kurse.plan_uebernehmen(
+                    kurs, kapitel, profil, gewaehlt, trotz, wahl=gezeichnet.wahl, lassen=lassen
+                )
+                # nur „lassen“ gewählt: Der Plan ist derselbe, das soll die Meldung auch sagen
+                melden(
+                    "Plan geändert — er steht auf „Heute“"
+                    if danach != kursplan
+                    else "Dein Plan bleibt, wie er ist"
+                )
+                state.neu_zeichnen()
+
+            gezeichnet = kapitel_bloecke(
                 page,
                 state,
                 kapitel.bloecke,
                 katalog=katalog,
                 werte=werte,
                 angelegt=angelegt,
-                offen=s in (AKTUELL, OFFEN),
+                offen=stand_hier is not None,
                 browser=browser,
                 text_bauen=markdown,
                 zur_uebung=lambda uid: _oeffner(page, f"/uebung/{uid}"),
-                anlegen=plan_anlegen,
-                # Kurs von vorn: was beim letzten Mal gewählt war, als Vorbelegung
-                letzte_wahl={} if angelegt else state.kurse.letzte_wahl(kapitel, profil),
-            ).controls
-        )
+                # „Plan anlegen“ nur, wo das Kapitel daneben eigene Plan-Vorlagen hat — und
+                # wie bisher nur, solange es dran ist
+                anlegen=plan_anlegen if kapitel.plaene and s in (AKTUELL, OFFEN) else None,
+                # Kurs von vorn: was im Kursplan des letzten Durchlaufs gewählt war
+                letzte_wahl=wahl_im_plan(fruehere_kursplaene[0], alle_bloecke)
+                if fruehere_kursplaene
+                else {},
+                kursplan=True,
+                feste_wahl=wahl_im_plan(kursplan, alle_bloecke) if kursplan is not None else {},
+                bei_wahl=wahl_geaendert,
+            )
+            bloecke.extend(gezeichnet.controls)
+            if stand_hier is not None and any(b.art in BAUSTEINE for b in kapitel.bloecke):
+                sammelkarte = kursplan_karte(
+                    aenderungen(),
+                    planname=kursplan.name if kursplan is not None else kursplan_name(kurs),
+                    uebernehmen=uebernehmen,
+                )
+                bloecke.append(sammelkarte.control)
     elif kapitel.text.strip():
         bloecke.append(markdown(kapitel.text))
 
@@ -549,17 +745,10 @@ def kapitel_view(
                     hinweis("Entsteht mit „Plan anlegen“ aus deinem Test und deiner Wahl.")
                 )
         # Pläne aus früheren Durchläufen des Kurses (Migration 063) — deaktiviert, zum Nachsehen
-        for frueher in state.kurse.fruehere_plaene(kapitel.id, profil):
-            zeilen.append(
-                ft.ListTile(
-                    leading=ft.Icon(ft.Icons.HISTORY, opacity=0.6),
-                    title=ft.Text(frueher.name, opacity=0.8),
-                    subtitle=ft.Text("früherer Durchlauf · deaktiviert", size=12),
-                    on_click=_oeffner(page, f"/plaene/{frueher.id}"),
-                    content_padding=ft.Padding.only(left=0, right=0),
-                    data=("frueherer_plan", frueher.id),
-                )
-            )
+        zeilen.extend(
+            _frueherer_plan(page, frueher)
+            for frueher in state.kurse.fruehere_plaene(kapitel.id, profil)
+        )
         bloecke.append(
             karte(
                 titel("Pläne dieses Kapitels"),
@@ -588,6 +777,15 @@ def kapitel_view(
                 fortschritt.append(
                     ft.ProgressBar(value=min(stand.ist / stand.soll, 1.0), bar_height=6)
                 )
+            # Kursplan-Kurs: „Tage“ zählt die Übungen des Kursplans (`KursRepo.stand`) —
+            # solange er keine hat, zählt nichts, und das soll dastehen (Skizze K2)
+            if (
+                baut_plan
+                and bedingung.art == TAGE
+                and not (kursplan is not None and kursplan.items)
+                and not any(v.items for v in kapitel.plaene)
+            ):
+                fortschritt.append(hinweis("Zählt, sobald dein Kursplan Übungen hat."))
         else:
             fortschritt.append(
                 hinweis("Gezählt wird ab dem Tag, an dem du dieses Kapitel öffnest.")

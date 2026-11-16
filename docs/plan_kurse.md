@@ -176,3 +176,25 @@ zeigt die Karte „Vorschlag aus dem Plan“ die **Zeitziele** (Haltezeit, Zeit)
   Messwert**. Einordnung: `docs/recht/00_zweckbestimmung.md` („Vorschlag nach der Belastung“).
 - Die Regel setzt, wer den Kurs baut (Kapitel bearbeiten → Plan → Schalter mit den drei
   Zahlen). Für freie Pläne gibt es noch keinen Schalter im Plan-Editor.
+
+## 9. Der Kurs baut einen Plan (Ben, 16.11.2026) — gebaut
+
+Ein Kurs kann statt Kapitelplänen **einen Kursplan** bauen, der über die Kapitel wächst
+(`Kurs.kursplan`, Migration 064). Vertrag, Bauplan und Abweichungen: `docs/plan_kurs_ablauf.md`
+§3.1, §11, §11.8; Paketformat: `docs/uebungspakete.md` („Kursplan und Bausteine“,
+Formatversion 6).
+
+- **Grundlage:** leer, ein Plan des Pakets (über seinen Schlüssel) oder eine Vorlage im Kurs,
+  die sonst nirgends erscheint.
+- **Bausteine** sind Blöcke eines Kapitels (`plan_uebung`, `plan_einstellen`, `plan_weg`); die
+  Kapitelansicht zeichnet sie nicht, sondern zeigt unter den Blöcken die Karte **„Das ändert
+  sich an deinem Plan“** (`ui/components/kursplan_karte.py`).
+- **Nichts ändert sich am Plan ohne Tipp** — jede Zeile lässt sich abwählen. **Was die Person
+  am Plan geändert hat, bleibt:** Der Kurs fragt („Dein Plan weicht ab“, Vorgabe „lassen“) und
+  nach „lassen“ nicht noch einmal. Hart | weich aus dem Kurs ist nur eine Vorgabe.
+- Test und Auswahl ändern im Kursplan-Kurs nichts von selbst; sie liefern Wert und Wahl an die
+  Bausteine. Gerechnet wird aus Einträgen und Wahl, **nie aus Messwerten** (`core/kursplan.py`).
+- Kapitel abschließen deaktiviert den Kursplan nicht; „Von vorn“ macht ihn zum früheren
+  Durchlauf (§2, Migration 063); die Bedingung „Tage“ zählt seine Übungen.
+- Ein Kurs **ohne** `kursplan` verhält sich wie in §1–§8 (der Einführungskurs im Paket
+  „Standard“ bleibt so).

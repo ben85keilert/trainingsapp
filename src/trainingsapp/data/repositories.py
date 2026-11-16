@@ -22,7 +22,7 @@ import hashlib
 import json
 import sqlite3
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -1040,6 +1040,11 @@ class PlanRepo:
         Planübungen, deren Übung im Papierkorb liegt, lädt `laden()` nicht mit —
         sie bleiben hier unangetastet stehen, damit sie beim Wiederherstellen
         der Übung zurückkehren. Die neuen Einträge reihen sich dahinter ein.
+
+        Nicht angefasst werden die gerätelokalen Spalten: `course_run_ended_at`,
+        `freischaltung_seit`, `workout_felder_json` und — beim Kursplan (Migration 064) —
+        `course_id` und `course_state_json` (`kurs_setzen`, `kurs_stand_setzen`). Die Marke
+        jeder Planübung (`PlanItem.kurs_marke`) dagegen wird mitgeschrieben.
         """
         stempel = jetzt().isoformat()
         ablauf_json = _ablauf_json(self._ablauf_zum_speichern(plan))
@@ -1524,6 +1529,28 @@ class PlanRepo:
                 (iso_utc(jetzt()), jetzt().isoformat(), plan_id),
             )
 
+    def kurs_setzen(self, plan_id: str, kurs_id: str | None) -> None:
+        """Macht den Plan zum **Kursplan** dieses Kurses (Migration 064, `core/kursplan.py`) —
+        nur diese Spalte; `speichern` fasst sie nicht an. ``None`` löst ihn vom Kurs."""
+        self.con.execute("UPDATE plan SET course_id = ? WHERE id = ?", (kurs_id, plan_id))
+
+    def kurs_stand(self, plan_id: str) -> dict[str, Any]:
+        """Der Kurs-Stand eines Kursplans (Migration 064): was der Kurs je Marke zuletzt
+        gesetzt hat und welche Änderungen übernommen sind (`core.kursplan`) — leer ohne."""
+        r = self.con.execute(
+            "SELECT course_state_json FROM plan WHERE id = ?", (plan_id,)
+        ).fetchone()
+        stand = _json_lesen(r[0], {}) if r is not None else {}
+        return stand if isinstance(stand, dict) else {}
+
+    def kurs_stand_setzen(self, plan_id: str, stand: Mapping[str, Any] | None) -> None:
+        """Den Kurs-Stand schreiben — nur diese Spalte, gerätelokal wie `freischaltung_seit`:
+        `speichern` fasst sie nicht an, und der Plan gilt dadurch nicht als geändert."""
+        self.con.execute(
+            "UPDATE plan SET course_state_json = ? WHERE id = ?",
+            (json.dumps(stand, ensure_ascii=False, sort_keys=True) if stand else None, plan_id),
+        )
+
     def workout_felder(self, plan_id: str) -> list[str]:
         """Die eigenen Skalen dieses Workouts (Migration 054) — ihre Namen, leer ohne."""
         r = self.con.execute(
@@ -1680,8 +1707,8 @@ class PlanRepo:
         self.con.execute(
             "INSERT INTO plan_item (id, plan_id, exercise_id, sort_order, target_json, note, "
             "input_mode, quick_json, fields_json, timer_json, acc_json, takt_json, "
-            "bedingung_json, beiname, description, media_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "bedingung_json, beiname, description, media_json, course_mark) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 item.id,
                 item.plan_id,
@@ -1701,6 +1728,8 @@ class PlanRepo:
                 json.dumps([m.als_dict() for m in item.media], ensure_ascii=False)
                 if item.media
                 else None,
+                # Die Marke des Kurses (Migration 064) reist mit: `speichern` ersetzt die Liste
+                item.kurs_marke,
             ),
         )
 
@@ -1756,6 +1785,7 @@ class PlanRepo:
             beiname=r["beiname"] or "",
             description=r["description"] or "",
             media=[m for roh in _json_lesen(r["media_json"], []) if (m := medium_aus_dict(roh))],
+            kurs_marke=r["course_mark"] or "",
         )
 
     def _zeile(self, r: sqlite3.Row, bibliothek: _Bibliothek | None = None) -> Plan:
@@ -1772,6 +1802,7 @@ class PlanRepo:
             kurs_durchlauf_beendet=datetime.fromisoformat(r["course_run_ended_at"])
             if r["course_run_ended_at"]
             else None,
+            kurs_id=r["course_id"],
             timer=_timer_lesen(self.con, r["timer_json"], {}, bibliothek) or None,
             weiter_automatisch=bool(r["auto_next"]),
             pause_ohne_timer=bool(r["pause_no_timer"]),

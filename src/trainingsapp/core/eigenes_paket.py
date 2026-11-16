@@ -104,12 +104,22 @@ def inhalt_sha(roh: dict[str, Any]) -> str:
 
 
 def noetige_uebungen(plaene: Iterable[Plan], kurse: Iterable[Kurs]) -> list[str]:
-    """Die Übungen, die gewählte Pläne und Kurse brauchen — Planübungen, Kapitelpläne und
-    die Übung einer Kapitelbedingung („Summe“), in der Reihenfolge des ersten Auftretens.
+    """Die Übungen, die gewählte Pläne und Kurse brauchen — Planübungen, Kapitelpläne, die
+    Übung einer Kapitelbedingung („Summe“), die Vorlage eines Kursplans und was die Blöcke
+    der Kapitel nennen (Test, Auswahl, Bausteine — `docs/plan_kurs_ablauf.md` §11) — in der
+    Reihenfolge des ersten Auftretens. Ohne die Übungen der Blöcke käme ein eigener Kurs beim
+    Empfänger an, ohne dass seine Auswahl etwas zur Wahl stellt oder sein Baustein eine Zeile
+    ergibt.
 
     >>> from trainingsapp.core.models import PlanItem
     >>> noetige_uebungen([Plan(items=[PlanItem(exercise_id="a"), PlanItem(exercise_id="a")])], [])
     ['a']
+    >>> from trainingsapp.core.kursbloecke import AUSWAHL, PLAN_UEBUNG, Block
+    >>> from trainingsapp.core.kurse import Kapitel, Kursplan, PlanVorlage, VorlageItem
+    >>> kap = Kapitel(bloecke=[Block(AUSWAHL, uebungen=["b", "c"]), Block(PLAN_UEBUNG, uebung="d")])
+    >>> vorlage = PlanVorlage("Rumpf", items=[VorlageItem(exercise_id="g")])
+    >>> noetige_uebungen([], [Kurs(kapitel=[kap], kursplan=Kursplan(vorlage=vorlage))])
+    ['g', 'b', 'c', 'd']
     """
     ids: list[str] = []
 
@@ -121,11 +131,18 @@ def noetige_uebungen(plaene: Iterable[Plan], kurse: Iterable[Kurs]) -> list[str]
         for i in sorted(p.items, key=lambda x: x.order):
             dazu(i.exercise_id)
     for k in kurse:
+        if k.kursplan is not None and k.kursplan.vorlage is not None:
+            for vi in k.kursplan.vorlage.items:
+                dazu(vi.exercise_id)
         for kap in k.kapitel:
             for v in kap.plaene:
                 for vi in v.items:
                     dazu(vi.exercise_id)
             dazu(getattr(kap.bedingung, "exercise_id", None))
+            for b in kap.bloecke:
+                dazu(b.uebung)
+                for uebung_id in b.uebungen:
+                    dazu(uebung_id)
     return ids
 
 

@@ -462,12 +462,84 @@ class Kapitel:
 
 
 @dataclass(slots=True)
+class Kursplan:
+    """Der Kurs baut mit der Person **einen Plan**, der über die Kapitel wächst (Ben,
+    16.11.2026, `docs/plan_kurs_ablauf.md` §3.1, §11.1; Rechnung `core/kursplan.py`).
+
+    Womit der Plan beginnt, sagt die **Grundlage**: ein Plan des Pakets (``grundlage`` = sein
+    Schlüssel, `plan.package_key`) oder eine ``vorlage``, die sonst nirgends erscheint — ohne
+    beides beginnt er leer. Hat der Kurs beides, gilt die Vorlage.
+    """
+
+    #: Der Name des Plans — leer = der Name des Kurses
+    name: str = ""
+    wochentage: list[int] = field(default_factory=lambda: list(range(7)))
+    grundlage: str = ""
+    vorlage: PlanVorlage | None = None
+
+    def als_dict(self) -> dict[str, Any]:
+        """Wie im Paket (``kurse[].kursplan``) und in der Spalte ``course.kursplan_json``.
+
+        >>> Kursplan("Rumpf", [0, 2], grundlage="rumpf-basis").als_dict()
+        {'name': 'Rumpf', 'wochentage': [0, 2], 'grundlage': 'rumpf-basis'}
+        """
+        d: dict[str, Any] = {"name": self.name, "wochentage": list(self.wochentage)}
+        if self.grundlage:
+            d["grundlage"] = self.grundlage
+        if self.vorlage is not None:
+            d["vorlage"] = self.vorlage.to_dict()
+        return d
+
+    @classmethod
+    def aus_dict(cls, roh: Any) -> Kursplan | None:
+        """Nachsichtig: keine Tabelle = kein Kursplan (der Kurs legt Kapitelpläne an); eine
+        Vorlage ohne Übung ist keine; Wochentage außerhalb 0–6 fallen weg.
+
+        >>> k = Kursplan.aus_dict({"name": " Rumpf ", "wochentage": [0, 9], "vorlage": {}})
+        >>> k.name, k.wochentage, k.grundlage, k.vorlage
+        ('Rumpf', [0], '', None)
+        >>> Kursplan.aus_dict({}).wochentage, Kursplan.aus_dict(None), Kursplan.aus_dict("x")
+        ([0, 1, 2, 3, 4, 5, 6], None, None)
+        >>> v = {"name": "Basis", "uebungen": [{"uebung": "a"}]}
+        >>> Kursplan.aus_dict({"vorlage": v}).vorlage.items[0].exercise_id
+        'a'
+        """
+        if not isinstance(roh, Mapping):
+            return None
+        tage = roh.get("wochentage")
+        wochentage = (
+            sorted({int(t) for t in tage if isinstance(t, int) and 0 <= t <= 6})
+            if isinstance(tage, list)
+            else list(range(7))
+        )
+        vorlage_roh = roh.get("vorlage")
+        vorlage: PlanVorlage | None = None
+        if isinstance(vorlage_roh, Mapping):
+            try:
+                vorlage = PlanVorlage.from_dict(vorlage_roh)
+            except (KeyError, TypeError, ValueError, AttributeError):
+                vorlage = None
+            if vorlage is not None and not vorlage.items:
+                vorlage = None
+        grundlage = roh.get("grundlage")
+        return cls(
+            name=" ".join(str(roh.get("name") or "").split()),
+            wochentage=wochentage,
+            grundlage=grundlage.strip() if isinstance(grundlage, str) else "",
+            vorlage=vorlage,
+        )
+
+
+@dataclass(slots=True)
 class Kurs:
     id: str = field(default_factory=new_id)
     name: str = ""
     beschreibung: str = ""
     freischaltung: str = RUECKFRAGE
     kapitel: list[Kapitel] = field(default_factory=list)
+    #: Baut der Kurs einen Plan, der über die Kapitel wächst (Migration 064)? ``None`` = nein:
+    #: Jedes Kapitel legt wie bisher seine eigenen Pläne an (Kapitelpläne)
+    kursplan: Kursplan | None = None
     #: Aus welchem Paket der Kurs kam (`core/pakete.py`); ``None`` = eigener Kurs
     package_id: str | None = None
     created_at: datetime = field(default_factory=jetzt)
@@ -912,6 +984,7 @@ __all__ = [
     "Kapitel",
     "Kapitelstand",
     "Kurs",
+    "Kursplan",
     "PlanVorlage",
     "Stand",
     "VorlageItem",

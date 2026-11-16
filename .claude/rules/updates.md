@@ -19,7 +19,9 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   SHA-256 geprüft, Signaturfeld reserviert). Paketversionen „X.Y.Z“ reisen als Zahl
   X·10000 + Y·100 + Z (`core/paketversion.py`, ältere Apps vergleichen weiter); die **Stufe**
   eines Updates kommt aus dem Unterschied, nicht aus der Nummer (U6, `core/paketstufe.py`: groß
-  = etwas fällt weg, mittel = Neues/Texte/Medien, klein = Vorgaben); Modus je Paket **Alle**
+  = etwas fällt weg, mittel = Neues/Texte/Medien, klein = Vorgaben; seit 16.11.2026, P211: Kurs
+  bekommt oder verliert seinen Kursplan = groß, Blöcke eines Kapitels = mittel, Name ·
+  Wochentage · Grundlage des Kursplans = klein); Modus je Paket **Alle**
   (klein + mittel von selbst, groß fragt) · **Kleine** · Manuell, „Für alle Pakete“ unter
   Updates; `trainingsapp-paket pruefen --gegen` lehnt eine zu kleine Nummer ab. `ui/views/updates.py` macht beides beim Start
   (abschaltbar, einmaliger Hinweis — jede neue Netzverbindung in Solo braucht Schalter,

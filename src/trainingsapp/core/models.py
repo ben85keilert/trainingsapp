@@ -543,6 +543,10 @@ class PlanItem:
     #: und Medien (Videos, Bilder, Links); aus dem Paketplan oder selbst geschrieben
     description: str = ""
     media: list[Media] = field(default_factory=list)
+    #: Die Marke, an der ein Kurs seine Planübung im Kursplan wiederfindet (Migration 064,
+    #: `core/kursplan.py`): die Block-ID des Bausteins, bei einer Auswahl ``<block>:<übung>``,
+    #: in der Grundlage ``g:<n>`` — leer = keine (selbst hinzugefügt, jeder andere Plan)
+    kurs_marke: str = ""
 
 
 @dataclass(slots=True)
@@ -567,6 +571,11 @@ class Plan:
     #: ``None`` = der laufende Plan. Nur gelesen — gesetzt von `KursRepo.zuruecksetzen`,
     #: `PlanRepo.speichern` fasst die Spalte nicht an
     kurs_durchlauf_beendet: datetime | None = None
+    #: Der Kurs, dessen **Kursplan** dieser Plan ist (Migration 064, Ben 16.11.2026,
+    #: `core/kursplan.py`): ein Plan, der über die Kapitel wächst — seine Herkunft ist der Kurs,
+    #: nicht ein Kapitel. ``None`` = kein Kursplan. Nur gelesen wie `kurs_durchlauf_beendet` —
+    #: gesetzt von `PlanRepo.kurs_setzen`, `PlanRepo.speichern` fasst die Spalte nicht an
+    kurs_id: str | None = None
     #: Regel für den Vorschlag nach der Belastung (Ben, 12.11.2026, `core.anpassung.Regel.
     #: als_dict`) — ``None`` = keine. Kommt aus dem Kurs oder Paket
     anpassung: dict[str, Any] | None = None

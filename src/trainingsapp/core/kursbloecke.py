@@ -17,6 +17,23 @@ erst mit „Plan anlegen“ (`braucht_eingabe`, `vorlage_anwenden`). Gerechnet w
 **Einträgen und der eigenen Wahl**, nie aus Messwerten (`docs/recht/00_zweckbestimmung.md`).
 Ein Kapitel ohne Blöcke zeigt Text und Medien wie bisher (`bloecke_von`).
 
+**Bausteine** (Ben, 16.11.2026, `docs/plan_kurs_ablauf.md` §11.2) sind Blöcke, die man nicht
+liest, sondern die den **Kursplan** ändern — den einen Plan, den ein Kurs mit `Kurs.kursplan`
+über die Kapitel baut:
+
+- ``plan_uebung`` — eine Übung kommt in den Plan: eine feste (``uebung``) oder „die gewählte“
+  einer Auswahl (``aus``), hinter eine Planübung (``hinter``) oder ans Ende, wahlweise mit Ziel
+  (``ziel`` oder aus einem Test: ``ziel_aus`` × ``faktor``), Parametern, Timer, Takt;
+- ``plan_einstellen`` — Ziel, Parameter, Timer, Takt an einer Planübung (``an``) oder Timer,
+  Takt, Übergang (nur die Vorgabe) und „Pause ohne Timer“ am Plan selbst;
+- ``plan_weg`` — ein Weg im Ablauf von einer Planübung zu einer anderen oder zum Ende, mit
+  Auslöser und Pflicht (``kante``).
+
+Bausteine nennen Planübungen über **Marken**: die Block-ID des Bausteins, der sie angelegt
+hat, oder ``g:<n>`` für die n-te Planübung der Grundlage. Was aus ihnen wird — die Zeilen
+„Das ändert sich an deinem Plan“ —, rechnet `core/kursplan.py`. In einem Kurs ohne Kursplan
+tun sie nichts.
+
 Dieses Modul kennt kein flet und keine Datenbank.
 """
 
@@ -29,6 +46,8 @@ from typing import Any, Final
 
 from . import ablauf as ab
 from .models import Media, medium_aus_dict, new_id
+from .takt import AUS, Takt
+from .timer import TimerProfil, ohne_verweise
 
 TEXT: Final = "text"
 MEDIUM: Final = "medium"
@@ -42,6 +61,22 @@ ARTEN: Final[dict[str, str]] = {
     TEST: "Test",
     AUSWAHL: "Auswahl",
 }
+PLAN_UEBUNG: Final = "plan_uebung"
+PLAN_EINSTELLEN: Final = "plan_einstellen"
+PLAN_WEG: Final = "plan_weg"
+#: Die Bausteine — Blöcke, die den Kursplan ändern. Eine eigene Liste neben `ARTEN`: Jene sind,
+#: was man im Kapitel liest und tut, diese, was sich am Plan ändert (Kurs-Editor: „Im Kapitel“
+#: und „Am Plan“)
+BAUSTEINE: Final[dict[str, str]] = {
+    PLAN_UEBUNG: "Übung dazu",
+    PLAN_EINSTELLEN: "Einstellen",
+    PLAN_WEG: "Weg",
+}
+#: ``plan_weg``: das Ziel „Ende des Plans“ statt einer Marke
+ZU_ENDE: Final = "ende"
+#: ``plan_einstellen``: die Vorgabe des Übergangs im Workout
+HART: Final = "hart"
+WEICH: Final = "weich"
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +120,35 @@ class Block:
     nach: int = 0
     #: ``test``, ``auswahl``: der Name des Kapitelplans — leer = der erste
     plan: str = ""
+    # -- Bausteine am Kursplan (``plan_uebung``, ``plan_einstellen``, ``plan_weg``) ------------
+    #: ``plan_uebung``: statt ``uebung`` die Block-ID einer Auswahl — „die gewählte(n)“
+    aus: str = ""
+    #: ``plan_uebung``: hinter welche Planübung (Marke) — leer = ans Ende
+    hinter: str = ""
+    #: ``plan_einstellen``: an welcher Planübung (Marke) — leer = am Plan selbst
+    an: str = ""
+    #: ``plan_uebung``, ``plan_einstellen``: das Ziel (Feld → Wert) — leer = keine Angabe …
+    ziel: dict[str, Any] = field(default_factory=dict)
+    #: … oder die Block-ID eines Tests: das Ziel ist sein Wert × ``faktor``, im Feld des Tests
+    ziel_aus: str = ""
+    #: angebotene Parameter (Feldschlüssel) — ``None`` = keine Angabe, ``[]`` = nur abhaken
+    felder: list[str] | None = None
+    #: Timer wie `core.timer.TimerProfil.als_dict` (eingebettet, ohne Verweis) — leer = keine
+    #: Angabe. An der Planübung wird er ihr eigener Timer, am Plan der „für alle Übungen“
+    timer: dict[str, Any] = field(default_factory=dict)
+    #: Takt — ``None`` = keine Angabe, der leere Takt (`core.takt.AUS`) = ausdrücklich keiner
+    takt: Takt | None = None
+    #: ``plan_einstellen``: die Vorgabe des Übergangs im Workout, `HART` oder `WEICH` — leer =
+    #: keine Angabe. Nur die Vorgabe: Umschalten kann die Person jederzeit
+    uebergang: str = ""
+    #: ``plan_einstellen``: „Pause nach Übungen ohne Timer“ — ``None`` = keine Angabe
+    pause_ohne_timer: bool | None = None
+    #: ``plan_weg``: von welcher Planübung zu welcher (Marken) — ``zu`` auch `ZU_ENDE`
+    von: str = ""
+    zu: str = ""
+    #: ``plan_weg``: Auslöser, Pflicht, „von selbst“, Beschriftung — wie
+    #: `core.ablauf.Kante.als_dict` ohne ``von`` und ``nach``; leer = ein freier Weg
+    kante: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Wie im Paket (`kapitel[].bloecke[]`) — nur, was zur Art gehört.
@@ -93,6 +157,10 @@ class Block:
         {'art': 'text', 'id': 'b1', 'titel': 'Warum?', 'text': 'Darum.'}
         >>> Block(TEST, id="b2", uebung="u1", faktor=0.8).to_dict()
         {'art': 'test', 'id': 'b2', 'uebung': 'u1', 'feld': 'hold', 'faktor': 0.8}
+        >>> Block(PLAN_UEBUNG, id="b3", aus="b1", hinter="g:1", ziel_aus="b2").to_dict()
+        {'art': 'plan_uebung', 'id': 'b3', 'aus': 'b1', 'hinter': 'g:1', 'ziel_aus': 'b2'}
+        >>> Block(PLAN_WEG, id="b4", von="g:1", zu="b3", kante={"ausloeser": "zeit"}).to_dict()
+        {'art': 'plan_weg', 'id': 'b4', 'von': 'g:1', 'zu': 'b3', 'kante': {'ausloeser': 'zeit'}}
         """
         d: dict[str, Any] = {"art": self.art, "id": self.id}
         if self.titel:
@@ -115,6 +183,37 @@ class Block:
                 d["nach"] = self.nach
         if self.art in (TEST, AUSWAHL) and self.plan:
             d["plan"] = self.plan
+        if self.art == PLAN_UEBUNG:
+            if self.aus:
+                d["aus"] = self.aus
+            else:
+                d["uebung"] = self.uebung
+            if self.hinter:
+                d["hinter"] = self.hinter
+        if self.art == PLAN_EINSTELLEN and self.an:
+            d["an"] = self.an
+        if self.art in (PLAN_UEBUNG, PLAN_EINSTELLEN):
+            if self.ziel_aus:
+                d["ziel_aus"] = self.ziel_aus
+                if self.faktor != 1.0:
+                    d["faktor"] = self.faktor
+            elif self.ziel:
+                d["ziel"] = dict(self.ziel)
+            if self.felder is not None:
+                d["felder"] = list(self.felder)
+            if self.timer:
+                d["timer"] = dict(self.timer)
+            if self.takt is not None:
+                d["takt"] = {} if self.takt.leer else self.takt.als_dict()
+        if self.art == PLAN_EINSTELLEN:
+            if self.uebergang:
+                d["uebergang"] = self.uebergang
+            if self.pause_ohne_timer is not None:
+                d["pause_ohne_timer"] = self.pause_ohne_timer
+        if self.art == PLAN_WEG:
+            d["von"], d["zu"] = self.von, self.zu
+            if self.kante:
+                d["kante"] = dict(self.kante)
         return d
 
     @classmethod
@@ -133,9 +232,28 @@ class Block:
         'u1'
         >>> Block.from_dict({"art": "test"}) is None
         True
+
+        Bausteine: Die Übung kommt wie beim Test über ihren Paketschlüssel; ein Baustein, der
+        nichts ändern könnte, fällt weg.
+
+        >>> b = Block.from_dict({"art": "plan_uebung", "id": "p", "uebung": "planke",
+        ...                      "ziel": {"hold": 60}}, {"planke": "u1"})
+        >>> b.uebung, b.ziel, b.hinter
+        ('u1', {'hold': 60}, '')
+        >>> Block.from_dict({"art": "plan_uebung"}) is None
+        True
+        >>> e = Block.from_dict({"art": "plan_einstellen", "uebergang": "Hart", "takt": {}})
+        >>> e.an, e.uebergang, e.takt.leer
+        ('', 'hart', True)
+        >>> Block.from_dict({"art": "plan_einstellen", "an": "p"}) is None
+        True
+        >>> w = Block.from_dict({"art": "plan_weg", "von": "p", "zu": "Ende",
+        ...                      "kante": {"ausloeser": "zeit", "pflicht": 1, "von": "x"}})
+        >>> w.zu, w.kante
+        ('ende', {'ausloeser': 'zeit', 'pflicht': True})
         """
         art = str(roh.get("art") or "")
-        if art not in ARTEN:
+        if art not in ARTEN and art not in BAUSTEINE:
             return None
         zu_id = schluessel or {}
         block = cls(
@@ -177,7 +295,58 @@ class Block:
                 return None
             block.anzahl = int(_zahl(roh.get("anzahl"), 1, 1, len(block.uebungen)))
             block.nach = int(_zahl(roh.get("nach"), 0, 0, 999))
+        if art == PLAN_UEBUNG:
+            block.aus = _marke(roh.get("aus"))
+            uebung = str(roh.get("uebung") or "").strip()
+            block.uebung = "" if block.aus else zu_id.get(uebung, uebung)
+            block.hinter = _marke(roh.get("hinter"))
+            if not block.aus and not block.uebung:
+                return None
+        if art == PLAN_EINSTELLEN:
+            block.an = _marke(roh.get("an"))
+            uebergang = str(roh.get("uebergang") or "").strip().lower()
+            block.uebergang = uebergang if uebergang in (HART, WEICH) else ""
+            pause = roh.get("pause_ohne_timer")
+            block.pause_ohne_timer = pause if isinstance(pause, bool) else None
+        if art in (PLAN_UEBUNG, PLAN_EINSTELLEN):
+            block.ziel_aus = _marke(roh.get("ziel_aus"))
+            ziel = roh.get("ziel")
+            if isinstance(ziel, Mapping) and not block.ziel_aus:
+                block.ziel = {str(k): v for k, v in ziel.items()}
+            block.faktor = _zahl(roh.get("faktor"), 1.0, 0.1, 3.0)
+            felder = roh.get("felder")
+            block.felder = [str(k) for k in felder] if isinstance(felder, list) else None
+            block.timer = _timer_lesen(roh.get("timer"), block.id)
+            block.takt = _takt_lesen(roh.get("takt"))
+        if art == PLAN_EINSTELLEN and not block.stellt_ein:
+            return None
+        if art == PLAN_WEG:
+            block.von = _marke(roh.get("von"))
+            zu = _marke(roh.get("zu"))
+            block.zu = ZU_ENDE if zu.lower() == ZU_ENDE else zu
+            if not block.von or not block.zu:
+                return None
+            block.kante = _kante_lesen(roh.get("kante"))
         return block
+
+    @property
+    def baustein(self) -> bool:
+        """Ein Block, der den Kursplan ändert (`BAUSTEINE`)."""
+        return self.art in BAUSTEINE
+
+    @property
+    def stellt_ein(self) -> bool:
+        """Trägt der Baustein eine Angabe zu Ziel, Parametern, Timer, Takt, Übergang oder
+        Pause? Ein ``plan_einstellen`` ohne eine davon gibt es nicht."""
+        return bool(
+            self.ziel
+            or self.ziel_aus
+            or self.felder is not None
+            or self.timer
+            or self.takt is not None
+            or self.uebergang
+            or self.pause_ohne_timer is not None
+        )
 
 
 def _zahl(roh: Any, vorgabe: float, unten: float, oben: float) -> float:
@@ -188,6 +357,59 @@ def _zahl(roh: Any, vorgabe: float, unten: float, oben: float) -> float:
     if not math.isfinite(wert):
         return vorgabe
     return min(max(wert, unten), oben)
+
+
+def _marke(roh: Any) -> str:
+    """Eine Marke oder Block-ID aus dem Paket — Text ohne Rand, alles andere ist keine."""
+    return str(roh).strip() if isinstance(roh, str | int) and not isinstance(roh, bool) else ""
+
+
+def _timer_lesen(roh: Any, block_id: str) -> dict[str, Any]:
+    """Der Timer eines Bausteins in der Form von `TimerProfil.als_dict` — ohne Verweis in die
+    Bibliothek (ein Paket kennt sie nicht), Unbrauchbares ist keine Angabe. Fehlt die ID,
+    kommt sie aus der Block-ID: Dasselbe Paket ergibt bei jedem Lesen denselben Timer.
+
+    >>> t = _timer_lesen({"name": "Runden", "runden": 3,
+    ...                   "abschnitte": [{"name": "Üben", "dauer_s": 40}]}, "b1")
+    >>> t["id"], t["runden"], _timer_lesen({"name": "leer"}, "b1"), _timer_lesen(7, "b1")
+    ('kurs-b1', 3, {}, {})
+    """
+    if not isinstance(roh, Mapping) or not roh:
+        return {}
+    d = ohne_verweise(dict(roh))
+    if not d.get("id"):
+        d["id"] = f"kurs-{block_id}"
+    profil = TimerProfil.aus_dict(d)
+    return profil.als_dict() if profil is not None else {}
+
+
+def _takt_lesen(roh: Any) -> Takt | None:
+    """Der Takt eines Bausteins: keine Tabelle oder keine brauchbare Phase = keine Angabe,
+    ``{}`` = ausdrücklich keiner (`AUS`) — wie an der Planübung einer Vorlage.
+
+    >>> _takt_lesen(None), _takt_lesen({"phasen": []}), _takt_lesen({}) is AUS
+    (None, None, True)
+    """
+    if not isinstance(roh, Mapping):
+        return None
+    return Takt.aus_dict(roh) if roh else AUS
+
+
+def _kante_lesen(roh: Any) -> dict[str, Any]:
+    """Die Kante eines Wegs, gelesen wie jede Kante (`core.ablauf.Kante.aus_dict`) und ohne
+    ``von``/``nach`` — die kommen erst im Plan dazu. Unbekanntes gilt als freier Weg.
+
+    >>> _kante_lesen({"ausloeser": "wdh", "n": "12", "text": " weiter "})
+    {'ausloeser': 'wdh', 'n': 12, 'text': 'weiter'}
+    >>> _kante_lesen({"ausloeser": "tanz"}), _kante_lesen("x")
+    ({}, {})
+    """
+    if not isinstance(roh, Mapping):
+        return {}
+    kante = ab.Kante.aus_dict({**roh, "von": "von", "nach": "nach"})
+    if kante is None:
+        return {}
+    return {k: v for k, v in kante.als_dict().items() if k not in ("von", "nach")}
 
 
 def bloecke_lesen(roh: Any, schluessel: Mapping[str, str] | None = None) -> list[Block]:
@@ -356,10 +578,17 @@ def _wege(anzahl: int, stelle: int, wege: int) -> dict[str, Any]:
 __all__ = [
     "ARTEN",
     "AUSWAHL",
+    "BAUSTEINE",
     "FRAGE",
+    "HART",
     "MEDIUM",
+    "PLAN_EINSTELLEN",
+    "PLAN_UEBUNG",
+    "PLAN_WEG",
     "TEST",
     "TEXT",
+    "WEICH",
+    "ZU_ENDE",
     "Antwort",
     "Block",
     "bloecke_lesen",

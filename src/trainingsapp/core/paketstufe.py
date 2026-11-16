@@ -7,11 +7,15 @@ der neuen Datei:
 
 - **groß** (X): etwas fällt weg — eine Übung, ein Kurs, ein Kapitel, ein Plan, eine Ergänzung —,
   ein Kapitel wird dazwischengeschoben oder wandert, eine Kapitelbedingung oder die
-  Freischaltung eines Kurses ändert sich (der Fortschritt hängt daran).
+  Freischaltung eines Kurses ändert sich (der Fortschritt hängt daran), ein Kurs bekommt oder
+  verliert seinen Kursplan (`core/kursplan.py` — die Bedingung „Tage“ zählt dann andere
+  Übungen).
 - **mittel** (Y): etwas kommt dazu (Übung, Kurs, Kapitel am Ende, Plan, Ergänzung), Texte,
-  Medien, andere Felder der Eingabe, Pläne.
+  Medien, andere Felder der Eingabe, Pläne, die Blöcke eines Kapitels (auch die Bausteine am
+  Kursplan — sie gelten ohnehin erst auf Tipp).
 - **klein** (Z): nur Vorgaben — Chips und Grenzen der Eingabe, Ziel, Timer, Uhr, Symbol, Typen,
-  Regionen, Sensor-Karte, Takt, Plan-Vorlagen eines Kapitels.
+  Regionen, Sensor-Karte, Takt, Plan-Vorlagen eines Kapitels, Name, Wochentage und Grundlage
+  eines Kursplans (ein Kursplan, den es schon gibt, bleibt, wie er ist).
 
 Die höchste Stufe zählt. Eine falsche Nummer richtet so nichts an; das Werkzeug hält sie
 ehrlich (`version_reicht`, ``trainingsapp-paket pruefen --gegen``). Was die Person geändert
@@ -27,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final
 
 from .eigenes_paket import GROSS, KLEIN, MITTEL, naechste_version
+from .kursbloecke import BAUSTEINE
 from .pakete import FELDNAMEN, Paketinhalt, kurs_stand, plan_stand, stand
 from .paketversion import AUTO, MANUELL, version_teile, version_text
 
@@ -104,10 +109,62 @@ def uebung_stufe(alt: Mapping[str, Any], neu: Mapping[str, Any], name: str, s: S
             s.dazu(KLEIN, f"„{name}“: {FELDNAMEN.get(feld, feld)}")
 
 
+def _bloecke(kapitel: Mapping[str, Any]) -> list[Any]:
+    """Die Blöcke eines Kapitels zum Vergleichen — ohne die ``id`` der Blöcke, die keine
+    Bausteine sind: Fehlt sie im Paket, vergibt der Leser bei jedem Lesen eine neue
+    (`core.kursbloecke.Block.from_dict`), und dasselbe Paket gälte sonst jedes Mal als
+    geändert. Die ``id`` eines Bausteins zählt — sie ist die Marke seiner Planübung, und das
+    Werkzeug verlangt eine feste.
+
+    >>> a = {"bloecke": [{"art": "text", "id": "x1", "text": "Hallo"}]}
+    >>> b = {"bloecke": [{"art": "text", "id": "y2", "text": "Hallo"}]}
+    >>> _bloecke(a) == _bloecke(b), _bloecke({})
+    (True, [])
+    >>> _bloecke({"bloecke": [{"art": "plan_uebung", "id": "a", "uebung": "u1"}]})
+    [{'art': 'plan_uebung', 'id': 'a', 'uebung': 'u1'}]
+    """
+    return [
+        {k: v for k, v in b.items() if k != "id" or b.get("art") in BAUSTEINE}
+        if isinstance(b, Mapping)
+        else b
+        for b in kapitel.get("bloecke") or []
+    ]
+
+
 def _kurs_stufe(alt: Mapping[str, Any], neu: Mapping[str, Any], s: Stufe) -> None:
+    """Was sich an einem Kurs geändert hat (Paketstände wie `core.pakete.kurs_stand`).
+
+    Kursplan und Blöcke zählen mit (16.11.2026) — vorher galt ein Update, das nur sie änderte,
+    als „unverändert“: `trainingsapp-paket pruefen --gegen` verlangte keine neue Nummer, und
+    kein Gerät hätte es je geholt.
+
+    >>> kap = {"id": "k1", "titel": "Eins", "bedingung": {"art": "gelesen"}}
+    >>> alt = {"name": "Rumpf", "kapitel": [kap]}
+    >>> s = Stufe()
+    >>> _kurs_stufe(alt, {**alt, "kursplan": {"name": "Rumpf"}}, s); s.stufe, s.gruende
+    ('gross', ['Kurs „Rumpf“: baut jetzt einen Plan'])
+    >>> s = Stufe()
+    >>> stein = {"art": "plan_uebung", "id": "a", "uebung": "u1"}
+    >>> _kurs_stufe(alt, {"name": "Rumpf", "kapitel": [{**kap, "bloecke": [stein]}]}, s)
+    >>> s.stufe, s.gruende
+    ('mittel', ['Kurs „Rumpf“, Kapitel „Eins“: Blöcke'])
+    >>> s = Stufe()
+    >>> mit = {**alt, "kursplan": {"name": "Rumpf"}}
+    >>> _kurs_stufe(mit, {**alt, "kursplan": {"name": "Rumpf", "grundlage": "basis"}}, s); s.stufe
+    'klein'
+    """
     name = str(neu.get("name") or alt.get("name") or "Kurs")
     if alt.get("freischaltung") != neu.get("freischaltung"):
         s.dazu(GROSS, f"Kurs „{name}“: Freischaltung")
+    alt_plan, neu_plan = alt.get("kursplan"), neu.get("kursplan")
+    if (alt_plan is None) != (neu_plan is None):
+        # Kapitelpläne ↔ Kursplan: Die Bedingung „Tage“ zählt danach andere Übungen
+        # (`KursRepo.stand`), und die Bausteine der Kapitel gelten bzw. ruhen
+        wie = "baut jetzt einen Plan" if alt_plan is None else "baut keinen Plan mehr"
+        s.dazu(GROSS, f"Kurs „{name}“: {wie}")
+    elif alt_plan != neu_plan:
+        # wie die Plan-Vorlagen eines Kapitels: Den Kursplan, den es schon gibt, ändert es nicht
+        s.dazu(KLEIN, f"Kurs „{name}“: Kursplan (Name, Wochentage oder Grundlage)")
     alt_kap = {k["id"]: k for k in alt.get("kapitel") or []}
     neu_kap = {k["id"]: k for k in neu.get("kapitel") or []}
     alt_folge = [k for k in (x["id"] for x in alt.get("kapitel") or []) if k in neu_kap]
@@ -132,6 +189,8 @@ def _kurs_stufe(alt: Mapping[str, Any], neu: Mapping[str, Any], s: Stufe) -> Non
         for feld, wort in (("titel", "Titel"), ("text", "Text"), ("media", "Medien")):
             if a.get(feld) != n.get(feld):
                 s.dazu(MITTEL, f"Kurs „{name}“, Kapitel „{titel}“: {wort}")
+        if _bloecke(a) != _bloecke(n):
+            s.dazu(MITTEL, f"Kurs „{name}“, Kapitel „{titel}“: Blöcke")
         if a.get("plaene") != n.get("plaene"):
             s.dazu(KLEIN, f"Kurs „{name}“, Kapitel „{titel}“: Plan-Vorlagen")
     for feld, wort in (("name", "Name"), ("beschreibung", "Beschreibung")):

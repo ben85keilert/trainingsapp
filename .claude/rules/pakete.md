@@ -66,7 +66,12 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   (`paketquelle.stand_url`), eine ZIP ohne Standdatei lädt nur „Jetzt prüfen“; große Pakete
   aus dem Netz gehen über eine Datei in `Import/`, nie durch den Arbeitsspeicher, und wie der
   Klartext eines privaten Pakets liegen sie dort nur, bis die Rückfrage zu ist
-  (`Paketinhalt.raeumen`). Paketmanager: Jede
+  (`Paketinhalt.raeumen`). **Kursplan im Paket** (Ben, 16.11.2026, Formatversion 6 — nur
+  für Pakete, die ihn nutzen; `core.pakete.noetige_version`): `kurse[].kursplan` und die
+  Blöcke `plan_uebung` · `plan_einstellen` · `plan_weg`; **Bausteine brauchen eine feste
+  `id`** (sie ist die Marke der Planübung), Verweise zeigen nur auf Bausteine davor —
+  `trainingsapp-paket pruefen` (`kursplan_pruefen`) meldet es; eine ältere App lehnt das Paket
+  ab (`docs/uebungspakete.md` „Kursplan und Bausteine“). Paketmanager: Jede
   Paketübung trägt ihren Paketstand (`package_standard_json`) für „Auf Paketstand setzen“;
   Entfernen legt die Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück;
   **Deaktivieren** (Migration 017) versteckt alles, ohne zu löschen; was beim Update aus

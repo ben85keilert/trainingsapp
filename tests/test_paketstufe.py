@@ -5,6 +5,7 @@ ehrlich (`trainingsapp-paket pruefen --gegen`)."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from trainingsapp.core.pakete import paket_lesen
 from trainingsapp.core.paketstufe import GROSS, KEINE, KLEIN, MITTEL, automatisch, stufe
@@ -58,6 +59,48 @@ def test_kapitel_am_ende_mittel_dazwischen_und_bedingung_gross() -> None:
     assert _stufe(alt, _paket(kurse=[kurs(a1, {**b1, "text": "neu"})]))[0] == MITTEL
 
 
+def test_kursplan_und_bloecke_zaehlen() -> None:
+    """Ein Update, das nur den Kursplan oder die Blöcke eines Kapitels ändert, galt bis zum
+    16.11.2026 als „unverändert“ — das Werkzeug verlangte keine neue Nummer, kein Gerät hätte
+    es geholt. Kursplan dazu oder weg ist groß (die Bedingung „Tage“ zählt dann andere
+    Übungen), seine Angaben klein (wie Plan-Vorlagen), Blöcke mittel (wie Text und Medien)."""
+    ex = [{"key": "planke", "name": "Planke", "description": "x"}]
+
+    def paket(kursplan: dict | None = None, bloecke: list[dict] | None = None) -> dict:
+        kapitel: dict = {"key": "eins", "titel": "Eins"}
+        if bloecke is not None:
+            kapitel["bloecke"] = bloecke
+        kurs: dict = {"key": "k", "name": "K", "kapitel": [kapitel]}
+        if kursplan is not None:
+            kurs["kursplan"] = kursplan
+        return _paket(exercises=ex, kurse=[kurs])
+
+    stein = {"art": "plan_uebung", "id": "a", "uebung": "planke"}
+    assert _stufe(paket(), paket({"name": "Rumpf"})) == (GROSS, ["Kurs „K“: baut jetzt einen Plan"])
+    assert _stufe(paket({"name": "Rumpf"}), paket()) == (
+        GROSS,
+        ["Kurs „K“: baut keinen Plan mehr"],
+    )
+    assert _stufe(paket({"name": "Rumpf"}), paket({"name": "Rumpf", "wochentage": [0, 2]})) == (
+        KLEIN,
+        ["Kurs „K“: Kursplan (Name, Wochentage oder Grundlage)"],
+    )
+    assert _stufe(paket({"name": "Rumpf"}), paket({"name": "Rumpf"}, [stein])) == (
+        MITTEL,
+        ["Kurs „K“, Kapitel „Eins“: Blöcke"],
+    )
+    ziel = {**stein, "ziel": {"hold": [60]}}
+    assert _stufe(paket({}, [stein]), paket({}, [ziel]))[0] == MITTEL
+    text = [{"art": "text", "id": "t", "text": "Hallo"}]
+    assert _stufe(paket(), paket(bloecke=text))[0] == MITTEL  # auch ohne Kursplan
+    assert _stufe(paket({}, [stein]), paket({}, [stein])) == (KEINE, [])
+    # Ein Block ohne `id` bekommt bei jedem Lesen eine neue — dasselbe Paket bleibt dasselbe;
+    # die `id` eines Bausteins dagegen ist seine Marke im Plan
+    ohne_id = [{"art": "text", "text": "Hallo"}, stein]
+    assert _stufe(paket({}, ohne_id), paket({}, ohne_id)) == (KEINE, [])
+    assert _stufe(paket({}, [stein]), paket({}, [{**stein, "id": "b"}]))[0] == MITTEL
+
+
 def test_plaene_und_ergaenzungen() -> None:
     ex = [{"key": "a", "name": "A", "description": "x"}]
     plan = {"key": "p", "name": "P", "uebungen": [{"uebung": "a"}]}
@@ -106,3 +149,32 @@ def test_werkzeug_prueft_gegen_die_veroeffentlichte_fassung(tmp_path) -> None:
     schreiben("2.0.0", [baum])
     fehler, hinweise = gegen_pruefen(neu, str(alt))
     assert fehler == [] and hinweise == ["gegen 1.4.0: große Änderung („Wandsitz“ fällt weg)"]
+
+
+def test_werkzeug_verlangt_eine_neue_nummer_wenn_nur_ein_baustein_dazukommt(tmp_path) -> None:
+    from trainingsapp.paket_werkzeug import gegen_pruefen
+
+    def datei(name: str, version: str, bloecke: list[dict]) -> str:
+        kurs = {
+            "key": "k",
+            "name": "K",
+            "kursplan": {"name": "Rumpf"},
+            "kapitel": [{"key": "eins", "titel": "Eins", "bloecke": bloecke}],
+        }
+        roh = _paket(
+            version=version,
+            exercises=[{"key": "planke", "name": "Planke", "description": "x"}],
+            kurse=[kurs],
+        )
+        pfad = tmp_path / name
+        pfad.write_text(json.dumps(roh), "utf-8")
+        return str(pfad)
+
+    stein = {"art": "plan_uebung", "id": "a", "uebung": "planke"}
+    mehr = {"art": "plan_einstellen", "id": "b", "an": "a", "ziel": {"hold": [60]}}
+    alt = datei("alt.json", "1.0.0", [stein])
+    fehler, _ = gegen_pruefen(Path(datei("gleich.json", "1.0.0", [stein, mehr])), alt)
+    assert fehler == [
+        "mittlere Änderung (Kurs „K“, Kapitel „Eins“: Blöcke) → mindestens 1.1.0, steht 1.0.0"
+    ]
+    assert gegen_pruefen(Path(datei("neu.json", "1.1.0", [stein, mehr])), alt)[0] == []

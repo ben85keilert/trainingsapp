@@ -19,6 +19,13 @@ Regeln (Ben, 15.10.2026; `docs/plan_kurse.md`):
 - Der **Stand einer Bedingung** wird aus vorhandenen Daten gerechnet
   (`core.kurse.bedingung_stand`): Einträge seit Kapitelstart, Varianten der
   Übung zählen mit, HRV-Messungen nur nach Dauer.
+- Ein Kurs mit **Kursplan** (`Kurs.kursplan`, Migration 064, Ben 16.11.2026;
+  `docs/plan_kurs_ablauf.md` §11) baut je Profil **einen** Plan, der über die Kapitel
+  wächst (`plan.course_id`): Er entsteht beim Start aus der Grundlage oder mit dem ersten
+  Übernehmen (`kursplan_anlegen`); die Bausteine eines Kapitels werden Zeilen „Das ändert
+  sich an deinem Plan“ (`plan_aenderungen`) und gelten erst auf Tipp (`plan_uebernehmen`).
+  Abschließen deaktiviert ihn nicht; „Von vorn“ macht ihn immer zum früheren Durchlauf.
+  Die Rechnung steht in `core/kursplan.py`.
 """
 
 from __future__ import annotations
@@ -26,11 +33,18 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
-from ..core.kursbloecke import AUSWAHL, TEST, bloecke_lesen, vorlage_anwenden, wert_im_test
+from ..core.kursbloecke import (
+    AUSWAHL,
+    TEST,
+    Block,
+    bloecke_lesen,
+    vorlage_anwenden,
+    wert_im_test,
+)
 from ..core.kurse import (
     MESSUNG,
     SUMME,
@@ -39,6 +53,7 @@ from ..core.kurse import (
     Kapitel,
     Kapitelstand,
     Kurs,
+    Kursplan,
     PlanVorlage,
     Stand,
     bedingung_stand,
@@ -49,9 +64,19 @@ from ..core.kurse import (
     naechstes,
     plan_aus_vorlage,
 )
+from ..core.kursplan import (
+    Aenderung,
+    Feldsuche,
+    KursStand,
+    aenderungen,
+    anwenden,
+    grundplan,
+    grundstand,
+    wahl_im_plan,
+)
 from ..core.models import Plan, jetzt, lokaler_tag, new_id
 from ..core.pakete import PaketPlan, paketplan_aus, plan_abgleichen, plan_stand
-from ..core.result_spec import FieldType
+from ..core.result_spec import FieldSpec, FieldType
 from .db import transaktion
 from .repositories import ExerciseRepo, HrvRepo, PlanRepo, SessionRepo
 
@@ -75,12 +100,14 @@ class KursRepo:
             self.con.execute(
                 """
                 INSERT INTO course (id, name, description, unlock_mode, package_id,
-                                    package_standard_json, created_at, updated_at, deleted_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    package_standard_json, created_at, updated_at, deleted_at,
+                                    kursplan_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
                     unlock_mode = excluded.unlock_mode,
+                    kursplan_json = excluded.kursplan_json,
                     package_id = excluded.package_id,
                     package_standard_json = COALESCE(excluded.package_standard_json,
                                                      course.package_standard_json),
@@ -100,6 +127,9 @@ class KursRepo:
                     kurs.created_at.isoformat(),
                     kurs.updated_at.isoformat(),
                     kurs.deleted_at.isoformat() if kurs.deleted_at else None,
+                    None
+                    if kurs.kursplan is None
+                    else json.dumps(kurs.kursplan.als_dict(), ensure_ascii=False),
                 ),
             )
             ids = [k.id for k in kurs.kapitel]
@@ -164,7 +194,8 @@ class KursRepo:
         Kurse gelten für alle. Die Pläne bleiben bestehen: Sie stehen nicht mehr auf „Heute“
         und lassen sich in der Planliste einzeln löschen (Ben, 14.11.2026: „Pläne
         deaktivieren. Kapitelpläne müssen separat gelöscht werden“). Aktiv stünde ein Plan
-        ohne Kurs weiter als Tagesplan (K22). Fortschritt und Einträge bleiben.
+        ohne Kurs weiter als Tagesplan (K22). Fortschritt und Einträge bleiben. Dasselbe gilt
+        für den Kursplan (Migration 064).
 
         Returns:
             Wie viele Pläne (ohne die im Papierkorb) dabei deaktiviert wurden.
@@ -183,6 +214,16 @@ class KursRepo:
                     "WHERE course_chapter_id = ? AND active = 1",
                     (stempel, kapitel.id),
                 )
+            n += self.con.execute(
+                "SELECT COUNT(*) FROM plan WHERE course_id = ? AND active = 1 "
+                "AND deleted_at IS NULL",
+                (kurs.id,),
+            ).fetchone()[0]
+            self.con.execute(
+                "UPDATE plan SET active = 0, updated_at = ?, revision = revision + 1 "
+                "WHERE course_id = ? AND active = 1",
+                (stempel, kurs.id),
+            )
             self.loeschen(kurs.id)
         return n
 
@@ -269,15 +310,26 @@ class KursRepo:
         return ergebnis
 
     def starten(self, kurs: Kurs, subject_id: str) -> Kapitel | None:
-        """Beginnt den Kurs: erreicht das erste Kapitel (legt dessen Pläne an)."""
+        """Beginnt den Kurs: erreicht das erste Kapitel (legt dessen Pläne an). Ein Kurs mit
+        Kursplan legt ihn hier an, **wenn die Grundlage Übungen hat** — ein leerer Plan
+        entsteht erst mit dem ersten Übernehmen (`plan_uebernehmen`)."""
         if not kurs.kapitel:
             return None
         erstes = kurs.kapitel[0]
-        self.kapitel_erreichen(kurs, erstes, subject_id)
+        with transaktion(self.con):
+            self.kapitel_erreichen(kurs, erstes, subject_id)
+            if kurs.kursplan is not None and self.kursplan(kurs, subject_id) is None:
+                plan, stand = self._grundplan(kurs, subject_id)
+                if plan.items:
+                    self._kursplan_speichern(plan, stand)
         return erstes
 
     def kapitel_erreichen(self, kurs: Kurs, kapitel: Kapitel, subject_id: str) -> None:
-        """Merkt das Erreichen (einmal) und legt die Pläne des Kapitels an bzw. aktiviert sie."""
+        """Merkt das Erreichen (einmal) und legt die Pläne des Kapitels an bzw. aktiviert sie.
+
+        Der Kursplan (`Kurs.kursplan`) entsteht nicht hier, sondern in `starten` und
+        `plan_uebernehmen`. Hat ein Kapitel eines solchen Kurses trotzdem Plan-Vorlagen, gelten
+        sie weiter wie bisher — als Kapitelpläne neben dem Kursplan."""
         plaene = PlanRepo(self.con)
         with transaktion(self.con):
             self.con.execute(
@@ -358,7 +410,8 @@ class KursRepo:
         self, kurs: Kurs, kapitel: Kapitel, subject_id: str, uebersprungen: bool = False
     ) -> Kapitel | None:
         """Schließt ab (``uebersprungen`` = freigeschaltet, ohne die Bedingung zu erfüllen),
-        deaktiviert die Kapitelpläne und erreicht das nächste Kapitel.
+        deaktiviert die Kapitelpläne und erreicht das nächste Kapitel. Der Kursplan
+        (`Kurs.kursplan`) bleibt aktiv — er wächst mit dem nächsten Kapitel weiter.
 
         Returns:
             Das nächste Kapitel — ``None`` am Ende des Kurses.
@@ -391,6 +444,10 @@ class KursRepo:
         Auswahl neu — bis hierher holte der neue Start den alten Plan mit der alten Wahl zurück,
         die neue galt nie. Pläne aus Kapiteln ohne Test und Auswahl werden wie bisher nur
         deaktiviert und beim neuen Start wieder aktiv (kein Duplikat, `docs/plan_kurse.md` §2).
+
+        Der **Kursplan** (Migration 064) wird immer zum früheren Durchlauf — auch einer im
+        Papierkorb, damit er nach dem Zurückholen nicht neben dem neuen als laufender gilt. Der
+        neue Durchlauf beginnt wieder mit der Grundlage (`fruehere_kursplaene`).
         """
         plaene = PlanRepo(self.con)
         stempel = jetzt().isoformat()
@@ -410,18 +467,29 @@ class KursRepo:
                             "UPDATE plan SET course_run_ended_at = ? WHERE id = ?",
                             (stempel, p.id),
                         )
+            laufende = self.con.execute(
+                "SELECT id, name FROM plan WHERE course_id = ? AND subject_id = ? "
+                "AND course_run_ended_at IS NULL AND purged_at IS NULL",
+                (kurs.id, subject_id),
+            ).fetchall()
+            for r in laufende:
+                plaene.umbenennen(r["id"], durchlauf_name(r["name"], nummer))
+                plaene.aktiv_setzen(r["id"], False)
+                self.con.execute(
+                    "UPDATE plan SET course_run_ended_at = ? WHERE id = ?", (stempel, r["id"])
+                )
 
     def _naechster_durchlauf(self, kurs: Kurs, subject_id: str) -> int:
         """Die Nummer für die Pläne, die jetzt zum früheren Durchlauf werden: eins mehr als
-        die Durchläufe des Kurses, die schon Pläne hinterlassen haben."""
+        die Durchläufe des Kurses, die schon Pläne hinterlassen haben — Kapitelpläne wie
+        Kurspläne."""
         ids = [k.id for k in kurs.kapitel]
-        if not ids:
-            return 1
-        platzhalter = ",".join("?" * len(ids))
+        platzhalter = ",".join("?" * len(ids)) or "''"
         (n,) = self.con.execute(
             "SELECT COUNT(DISTINCT course_run_ended_at) FROM plan WHERE subject_id = ? "
-            f"AND course_run_ended_at IS NOT NULL AND course_chapter_id IN ({platzhalter})",
-            (subject_id, *ids),
+            "AND course_run_ended_at IS NOT NULL "
+            f"AND (course_id = ? OR course_chapter_id IN ({platzhalter}))",
+            (subject_id, kurs.id, *ids),
         ).fetchone()
         return int(n) + 1
 
@@ -463,6 +531,195 @@ class KursRepo:
             if gewaehlt:
                 ergebnis[block.id] = gewaehlt
         return ergebnis
+
+    # -- Kursplan (Migration 064, `docs/plan_kurs_ablauf.md` §11) ------------------------
+
+    def kursplan(self, kurs: Kurs, subject_id: str) -> Plan | None:
+        """Der **laufende** Kursplan des Profils — ``None``, solange es keinen gibt (auch:
+        im Papierkorb). Die aus früheren Durchläufen stehen in `fruehere_kursplaene`."""
+        plan_id = self._kursplan_id(kurs.id, subject_id)
+        return PlanRepo(self.con).laden(plan_id) if plan_id is not None else None
+
+    def _kursplan_id(self, kurs_id: str, subject_id: str) -> str | None:
+        r = self.con.execute(
+            "SELECT id FROM plan WHERE course_id = ? AND subject_id = ? AND deleted_at IS NULL "
+            "AND course_run_ended_at IS NULL ORDER BY created_at LIMIT 1",
+            (kurs_id, subject_id),
+        ).fetchone()
+        return r["id"] if r is not None else None
+
+    def fruehere_kursplaene(self, kurs_id: str, subject_id: str) -> list[Plan]:
+        """Die Kurspläne aus **früheren Durchläufen** des Kurses — der jüngste zuerst; ohne die
+        im Papierkorb. Gewöhnliche, deaktivierte Pläne wie in `fruehere_plaene`; was damals
+        gewählt war, sagt `core.kursplan.wahl_im_plan`."""
+        repo = PlanRepo(self.con)
+        ids = [
+            r["id"]
+            for r in self.con.execute(
+                "SELECT id FROM plan WHERE course_id = ? AND subject_id = ? "
+                "AND deleted_at IS NULL AND course_run_ended_at IS NOT NULL "
+                "ORDER BY course_run_ended_at DESC, created_at",
+                (kurs_id, subject_id),
+            )
+        ]
+        return [p for p in (repo.laden(i) for i in ids) if p is not None]
+
+    def kursplan_anlegen(self, kurs: Kurs, subject_id: str) -> Plan:
+        """Legt den Kursplan aus seiner Grundlage an — leer, aus der Vorlage im Kurs oder aus
+        dem Plan des Pakets (`core.kursplan.grundplan`) — und gibt ihn zurück; gibt es den
+        laufenden schon, bleibt er, wie er ist. Der Plan ist aktiv und erscheint wie jeder
+        andere; seine Herkunft ist der Kurs (`Plan.kurs_id`).
+
+        Raises:
+            ValueError: Der Kurs baut keinen Plan (`Kurs.kursplan` ist ``None``).
+        """
+        if kurs.kursplan is None:
+            raise ValueError(f"Der Kurs „{kurs.name}“ baut keinen Plan")
+        vorhanden = self.kursplan(kurs, subject_id)
+        if vorhanden is not None:
+            return vorhanden
+        plan, stand = self._grundplan(kurs, subject_id)
+        return self._kursplan_speichern(plan, stand)
+
+    def _kursplan_speichern(self, plan: Plan, stand: KursStand) -> Plan:
+        """Ein neuer Kursplan mit Herkunft und Kurs-Stand — in einer Transaktion."""
+        plaene = PlanRepo(self.con)
+        with transaktion(self.con):
+            plaene.speichern(plan)
+            plaene.kurs_setzen(plan.id, plan.kurs_id)
+            plaene.kurs_stand_setzen(plan.id, stand)
+        return plaene.laden(plan.id) or plan
+
+    def _grundplan(self, kurs: Kurs, subject_id: str) -> tuple[Plan, KursStand]:
+        """Der Kursplan, wie er aus der Grundlage entstünde, und sein Kurs-Stand — nichts
+        wird gespeichert."""
+        da = {u.id for u in ExerciseRepo(self.con).alle(mit_archivierten=True)}
+        plan = grundplan(kurs, subject_id, da, self._paketplan(kurs))
+        return plan, grundstand(plan)
+
+    def _paketplan(self, kurs: Kurs) -> PaketPlan | None:
+        """Der Plan des Pakets, den `Kursplan.grundlage` nennt — so, wie das Paket ihn zuletzt
+        mitbrachte, nicht die Fassung, die ein Profil daraus gemacht hat. ``None`` ohne
+        Schlüssel, in einem eigenen Kurs und wenn das Paket ihn nicht (mehr) hat."""
+        kursplan = kurs.kursplan
+        if kursplan is None or not kursplan.grundlage or not kurs.package_id:
+            return None
+        from .pakete import PaketRepo  # hier, weil `data.pakete` dieses Modul lädt
+
+        plaene = PaketRepo(self.con).paketplaene(kurs.package_id)
+        return next((pp for pp in plaene if pp.key == kursplan.grundlage), None)
+
+    def _kursplan_eingaben(
+        self,
+        kurs: Kurs,
+        subject_id: str,
+        plan: Plan,
+        wahl: Mapping[str, Sequence[str]] | None,
+    ) -> tuple[dict[str, float], dict[str, list[str]], dict[str, str], Feldsuche, list[Block]]:
+        """Was die Rechnung (`core.kursplan`) außer Plan und Kurs-Stand braucht: Testwerte,
+        Wahl, die Namen der Übungen, die es hier gibt, ihre Felder und alle Blöcke des Kurses
+        (ein Baustein darf sich auf Test und Auswahl eines anderen Kapitels beziehen).
+
+        Testwerte kommen wie in `testwerte` aus dem jüngsten Eintrag seit dem Erreichen des
+        Kapitels, in dem der Test steht — gewöhnliche Einträge, keine Messwerte."""
+        staende = self.staende(subject_id, kurs.id)
+        werte: dict[str, float] = {}
+        for kapitel in kurs.kapitel:
+            erreicht = staende.get(kapitel.id)
+            if erreicht is not None:
+                werte.update(self.testwerte(kapitel, subject_id, erreicht.erreicht))
+        bloecke = [b for kapitel in kurs.kapitel for b in kapitel.bloecke]
+        katalog = {u.id: u for u in ExerciseRepo(self.con).alle(mit_archivierten=True)}
+
+        def feld_von(uebung_id: str, key: str) -> FieldSpec | None:
+            uebung = katalog.get(uebung_id)
+            return uebung.result_spec.field_by_key(key) if uebung is not None else None
+
+        namen = {uid: u.name for uid, u in katalog.items()}
+        return werte, _wahl_zusammen(bloecke, plan, wahl), namen, feld_von, bloecke
+
+    def plan_aenderungen(
+        self,
+        kurs: Kurs,
+        kapitel: Kapitel,
+        subject_id: str,
+        wahl: Mapping[str, Sequence[str]] | None = None,
+    ) -> list[Aenderung]:
+        """Die Zeilen „Das ändert sich an deinem Plan“ zu den Bausteinen dieses Kapitels
+        (`core.kursplan.aenderungen`) — nichts wird geändert. Gibt es den Kursplan noch nicht,
+        wird gegen seine Grundlage gerechnet; ein Kurs ohne Kursplan hat keine Zeilen.
+
+        **Die Wahl einer Auswahl** (``wahl``: Auswahl-Block → gewählte Übungen): Was davon
+        schon im Kursplan steht, gilt — abgelesen an den Marken ``<block>:<übung>``
+        (`core.kursplan.wahl_im_plan`); eine übernommene Wahl ist fest, bis der Kurs von vorn
+        beginnt, und überlebt so jeden Neuaufbau der Ansicht. Solange nichts übernommen ist,
+        kommt sie nur als Argument: Die Oberfläche hält sie, bis die Person übernimmt —
+        gespeichert wird eine Wahl nirgends sonst. Eine unvollständige Wahl (weniger Übungen,
+        als die Auswahl verlangt) gilt als noch nicht getroffen; ist ein Teil übernommen,
+        füllt das Argument den Rest auf.
+        """
+        if kurs.kursplan is None:
+            return []
+        plan = self.kursplan(kurs, subject_id)
+        if plan is None:
+            plan, stand = self._grundplan(kurs, subject_id)
+        else:
+            stand = PlanRepo(self.con).kurs_stand(plan.id)
+        werte, gewaehlt, namen, feld_von, bloecke = self._kursplan_eingaben(
+            kurs, subject_id, plan, wahl
+        )
+        return aenderungen(
+            plan, kapitel.bloecke, werte, gewaehlt, stand, namen, feld_von, bezug=bloecke
+        )
+
+    def plan_uebernehmen(
+        self,
+        kurs: Kurs,
+        kapitel: Kapitel,
+        subject_id: str,
+        gewaehlt: Collection[str],
+        trotz: Collection[str] = (),
+        wahl: Mapping[str, Sequence[str]] | None = None,
+        lassen: Collection[str] = (),
+    ) -> Plan:
+        """„Übernehmen“: wendet die Zeilen mit den IDs in ``gewaehlt`` auf den Kursplan an
+        (`core.kursplan.anwenden`) — eine Zeile, in der der Plan abweicht, nur, wenn ihre ID
+        auch in ``trotz`` steht („Vorschlag übernehmen“). Plan und Kurs-Stand werden in einer
+        Transaktion gespeichert; den Kursplan gibt es danach in jedem Fall. ``wahl`` wie in
+        `plan_aenderungen` — beide Aufrufe brauchen dieselbe, sonst passen die IDs nicht.
+
+        ``lassen``: die Zeilen, in denen der Plan abweicht und die Person **ihren Wert lässt**
+        — der Plan bleibt, der Kurs-Stand merkt sie als erledigt, und `plan_aenderungen`
+        bietet sie nicht wieder an (bis ein späteres Kapitel etwas anderes vorschlägt).
+
+        Raises:
+            ValueError: Der Kurs baut keinen Plan.
+        """
+        plaene = PlanRepo(self.con)
+        with transaktion(self.con):
+            plan = self.kursplan_anlegen(kurs, subject_id)
+            stand = plaene.kurs_stand(plan.id)
+            werte, wahl_jetzt, namen, feld_von, bloecke = self._kursplan_eingaben(
+                kurs, subject_id, plan, wahl
+            )
+            neu, neuer_stand = anwenden(
+                plan,
+                kapitel.bloecke,
+                werte,
+                wahl_jetzt,
+                gewaehlt,
+                trotz,
+                stand,
+                namen,
+                feld_von,
+                bezug=bloecke,
+                lassen=lassen,
+            )
+            if neu != plan:
+                plaene.speichern(neu)
+            if neuer_stand != stand:
+                plaene.kurs_stand_setzen(neu.id, neuer_stand)
+        return plaene.laden(neu.id) or neu
 
     # -- Kapitelplan neu laden (U2, `docs/plan_paketinhalte.md` §9) ---------------------
 
@@ -646,8 +903,20 @@ class KursRepo:
 
     # -- Bedingung ---------------------------------------------------------
 
-    def stand(self, kapitel: Kapitel, subject_id: str, staende: dict[str, Kapitelstand]) -> Stand:
-        """Wie weit die Bedingung des Kapitels erfüllt ist — gerechnet ab Kapitelstart."""
+    def stand(
+        self,
+        kapitel: Kapitel,
+        subject_id: str,
+        staende: dict[str, Kapitelstand],
+        kurs: Kurs | None = None,
+    ) -> Stand:
+        """Wie weit die Bedingung des Kapitels erfüllt ist — gerechnet ab Kapitelstart.
+
+        Bedingung „Tage“ in einem Kurs mit Kursplan: Es zählen die Übungen des Kursplans (und
+        die der Plan-Vorlagen des Kapitels, falls es welche hat) — nicht mehr alle, die eine
+        Auswahl anbietet. Solange der Kursplan keine Übung hat, zählt nichts. ``kurs`` erspart
+        das Nachsehen, ob der Kurs einen Kursplan baut; ohne ihn sieht die Methode selbst nach.
+        """
         b: Bedingung = kapitel.bedingung
         erreicht = staende.get(kapitel.id)
         seit = erreicht.erreicht if erreicht is not None else None
@@ -663,10 +932,28 @@ class KursRepo:
             )
             return bedingung_stand(b, seit, eintraege)
         uebungen = kapitel.uebungen
+        if self._baut_kursplan(kapitel, kurs):
+            plan_id = self._kursplan_id(kapitel.kurs_id, subject_id)
+            plan = PlanRepo(self.con).laden(plan_id) if plan_id is not None else None
+            uebungen = {i.exercise_id for v in kapitel.plaene for i in v.items}
+            uebungen |= {i.exercise_id for i in plan.items} if plan is not None else set()
+            if not uebungen:
+                return Stand(0.0, float(b.soll))  # zählt, sobald der Plan steht
         eintraege = sitzungen.eintraege_zwischen(
             subject_id, lokaler_tag(seit), heute, exercise_ids=uebungen or None
         )
         return bedingung_stand(b, seit, eintraege, plan_uebungen=uebungen)
+
+    def _baut_kursplan(self, kapitel: Kapitel, kurs: Kurs | None) -> bool:
+        """Gehört das Kapitel zu einem Kurs mit Kursplan?"""
+        if kurs is not None:
+            return kurs.kursplan is not None
+        if not kapitel.kurs_id:
+            return False
+        r = self.con.execute(
+            "SELECT kursplan_json FROM course WHERE id = ?", (kapitel.kurs_id,)
+        ).fetchone()
+        return r is not None and Kursplan.aus_dict(_json(r[0], None)) is not None
 
     # -- intern --------------------------------------------------------------
 
@@ -709,11 +996,33 @@ class KursRepo:
             name=r["name"],
             beschreibung=r["description"],
             freischaltung=r["unlock_mode"],
+            kursplan=Kursplan.aus_dict(_json(r["kursplan_json"], None)),
             package_id=r["package_id"],
             created_at=datetime.fromisoformat(r["created_at"]),
             updated_at=datetime.fromisoformat(r["updated_at"]),
             deleted_at=datetime.fromisoformat(r["deleted_at"]) if r["deleted_at"] else None,
         )
+
+
+def _wahl_zusammen(
+    bloecke: Iterable[Block], plan: Plan, wahl: Mapping[str, Sequence[str]] | None
+) -> dict[str, list[str]]:
+    """Je Auswahl-Block des Kurses die Wahl, die für den Kursplan gilt: zuerst, was schon im
+    Plan steht (fest), dann — bis zur verlangten Anzahl — was die Oberfläche als ``wahl``
+    mitgibt. Eine Wahl, von der nichts im Plan steht und die nicht vollständig ist, fehlt im
+    Ergebnis: Die Bausteine dazu bleiben offen."""
+    bloecke = list(bloecke)
+    im_plan = wahl_im_plan(plan, bloecke)
+    ergebnis: dict[str, list[str]] = {}
+    for block in bloecke:
+        if block.art != AUSWAHL:
+            continue
+        fest = im_plan.get(block.id, [])
+        dazu = [u for u in (wahl or {}).get(block.id, ()) if u in block.uebungen and u not in fest]
+        gewaehlt = [*fest, *dict.fromkeys(dazu)][: max(block.anzahl, len(fest))]
+        if fest or len(gewaehlt) == block.anzahl:
+            ergebnis[block.id] = gewaehlt
+    return ergebnis
 
 
 def _json(text: str | None, fallback: Any) -> Any:

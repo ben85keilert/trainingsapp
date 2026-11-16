@@ -27,7 +27,10 @@ dem Update doppelt da.
 **Kurse** (Ben, 15.10.2026; `core/kurse.py`) kommen seit Formatversion 2 im
 Feld ``kurse`` mit: Kapitel mit Text, Medien, Plan-Vorlagen und Bedingung. Übungen
 darin heißen wie im Paket (``key``) oder tragen eine ID. Ein Paket darf auch nur
-Kurse enthalten.
+Kurse enthalten. Baut ein Kurs einen **Kursplan** (``kurse[].kursplan``, Bausteine
+``plan_uebung``, ``plan_einstellen``, ``plan_weg`` in den Kapiteln — Ben, 16.11.2026,
+`core/kursplan.py`), ist die Datei Formatversion 6 (`noetige_version`): Eine ältere App
+lehnt sie ab, statt den Kurs ohne seinen Plan zu zeigen.
 
 **Was nicht hineinkommt:** Einträge, Messungen, Strecken, eigene Pläne, der
 Kursfortschritt — ein Paket beschreibt Übungen und Kurse, nicht Training. Eigene
@@ -62,12 +65,14 @@ from .kurse import (
     Bedingung,
     Kapitel,
     Kurs,
+    Kursplan,
     PlanVorlage,
     VorlageItem,
     medien_from_list,
     medien_to_list,
     verweise_als_position,
 )
+from .kursplan import GRUNDLAGE
 from .models import Exercise, Media, MediaKind, MediaSource, Plan, jetzt, medien_zusatz
 from .paketmedien import Paketmedium, ist_paketmedium, medium_aus_paket
 from .paketversion import version_zahl
@@ -80,9 +85,10 @@ from .zaehlen import SensorWahl
 #: Kennung im Feld ``format`` — andere JSON-Dateien (Messungen) sind kein Paket
 FORMAT = "trainingsapp-uebungspaket"
 #: Höchste Formatversion, die diese App liest — 2 seit es Kurse gibt (``kurse``), 3 mit
-#: Plänen, 4 mit Dateien (ZIP, U3), 5 mit Ergänzungen (U5); eine Datei ohne Kurse wird weiter
-#: als Version 1 geschrieben
-FORMAT_VERSION = 5
+#: Plänen, 4 mit Dateien (ZIP, U3), 5 mit Ergänzungen (U5), 6 mit Kursplan und Bausteinen
+#: (``kurse[].kursplan``, ``plan_*``-Blöcke). Geschrieben wird immer die kleinste, die der
+#: Inhalt braucht (`noetige_version`): eine Datei ohne Kurse weiter als Version 1
+FORMAT_VERSION = 6
 
 #: Namensraum der UUIDv5-IDs — derselbe wie für den Seed vor den Paketen.
 #: Einmal gewählt, nie ändern, sonst bekäme jede Übung eine neue ID.
@@ -773,8 +779,28 @@ def _kurs_lesen(eintrag: Any, paket: str, schluessel: Mapping[str, str]) -> Kurs
         beschreibung=str(eintrag.get("beschreibung") or "").strip(),
         freischaltung=freischaltung,
         kapitel=kapitel,
+        kursplan=_kursplan_lesen(eintrag.get("kursplan"), schluessel),
         package_id=paket,
     )
+
+
+def _kursplan_lesen(roh: Any, schluessel: Mapping[str, str]) -> Kursplan | None:
+    """``kurse[].kursplan`` (`core.kurse.Kursplan`): Der Kurs baut einen Plan, der über die
+    Kapitel wächst — ``None`` ohne das Feld. Die Übungen einer Vorlage darin kommen wie überall
+    über ihren Paketschlüssel; eine Vorlage ohne Übung ist keine (der Plan beginnt dann leer)."""
+    if roh is None:
+        return None
+    kursplan = Kursplan.aus_dict(_objekt(roh, "kursplan"))
+    assert kursplan is not None  # ein Objekt ergibt immer einen Kursplan
+    if kursplan.vorlage is not None:
+        vorlage = kursplan.vorlage
+        vorlage.items = [i for i in vorlage.items if not i.exercise_id.startswith("$")]
+        for item in vorlage.items:
+            item.exercise_id = schluessel.get(item.exercise_id, item.exercise_id)
+            _werte_pruefen(item.target, "ziel")
+        if not vorlage.items:
+            kursplan.vorlage = None
+    return kursplan
 
 
 def _vorlage_lesen(roh: Any, schluessel: Mapping[str, str]) -> PlanVorlage:
@@ -796,7 +822,17 @@ def _vorlage_lesen(roh: Any, schluessel: Mapping[str, str]) -> PlanVorlage:
 
 def _bloecke_lesen(roh: list[Any], schluessel: Mapping[str, str]) -> list[Block]:
     """Die Blöcke eines Kapitels (`core/kursbloecke.py`) — Medien darin wie alle Medien des
-    Pakets: nur erlaubte Links und Paketdateien, nie eine Datei vom Ursprungsgerät."""
+    Pakets: nur erlaubte Links und Paketdateien, nie eine Datei vom Ursprungsgerät.
+
+    Marken der Bausteine, die eine gewählte Übung meinen (``<block>:<übung>``), nennen die
+    Übung wie überall über ihren Paketschlüssel — hier wird er zur ID, mit der die Planübung
+    im Kursplan steht (`core.kursplan`):
+
+    >>> roh = [{"art": "plan_einstellen", "id": "e", "an": "dazu:kaefer", "ziel": {"reps": 9}},
+    ...        {"art": "plan_weg", "id": "w", "von": "g:1", "zu": "dazu:kaefer"}]
+    >>> [(b.an, b.von, b.zu) for b in _bloecke_lesen(roh, {"kaefer": "u1"})]
+    [('dazu:u1', '', ''), ('', 'g:1', 'dazu:u1')]
+    """
     ergebnis: list[Block] = []
     for block in bloecke_lesen(roh, schluessel):
         if block.art == MEDIUM:
@@ -805,8 +841,26 @@ def _bloecke_lesen(roh: list[Any], schluessel: Mapping[str, str]) -> list[Block]
             if not geprueft:
                 continue
             block.medium = geprueft[0]
+        _werte_pruefen(block.ziel, "ziel")  # Baustein am Kursplan (`core.kursbloecke`)
+        if block.baustein:
+            for feld in ("hinter", "an", "von", "zu"):
+                setattr(block, feld, _marke_lesen(getattr(block, feld), schluessel))
         ergebnis.append(block)
     return ergebnis
+
+
+def _marke_lesen(marke: str, schluessel: Mapping[str, str]) -> str:
+    """Eine Marke ``<block>:<übung>`` mit der ID statt dem Paketschlüssel der Übung — alles
+    andere (Block-ID, ``g:<n>``, ``ende``, eine ID) bleibt, wie es dasteht.
+
+    >>> s = {"kaefer": "u1"}
+    >>> [_marke_lesen(m, s) for m in ("dazu:kaefer", "dazu:u9", "dazu", "g:1", "ende", "")]
+    ['dazu:u1', 'dazu:u9', 'dazu', 'g:1', 'ende', '']
+    """
+    block, trenner, uebung = marke.partition(":")
+    if not trenner or marke.startswith(GRUNDLAGE) or uebung not in schluessel:
+        return marke
+    return f"{block}:{schluessel[uebung]}"
 
 
 def _bedingung_lesen(roh: Any, schluessel: Mapping[str, str]) -> Bedingung:
@@ -1301,11 +1355,18 @@ def kurs_stand(k: Kurs) -> dict[str, Any]:
     >>> k = Kurs(name="HRV", kapitel=[Kapitel(titel="Was ist das?")])
     >>> kurs_stand(k)["kapitel"][0]["titel"]
     'Was ist das?'
+    >>> "kursplan" in kurs_stand(k)
+    False
+    >>> k.kursplan = Kursplan("Rumpf")
+    >>> kurs_stand(k)["kursplan"]
+    {'name': 'Rumpf', 'wochentage': [0, 1, 2, 3, 4, 5, 6]}
     """
     d: dict[str, Any] = {"name": k.name}
     if k.beschreibung:
         d["beschreibung"] = k.beschreibung
     d["freischaltung"] = k.freischaltung
+    if k.kursplan is not None:
+        d["kursplan"] = k.kursplan.als_dict()
     kapitel: list[dict[str, Any]] = []
     for kap in k.kapitel:
         e: dict[str, Any] = {"id": kap.id, "titel": kap.titel}
@@ -1330,6 +1391,9 @@ def kurs_aus_stand(kurs_id: str, paket: str, standard: dict[str, Any]) -> Kurs:
     >>> zurueck = kurs_aus_stand(k.id, "p1", kurs_stand(k))
     >>> (zurueck.id == k.id, zurueck.kapitel[0].id == k.kapitel[0].id, zurueck.package_id)
     (True, True, 'p1')
+    >>> k.kursplan = Kursplan("Rumpf", [0, 2], grundlage="basis")
+    >>> kurs_aus_stand(k.id, "p1", kurs_stand(k)).kursplan == k.kursplan
+    True
     """
     return _kurs_lesen({**standard, "id": kurs_id}, paket, {})
 
@@ -1341,15 +1405,21 @@ def paketmedien_in(
     ergaenzungen: Iterable[Ergaenzung] = (),
 ) -> set[str]:
     """Die Paketdateien (``medien/<sha256>.<endung>``), die Übungen, Kapitel und Planübungen
-    nennen — auch die Planübungen in Kapiteln.
+    nennen — auch die Planübungen in Kapiteln und in der Vorlage eines Kursplans.
 
     >>> u = Exercise(media=[Media(source=MediaSource.PAKET, uri="medien/" + "a" * 64 + ".mp4")])
     >>> [n[-8:] for n in paketmedien_in([u])]
+    ['aaaa.mp4']
+    >>> v = PlanVorlage("Basis", items=[VorlageItem("a", medien=list(u.media))])
+    >>> k = Kurs(name="K", kapitel=[Kapitel(titel="A")], kursplan=Kursplan(vorlage=v))
+    >>> [n[-8:] for n in paketmedien_in([], [k])]
     ['aaaa.mp4']
     """
     medien: list[Media] = [m for u in uebungen for m in u.media]
     vorlagen: list[PlanVorlage] = [p.vorlage for p in plaene]
     for k in kurse:
+        if k.kursplan is not None and k.kursplan.vorlage is not None:
+            vorlagen.append(k.kursplan.vorlage)
         for kap in k.kapitel:
             medien.extend(kap.media)
             medien.extend(b.medium for b in kap.bloecke if b.medium is not None)
@@ -1367,6 +1437,53 @@ def paketmedien_in(
     return namen
 
 
+def nutzt_kursplan(kurs: Kurs) -> bool:
+    """Nutzt der Kurs, was es erst seit Formatversion 6 gibt — einen Kursplan
+    (``kurse[].kursplan``) oder einen Baustein (``plan_*``-Block, `core.kursbloecke`)?
+
+    >>> nutzt_kursplan(Kurs(name="K", kapitel=[Kapitel(titel="A", bloecke=[Block("text")])]))
+    False
+    >>> nutzt_kursplan(Kurs(name="K", kursplan=Kursplan()))
+    True
+    >>> stein = Block("plan_uebung", id="a", uebung="u1")
+    >>> nutzt_kursplan(Kurs(name="K", kapitel=[Kapitel(titel="A", bloecke=[stein])]))
+    True
+    """
+    return kurs.kursplan is not None or any(b.baustein for kap in kurs.kapitel for b in kap.bloecke)
+
+
+def noetige_version(
+    uebungen: Iterable[Exercise] = (),
+    kurse: Iterable[Kurs] = (),
+    plaene: Iterable[PaketPlan] = (),
+    ergaenzungen: Iterable[Ergaenzung] = (),
+) -> int:
+    """Die kleinste Formatversion, die dieser Inhalt braucht — mit ihr wird die Datei
+    geschrieben, damit ältere Apps alles weiter lesen, was sie verstehen: 1 nur Übungen ·
+    2 Kurse · 3 Pläne · 4 Dateien aus dem Paket (ZIP, U3) · 5 Ergänzungen (U5) · 6 ein Kurs
+    mit Kursplan oder Bausteinen (`nutzt_kursplan`). Das Höchste zählt.
+
+    Version 6 ist mit Absicht eine Schranke: Eine App, die den Kursplan nicht kennt, zeigte
+    den Kurs sonst ohne seinen Plan — sie lehnt die Datei ab („… neuer als diese App“,
+    `paket_lesen`).
+
+    >>> k = Kurs(name="HRV", kapitel=[Kapitel(titel="A")])
+    >>> noetige_version(), noetige_version(kurse=[k])
+    (1, 2)
+    >>> k.kursplan = Kursplan("Rumpf")
+    >>> noetige_version(kurse=[k]), noetige_version(kurse=[k]) <= FORMAT_VERSION
+    (6, True)
+    """
+    kurse, plaene = list(kurse), list(plaene)
+    if any(nutzt_kursplan(k) for k in kurse):
+        return 6
+    if list(ergaenzungen):
+        return 5
+    if paketmedien_in(uebungen, kurse, plaene):
+        return 4
+    return 3 if plaene else 2 if kurse else 1
+
+
 def paket_bauen(
     paket: Paket,
     uebungen: list[Exercise],
@@ -1381,7 +1498,8 @@ def paket_bauen(
 
     Ohne Kurse bleibt die Datei Formatversion 1, ohne Pläne höchstens 2 — ältere Apps
     lesen sie weiter. Mit Dateien aus dem Paket (U3) ist sie Version 4 — sie gehört dann in
-    eine ZIP (`core.paketdatei.paket_zip`).
+    eine ZIP (`core.paketdatei.paket_zip`); mit einem Kursplan-Kurs Version 6
+    (`noetige_version`).
 
     >>> u = Exercise(name="Baum", typen=["Qigong"])
     >>> zurueck = paket_lesen(paket_bauen(Paket(id="p1", name="Qigong"), [u])).uebungen[0]
@@ -1395,6 +1513,10 @@ def paket_bauen(
     >>> roh = paket_bauen(Paket(id="p1", name="Qigong"), [u], plaene=[pp])
     >>> roh["version"], paket_lesen(roh).plaene[0].vorlage.items[0].exercise_id == u.id
     (3, True)
+    >>> k.kursplan = Kursplan("Rumpf", grundlage="atmung")
+    >>> roh = paket_bauen(Paket(id="p1", name="Qigong"), [u], kurse=[k], plaene=[pp])
+    >>> roh["version"], paket_lesen(roh).kurse[0].kursplan == k.kursplan
+    (6, True)
     """
     kopf: dict[str, Any] = {"id": paket.id, "name": paket.name}
     if paket.beschreibung:
@@ -1407,15 +1529,7 @@ def paket_bauen(
         kopf["fuer"] = paket.fuer
     roh: dict[str, Any] = {
         "format": FORMAT,
-        "version": 5
-        if ergaenzungen
-        else 4
-        if paketmedien_in(uebungen, kurse or [], plaene or [])
-        else 3
-        if plaene
-        else 2
-        if kurse
-        else 1,
+        "version": noetige_version(uebungen, kurse or [], plaene or [], ergaenzungen or []),
         "paket": kopf,
         "exercises": [{"id": u.id, **stand(u)} for u in uebungen],
     }
@@ -1492,6 +1606,8 @@ __all__ = [
     "kurs_id",
     "kurs_stand",
     "name_pruefen",
+    "noetige_version",
+    "nutzt_kursplan",
     "paket_bauen",
     "paket_id",
     "paket_json",

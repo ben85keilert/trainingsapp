@@ -164,11 +164,41 @@ def daten(tmp_path, monkeypatch):
     state.schliessen()
 
 
-async def _training(
+async def _training(state, tmp_path, sportart: str = GEHEN, zwischendurch=None, **mehr):
+    """Ein Training wie in der App — als Einheit (Startleiste, „Training starten“), auf
+    einer Uhr-Attrappe: Gurt und GPS ticken im Takt, ohne zu warten.
+
+    ``hrv_vorher``: so viele Sekunden lief die HRV-Aufnahme schon vor dem Training (sie
+    läuft dann danach weiter, bis nach ``vor_dem_stopp(strecke)``). ``timer``: ein
+    Timer-Profil, das mit in der Startleiste steht (Intervalle). Gibt die Strecke und
+    die gezählten Ortungen zurück. ``uebung``: die gewählte Übung mit GPS — ohne sie die
+    erste der Rechenart ``sportart`` (aus dem Paket „Standard“).
+
+    **Das Handy geht wie der Empfänger:** Jede Einheit, die die Oberfläche hier anlegt (auch
+    die der Messung, die nach dem Training weiterläuft), bekommt die Wanduhr der Attrappen
+    (heute 10:00) statt der echten. Mit zwei Uhren hing die Zeitachse der Auswertung an der
+    Tageszeit des Testlaufs: Drei Tests waren zwischen etwa 9:00 und 11:00 Ortszeit rot, weil
+    die Uhren weniger als `UHREN_ABSTAND_MAX_S` auseinanderlagen, aber weiter, als das
+    Training dauert (CI am 16.11.2026, Katalog N170).
+    """
+    from functools import partial
+
+    from attrappen import Uhr
+    from trainingsapp.devices.einheit import Einheitslauf
+    from trainingsapp.ui import einheit as einheit_ui
+
+    uhr = Uhr()
+    with pytest.MonkeyPatch.context() as ersatz:
+        ersatz.setattr(einheit_ui, "Einheitslauf", partial(Einheitslauf, jetzt_utc=uhr.utc))
+        return await _training_auf(uhr, state, tmp_path, sportart, zwischendurch, **mehr)
+
+
+async def _training_auf(
+    uhr,
     state,
     tmp_path,
-    sportart: str = GEHEN,
-    zwischendurch=None,
+    sportart,
+    zwischendurch,
     *,
     hrv_vorher=0,
     vor_dem_stopp=None,
@@ -178,20 +208,11 @@ async def _training(
     messung_beenden=False,
     uebung=None,
 ):
-    """Ein Training wie in der App — als Einheit (Startleiste, „Training starten“), auf
-    einer Uhr-Attrappe: Gurt und GPS ticken im Takt, ohne zu warten.
-
-    ``hrv_vorher``: so viele Sekunden lief die HRV-Aufnahme schon vor dem Training (sie
-    läuft dann danach weiter, bis nach ``vor_dem_stopp(strecke)``). ``timer``: ein
-    Timer-Profil, das mit in der Startleiste steht (Intervalle). Gibt die Strecke und
-    die gezählten Ortungen zurück. ``uebung``: die gewählte Übung mit GPS — ohne sie die
-    erste der Rechenart ``sportart`` (aus dem Paket „Standard“).
-    """
-    from attrappen import Empfaenger, Gurt, Seite, Uhr, ruhe
+    """Der Lauf zu `_training`, auf der Uhr ``uhr``."""
+    from attrappen import Empfaenger, Gurt, Seite, ruhe
     from trainingsapp.devices.messlauf import Messlauf
     from trainingsapp.ui import einheit as einheit_ui
 
-    uhr = Uhr()
     gurt = Gurt(uhr)
     messlauf = Messlauf(gurt, jetzt_utc=uhr.utc, backup_basis=tmp_path)
     await messlauf.verbinden("gurt", "Polar H10 TEST")

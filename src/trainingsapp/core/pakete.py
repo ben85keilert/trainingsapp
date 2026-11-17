@@ -50,7 +50,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from . import ablauf as ab
 from . import links
@@ -489,10 +489,16 @@ def name_pruefen(name: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> Paketinhalt:
+def paket_lesen(
+    daten: bytes | str | dict[str, Any],
+    name_vorgabe: str = "",
+    pakete: Mapping[str, str] | None = None,
+) -> Paketinhalt:
     """Liest eine Paketdatei; wirft `PaketFehler` mit einem Satz für Menschen.
 
     ``name_vorgabe`` (etwa der Dateiname) gilt, wenn die Datei keinen Paketkopf hat.
+    ``pakete`` (Name klein → ID, `paket_namen`): die Pakete, die ein Verweis mit ``paket``
+    nennen darf — ohne Eintrag folgt die ID aus dem Namen (`ergaenzung_ziel`).
 
     >>> inhalt = paket_lesen('{"paket": {"name": "Test"}, "exercises": [{"name": "Baum"}]}')
     >>> inhalt.paket.name, [u.name for u in inhalt.uebungen]
@@ -537,6 +543,9 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
         raise PaketFehler("Das ist keine Paketdatei (Ergänzungen unlesbar).")
     if not eintraege and not kurs_eintraege and not plan_eintraege and not ergaenzungs_eintraege:
         raise PaketFehler("Das Paket enthält keine Übungen.")
+    # V1: Verweise auf Übungen anderer Pakete (`uebung` + `paket`) werden hier zu IDs
+    kurs_eintraege = verweise_aufloesen(kurs_eintraege, pakete)
+    plan_eintraege = verweise_aufloesen(plan_eintraege, pakete)
 
     kopf = roh.get("paket", {})
     if not isinstance(kopf, dict):
@@ -619,7 +628,7 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
     ergaenzungen: list[Ergaenzung] = []
     for nr, eintrag in enumerate(ergaenzungs_eintraege, start=1):
         try:
-            erg = ergaenzung_lesen(eintrag, paket.id)
+            erg = ergaenzung_lesen(eintrag, paket.id, pakete)
         except (KeyError, TypeError, ValueError, AttributeError) as grund:
             probleme.append(f"Ergänzung {nr}: {grund}")
             continue
@@ -639,29 +648,108 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
 _UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 
-def ergaenzung_ziel(uebung: str, paket: str = "") -> str:
+def _name_klein(name: str) -> str:
+    return " ".join(name.split()).casefold()
+
+
+def paket_namen(koepfe: Iterable[Mapping[str, Any]]) -> dict[str, str]:
+    """Name (klein) → ID aus Paketköpfen (``[paket]``) — damit ``paket = "Qigong Basis"`` die
+    ID findet, die im Kopf steht, und nicht die aus dem Namen gerechnete.
+
+    >>> paket_namen([{"name": "Qigong  Basis", "id": "d9f9b050-7d51-409d-8df7-efffb04543ef"},
+    ...              {"name": "Ohne ID"}, "kaputt"])["qigong basis"]
+    'd9f9b050-7d51-409d-8df7-efffb04543ef'
+    """
+    namen: dict[str, str] = {}
+    for kopf in koepfe:
+        if not isinstance(kopf, Mapping):
+            continue
+        name = _name_klein(str(kopf.get("name") or ""))
+        if not name:
+            continue
+        roh_id = str(kopf.get("id") or "").strip()
+        namen[name] = roh_id.lower() if _UUID.fullmatch(roh_id) else roh_id or paket_id(name)
+    return namen
+
+
+def ergaenzung_ziel(uebung: str, paket: str = "", pakete: Mapping[str, str] | None = None) -> str:
     """Die ID der ergänzten Übung: eine ID, oder ein Schlüssel im Paket ``paket`` (Name oder
-    ID; ohne Angabe „Standard“).
+    ID; ohne Angabe „Standard“). Steht der Name in ``pakete`` (`paket_namen`), gilt die ID
+    von dort — ein Paket mit eigener ``id`` im Kopf hat eine andere als die aus dem Namen.
 
     >>> ergaenzung_ziel("kniebeuge") == uebung_id(GRUNDAUSSTATTUNG, "kniebeuge")
     True
     >>> ergaenzung_ziel("baum", "Qigong") == uebung_id(paket_id("Qigong"), "baum")
     True
+    >>> ergaenzung_ziel("baum", "qigong", {"qigong": "p9"}) == uebung_id("p9", "baum")
+    True
     """
     uebung = uebung.strip()
     if _UUID.fullmatch(uebung):
         return uebung.lower()
+    return uebung_id(paket_ziel(paket, pakete), uebung)
+
+
+def paket_ziel(paket: str, pakete: Mapping[str, str] | None = None) -> str:
+    """Die ID des Pakets, das ein Verweis nennt (Name oder ID; leer, „Standard“ oder
+    „Grundausstattung“ = das Grundpaket; ein Name aus ``pakete`` mit der ID von dort).
+
+    >>> paket_ziel("") == paket_ziel("standard") == GRUNDAUSSTATTUNG, paket_ziel("Q", {"q": "p"})
+    (True, 'p')
+    """
     paket = paket.strip()
     if not paket or paket.casefold() in ("standard", "grundausstattung"):
-        pid = GRUNDAUSSTATTUNG
-    elif _UUID.fullmatch(paket):
-        pid = paket.lower()
-    else:
-        pid = paket_id(paket)
-    return uebung_id(pid, uebung)
+        return GRUNDAUSSTATTUNG
+    if _UUID.fullmatch(paket):
+        return paket.lower()
+    if pakete and _name_klein(paket) in pakete:
+        return pakete[_name_klein(paket)]
+    return paket_id(paket)
 
 
-def ergaenzung_lesen(eintrag: Any, paket: str) -> Ergaenzung:
+#: Felder eines Bausteins, die eine Marke ``<block>:<übung>`` tragen (`core.kursbloecke`)
+MARKENFELDER: Final = ("hinter", "an", "von", "zu")
+
+
+def verweise_aufloesen(roh: Any, pakete: Mapping[str, str] | None = None) -> Any:
+    """Verweise auf Übungen **anderer** Pakete (V1, `docs/plan_paketverweise.md`, Ben
+    17.11.2026) als IDs: ``uebung = "kniebeuge", paket = "Standard"`` in Plänen, Kapitelplänen,
+    Kursplan, Bedingungen und Blöcken; in einer Marke ``<block>:<Paket>/<schlüssel>``
+    (``"dazu:Standard/kniebeuge"``). Aufgelöst wie bei Ergänzungen (`ergaenzung_ziel`); die
+    gebaute JSON trägt die ID wie bisher — keine neue Formatversion. Alles andere bleibt.
+
+    >>> r = verweise_aufloesen([{"uebungen": [{"uebung": "kniebeuge", "paket": "Standard"},
+    ...                                       {"uebung": "baum"}]}])
+    >>> r[0]["uebungen"][0] == {"uebung": uebung_id(GRUNDAUSSTATTUNG, "kniebeuge")}
+    True
+    >>> r[0]["uebungen"][1]
+    {'uebung': 'baum'}
+    >>> b = verweise_aufloesen({"an": "dazu:Standard/kniebeuge", "von": "g:1", "zu": "dazu:a"})
+    >>> b["an"] == "dazu:" + uebung_id(GRUNDAUSSTATTUNG, "kniebeuge"), b["von"], b["zu"]
+    (True, 'g:1', 'dazu:a')
+    """
+    if isinstance(roh, list):
+        return [verweise_aufloesen(x, pakete) for x in roh]
+    if not isinstance(roh, dict):
+        return roh
+    neu = {k: verweise_aufloesen(v, pakete) for k, v in roh.items()}
+    paket, uebung = neu.get("paket"), neu.get("uebung")
+    if isinstance(paket, str) and paket.strip() and isinstance(uebung, str) and uebung.strip():
+        del neu["paket"]
+        neu["uebung"] = ergaenzung_ziel(uebung, paket, pakete)
+    for feld in MARKENFELDER:
+        marke = neu.get(feld)
+        if isinstance(marke, str) and ":" in marke:
+            block, _, rest = marke.partition(":")
+            vorn, schraeg, key = rest.rpartition("/")
+            if schraeg and vorn.strip() and key.strip():
+                neu[feld] = f"{block}:{ergaenzung_ziel(key, vorn, pakete)}"
+    return neu
+
+
+def ergaenzung_lesen(
+    eintrag: Any, paket: str, pakete: Mapping[str, str] | None = None
+) -> Ergaenzung:
     """Eine Ergänzung aus ``ergaenzungen[]`` (U5): ``uebung`` (ID oder Schlüssel, dazu wahlweise
     ``paket``) und die Felder aus `ERGAENZBAR` — Medien wie an Übungen geprüft (nur https,
     Paketdateien), der Rest wie im Paketstand.
@@ -722,7 +810,7 @@ def ergaenzung_lesen(eintrag: Any, paket: str) -> Ergaenzung:
             if not isinstance(wert, dict):
                 raise ValueError(f"{feld} ist keine Tabelle")
             daten[feld] = json.loads(json.dumps(wert, ensure_ascii=False))
-    return Ergaenzung(paket, ergaenzung_ziel(ziel, str(eintrag.get("paket") or "")), daten)
+    return Ergaenzung(paket, ergaenzung_ziel(ziel, str(eintrag.get("paket") or ""), pakete), daten)
 
 
 def _plan_lesen(eintrag: Any, schluessel: Mapping[str, str]) -> PaketPlan:

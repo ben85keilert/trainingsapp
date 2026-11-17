@@ -460,6 +460,15 @@ zweig = "A"…"D", dann, sonst, wege = [{ ziel, text }] }` — `dann`, `sonst` u
 in IDs; `skala` ist eine Selbsteinschätzung ab `n`; P97), dazu `timer` (Plan-Timer),
 `weiter_automatisch` (seit Migration 043 = Übergang **hart**), `pause_ohne_timer`.
 
+**Übungen anderer Pakete** (V1, Ben 17.11.2026, `docs/plan_paketverweise.md`): `uebung =
+"kniebeuge", paket = "Standard"` — an jeder Planübung, auch in Kapitelplänen und im
+Kursplan, an Bedingungen und Blöcken; in einer Marke `<block>:<Paket>/<schlüssel>`
+(`"dazu:Standard/kniebeuge"`). `paket` ist Name oder ID; „Standard“ (oder leer bei
+Ergänzungen) ist das Grundpaket. Liegt das genannte Paket als TOML daneben, gilt die ID aus
+seinem Kopf (`core.paketdatei.nachbar_namen`) — sonst die aus dem Namen. Aufgelöst beim Lesen
+(`core.pakete.verweise_aufloesen`): Die gebaute JSON trägt die ID wie bisher, keine neue
+Formatversion.
+
 **Gezeichneter Ablauf** (8.11.2026 spät, `docs/plan_verzweigungen.md` §8, G4): je Plan — auch
 in Kurskapiteln — wahlweise `ablauf = { an = true, start = "#1", kanten = [{ von, nach, ausloeser
 = "frei" | "zeit" | "wdh" | "wdh_in_zeit" | "skala", n, sekunden, bis, pflicht, ausfuehren,
@@ -839,7 +848,11 @@ uv run --project ../trainingsapp trainingsapp-paket bauen pakete/*.toml --ziel d
 uv run --project ../trainingsapp trainingsapp-paket index dist/*.json \
   --ziel dist/index.json --basis-url https://…/pakete/ --quelle "Praxis Ebert"
 uv run --project ../trainingsapp trainingsapp-paket uebernehmen .daten/trainingsapp.db \
-  pakete/standard.toml [--probe]          # oder ein Export: ~/Downloads/uebungspaket_Standard.json
+  pakete/standard.toml [--probe]          # oder ein Export der App (JSON oder ZIP)
+uv run --project ../trainingsapp trainingsapp-paket einlesen ~/Downloads/<export>.zip \
+  pakete/<neu>.toml [--privat --fuer "A."] [--probe]   # eigenes Paket vom Handy → neue TOML
+uv run --project ../trainingsapp trainingsapp-paket verlinken pakete/<x>.toml \
+  medien/<x>/<datei> https://… [--pruefen]           # eine Datei des Pakets → Link
 ```
 
 `pruefen` wendet die Regeln des Standardpakets an (Schlüssel, Beschreibung, Variante,
@@ -860,26 +873,46 @@ Kennung steht am offenen Treffer und hängt am Text: Ändert er sich, meldet sic
 wieder. `index` schreibt den Index einer Paketquelle (ID, Name, Version, URL, SHA-256,
 Größe, Neuigkeiten, reserviertes Feld `signatur`) — das Format, das die App für Updates
 liest. `quelle URL` liest einen veröffentlichten Index wie die App und prüft jede
-Paketdatei samt Prüfsumme. Wie die Dateien auf den Server kommen: Homepage,
+Paketdatei samt Prüfsumme. **Verweise auf Übungen anderer Pakete** (V2,
+`docs/plan_paketverweise.md`, 17.11.2026): `pruefen` folgt jedem `uebung` in Plänen,
+Kapitelplänen, Kursplan, Bedingungen und Blöcken — ein Schlüssel ohne `paket` muss einer
+dieses Pakets sein (sonst Fehler: auf dem Gerät fiele die Übung still aus dem Plan), mit
+`paket = "…"` muss es ihn in jenem Paket geben, wenn es als TOML daneben liegt (sonst Fehler;
+liegt es nicht daneben, ein Hinweis „nicht prüfbar“). Wie die Dateien auf den Server kommen: Homepage,
 `docs/runbooks/trainingsapp-pakete.md` (rsync mit beschränktem Schlüssel).
 
-**Aus der App zurück ins TOML** (Ben, 27.10.2026): Chips, Ziele, Timer und Varianten
-stellt man leichter in der App ein als in der Datei. `uebernehmen` liest die Quelle und
-trägt je Übung die Felder, die vom Stand der Datei abweichen, in ihren
-`[[exercises]]`-Block ein. Quelle ist die **Datenbank der App** (`.db`, nur lesend —
-im Inhalte-Repo `.daten/trainingsapp.db` nach `./start.sh`): Übungen des Pakets und die
-Pläne, die Kurskapitel angelegt haben; oder ein **Export** aus dem Paketmanager (JSON,
-nur Übungen — die App schreibt kein TOML, `tomllib` liest nur). Zugeordnet wird über die
-ID, die der Leser aus `key` rechnet; `key`, Kommentare, Abschnitte, Reihenfolge und Kurse
-bleiben (`tomlkit`, nur in der Gruppe `dev`). Parameter, die einer Vorlage entsprechen,
-werden wieder `spec = "…"`, andere ein vollständiges `result_spec`. Die Ausgabe nennt je
-Übung die Felder; `git diff` zeigt den Stand. Regeln:
+**Aus der App zurück ins TOML** (Ben, 27.10.2026; drei Wege seit 17.11.2026,
+`docs/plan_rueckweg_handy.md` Stufe 1): Chips, Ziele, Timer und Varianten stellt man leichter
+in der App ein als in der Datei. `uebernehmen` liest die Quelle und trägt je Übung ein, was
+die App **seit ihrer Basis** geändert hat — in ihren `[[exercises]]`-Block. Quelle ist die
+**Datenbank der App** (`.db`, nur lesend — im Inhalte-Repo `.daten/trainingsapp.db` nach
+`./start.sh`): Übungen des Pakets und die Pläne, die Kurskapitel angelegt haben; oder ein
+**Export** der App (JSON oder ZIP — die App schreibt kein TOML, `tomllib` liest nur).
+Zugeordnet wird über die ID, die der Leser aus `key` rechnet; `key`, Kommentare,
+Abschnitte, Reihenfolge und Kurse bleiben (`tomlkit`, nur in der Gruppe `dev`). Parameter,
+die einer Vorlage entsprechen, werden wieder `spec = "…"`, andere ein vollständiges
+`result_spec`. Die Ausgabe nennt je Übung die Felder; `git diff` zeigt den Stand. Regeln:
 
-- Gleiches Paket, andere Version → nichts: Die App hat den Stand der Datei nie gesehen,
-  die Quelle brächte Altes zurück. Erst `version` heben, App starten, dann übernehmen.
-- Übungen der Quelle ohne Block (eigene, aus anderen Paketen) werden nur genannt; Übungen
-  der Datei, die nicht in der Quelle sind, bleiben unverändert — ein Export darf eine
-  Auswahl sein.
+- **Drei Wege, die Datei gewinnt** (Ben, 17.11.2026: „TOML, aber die ältere Handyversion darf
+  keinen Konflikt bekommen“): Was die App geändert hat, kommt nur dorthin, wo die Datei seit
+  der Basis gleich blieb; haben beide dieselbe Stelle geändert, bleibt die Datei, und die
+  Ausgabe nennt den Wert der App. Beschreibung je Abschnitt, Medien je Adresse — derselbe
+  Abgleich wie beim Update auf dem Gerät (`core.abgleich.abgleichen`, Rollen vertauscht).
+- **Die Basis:** aus der Datenbank der Paketstand jeder Übung; bei einem Export die Fassung
+  seiner Version aus der **git-Geschichte** der TOML — der jüngste Commit mit dieser Version,
+  der vor dem Export (`exportiert`) lag. Nach dem Übernehmen committen, sonst rechnet die
+  nächste Runde gegen die alte Basis. Ohne Basis (kein git, die Version nie committet, ein
+  Export unter anderem Paket) übernimmt es **nichts** und nennt nur, was abweicht;
+  `--ohne-basis` übernimmt dann die Werte der Quelle (wie bis 17.11.2026). Die Version der
+  Quelle blockiert nichts mehr.
+- **Neue Übungen eines Exports** (in keiner Basis, in keinem Paket daneben) bekommen einen
+  Block mit einem `key` aus dem Namen — die ID folgt daraus, nicht die des Geräts (E3 im
+  Plan). Dateien aus einer ZIP legt es unter `medien/<paket>/` neben die TOML (Name =
+  Prüfsumme) und nennt sie als `datei = "…"` — der Ordner gehört ins `.gitignore` des
+  Inhalte-Repos; fehlt er dort, warnt die Ausgabe. Was die Basis kennt und der Datei fehlt,
+  wurde dort gestrichen und kommt nicht zurück.
+- Übungen aus Paketen daneben werden nur genannt; Übungen der Datei, die nicht in der Quelle
+  sind, bleiben unverändert — ein Export darf eine Auswahl sein.
 - Typen und Regionen gelten als Mengen (die App führt sie in anderer Reihenfolge).
 - **Pläne** (nur aus der Datenbank): Ein Plan mit `kurs_kapitel_id` gehört zur Vorlage
   gleichen Namens in seinem Kapitel (`plaene[]`); Wochentage und Übungen (mit `key`,
@@ -887,7 +920,35 @@ werden wieder `spec = "…"`, andere ein vollständiges `result_spec`. Die Ausga
   Vorlage dieses Namens wird genannt, nicht angelegt; eigene Pläne ohne Kapitel haben im
   Paketformat keinen Platz. Timer, „automatisch weiter“ und Chips je Planübung kennt
   die Vorlage nicht — sie bleiben in der App (Erweiterung des Formats: offen).
-- `--probe` zeigt nur. Nach dem Schreiben läuft `pruefen` über die Datei.
+- `--probe` zeigt nur. Nach dem Schreiben läuft `pruefen` über die Datei, und passt die
+  `version` nicht zu dem, was sich seit dem letzten Commit geändert hat (`core.paketstufe`),
+  nennt eine Zeile die kleinste passende („Version: steht 0.0.6, … mindestens 0.1.0“).
+
+**Vom Handy ein neues Paket** (`einlesen`, Stufe 2 in `docs/plan_rueckweg_handy.md`, Ben
+17.11.2026; `src/trainingsapp/paket_einlesen.py`): Ein eigenes Paket aus der App (U4, JSON oder
+ZIP) wird eine TOML — Übungen, Pläne, Kurse und Kapitel mit einem `key` aus ihrem Namen (die
+IDs folgen daraus, nicht die des Geräts), Verweise auf Übungen anderer Pakete als `uebung =
+"…", paket = "…"` (wenn jenes Paket als TOML daneben liegt, sonst bleibt die ID), Dateien aus
+der ZIP unter `medien/<paket>/` als `datei = "…"`, ein Kopf mit eigener `id`, `version =
+"1.0.0"` und mit `--privat`/`--fuer` ein `[privat]`. Daneben schreibt es
+`einlesen/<paket>.json` (committen): aus welchem eigenen Paket die Datei kam, welche ID vom
+Handy zu welchem Schlüssel gehört und den eingelesenen Stand der Übungen. Ein späterer Export
+desselben Entwurfs in dieselbe TOML gleicht die Übungen in drei Wegen ab (Basis = der Stand
+der letzten Runde, die TOML gewinnt); Pläne und Kurse einer weiteren Runde nennt es nur.
+Ein Export, der schon eingelesen wurde, geht nicht in eine zweite neue Datei; der Export
+eines installierten Pakets in dessen TOML geht wie `uebernehmen`.
+
+**Datei oder Link** (`verlinken`, Stufe 5; Ben 17.11.2026: „Medien je Stück als Datei oder als
+Link“): Jeder Eintrag, der die Datei nennt, bekommt `uri = "https://…"`, Titel und alles
+andere bleiben. Mit `--pruefen` lädt das Werkzeug den Link einmal (nur https, auch nach
+Umleitungen) und vergleicht die Prüfsumme — liefert er eine Webseite (`text/html`, bei Dropbox
+`dl=0` statt `raw=1`) oder eine andere Datei, bleibt die Datei im Paket.
+
+**Version gegen die veröffentlichte Fassung:** `pruefen --gegen <Index oder Datei>` meldet eine
+Nummer, die nicht zur Stufe des Unterschieds passt, als Fehler; mit `--stufe-als-hinweis`
+(so ruft `veroeffentlichen.sh` es auf) ist nur eine **nicht gestiegene** Nummer bei geändertem
+Inhalt ein Fehler — die Geräte rechnen die Stufe selbst (`ui/views/updates.py`), die Nummer
+zeigen sie nur.
 
 ## Paketquellen — Updates online (Ben, 16.10.2026)
 

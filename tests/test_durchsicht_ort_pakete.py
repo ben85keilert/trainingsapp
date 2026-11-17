@@ -476,7 +476,7 @@ def test_uebernehmen_laesst_ergaenzungen_anderer_pakete_draussen(tmp_path) -> No
 
     zeilen, fehler = uebernehmen(db, datei)
     assert fehler == []
-    assert zeilen == [
+    assert [z for z in zeilen if not z.startswith("Basis: ")] == [
         "Baum: Name",
         "Baum: von einem anderen Paket ergänzt — nicht übernommen: Beschreibung",
     ]

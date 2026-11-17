@@ -7,7 +7,8 @@ exportiert, wird die Grundübung mitgenommen mit einem Verweis, dass sie von Sta
 Anlass: Kurse, die die App erklären, sollen in ein eigenes Paket und brauchen Übungen aus
 „Standard“.
 
-**Stand: nichts hiervon ist gebaut.** Dieses Papier hält fest, was heute gilt, schlägt einen
+**Stand 17.11.2026: V1 und V2 gebaut** (`core.pakete.verweise_aufloesen`, `trainingsapp-paket
+pruefen` → `verweise_pruefen`); V3–V6 nicht. Dieses Papier hält fest, was heute gilt, schlägt einen
 Grundsatz und Stufen vor und sammelt die Fragen, die Ben entscheidet.
 
 ---

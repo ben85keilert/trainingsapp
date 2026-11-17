@@ -15,7 +15,7 @@ Zwei Zwecke (Ben, 17.11.2026):
   private Pakete hochgeladen und gedownloadet werden können. Evtl. wird aus einem Standardpaket
   ein Plan/Kurs erstellt und nur das ist anders […] (Paketverlinkungen müssen passen)“.
 
-**Stand: nichts hiervon ist gebaut.** Die Inhalte liegen im privaten Repo
+**Stand 17.11.2026 abends: Stufe 1–5 im Werkzeug gebaut** (§6); die App-Stufen 6–8 nicht. Die Inhalte liegen im privaten Repo
 `trainingsapp-inhalte` (`pakete/*.toml`, `veroeffentlichen.sh`); Werkzeug und App hier.
 
 ---
@@ -153,11 +153,11 @@ dem Server (nur, wenn Ben sie will — dann Caddy, `veroeffentlichen.sh`, rsync 
 
 | Stufe | Wo | Inhalt | Zweck |
 |---|---|---|---|
-| 1 | Werkzeug | `uebernehmen` mit drei Wegen, legt Neues an | A |
-| 2 | Werkzeug | `einlesen`: Eingang, Ziel, Basisdatei, IDs → `paket` + `key` | A, B |
-| 3 | Werkzeug | Verweise V1 + V2 | B |
-| 4 | Werkzeug, Inhalte | X.Y.Z, Vorschlag der Nummer, `veroeffentlichen.sh` mit `--gegen` | A, B |
-| 5 | Werkzeug | Medientabelle Datei → Link mit `sha256` | Medien |
+| 1 | Werkzeug | `uebernehmen` mit drei Wegen, legt Neues an — **gebaut** (Übungen; Kapitelpläne wie bisher) | A |
+| 2 | Werkzeug | `einlesen`: Eingang, Ziel, Basisdatei, IDs → `paket` + `key` — **gebaut** (neue TOML direkt unter `pakete/`, Merkdatei `pakete/einlesen/<paket>.json`; weitere Runde: Übungen in drei Wegen, Pläne/Kurse nur genannt) | A, B |
+| 3 | Werkzeug | Verweise V1 + V2 — **gebaut** | B |
+| 4 | Werkzeug, Inhalte | X.Y.Z, Vorschlag der Nummer, `veroeffentlichen.sh` mit `--gegen` — **gebaut** (`--stufe-als-hinweis`, Vorschlag nach `uebernehmen`) | A, B |
+| 5 | Werkzeug | Medientabelle Datei → Link mit `sha256` — **gebaut als `verlinken`** (je Datei, `--pruefen` lädt und vergleicht; `sha256` am Link erst mit Stufe 7, weil die App das Feld dann lesen muss) | Medien |
 | 6 | App | Export mit Ziel und Herkunft, Kurskopie merkt das Original | A |
 | 7 | App | Videolinks: je Server, Abspielen, Herunterladen, Anhänge, Aufräumen | Medien |
 | 8 | App | Verweise V3–V6 | B |

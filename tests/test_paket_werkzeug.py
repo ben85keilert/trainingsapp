@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import struct
+import subprocess
 import tomllib
+import zlib
 
 from trainingsapp.core.pakete import GRUNDAUSSTATTUNG, paket_lesen
 from trainingsapp.data.seed import SEED_DATEI
@@ -247,10 +251,60 @@ def test_quelle_pruefen_wie_die_app(tmp_path, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _git(ordner, *args, datum: str | None = None) -> None:
+    umgebung = {**os.environ, "GIT_AUTHOR_DATE": datum, "GIT_COMMITTER_DATE": datum}
+    subprocess.run(
+        [
+            *(
+                "git",
+                "-C",
+                str(ordner),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=t@example.invalid",
+            ),
+            *("-c", "commit.gpgsign=false", *args),
+        ],
+        check=True,
+        capture_output=True,
+        env=umgebung if datum else None,
+    )
+
+
+def _committen(datei, datum: str | None = None) -> None:
+    """Die TOML committen — wie im Inhalte-Repo: Die Fassung einer Version steht in der
+    Geschichte, `uebernehmen` findet dort die Basis."""
+    if not (datei.parent / ".git").exists():
+        _git(datei.parent, "init", "-q")
+    _git(datei.parent, "add", datei.name)
+    _git(datei.parent, "commit", "-q", "--allow-empty", "-m", "Stand", datum=datum)
+
+
+def _ohne_basiszeile(zeilen: list[str]) -> list[str]:
+    """Ohne die Zeilen zu Basis und Versionsvorschlag — sie hängen am Stand von git."""
+    return [z for z in zeilen if not z.startswith(("Basis: ", "Version: "))]
+
+
+def _png(farbe: bytes = b"\x00\x00") -> bytes:
+    def block(typ: bytes, daten: bytes) -> bytes:
+        laenge, pruef = struct.pack(">I", len(daten)), struct.pack(">I", zlib.crc32(typ + daten))
+        return laenge + typ + daten + pruef
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + block(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 0, 0, 0, 0))
+        + block(b"IDAT", zlib.compress(farbe))
+        + block(b"IEND", b"")
+    )
+
+
 def _export(tmp_path, toml_text: str, aendern) -> tuple:
-    """Die TOML-Datei bauen, am JSON ``aendern`` (wie die App), beides zurückgeben."""
+    """Die TOML-Datei schreiben und committen, bauen, am JSON ``aendern`` (wie die App),
+    beides zurückgeben."""
     datei = tmp_path / "qigong.toml"
     datei.write_text(toml_text, encoding="utf-8")
+    _committen(datei)
     export = bauen(datei, tmp_path / "dist")
     roh = json.loads(export.read_text("utf-8"))
     aendern(roh)
@@ -317,7 +371,7 @@ def test_uebernehmen_findet_zur_vorlage_zurueck_und_ergaenzt_skalar_neben_tabell
     nochmal(roh)
     export.write_text(json.dumps(roh), encoding="utf-8")
     zeilen, fehler = uebernehmen(export, datei)
-    assert zeilen == ["Lotus: Uhr"] and fehler == []
+    assert _ohne_basiszeile(zeilen) == ["Lotus: Uhr"] and fehler == []
     gelesen = paket_lesen(tomllib.loads(datei.read_text("utf-8")))
     assert [u.uhr for u in gelesen.uebungen] == [True, False]
     assert gelesen.uebungen[1].zaehlt_als == "duration"
@@ -332,7 +386,8 @@ def test_uebernehmen_schreibt_beschleunigung_als_inline_tabelle(tmp_path) -> Non
         roh["exercises"][0]["beschleunigung"] = {"wiederholungen": False, "atmung": True}
 
     export, datei = _export(tmp_path, QIGONG, aendern)
-    assert uebernehmen(export, datei) == (["Baum: Beschleunigungssensor"], [])
+    zeilen, fehler = uebernehmen(export, datei)
+    assert (_ohne_basiszeile(zeilen), fehler) == (["Baum: Beschleunigungssensor"], [])
     text = datei.read_text("utf-8")
     assert "beschleunigung = {wiederholungen = false, atmung = true}" in text
     gelesen = paket_lesen(tomllib.loads(text))
@@ -346,10 +401,13 @@ def test_uebernehmen_schreibt_beschleunigung_als_inline_tabelle(tmp_path) -> Non
     assert wieder["exercises"][0]["beschleunigung"] == {"wiederholungen": False, "atmung": True}
     assert "beschleunigung" not in wieder["exercises"][1]
 
+    # Übernommen und committet — dann ist das die Basis der nächsten Runde
+    _committen(datei)
     roh = json.loads(export.read_text("utf-8"))
     del roh["exercises"][0]["beschleunigung"]
     export.write_text(json.dumps(roh, ensure_ascii=False), encoding="utf-8")
-    assert uebernehmen(export, datei) == (["Baum: Beschleunigungssensor"], [])
+    zeilen, fehler = uebernehmen(export, datei)
+    assert (_ohne_basiszeile(zeilen), fehler) == (["Baum: Beschleunigungssensor"], [])
     assert "beschleunigung" not in datei.read_text("utf-8")
 
 
@@ -388,7 +446,8 @@ def test_gps_im_werkzeug_pruefen_und_uebernehmen(tmp_path) -> None:
         roh["exercises"][0]["gps"] = {"art": "gehen", "tempo": [4.0, 5.0, 6.0, 7.0]}
 
     export, datei = _export(tmp_path, QIGONG, aendern)
-    assert uebernehmen(export, datei) == (["Baum: GPS"], [])
+    zeilen, fehler = uebernehmen(export, datei)
+    assert (_ohne_basiszeile(zeilen), fehler) == (["Baum: GPS"], [])
     text = datei.read_text("utf-8")
     assert 'gps = {art = "gehen", tempo = [4.0, 5.0, 6.0, 7.0]}' in text
     assert pruefen(datei, symbole=None)[0] == []
@@ -447,29 +506,112 @@ def test_pruefen_meldet_unsinn_in_beschleunigung(tmp_path) -> None:
     ]
 
 
-def test_uebernehmen_probe_version_und_fremde(tmp_path, capsys) -> None:
+def test_uebernehmen_probe_version_und_neue(tmp_path, capsys) -> None:
     def aendern(roh):
         roh["exercises"][0]["name"] = "Anders"
         roh["exercises"].append(
-            {"id": "eigene-1", "name": "Eigene Übung", "typen": [], "regionen": []}
+            {
+                "id": "eigene-1",
+                "name": "Eigene Übung",
+                "description": "Am Handy angelegt.",
+                "typen": [],
+                "regionen": [],
+            }
         )
 
     export, datei = _export(tmp_path, QIGONG, aendern)
     vorher = datei.read_text("utf-8")
     assert main(["uebernehmen", str(export), str(datei), "--probe"]) == 0
     out = capsys.readouterr().out
-    assert "Baum: Name" in out and "Nicht übernommen" in out and "Eigene Übung" in out
+    assert "Baum: Name" in out and "Neu angelegt: Eigene Übung (key „eigene_uebung“)" in out
     assert datei.read_text("utf-8") == vorher, "--probe schreibt nicht"
-    # andere Version desselben Pakets: nichts übernehmen
+    # Die Datei ist schon weiter (Version 3) — die Basis ist trotzdem Version 2 aus der
+    # Geschichte: Die Nummer vom Handy blockiert nichts (Ben, 17.11.2026)
     datei.write_text(vorher.replace("version = 2", "version = 3"), encoding="utf-8")
-    assert main(["uebernehmen", str(export), str(datei)]) == 1
-    assert "Version 0.0.2" in capsys.readouterr().out
-    # anderer Paketname (eigener Export unter neuem Namen): Zuordnung über die IDs trotzdem
+    assert main(["uebernehmen", str(export), str(datei)]) == 0
+    text = datei.read_text("utf-8")
+    assert 'name = "Anders"' in text and 'key = "eigene_uebung"' in text
+    assert "version = 3" in text
+    gelesen = paket_lesen(tomllib.loads(text))
+    neu = gelesen.uebungen[-1]
+    assert neu.name == "Eigene Übung" and neu.id != "eigene-1", "die ID folgt aus dem key"
+    # Ein Export unter anderem Paket: keine Basis — nichts übernehmen, nur nennen …
+    datei.write_text(vorher, encoding="utf-8")
     roh = json.loads(export.read_text("utf-8"))
     roh["paket"] = {"id": "anderes", "name": "Meins"}
     export.write_text(json.dumps(roh), encoding="utf-8")
     assert main(["uebernehmen", str(export), str(datei)]) == 0
+    out = capsys.readouterr().out
+    assert "Keine Basis" in out and "Baum: Name" in out
+    assert datei.read_text("utf-8") == vorher
+    # … außer ausdrücklich ohne Basis (wie bis 17.11.2026)
+    assert main(["uebernehmen", str(export), str(datei), "--ohne-basis"]) == 0
     assert 'name = "Anders"' in datei.read_text("utf-8")
+
+
+def test_uebernehmen_aelterer_export_holt_nichts_zurueck(tmp_path) -> None:
+    """Der Versuch vom 17.11.2026: Am Laptop ist die Beschreibung seit dem Export geändert —
+    ein älterer Export derselben Version darf sie nicht zurückholen. Haben beide dieselbe
+    Stelle geändert, bleibt die Datei, und die Zeile nennt den Wert der App."""
+    export, datei = _export(tmp_path, QIGONG, lambda roh: None)
+    text = datei.read_text("utf-8").replace('"Knie weich."', '"Knie weich, Blick weit."')
+    datei.write_text(text, encoding="utf-8")
+    assert uebernehmen(export, datei) == (["Keine Änderung"], [])
+    assert "Blick weit" in datei.read_text("utf-8")
+    # Auch, wenn die Änderung am Laptop schon committet ist: Der Export ist älter
+    _git(tmp_path, "commit", "-q", "-am", "Laptop", datum="2030-01-02T12:00:00")
+    roh = json.loads(export.read_text("utf-8"))
+    roh["exportiert"] = "2030-01-01T12:00:00+00:00"
+    export.write_text(json.dumps(roh, ensure_ascii=False), encoding="utf-8")
+    assert uebernehmen(export, datei) == (["Keine Änderung"], [])
+    # Beide geändert: die Datei bleibt, die App wird genannt
+    roh["exercises"][0]["description"] = "Knie weich, Fersen schwer."
+    roh["exercises"][1]["description"] = "Sitzen, Rücken lang."
+    export.write_text(json.dumps(roh, ensure_ascii=False), encoding="utf-8")
+    zeilen, fehler = uebernehmen(export, datei)
+    assert fehler == []
+    assert zeilen[0] == "Lotus: Beschreibung"
+    assert any(
+        z.startswith("Baum: Beschreibung") and "die Datei bleibt" in z and "Fersen schwer" in z
+        for z in zeilen
+    )
+    text = datei.read_text("utf-8")
+    assert "Blick weit" in text and "Rücken lang" in text
+
+
+def test_uebernehmen_zip_mit_neuer_uebung_und_datei(tmp_path) -> None:
+    """Eine ZIP der App (eigenes Paket mit Foto): Die neue Übung bekommt einen Block, ihre
+    Datei liegt danach unter ``medien/<paket>/`` neben der TOML und wird als ``datei``
+    genannt; gebaut ist sie wieder dieselbe Paketdatei."""
+    from trainingsapp.core.paketdatei import paket_oeffnen, paket_zip
+    from trainingsapp.core.paketmedien import name_fuer
+
+    export, datei = _export(tmp_path, QIGONG, lambda roh: None)
+    bild = _png()
+    name = name_fuer(hashlib.sha256(bild).hexdigest(), "png")
+    roh = json.loads(export.read_text("utf-8"))
+    roh["version"] = 4
+    roh["exercises"].append(
+        {
+            "id": "handy-1",
+            "name": "Kranich",
+            "description": "Auf einem Bein.",
+            "media": [{"kind": "image", "source": "paket", "uri": name, "title": "Foto"}],
+        }
+    )
+    (tmp_path / "bild.png").write_bytes(bild)
+    zip_pfad = tmp_path / "export.zip"
+    paket_zip(zip_pfad, json.dumps(roh, ensure_ascii=False).encode(), {name: tmp_path / "bild.png"})
+    zeilen, fehler = uebernehmen(zip_pfad, datei)
+    assert fehler == []
+    assert "Neu angelegt: Kranich (key „kranich“)" in zeilen
+    abgelegt = tmp_path / "medien" / "qigong" / name.removeprefix("medien/")
+    assert abgelegt.read_bytes() == bild
+    text = datei.read_text("utf-8")
+    assert f'datei = "medien/qigong/{abgelegt.name}"' in text
+    gebaut = paket_oeffnen(bauen(datei, tmp_path / "dist2"))
+    (kranich,) = [u for u in gebaut.uebungen if u.name == "Kranich"]
+    assert [m.uri for m in kranich.media] == [name]
 
 
 QIGONG_MIT_KURS = (
@@ -544,10 +686,17 @@ def test_uebernehmen_aus_der_datenbank_mit_kapitelplan(tmp_path) -> None:
     vorlage = gelesen.kurse[0].kapitel[1].plaene[0]
     assert [i.exercise_id for i in vorlage.items] == [baum.id, lotus.id]
     assert uebernehmen(db, datei) == (["Keine Änderung"], [])
-    # Datei inzwischen weiter: andere Version als in der Datenbank → nichts
-    datei.write_text(text.replace("version = 2", "version = 3"), encoding="utf-8")
+    # Datei inzwischen weiter (Version 3, Baum am Laptop umbenannt): Die Basis ist der
+    # Paketstand der Datenbank — die Nummer blockiert nichts, und was beide geändert haben,
+    # bleibt, wie es in der Datei steht
+    datei.write_text(
+        text.replace("version = 2", "version = 3").replace("Baum, tief", "Baum am Laptop"),
+        encoding="utf-8",
+    )
     zeilen, fehler = uebernehmen(db, datei)
-    assert zeilen == [] and "Version 0.0.2" in fehler[0]
+    assert fehler == [] and zeilen[0] == "Keine Änderung"
+    assert any("Baum am Laptop: Name" in z and "App: Baum, tief" in z for z in zeilen)
+    assert "Baum am Laptop" in datei.read_text("utf-8")
 
 
 def test_pruefen_sieht_takt_und_beschleunigung_je_planuebung(tmp_path) -> None:
@@ -614,3 +763,140 @@ def test_pruefen_warnt_vor_kapiteln_ohne_key(tmp_path) -> None:
     assert any("Kurs „Ruhe“: Kapitel 2 ohne `key`" in h for h in hinweise)
     datei.write_text(QIGONG + kurs.replace('titel = "Zwei"', 'key = "zwei"\ntitel = "Zwei"'))
     assert not any("ohne `key`" in h for h in pruefen(datei, symbole=None)[1])
+
+
+INDIVIDUELL = """[paket]
+name = "Für A."
+version = "0.1.0"
+
+[[exercises]]
+key = "kranich"
+name = "Kranich"
+description = "Auf einem Bein."
+
+[[plaene]]
+key = "morgens"
+name = "Morgens"
+uebungen = [
+  { uebung = "kranich" },
+  { uebung = "kniebeuge", paket = "Standard" },
+  { uebung = "baum", paket = "Qigong Basis" },
+]
+"""
+
+QIGONG_MIT_ID = QIGONG.replace(
+    '[paket]\nname = "Qigong"',
+    '[paket]\nid = "d9f9b050-7d51-409d-8df7-efffb04543ef"\nname = "Qigong Basis"',
+)
+
+
+def test_verweise_auf_andere_pakete(tmp_path) -> None:
+    """V1 und V2 (`docs/plan_paketverweise.md`, Ben 17.11.2026): ``paket = "…"`` an einer
+    Planübung wird zur ID der Übung dort — bei einem Paket mit eigener ID im Kopf die aus
+    jener Datei, nicht die aus dem Namen; `pruefen` folgt jedem Verweis in die Datei daneben."""
+    from trainingsapp.core.pakete import paket_id, uebung_id
+
+    (tmp_path / "standard.toml").write_text(SEED_DATEI.read_text("utf-8"), encoding="utf-8")
+    (tmp_path / "qigong.toml").write_text(QIGONG_MIT_ID, encoding="utf-8")
+    datei = tmp_path / "fuer_a.toml"
+    datei.write_text(INDIVIDUELL, encoding="utf-8")
+    fehler, hinweise = pruefen(datei, symbole=None)
+    assert fehler == [] and not any("Verweis" in h or "prüfbar" in h for h in hinweise)
+    gebaut = json.loads(bauen(datei, tmp_path / "dist").read_text("utf-8"))
+    ids = [e["uebung"] for e in gebaut["plaene"][0]["uebungen"]]
+    assert ids[1] == uebung_id(GRUNDAUSSTATTUNG, "kniebeuge")
+    assert ids[2] == uebung_id("d9f9b050-7d51-409d-8df7-efffb04543ef", "baum")
+    assert ids[2] != uebung_id(paket_id("Qigong Basis"), "baum"), "nicht die ID aus dem Namen"
+
+    kaputt = INDIVIDUELL.replace(
+        '{ uebung = "kniebeuge", paket = "Standard" }', '{ uebung = "kniebeuge" }'
+    ).replace(
+        '{ uebung = "baum", paket = "Qigong Basis" }',
+        '{ uebung = "gibtsnicht", paket = "Standard" }',
+    )
+    datei.write_text(kaputt, encoding="utf-8")
+    fehler, _ = pruefen(datei, symbole=None)
+    assert any("„kniebeuge“ ist kein Schlüssel dieses Pakets" in f for f in fehler)
+    assert any("„gibtsnicht“ gibt es in „Standard“ nicht" in f for f in fehler)
+    datei.write_text(
+        INDIVIDUELL.replace('paket = "Qigong Basis"', 'paket = "Unbekannt"'), encoding="utf-8"
+    )
+    fehler, hinweise = pruefen(datei, symbole=None)
+    assert fehler == []
+    assert any("„Unbekannt“ liegt nicht neben fuer_a.toml" in h for h in hinweise)
+
+
+def test_version_gegen_die_veroeffentlichte_fassung(tmp_path) -> None:
+    """Stufe 4 (`docs/plan_rueckweg_handy.md`, Ben 17.11.2026): Mit ``--stufe-als-hinweis``
+    sperrt nur eine Nummer, die nicht gestiegen ist; eine zu kleine Stufe ist ein Hinweis —
+    die Geräte rechnen sie selbst aus dem Unterschied. Nach `uebernehmen` schlägt das Werkzeug
+    die Nummer vor."""
+    from trainingsapp.paket_werkzeug import gegen_pruefen
+
+    alt = tmp_path / "alt"
+    alt.mkdir()
+    (alt / "qigong.toml").write_text(QIGONG, encoding="utf-8")
+    veroeffentlicht = bauen(alt / "qigong.toml", tmp_path / "dist")
+    neu_text = QIGONG + (
+        '\n[[exercises]]\nkey = "kranich"\nname = "Kranich"\ndescription = "Auf einem Bein."\n'
+    )
+    datei = tmp_path / "qigong.toml"
+    datei.write_text(neu_text, encoding="utf-8")  # neue Übung, Nummer gleich (2 = 0.0.2)
+    for locker in (False, True):
+        fehler, _ = gegen_pruefen(datei, str(veroeffentlicht), stufe_als_hinweis=locker)
+        assert fehler and "mindestens 0.1.0, steht 0.0.2" in fehler[0]
+    datei.write_text(neu_text.replace("version = 2", 'version = "0.0.3"'), encoding="utf-8")
+    assert gegen_pruefen(datei, str(veroeffentlicht))[0], "streng: die Stufe reicht nicht"
+    fehler, hinweise = gegen_pruefen(datei, str(veroeffentlicht), stufe_als_hinweis=True)
+    assert fehler == [] and "mindestens 0.1.0, steht 0.0.3" in hinweise[0]
+
+    # Vorschlag nach dem Übernehmen: gegen den letzten Commit
+    def aendern(roh):
+        roh["exercises"].append({"id": "x", "name": "Kranich", "description": "Bein."})
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    export, datei = _export(repo, QIGONG, aendern)
+    zeilen, fehler = uebernehmen(export, datei)
+    assert fehler == []
+    assert any(
+        z.startswith("Version: steht 0.0.2, für diese Änderungen mindestens 0.1.0") for z in zeilen
+    )
+
+
+def test_verlinken_ersetzt_die_datei_durch_einen_link(tmp_path) -> None:
+    """Stufe 5: ``datei = …`` wird ``uri = …`` — mit ``pruefen_mit`` nur, wenn der Link genau
+    diese Datei liefert (keine Webseite, keine andere Datei)."""
+    from trainingsapp.paket_werkzeug import verlinken
+
+    bild = _png()
+    (tmp_path / "medien").mkdir()
+    (tmp_path / "medien" / "foto.png").write_bytes(bild)
+    datei = tmp_path / "qigong.toml"
+    datei.write_text(
+        QIGONG.replace(
+            'icon_key = "fitness_center"',
+            'icon_key = "fitness_center"\nmedia = [{ datei = "medien/foto.png", title = "Foto" }]',
+        ),
+        encoding="utf-8",
+    )
+    url = "https://example.invalid/foto.png"
+    sha = hashlib.sha256(bild).hexdigest()
+    fehler = verlinken(datei, "medien/foto.png", url, pruefen_mit=lambda u: (sha, "text/html", 9))[
+        1
+    ]
+    assert fehler and "Webseite" in fehler[0]
+    fehler = verlinken(
+        datei, "medien/foto.png", url, pruefen_mit=lambda u: ("0" * 64, "image/png", 9)
+    )[1]
+    assert fehler and "andere Datei" in fehler[0]
+    assert 'datei = "medien/foto.png"' in datei.read_text("utf-8"), "bei Fehlern bleibt die Datei"
+    zeilen, fehler = verlinken(
+        datei, "medien/foto.png", url, pruefen_mit=lambda u: (sha, "image/png", len(bild))
+    )
+    assert fehler == [] and zeilen[0].startswith("Link geprüft: dieselbe Datei")
+    text = datei.read_text("utf-8")
+    assert f'uri = "{url}"' in text and "datei =" not in text and 'title = "Foto"' in text
+    assert pruefen(datei)[0] == []
+    assert verlinken(datei, "medien/foto.png", url)[1], "nennt die Datei nicht mehr"
+    assert verlinken(datei, "medien/foto.png", "http://x")[1], "nur https"

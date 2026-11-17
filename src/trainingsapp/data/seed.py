@@ -35,7 +35,7 @@ import tomllib
 from pathlib import Path
 
 from ..core.models import Exercise
-from ..core.paketdatei import paket_oeffnen, toml_oeffnen
+from ..core.paketdatei import nachbar_namen, paket_oeffnen, toml_oeffnen
 from ..core.pakete import (
     GRUNDAUSSTATTUNG,
     NAMENSRAUM,
@@ -83,7 +83,7 @@ def seed_inhalt(datei: Path = SEED_DATEI) -> Paketinhalt:
         roh = tomllib.loads(datei.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as fehler:
         raise PaketFehler(f"{datei.name}: {fehler}") from None
-    return paket_lesen(roh)
+    return paket_lesen(roh, pakete=nachbar_namen(datei))
 
 
 def seed_laden(datei: Path = SEED_DATEI) -> list[Exercise]:

@@ -44,6 +44,7 @@ from .pakete import (
     dateiname,
     paket_json,
     paket_lesen,
+    paket_namen,
     paketmedien_in,
 )
 from .paketmedien import (
@@ -312,7 +313,7 @@ def paket_oeffnen(
 def medienlisten(roh: Mapping[str, Any]) -> Iterator[list[Any]]:
     """Alle Medienlisten der Rohdaten: Übungen (``media``), Planübungen (``medien``), Kapitel
     (``media``), die Planübungen in Kapiteln und die in der Vorlage eines Kursplans
-    (``kurse[].kursplan.vorlage``).
+    (``kurse[].kursplan.vorlage``), dazu das Medium jedes Blocks „Medium“ eines Kapitels.
 
     >>> vorlage = {"uebungen": [{"uebung": "a", "medien": [{"datei": "x.jpg"}]}]}
     >>> list(medienlisten({"kurse": [{"kursplan": {"vorlage": vorlage}}]}))
@@ -342,6 +343,11 @@ def medienlisten(roh: Mapping[str, Any]) -> Iterator[list[Any]]:
             if isinstance(kap.get("media"), list):
                 yield kap["media"]
             yield from aus_plaenen(kap.get("plaene"))
+            # Blöcke „Medium“ (`core.kursbloecke`) — eine Liste mit dem einen Eintrag, damit
+            # auch dort ``datei = "…"`` geht (17.11.2026: Erklärvideo vor oder nach dem Kapitel)
+            for block in kap.get("bloecke") or []:
+                if isinstance(block, dict) and isinstance(block.get("medium"), dict):
+                    yield [block["medium"]]
 
 
 def sha256_datei(pfad: Path) -> str:
@@ -390,6 +396,21 @@ def dateien_einbinden(roh: dict[str, Any], basis: Path, arbeit: Path) -> dict[st
     return dateien
 
 
+def nachbar_namen(pfad: Path) -> dict[str, str]:
+    """Name (klein) → ID der Pakete, die als TOML neben ``pfad`` liegen (auch ``pfad`` selbst;
+    `core.pakete.paket_namen`) — damit ein Verweis ``paket = "Qigong Basis"`` (V1) die ID aus
+    dem Kopf jener Datei findet. Unlesbares zählt nicht."""
+    koepfe: list[Mapping[str, Any]] = []
+    for datei in sorted(pfad.parent.glob("*.toml")):
+        try:
+            kopf = tomllib.loads(datei.read_text(encoding="utf-8")).get("paket")
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            continue
+        if isinstance(kopf, dict):
+            koepfe.append(kopf)
+    return paket_namen(koepfe)
+
+
 def toml_oeffnen(pfad: Path, arbeit: Path) -> Paketinhalt:
     """Eine TOML aus dem Inhalte-Repo **mit** ihren Dateien (``datei = "…"``, bereinigt nach
     ``arbeit``) — wie eine ZIP: ``medien`` zeigt auf die bereinigten Dateien. ``arbeit`` muss
@@ -399,7 +420,7 @@ def toml_oeffnen(pfad: Path, arbeit: Path) -> Paketinhalt:
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as fehler:
         raise PaketFehler(f"{pfad.name}: {fehler}") from None
     dateien = dateien_einbinden(roh, pfad.parent, arbeit)
-    inhalt = paket_lesen(roh, name_vorgabe=pfad.stem)
+    inhalt = paket_lesen(roh, name_vorgabe=pfad.stem, pakete=nachbar_namen(pfad))
 
     def oeffner(datei: Path) -> Callable[[], IO[bytes]]:
         return lambda: datei.open("rb")

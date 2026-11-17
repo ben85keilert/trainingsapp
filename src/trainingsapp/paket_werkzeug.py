@@ -36,16 +36,19 @@ import hashlib
 import json
 import re
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import tomllib
 import uuid
+import zipfile
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from trainingsapp.core.abgleich import Hinweis, abgleichen
 from trainingsapp.core.ablauf import ablauf_pruefen
 from trainingsapp.core.bedingung import bedingung_pruefen
 from trainingsapp.core.ergaenzungen import ERGAENZBAR
@@ -71,10 +74,12 @@ from trainingsapp.core.kursbloecke import (
 from trainingsapp.core.kurse import Kapitel, Kurs, PlanVorlage, VorlageItem
 from trainingsapp.core.kursplan import GRUNDLAGE
 from trainingsapp.core.links import erlaubt as links_erlaubt
-from trainingsapp.core.models import Exercise, Plan
+from trainingsapp.core.models import Exercise, MediaSource, Plan
 from trainingsapp.core.paketdatei import (
+    PAKET_JSON,
     dateien_einbinden,
     medienlisten,
+    nachbar_namen,
     paket_oeffnen,
     paket_zip,
     sha256_datei,
@@ -82,18 +87,22 @@ from trainingsapp.core.paketdatei import (
 )
 from trainingsapp.core.pakete import (
     FELDNAMEN,
+    MARKENFELDER,
     NAMENSRAUM,
     Paket,
     PaketFehler,
     Paketinhalt,
     dateiname,
+    ergaenzung_ziel,
     noetige_version,
     nutzt_kursplan,
     paket_json,
     paket_lesen,
+    paket_ziel,
     stand,
+    stand_normieren,
 )
-from trainingsapp.core.paketmedien import medium_aus_paket
+from trainingsapp.core.paketmedien import Paketmedium, medium_aus_paket
 from trainingsapp.core.paketquelle import (
     INDEX_FORMAT,
     INDEX_VERSION,
@@ -107,7 +116,7 @@ from trainingsapp.core.paketquelle import (
 from trainingsapp.core.paketquelle import _laden as netz_laden
 from trainingsapp.core.paketstufe import STUFE_TEXT, mindestens, stufen_text, version_reicht
 from trainingsapp.core.paketstufe import stufe as paket_stufe
-from trainingsapp.core.paketversion import version_text
+from trainingsapp.core.paketversion import version_text, version_zahl
 from trainingsapp.core.privat import (
     ZUGANG_ENDUNG,
     code_neu,
@@ -431,6 +440,9 @@ def pruefen(
     f_kurs, h_kurs = kursplan_pruefen(roh, inhalt)
     fehler.extend(f_kurs)
     hinweise.extend(h_kurs)
+    f_verw, h_verw = verweise_pruefen(datei, roh, inhalt)
+    fehler.extend(f_verw)
+    hinweise.extend(h_verw)
     if any(nutzt_kursplan(k) for k in inhalt.kurse):
         hinweise.append(
             "Formatversion 6 (Kursplan) — eine App, die sie nicht kennt, lehnt das Paket ab "
@@ -453,6 +465,119 @@ def pruefen(
         stellen = "1 geprüfte Stelle" if angenommen == 1 else f"{angenommen} geprüfte Stellen"
         hinweise.append(f"Wortliste: {stellen} (Text unverändert)")
     return fehler, hinweise
+
+
+def _uebungsverweise(roh: Mapping[str, Any]) -> list[tuple[str, str, str]]:
+    """``(Wo, Übung, Paket)`` jedes Übungsverweises in Plänen und Kursen — Planübungen,
+    Kursplan, Bedingungen, Blöcke (``uebung``, wahlweise ``paket``) und Marken in der Form
+    ``<block>:<Paket>/<schlüssel>`` (V1).
+
+    >>> roh = {"plaene": [{"name": "P", "uebungen": [{"uebung": "a"}]}], "kurse": [{"name":
+    ...     "K", "kapitel": [{"titel": "T", "bedingung": {"uebung": "b", "paket": "Standard"},
+    ...     "bloecke": [{"an": "dazu:Qigong/c"}]}]}]}
+    >>> _uebungsverweise(roh)  # doctest: +NORMALIZE_WHITESPACE
+    [('Plan „P“', 'a', ''), ('Kurs „K“, Kapitel „T“', 'b', 'Standard'),
+     ('Kurs „K“, Kapitel „T“', 'c', 'Qigong')]
+    """
+    out: list[tuple[str, str, str]] = []
+
+    def gehe(x: Any, wo: str) -> None:
+        if isinstance(x, list):
+            for e in x:
+                gehe(e, wo)
+            return
+        if not isinstance(x, dict):
+            return
+        uebung = x.get("uebung")
+        if isinstance(uebung, str) and uebung.strip():
+            out.append((wo, uebung.strip(), str(x.get("paket") or "").strip()))
+        for feld in MARKENFELDER:
+            marke = x.get(feld)
+            if isinstance(marke, str) and ":" in marke:
+                vorn, schraeg, key = marke.partition(":")[2].rpartition("/")
+                if schraeg and vorn.strip() and key.strip():
+                    out.append((wo, key.strip(), vorn.strip()))
+        for wert in x.values():
+            if isinstance(wert, dict | list):
+                gehe(wert, wo)
+
+    for pl in roh.get("plaene") or []:
+        if isinstance(pl, dict):
+            gehe(pl, f"Plan „{pl.get('name', pl.get('key', '?'))}“")
+    for k in roh.get("kurse") or []:
+        if not isinstance(k, dict):
+            continue
+        wo = f"Kurs „{k.get('name', k.get('key', '?'))}“"
+        gehe({f: w for f, w in k.items() if f != "kapitel"}, wo)
+        for kap in k.get("kapitel") or []:
+            if isinstance(kap, dict):
+                gehe(kap, f"{wo}, Kapitel „{kap.get('titel', kap.get('key', '?'))}“")
+    return out
+
+
+def _nachbar_uebungen(datei: Path) -> dict[str, tuple[str, set[str]]]:
+    """Paket-ID → ``(Name, IDs der Übungen)`` der TOML-Pakete neben ``datei``."""
+    out: dict[str, tuple[str, set[str]]] = {}
+    for anderes in sorted(datei.parent.glob("*.toml")):
+        if anderes.resolve() == datei.resolve():
+            continue
+        try:
+            inh = seed_inhalt(anderes)
+        except (PaketFehler, OSError):
+            continue
+        out[inh.paket.id] = (inh.paket.name, {u.id for u in inh.uebungen})
+    return out
+
+
+def verweise_pruefen(
+    datei: Path, roh: Mapping[str, Any], inhalt: Paketinhalt
+) -> tuple[list[str], list[str]]:
+    """``(Fehler, Hinweise)``: Geht jeder Übungsverweis auf (V2, `docs/plan_paketverweise.md`)?
+    Ein Schlüssel ohne ``paket`` muss einer dieses Pakets sein — sonst fiele die Übung auf
+    dem Gerät still aus dem Plan; mit ``paket`` muss es den Schlüssel in jenem Paket geben,
+    wenn es als TOML daneben liegt (sonst ein Hinweis „nicht prüfbar“); eine ID ohne Paket,
+    die weder hier noch daneben vorkommt, ist ein Hinweis."""
+    eigene = {u.id for u in inhalt.uebungen}
+    keys = {
+        str(e.get("key")).strip()
+        for e in roh.get("exercises") or []
+        if isinstance(e, dict) and e.get("key")
+    }
+    toml = datei.suffix == ".toml"
+    nachbarn = _nachbar_uebungen(datei) if toml else {}
+    namen = nachbar_namen(datei) if toml else {}
+    fehler: list[str] = []
+    hinweise: list[str] = []
+    gesehen: set[tuple[str, str, str]] = set()
+    for wo, uebung, paket in _uebungsverweise(roh):
+        if (wo, uebung, paket) in gesehen or uebung.startswith("$"):
+            continue
+        gesehen.add((wo, uebung, paket))
+        if paket:
+            uid, pid = ergaenzung_ziel(uebung, paket, namen), paket_ziel(paket, namen)
+            if uid in eigene or uid in nachbarn.get(pid, ("", set()))[1]:
+                continue
+            if pid in nachbarn:
+                fehler.append(f"{wo}: „{uebung}“ gibt es in „{nachbarn[pid][0]}“ nicht")
+            else:
+                hinweise.append(
+                    f"{wo}: „{paket}“ liegt nicht neben {datei.name} — „{uebung}“ nicht prüfbar"
+                )
+        elif _UUID_TEXT.fullmatch(uebung):
+            if uebung.lower() not in eigene and not any(
+                uebung.lower() in ids for _, ids in nachbarn.values()
+            ):
+                hinweise.append(f"{wo}: Übung {uebung} kennt kein Paket hier — nicht prüfbar")
+        elif uebung not in keys:
+            fehler.append(
+                f"{wo}: „{uebung}“ ist kein Schlüssel dieses Pakets — aus einem anderen Paket "
+                '`paket = "…"` dazuschreiben (sonst fällt die Übung auf dem Gerät still weg)'
+            )
+    return fehler, hinweise
+
+
+#: Eine ID (UUID) statt eines Schlüssels
+_UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 
 
 def _nennt_dateien(roh: dict[str, Any]) -> bool:
@@ -1021,7 +1146,10 @@ beginnt leer (keine Grundlage)
 
 
 def gegen_pruefen(
-    datei: Path, gegen: str, laden: Callable[[str], bytes] | None = None
+    datei: Path,
+    gegen: str,
+    laden: Callable[[str], bytes] | None = None,
+    stufe_als_hinweis: bool = False,
 ) -> tuple[list[str], list[str]]:
     """``(Fehler, Hinweise)``: Passt die Version von ``datei`` zur Stufe ihres Unterschieds zur
     veröffentlichten Fassung ``gegen`` (eine Datei, ein Link auf eine Paketdatei oder ein Index —
@@ -1052,10 +1180,18 @@ def gegen_pruefen(
             return [f"--gegen: {f}"], []
     s = paket_stufe(alt, neu)
     if not version_reicht(alt.paket.version, neu.paket.version, s.stufe):
-        return [
+        text = (
             f"{STUFE_TEXT[s.stufe]} ({stufen_text(s.gruende)}) → mindestens "
             f"{mindestens(alt.paket.version, s.stufe)}, steht {version_text(neu.paket.version)}"
-        ], []
+        )
+        # Mit ``stufe_als_hinweis`` (veroeffentlichen.sh, Ben 17.11.2026) sperrt nur eine Nummer,
+        # die nicht gestiegen ist — dann sähe kein Gerät das Update. Eine zu kleine Stufe ist
+        # ein Hinweis: Die Geräte rechnen die Stufe selbst aus dem Unterschied
+        # (`ui/views/updates.py`, `core.paketstufe.automatisch`), die Nummer zeigen sie nur.
+        gestiegen = (neu.paket.version or 0) > (alt.paket.version or 0)
+        if stufe_als_hinweis and gestiegen:
+            return [], [f"gegen {version_text(alt.paket.version)}: {text}"]
+        return [text], []
     return [], [
         f"gegen {version_text(alt.paket.version)}: {STUFE_TEXT[s.stufe]}"
         + (f" ({stufen_text(s.gruende)})" if s.gruende else "")
@@ -1349,6 +1485,14 @@ def _anders(feld: str, alt: Any, neu: Any) -> bool:
     return alt != neu
 
 
+#: Wohin `uebernehmen` und `einlesen` Dateien aus einer ZIP der App legen — neben die TOML,
+#: je Paket ein Ordner (``pakete/medien/<paket>/``). Mediendateien kommen nie ins git
+#: (Inhalte-Repo, CLAUDE.md Regel 6) — der Ordner gehört in dessen ``.gitignore``.
+MEDIENORDNER = "medien"
+#: Schlüssel einer Übung, wie `pruefen` sie verlangt
+_UMLAUTE_KEY = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+
+
 @dataclass
 class Quelle:
     """Was aus der App kommt: der Paketkopf (Version!), Übungen, bei einer Datenbank auch
@@ -1360,10 +1504,35 @@ class Quelle:
     #: Übungen (IDs), die in der Datenbank ein **anderes** Paket ergänzt (U5): Ihr Stand dort
     #: ist Grund + Ergänzungen — die ergänzbaren Felder gehören nicht ins Grundpaket (K44)
     ergaenzt: frozenset[str] = frozenset()
+    #: Der Paketstand je Übung (ID), wie das Gerät ihn bekam — die Basis des Drei-Wege-
+    #: Abgleichs; aus der Datenbank (`Exercise.package_standard`). ``None`` = nicht dabei
+    basis: dict[str, dict[str, Any]] | None = None
+    #: Wann die Datei exportiert wurde (``exportiert``) — wählt die Basis in der Geschichte
+    exportiert: datetime | None = None
+    #: Die Dateien einer ZIP (Name → Datei) — `uebernehmen` legt neue neben die TOML
+    medien: Mapping[str, Paketmedium] = field(default_factory=dict)
+    #: Die Datenbank der App — dort ist jede Paketübung aus der Datei gekommen; was der
+    #: Datei fehlt, wurde am Laptop gestrichen und kommt nicht zurück
+    aus_datenbank: bool = False
 
 
-def _quelle_lesen(quelle: Path, paket_id: str) -> Quelle:
-    """Ein Export (JSON) oder eine Datenbank der App (nur lesend, ``mode=ro``)."""
+def _exportiert(quelle: Path) -> datetime | None:
+    """``exportiert`` aus einer JSON- oder ZIP-Datei der App — ``None``, wenn es fehlt (eine
+    mit `bauen` gebaute Datei hat keinen Zeitstempel, K28)."""
+    try:
+        if zipfile.is_zipfile(quelle):
+            with zipfile.ZipFile(quelle) as z:
+                roh = json.loads(z.read(PAKET_JSON))
+        else:
+            roh = json.loads(quelle.read_bytes())
+        wert = datetime.fromisoformat(str(roh.get("exportiert")))
+    except (OSError, KeyError, ValueError, AttributeError, zipfile.BadZipFile):
+        return None
+    return wert if wert.tzinfo else wert.replace(tzinfo=UTC)
+
+
+def _quelle_lesen(quelle: Path, paket_id: str, arbeit: Path) -> Quelle:
+    """Ein Export (JSON oder ZIP) oder eine Datenbank der App (nur lesend, ``mode=ro``)."""
     if quelle.suffix.lower() in (".db", ".sqlite", ".sqlite3"):
         from trainingsapp.data.pakete import PaketRepo
         from trainingsapp.data.repositories import ExerciseRepo, PlanRepo, SubjectRepo
@@ -1393,48 +1562,184 @@ def _quelle_lesen(quelle: Path, paket_id: str) -> Quelle:
                 )
             except sqlite3.OperationalError:  # eine Datenbank von vor den Ergänzungen (U5)
                 ergaenzt = frozenset()
+            repo = PaketRepo(con)
+            basis = {
+                u.id: stand_normieren(standard)
+                for u in uebungen
+                if (standard := repo.standard(u.id)) is not None
+            }
         finally:
             con.close()
-        return Quelle(paket, uebungen, list(plaene.values()), ergaenzt)
-    inhalt = paket_lesen(quelle.read_bytes(), quelle.stem)
-    return Quelle(inhalt.paket, inhalt.uebungen)
+        return Quelle(paket, uebungen, list(plaene.values()), ergaenzt, basis, aus_datenbank=True)
+    arbeit.mkdir(parents=True, exist_ok=True)
+    inhalt = paket_oeffnen(quelle, quelle.stem, arbeit=arbeit)
+    return Quelle(
+        inhalt.paket, inhalt.uebungen, exportiert=_exportiert(quelle), medien=inhalt.medien
+    )
 
 
-def _uebungen_uebernehmen(
-    quelle: Quelle, bloecke: list[Any], uebungen: list[Exercise]
-) -> tuple[list[str], list[str], list[str]]:
-    """Je Übung der Quelle den Block mit derselben ID: anders als in der Datei → eintragen.
-    ``(Zeilen je übernommener Übung, Namen ohne Block, Hinweise)``.
+def _git(ordner: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(ordner), *args], capture_output=True, text=True, check=True, timeout=60
+    ).stdout
 
-    Ergänzt in der Datenbank ein anderes Paket die Übung (`Quelle.ergaenzt`), ist ihr Stand
-    dort der **wirksame** (Grund + Ergänzungen): Die Felder, die eine Ergänzung setzen darf
-    (`ERGAENZBAR`), werden dann nicht übernommen — sonst landeten Abschnitte, Medien oder
-    Timer des anderen Pakets als Inhalt dieses Pakets in der Datei (K44)."""
-    je_id = {u.id: (block, u) for block, u in zip(bloecke, uebungen, strict=True)}
-    zeilen: list[str] = []
-    fremd: list[str] = []
-    hinweise: list[str] = []
-    for u in quelle.uebungen:
-        if u.id not in je_id:
-            fremd.append(u.name)
+
+def _dateien_merken(roh: dict[str, Any], ordner: Path, arbeit: Path) -> dict[str, str]:
+    """`dateien_einbinden` — und dazu, welche Paketdatei (``medien/<sha>.<endung>``) aus
+    welchem ``datei = "…"`` kam: So schreibt `uebernehmen` sie wieder als Pfad zurück."""
+    vorher = [
+        (e, str(e["datei"]))
+        for liste in medienlisten(roh)
+        for e in liste
+        if isinstance(e, dict) and "datei" in e
+    ]
+    arbeit.mkdir(parents=True, exist_ok=True)
+    dateien_einbinden(roh, ordner, arbeit)
+    return {str(e["uri"]): rel for e, rel in vorher}
+
+
+def _basis_aus_git(
+    datei: Path, version: int | None, bis: datetime | None, namen: Mapping[str, str], arbeit: Path
+) -> tuple[dict[str, dict[str, Any]], str] | None:
+    """Der Paketstand je Übung der Fassung ``version`` aus der Geschichte von ``datei`` — der
+    jüngste Commit mit dieser Version, der **vor dem Export** (``bis``) lag: Was danach
+    committet wurde, kann das Gerät nicht haben. ``(Stand je ID, woher)``; ``None`` ohne
+    git, ohne passenden Commit oder wenn er sich nicht lesen lässt."""
+    if version is None:
+        return None
+    try:
+        wurzel = Path(_git(datei.parent, "rev-parse", "--show-toplevel").strip())
+        rel = datei.resolve().relative_to(wurzel.resolve()).as_posix()
+        log = _git(wurzel, "log", "--format=%H %ct", "--", rel)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    for zeile in log.splitlines():
+        commit, _, zeit = zeile.partition(" ")
+        if not commit or not zeit.isdigit():
             continue
-        block, alt = je_id[u.id]
-        alt_stand, neu_stand = stand(alt), stand(u)
-        geaendert = [
-            feld for feld in FELDNAMEN if _anders(feld, alt_stand.get(feld), neu_stand.get(feld))
-        ]
-        if u.id in quelle.ergaenzt and (aus := [f for f in geaendert if f in ERGAENZBAR]):
-            geaendert = [f for f in geaendert if f not in ERGAENZBAR]
-            hinweise.append(
-                f"{alt.name}: von einem anderen Paket ergänzt — nicht übernommen: "
-                + ", ".join(FELDNAMEN[f] for f in aus)
-            )
-        if not geaendert:
+        if bis is not None and int(zeit) > bis.timestamp():
             continue
-        for feld in geaendert:
-            _feld_setzen(block, feld, neu_stand.get(feld), u)
-        zeilen.append(f"{alt.name}: " + ", ".join(FELDNAMEN[feld] for feld in geaendert))
-    return zeilen, fremd, hinweise
+        try:
+            roh = tomllib.loads(_git(wurzel, "show", f"{commit}:{rel}"))
+            kopf = roh.get("paket")
+            if version_zahl(kopf.get("version") if isinstance(kopf, dict) else None) != version:
+                continue
+            dateien_einbinden(roh, datei.parent, arbeit)
+            inhalt = paket_lesen(roh, name_vorgabe=datei.stem, pakete=namen)
+        except (OSError, ValueError, subprocess.SubprocessError, PaketFehler):
+            return None
+        datum = datetime.fromtimestamp(int(zeit), UTC)
+        return (
+            {u.id: stand(u) for u in inhalt.uebungen},
+            f"Version {version_text(version)} aus Commit {commit[:7]} vom {datum:%d.%m.%Y}",
+        )
+    return None
+
+
+def _sortiert(s: Mapping[str, Any]) -> dict[str, Any]:
+    """Typen und Regionen sind Mengen — sortiert, damit eine andere Reihenfolge der App
+    nicht als Änderung zählt."""
+    return {
+        k: sorted(v) if k in ("typen", "regionen") and isinstance(v, list) else v
+        for k, v in s.items()
+    }
+
+
+def dreiwege(
+    basis: Mapping[str, Any],
+    datei: Mapping[str, Any],
+    quelle: Mapping[str, Any],
+    felder: Iterable[str],
+) -> tuple[dict[str, Any], list[Hinweis]]:
+    """``(Felder mit neuem Wert, Stellen, die beide geändert haben)`` — **die Datei gewinnt**
+    (Ben, 17.11.2026: „TOML, aber die ältere Handyversion darf keinen Konflikt bekommen“).
+    Derselbe Abgleich wie beim Update auf dem Gerät (`core.abgleich.abgleichen`), nur mit
+    vertauschten Rollen: Die Datei ist „die Person“, die App „das Paket“. Was die App
+    geändert hat, kommt, wo die Datei seit der Basis gleich blieb; Beschreibung je
+    Abschnitt, Medien je Adresse.
+
+    >>> b = {"name": "Baum", "description": "Knie weich."}
+    >>> neu, konflikt = dreiwege(b, {**b, "name": "Baum stehen"},
+    ...                          {"name": "Baum tief", "description": "Knie weich, tief."},
+    ...                          ["name", "description"])
+    >>> neu, [h.feld for h in konflikt]
+    ({'description': 'Knie weich, tief.'}, ['name'])
+    """
+    felder = list(felder)
+    d = _sortiert(datei)
+    ergebnis, hinweise = abgleichen(_sortiert(basis), d, _sortiert(quelle), felder)
+    neu = {f: ergebnis.get(f) for f in felder if _anders(f, d.get(f), ergebnis.get(f))}
+    return neu, hinweise
+
+
+def _kurz(wert: Any, laenge: int = 80) -> str:
+    if isinstance(wert, list | dict):
+        return f"{len(wert)} Einträge" if isinstance(wert, list) else "eine Tabelle"
+    text = " ".join(str(wert if wert is not None else "—").split())
+    return text if len(text) <= laenge else text[: laenge - 1] + "…"
+
+
+def neuer_key(name: str, vergeben: Collection[str]) -> str:
+    """Ein Schlüssel aus dem Namen, wie `pruefen` ihn verlangt (a–z, 0–9, ``_``) — eindeutig.
+
+    >>> neuer_key("Rücken stark!", {"ruecken_stark"}), neuer_key("…", set())
+    ('ruecken_stark_2', 'uebung')
+    """
+    roh = re.sub(r"[^a-z0-9]+", "_", name.casefold().translate(_UMLAUTE_KEY)).strip("_")
+    basis = roh[:56] or "uebung"
+    key, n = basis, 2
+    while key in vergeben:
+        key, n = f"{basis}_{n}", n + 1
+    return key
+
+
+def _medien_fuers_toml(
+    medien: Any,
+    rueck: Mapping[str, str],
+    quelle_medien: Mapping[str, Paketmedium],
+    ordner: Path,
+    wurzel: Path,
+    schreiben: bool,
+    fehlen: list[str],
+) -> list[dict[str, Any]]:
+    """Medien aus dem Abgleich zurück in die Form der TOML: eine Paketdatei, die die Datei
+    schon nennt, wieder als ``datei = "<Pfad>"``; eine neue aus der ZIP der App wird unter
+    ``ordner`` abgelegt (Name = Prüfsumme) und so genannt; Links bleiben, wie sie sind. Eine
+    Paketdatei, die es weder hier noch in der Quelle gibt, fällt weg (``fehlen``)."""
+    out: list[dict[str, Any]] = []
+    for m in medien or []:
+        if not isinstance(m, dict) or m.get("source") != MediaSource.PAKET:
+            out.append(m)
+            continue
+        name = str(m.get("uri") or "")
+        rest = {k: v for k, v in m.items() if k not in ("kind", "source", "uri")}
+        if name in rueck:
+            out.append({"datei": rueck[name], **rest})
+        elif name in quelle_medien:
+            ziel = ordner / name.removeprefix("medien/")
+            if schreiben and not ziel.is_file():
+                ordner.mkdir(parents=True, exist_ok=True)
+                quelle_medien[name].kopieren(ziel)
+            out.append({"datei": ziel.relative_to(wurzel).as_posix(), **rest})
+        else:
+            fehlen.append(str(m.get("title") or name))
+    return out
+
+
+def _uebungsblock(u: Exercise, key: str, medien: Callable[[Any], list[dict[str, Any]]]) -> Any:
+    """Ein neuer ``[[exercises]]``-Block aus einer Übung der App — ``key`` vorn, die ID folgt
+    daraus (nicht die des Geräts: Ben, 17.11.2026, E3 in `docs/plan_rueckweg_handy.md`)."""
+    block = _tomlkit().table()
+    block["key"] = key
+    s = stand(u)
+    for feld in FELDNAMEN:
+        wert = s.get(feld)
+        if feld == "media":
+            wert = medien(wert)
+        elif feld == "timer":  # die IDs rechnet der Leser aus Übung und Stelle
+            wert = [{k: v for k, v in p.items() if k != "id"} for p in wert or []]
+        _feld_setzen(block, feld, wert, u)
+    return block
 
 
 def _vorlage_aus_plan(plan: Plan) -> PlanVorlage:
@@ -1486,65 +1791,304 @@ def _plaene_uebernehmen(
     return zeilen, hinweise
 
 
-def uebernehmen(quelle: Path, datei: Path, schreiben: bool = True) -> tuple[list[str], list[str]]:
+def uebernehmen(
+    quelle: Path | Quelle, datei: Path, schreiben: bool = True, ohne_basis: bool = False
+) -> tuple[list[str], list[str]]:
     """Was in der App eingestellt wurde, in die TOML-Datei übernehmen — ``(Zeilen, Fehler)``.
-    ``quelle`` ist ein Export aus dem Paketmanager (JSON: Übungen) oder die Datenbank der
-    App (``.db``, nur lesend: Übungen und die Pläne aus Kurskapiteln). Ohne ``schreiben``
-    nur zeigen, was sich änderte.
+    ``quelle`` ist ein Export der App (JSON oder ZIP) oder ihre Datenbank (``.db``, nur
+    lesend: Übungen und die Pläne aus Kurskapiteln). Ohne ``schreiben`` nur zeigen.
 
-    Je Übung: der Block mit derselben ID (aus ``key`` gerechnet, wie beim Lesen); je Feld
-    des Paketstands (`core.pakete.stand`): anders als in der Datei → eintragen. Übungen
-    ohne Block (eigene, aus anderen Paketen) werden nur genannt. Gleiches Paket, andere
-    Version → nichts: Dann hat die App den Stand der Datei nie gesehen, und die Quelle
-    brächte Altes zurück."""
+    **Drei Wege** (Ben, 17.11.2026, `docs/plan_rueckweg_handy.md` Stufe 1): Je Übung zählt,
+    was die App **seit ihrer Basis** geändert hat — nur das kommt in die Datei, und nur
+    dort, wo die Datei seit der Basis gleich blieb; haben beide dieselbe Stelle geändert,
+    **bleibt die Datei** und die Zeile nennt den Wert der App (`dreiwege`). Die Basis ist der
+    Paketstand der Datenbank oder — bei einem Export — die Fassung mit seiner Version aus
+    der git-Geschichte, die vor dem Export committet war (`_basis_aus_git`). Ohne Basis
+    übernimmt es nichts und nennt nur, was abweicht; ``ohne_basis`` übernimmt dann die Werte
+    der Quelle (wie bis 17.11.2026).
+
+    Neue Übungen eines Exports (in keiner Basis, in keinem Paket daneben) bekommen einen
+    Block mit einem ``key`` aus dem Namen; ihre Dateien aus der ZIP liegen danach unter
+    ``medien/<paket>/`` neben der TOML. Was die Basis kennt und der Datei fehlt, wurde am
+    Laptop gestrichen und kommt nicht zurück. Kapitelpläne (Datenbank) wie bisher."""
     tomlkit = _tomlkit()
-    try:
-        text = datei.read_text(encoding="utf-8")
-        inhalt_datei = paket_lesen(_roh(datei))
-        inhalt_quelle = _quelle_lesen(quelle, inhalt_datei.paket.id)
-    except (PaketFehler, OSError, ValueError, sqlite3.Error) as grund:
-        return [], [str(grund)]
-    if (
-        inhalt_quelle.paket.id == inhalt_datei.paket.id
-        and inhalt_quelle.paket.version != inhalt_datei.paket.version
-    ):
-        return [], [
-            f"{quelle.name} hat Version {version_text(inhalt_quelle.paket.version)}, "
-            f"{datei.name} Version {version_text(inhalt_datei.paket.version)} — erst die App "
-            "mit diesem Stand starten "
-            "(`version` heben), dann übernehmen"
-        ]
-    dokument = tomlkit.parse(text)
-    bloecke = list(dokument.get("exercises") or [])
-    kurs_bloecke = list(dokument.get("kurse") or [])
-    if len(bloecke) != len(inhalt_datei.uebungen) or len(kurs_bloecke) != len(inhalt_datei.kurse):
-        return [], [f"{datei.name}: Blöcke und gelesene Übungen passen nicht zusammen"]
-    zeilen, fremd, ergaenzt = _uebungen_uebernehmen(inhalt_quelle, bloecke, inhalt_datei.uebungen)
+    with tempfile.TemporaryDirectory() as arbeit_text:
+        arbeit = Path(arbeit_text)
+        try:
+            text = datei.read_text(encoding="utf-8")
+            namen = nachbar_namen(datei)
+            roh_datei = tomllib.loads(text)
+            rueck = _dateien_merken(roh_datei, datei.parent, arbeit / "datei")
+            inhalt_datei = paket_lesen(roh_datei, name_vorgabe=datei.stem, pakete=namen)
+            inhalt_quelle = (
+                quelle
+                if isinstance(quelle, Quelle)
+                else _quelle_lesen(quelle, inhalt_datei.paket.id, arbeit / "quelle")
+            )
+        except (PaketFehler, OSError, ValueError, sqlite3.Error) as grund:
+            return [], [str(grund)]
+        basis: dict[str, dict[str, Any]] | None = inhalt_quelle.basis
+        woher = "Paketstand der Datenbank"
+        if basis is None and inhalt_quelle.paket.id == inhalt_datei.paket.id:
+            gefunden = _basis_aus_git(
+                datei, inhalt_quelle.paket.version, inhalt_quelle.exportiert, namen, arbeit / "b"
+            )
+            if gefunden is not None:
+                basis, woher = gefunden
+        dokument = tomlkit.parse(text)
+        bloecke = list(dokument.get("exercises") or [])
+        kurs_bloecke = list(dokument.get("kurse") or [])
+        if len(bloecke) != len(inhalt_datei.uebungen) or len(kurs_bloecke) != len(
+            inhalt_datei.kurse
+        ):
+            return [], [f"{datei.name}: Blöcke und gelesene Übungen passen nicht zusammen"]
+        je_id = {u.id: (block, u) for block, u in zip(bloecke, inhalt_datei.uebungen, strict=True)}
+        keys = {str(b.get("key")) for b in bloecke if b.get("key")}
+        nachbarn = {uid: name for name, ids in _nachbar_uebungen(datei).values() for uid in ids}
+        ordner = datei.parent / MEDIENORDNER / datei.stem
+        fehlen: list[str] = []
+
+        def medien(wert: Any) -> list[dict[str, Any]]:
+            return _medien_fuers_toml(
+                wert, rueck, inhalt_quelle.medien, ordner, datei.parent, schreiben, fehlen
+            )
+
+        zeilen: list[str] = []
+        hinweise: list[str] = []
+        ohne: list[str] = []
+        neu_angelegt: list[str] = []
+        gestrichen: list[str] = []
+        fremd: list[str] = []
+        for u in inhalt_quelle.uebungen:
+            if u.id not in je_id:
+                if u.id in nachbarn:
+                    fremd.append(f"{u.name} (aus „{nachbarn[u.id]}“)")
+                elif basis is None or inhalt_quelle.aus_datenbank:
+                    (gestrichen if inhalt_quelle.aus_datenbank else fremd).append(u.name)
+                elif u.id in basis:
+                    gestrichen.append(u.name)
+                else:
+                    key = neuer_key(u.name, keys)
+                    keys.add(key)
+                    if "exercises" not in dokument:
+                        dokument["exercises"] = tomlkit.aot()
+                    dokument["exercises"].append(_uebungsblock(u, key, medien))
+                    neu_angelegt.append(f"{u.name} (key „{key}“)")
+                continue
+            block, alt = je_id[u.id]
+            felder = list(FELDNAMEN)
+            if u.id in inhalt_quelle.ergaenzt:
+                aus = [
+                    f
+                    for f in felder
+                    if f in ERGAENZBAR and _anders(f, stand(alt).get(f), stand(u).get(f))
+                ]
+                felder = [f for f in felder if f not in ERGAENZBAR]
+                if aus:
+                    hinweise.append(
+                        f"{alt.name}: von einem anderen Paket ergänzt — nicht übernommen: "
+                        + ", ".join(FELDNAMEN[f] for f in aus)
+                    )
+            d_stand, q_stand = stand(alt), stand(u)
+            b_stand = basis.get(u.id) if basis is not None else None
+            if b_stand is None and not ohne_basis:
+                abw = [f for f in felder if _anders(f, d_stand.get(f), q_stand.get(f))]
+                if abw:
+                    ohne.append(f"{alt.name}: " + ", ".join(FELDNAMEN[f] for f in abw))
+                continue
+            if b_stand is None:
+                neu = {
+                    f: q_stand.get(f) for f in felder if _anders(f, d_stand.get(f), q_stand.get(f))
+                }
+                konflikte: list[Hinweis] = []
+            else:
+                neu, konflikte = dreiwege(b_stand, d_stand, q_stand, felder)
+            for h in konflikte:
+                teil = f" „{h.teil}“" if h.teil else ""
+                hinweise.append(
+                    f"{alt.name}: {FELDNAMEN.get(h.feld, h.feld)}{teil} — in der Datei und in "
+                    f"der App geändert, die Datei bleibt (App: {_kurz(q_stand.get(h.feld))})"
+                )
+            if not neu:
+                continue
+            for feld, wert in neu.items():
+                _feld_setzen(block, feld, medien(wert) if feld == "media" else wert, u)
+            zeilen.append(f"{alt.name}: " + ", ".join(FELDNAMEN[feld] for feld in neu))
     schluessel = {
         u.id: str(block.get("key") or "")
         for block, u in zip(bloecke, inhalt_datei.uebungen, strict=True)
         if block.get("key")
     }
-    plan_zeilen, hinweise = _plaene_uebernehmen(
+    plan_zeilen, plan_hinweise = _plaene_uebernehmen(
         inhalt_quelle, kurs_bloecke, inhalt_datei.kurse, schluessel
     )
     zeilen += plan_zeilen
-    hinweise = ergaenzt + hinweise
+    if neu_angelegt:
+        zeilen.append("Neu angelegt: " + ", ".join(neu_angelegt))
     uebernommen = len(zeilen)
     if not uebernommen:
         zeilen.append("Keine Änderung")
+    if gestrichen:
+        zeilen.append("In der Datei gestrichen, bleibt weg: " + ", ".join(gestrichen))
     if fremd:
         zeilen.append("Nicht übernommen (kein Block mit dieser ID): " + ", ".join(fremd))
-    zeilen += hinweise
+    if ohne:
+        zeilen.append(
+            "Keine Basis (weder Paketstand noch die Version in der git-Geschichte) — nichts "
+            "übernommen, nur gemeldet; `--ohne-basis` übernimmt die Werte der Quelle:"
+        )
+        zeilen += [f"    {z}" for z in ohne]
+    zeilen += hinweise + plan_hinweise
+    if fehlen:
+        zeilen.append("Dateien fehlen in der Quelle, fallen weg: " + ", ".join(fehlen))
     unberuehrt = len(bloecke) - len({u.id for u in inhalt_quelle.uebungen} & schluessel.keys())
     if unberuehrt:
         zeilen.append(f"{unberuehrt} Übung(en) der Datei sind nicht in der Quelle — unverändert")
+    if (uebernommen or hinweise) and basis is not None:
+        zeilen.append(f"Basis: {woher}")
     if schreiben and uebernommen:
         toml_text = _TABELLE_OHNE_LEERZEILE.sub(r"\1\n\n\2", tomlkit.dumps(dokument))
         datei.write_text(toml_text, encoding="utf-8")
         fehler, _ = pruefen(datei)
+        if (vorschlag := versionsvorschlag(datei)) is not None:
+            zeilen.append(vorschlag)
+        if ordner.is_dir() and not _ignoriert(ordner):
+            zeilen.append(
+                f"ACHTUNG: {ordner} ist nicht in .gitignore — Mediendateien nie committen"
+            )
         return zeilen, [f"{datei.name} nach dem Übernehmen: {text}" for text in fehler]
     return zeilen, []
+
+
+def versionsvorschlag(datei: Path) -> str | None:
+    """Passt die Version der Datei zu dem, was sich seit dem letzten Commit geändert hat
+    (`core.paketstufe`)? Eine Zeile mit dem Vorschlag, sonst ``None`` — auch ohne git oder
+    ohne committete Fassung. Dateien (``datei = "…"``) zählen dabei nicht mit."""
+    try:
+        wurzel = Path(_git(datei.parent, "rev-parse", "--show-toplevel").strip())
+        rel = datei.resolve().relative_to(wurzel.resolve()).as_posix()
+        namen = nachbar_namen(datei)
+        alt = paket_lesen(tomllib.loads(_git(wurzel, "show", f"HEAD:{rel}")), pakete=namen)
+        neu = paket_lesen(tomllib.loads(datei.read_text(encoding="utf-8")), pakete=namen)
+    except (OSError, ValueError, subprocess.SubprocessError, PaketFehler):
+        return None
+    s = paket_stufe(alt, neu)
+    if version_reicht(alt.paket.version, neu.paket.version, s.stufe):
+        return None
+    return (
+        f"Version: steht {version_text(neu.paket.version) or '—'}, für diese Änderungen "
+        f"mindestens {mindestens(alt.paket.version, s.stufe)} — {STUFE_TEXT[s.stufe]} "
+        f"({stufen_text(s.gruende)}); `version` heben, wenn der Stand auf die Geräte soll"
+    )
+
+
+#: Größte Datei, die `link_pruefen` lädt (ein Video von 20 Minuten in 1080p passt)
+LINK_MAX_BYTES = 2_000_000_000
+
+
+def link_laden(url: str, grenze: int = LINK_MAX_BYTES) -> tuple[str, str, int]:
+    """``(SHA-256, Content-Type, Bytes)`` dessen, was hinter ``url`` liegt — gestreamt, nur
+    https (auch nach Umleitungen), höchstens ``grenze`` Bytes. Wirft `OSError`/`ValueError`."""
+    import urllib.request
+
+    if not url.startswith("https://"):
+        raise ValueError("nur https-Adressen")
+    anfrage = urllib.request.Request(url, headers={"User-Agent": "trainingsapp-paket"})
+    with urllib.request.urlopen(anfrage, timeout=60) as antwort:  # https geprüft (oben)
+        if not str(antwort.geturl()).startswith("https://"):
+            raise ValueError(f"umgeleitet auf {antwort.geturl()} — nicht https")
+        art = str(antwort.headers.get("Content-Type") or "")
+        h, n = hashlib.sha256(), 0
+        while block := antwort.read(1 << 20):
+            n += len(block)
+            if n > grenze:
+                raise ValueError(f"größer als {grenze / 1e9:.0f} GB")
+            h.update(block)
+    return h.hexdigest(), art, n
+
+
+def verlinken(
+    datei: Path,
+    medium: str,
+    url: str,
+    *,
+    pruefen_mit: Callable[[str], tuple[str, str, int]] | None = None,
+    schreiben: bool = True,
+) -> tuple[list[str], list[str]]:
+    """Eine Datei des Pakets (``datei = "<medium>"``) durch einen Link ersetzen — Stufe 5,
+    `docs/plan_rueckweg_handy.md` (Ben 17.11.2026: Medien je Stück als Datei oder Link). Jeder
+    Eintrag, der die Datei nennt, bekommt ``uri = "<url>"``; Titel und alles andere bleiben.
+    Mit ``pruefen_mit`` (`link_laden`) wird der Link einmal geladen: Dieselbe Prüfsumme wie
+    die Datei heißt, der Link liefert genau sie (für das Abspielen in der App); eine andere
+    oder eine Webseite (``text/html``) ist ein Fehler — dann bleibt die Datei.
+    ``(Zeilen, Fehler)``."""
+    tomlkit = _tomlkit()
+    if not links_erlaubt(url) or not url.startswith("https://"):
+        return [], [f"„{url}“ ist kein https-Link"]
+    pfad = (datei.parent / medium).resolve()
+    if datei.parent.resolve() not in pfad.parents or not pfad.is_file():
+        return [], [f"„{medium}“ liegt nicht im Paketordner"]
+    try:
+        dokument = tomlkit.parse(datei.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as grund:
+        return [], [f"{datei.name}: {grund}"]
+    treffer = [
+        e
+        for liste in medienlisten(dokument)
+        for e in liste
+        if isinstance(e, dict)
+        and "datei" in e
+        and (datei.parent / str(e["datei"])).resolve() == pfad
+    ]
+    if not treffer:
+        return [], [f"{datei.name} nennt „{medium}“ nicht"]
+    zeilen: list[str] = []
+    if pruefen_mit is not None:
+        try:
+            sha, art, groesse = pruefen_mit(url)
+        except (OSError, ValueError) as grund:
+            return [], [f"{url}: {grund}"]
+        if "text/html" in art:
+            return [], [
+                f"{url} liefert eine Webseite ({art}), nicht die Datei — bei Dropbox `raw=1` "
+                "statt `dl=0`; die Datei bleibt"
+            ]
+        if sha != sha256_datei(pfad):
+            return [], [
+                f"{url} liefert eine andere Datei ({groesse / 1e6:.1f} MB, {art or '?'}) — "
+                "die Datei bleibt"
+            ]
+        zeilen.append(f"Link geprüft: dieselbe Datei ({groesse / 1e6:.1f} MB, {art or '?'})")
+    for e in treffer:
+        del e["datei"]
+        e["uri"] = url
+    zeilen.append(f"{datei.name}: {len(treffer)} Eintrag/Einträge nennen jetzt {url}")
+    if schreiben:
+        text = _TABELLE_OHNE_LEERZEILE.sub(r"\1\n\n\2", tomlkit.dumps(dokument))
+        datei.write_text(text, encoding="utf-8")
+        zeilen.append(
+            f"Die Datei {medium} braucht das Paket nicht mehr — löschen, wenn nichts sie nennt"
+        )
+    return zeilen, []
+
+
+def _ignoriert(pfad: Path) -> bool:
+    """Ignoriert git den Pfad? Ohne git (kein Repo): ja — dann gibt es nichts zu committen."""
+    try:
+        subprocess.run(
+            ["git", "-C", str(pfad.parent), "rev-parse", "--git-dir"],
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+    lauf = subprocess.run(
+        ["git", "-C", str(pfad.parent), "check-ignore", "-q", str(pfad)],
+        capture_output=True,
+        timeout=30,
+    )
+    return lauf.returncode == 0
 
 
 def _symbole() -> list[str] | None:
@@ -1563,6 +2107,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--gegen",
         help="die veröffentlichte Fassung (Datei, Link oder Index): Stufe und Version prüfen",
+    )
+    p.add_argument(
+        "--stufe-als-hinweis",
+        action="store_true",
+        help="mit --gegen: nur eine nicht gestiegene Nummer ist ein Fehler",
     )
     p.add_argument("--wortliste", type=Path, help="Begriffe, die in Texten nichts verloren haben")
     p.add_argument("--streng", action="store_true", help="Treffer der Wortliste sind Fehler")
@@ -1588,6 +2137,31 @@ def main(argv: list[str] | None = None) -> int:
     )
     u.add_argument("datei", type=Path, help="die TOML-Datei des Pakets")
     u.add_argument("--probe", action="store_true", help="nur zeigen, nichts schreiben")
+    u.add_argument(
+        "--ohne-basis",
+        action="store_true",
+        help="ohne Basis (Paketstand, git-Geschichte) die Werte der Quelle übernehmen",
+    )
+    v = sub.add_parser("verlinken", help="eine Datei des Pakets durch einen https-Link ersetzen")
+    v.add_argument("datei", type=Path, help="die TOML-Datei des Pakets")
+    v.add_argument("medium", help="der Pfad, den `datei = …` nennt (relativ zur TOML)")
+    v.add_argument("url", help="wo die Datei jetzt liegt (https)")
+    v.add_argument(
+        "--pruefen", action="store_true", help="den Link einmal laden und die Prüfsumme vergleichen"
+    )
+    v.add_argument("--probe", action="store_true", help="nur zeigen, nichts schreiben")
+    e = sub.add_parser(
+        "einlesen",
+        help="einen Export der App (eigenes Paket, JSON oder ZIP) als TOML einlesen",
+    )
+    e.add_argument("quelle", type=Path, help="die Datei vom Handy (JSON oder ZIP)")
+    e.add_argument(
+        "datei", type=Path, help="die TOML — neu, oder die einer früheren Runde (gleicht ab)"
+    )
+    e.add_argument("--name", default="", help="Name des neuen Pakets (sonst der vom Handy)")
+    e.add_argument("--privat", action="store_true", help="privates Paket ([privat])")
+    e.add_argument("--fuer", default="", help="für wen (Vorname oder Kürzel) — macht es privat")
+    e.add_argument("--probe", action="store_true", help="nur zeigen, nichts schreiben")
     args = parser.parse_args(argv)
 
     if args.befehl == "pruefen":
@@ -1607,7 +2181,9 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             fehler, hinweise = pruefen(datei, symbole, begriffe, args.streng, geprueft)
             if args.gegen and not fehler:
-                f_gegen, h_gegen = gegen_pruefen(datei, args.gegen)
+                f_gegen, h_gegen = gegen_pruefen(
+                    datei, args.gegen, stufe_als_hinweis=args.stufe_als_hinweis
+                )
                 fehler, hinweise = fehler + f_gegen, hinweise + h_gegen
             # Erst das Urteil je Datei, darunter eingerückt das Warum (Ben, 14.11.2026)
             print(f"{datei}: " + (f"{len(fehler)} FEHLER" if fehler else "in Ordnung"))
@@ -1657,13 +2233,44 @@ def main(argv: list[str] | None = None) -> int:
             print(f"FEHLER: {f}")
         return 1 if fehler else 0
     if args.befehl == "uebernehmen":
-        zeilen, fehler = uebernehmen(args.quelle, args.datei, schreiben=not args.probe)
+        zeilen, fehler = uebernehmen(
+            args.quelle, args.datei, schreiben=not args.probe, ohne_basis=args.ohne_basis
+        )
         for z in zeilen:
             print(z)
         for f in fehler:
             print(f"FEHLER: {f}")
-        if not fehler and not args.probe and zeilen[0] != "Keine Änderung":
+        if not fehler and not args.probe and zeilen and zeilen[0] != "Keine Änderung":
             print(f"{args.datei}: geschrieben — `git diff` zeigt, was aus der App kam")
+        return 1 if fehler else 0
+    if args.befehl == "verlinken":
+        zeilen, fehler = verlinken(
+            args.datei,
+            args.medium,
+            args.url,
+            pruefen_mit=link_laden if args.pruefen else None,
+            schreiben=not args.probe,
+        )
+        for z in zeilen:
+            print(z)
+        for f in fehler:
+            print(f"FEHLER: {f}")
+        return 1 if fehler else 0
+    if args.befehl == "einlesen":
+        from trainingsapp.paket_einlesen import einlesen
+
+        zeilen, fehler = einlesen(
+            args.quelle,
+            args.datei,
+            name=args.name,
+            privat=args.privat,
+            fuer=args.fuer,
+            schreiben=not args.probe,
+        )
+        for z in zeilen:
+            print(z)
+        for f in fehler:
+            print(f"FEHLER: {f}")
         return 1 if fehler else 0
     if args.befehl == "index":
         vorher = None

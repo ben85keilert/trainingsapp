@@ -697,6 +697,7 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
                                 "Kapitels — der Anbieter des Pakets sieht dann die Adresse deines "
                                 "Geräts und wann du liest."
                             ),
+                            *_link_einstellungen(page, state),
                             ft.Dropdown(
                                 label="Benachrichtigung unter dem Zahnrad",
                                 value=state.benachrichtigung(),
@@ -714,6 +715,61 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
             )
         ],
     )
+
+
+def _link_einstellungen(page: ft.Page, state: AppState) -> list[ft.Control]:
+    """Schalter „mobile Daten“ und die erlaubten Server — nur, wo die App Videos lädt."""
+    if not ist_aktiv("link_videos"):
+        return []
+    return [
+        ft.Switch(
+            label="Videos auch über mobile Daten laden",
+            value=state.link_mobil(),
+            on_change=lambda e: state.link_mobil_setzen(bool(e.control.value)),
+            data="link_mobil",
+        ),
+        hinweis("Aus (Vorgabe): Videos hinter Links lädt die App nur im WLAN."),
+        *_link_server_zeilen(page, state),
+    ]
+
+
+def _link_server_zeilen(page: ft.Page, state: AppState) -> list[ft.Control]:
+    """Die Server, von denen Videos geladen werden dürfen (Stufe 7, Ben 17.11.2026: „je Server
+    … whitelist“) — beim ersten Laden gefragt, hier einzeln zu entfernen."""
+    server = state.link_server()
+    spalte = ft.Column(spacing=0)
+
+    def entferner(name: str) -> Callable[..., None]:
+        def handler(_e: Any = None) -> None:
+            state.link_server_entziehen(name)
+            spalte.controls = _server_liste(state, entferner)
+            with contextlib.suppress(Exception):
+                spalte.update()
+
+        return handler
+
+    spalte.controls = _server_liste(state, entferner)
+    if not server:
+        return [
+            hinweis("Videos aus Links: noch kein Server erlaubt — die App fragt beim ersten Mal.")
+        ]
+    return [ft.Text("Videos aus Links von", weight=ft.FontWeight.W_500), spalte]
+
+
+def _server_liste(
+    state: AppState, entferner: Callable[[str], Callable[..., None]]
+) -> list[ft.Control]:
+    return [
+        ft.ListTile(
+            title=ft.Text(name),
+            trailing=ft.IconButton(
+                ft.Icons.DELETE_OUTLINE, tooltip="Nicht mehr erlauben", on_click=entferner(name)
+            ),
+            content_padding=ft.Padding.only(left=0, right=0),
+            data=("link_server", name),
+        )
+        for name in state.link_server()
+    ]
 
 
 __all__ = ["ROUTE", "beim_start", "hinweis_dialog", "pruefung_ausfuehren", "updates_view"]

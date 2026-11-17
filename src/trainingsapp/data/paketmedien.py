@@ -12,10 +12,13 @@ Paketdateien gehen nie in Backup oder Sync (wie die Anhänge) — sie kommen wie
 
 from __future__ import annotations
 
+import contextlib
 import re
 import sqlite3
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
@@ -38,6 +41,32 @@ _ABFRAGEN: Final = (
     "SELECT blocks_json FROM course_chapter WHERE blocks_json LIKE '%medien/%'",
 )
 _NAME: Final = re.compile(r"medien/[0-9a-f]{64}\.[a-z0-9]{2,4}")
+#: Wo die Datenbank eine **Adresse** nennen kann (Stufe 7: geladene Videos hinter Links) — je
+#: Spalte eine Abfrage mit ``instr`` (eine Adresse enthält ``%`` und ``_``, LIKE passte nicht)
+_LINK_ABFRAGEN: Final = (
+    "SELECT 1 FROM exercise_media WHERE uri = ?1 LIMIT 1",
+    "SELECT 1 FROM exercise WHERE instr(package_standard_json, ?1) LIMIT 1",
+    "SELECT 1 FROM exercise_addon WHERE instr(data_json, ?1) LIMIT 1",
+    "SELECT 1 FROM plan_item WHERE instr(media_json, ?1) LIMIT 1",
+    "SELECT 1 FROM plan WHERE instr(package_standard_json, ?1) LIMIT 1",
+    "SELECT 1 FROM package WHERE instr(plans_json, ?1) LIMIT 1",
+    "SELECT 1 FROM course WHERE instr(package_standard_json, ?1) LIMIT 1",
+    "SELECT 1 FROM course WHERE instr(kursplan_json, ?1) LIMIT 1",
+    "SELECT 1 FROM course_chapter WHERE instr(media_json, ?1) LIMIT 1",
+    "SELECT 1 FROM course_chapter WHERE instr(plans_json, ?1) LIMIT 1",
+    "SELECT 1 FROM course_chapter WHERE instr(blocks_json, ?1) LIMIT 1",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class LinkDownload:
+    """Ein Video hinter einem Link, auf dem Gerät gespeichert (Migration 068)."""
+
+    url: str
+    name: str
+    title: str
+    bytes: int
+    geladen: str
 
 
 class Paketablage:
@@ -109,6 +138,66 @@ class Paketablage:
         finally:
             roh.unlink(missing_ok=True)
 
+    # -- Videos hinter Links (Stufe 7, Migration 068) ---------------------------------------
+
+    def link_datei(self, url: str) -> str | None:
+        """Der Name der geladenen Datei zu ``url`` — ``None``, wenn keine da ist."""
+        try:
+            r = self.con.execute("SELECT name FROM link_download WHERE url = ?", (url,)).fetchone()
+        except sqlite3.OperationalError:  # eine Datenbank von vor Migration 068
+            return None
+        return str(r[0]) if r is not None and self.vorhanden(str(r[0])) else None
+
+    def link_merken(self, url: str, name: str, title: str, groesse: int) -> None:
+        self.con.execute(
+            "INSERT INTO link_download (url, name, title, bytes, loaded_at) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(url) DO UPDATE SET name = excluded.name, title = excluded.title,"
+            " bytes = excluded.bytes, loaded_at = excluded.loaded_at",
+            (url, name, title, groesse, datetime.now(UTC).isoformat(timespec="seconds")),
+        )
+        self.con.commit()
+
+    def links(self) -> list[LinkDownload]:
+        """Alle geladenen Videos, das jüngste zuerst — für Einstellungen → Anhänge."""
+        try:
+            zeilen = self.con.execute(
+                "SELECT url, name, title, bytes, loaded_at FROM link_download "
+                "ORDER BY loaded_at DESC"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [LinkDownload(str(a), str(b), str(c), int(d), str(e)) for a, b, c, d, e in zeilen]
+
+    def link_loeschen(self, url: str) -> None:
+        """Die Kopie auf dem Gerät weg — der Link bleibt, wo er steht."""
+        name = self.link_datei(url)
+        self.con.execute("DELETE FROM link_download WHERE url = ?", (url,))
+        self.con.commit()
+        if name is not None and name not in self.benutzte() and (pfad := self.pfad(name)):
+            pfad.unlink(missing_ok=True)
+
+    def link_genannt(self, url: str) -> bool:
+        """Nennt die Datenbank die Adresse noch irgendwo?"""
+        for abfrage in _LINK_ABFRAGEN:
+            try:
+                if self.con.execute(abfrage, (url,)).fetchone() is not None:
+                    return True
+            except sqlite3.OperationalError:
+                continue
+        return False
+
+    def _links_aufraeumen(self) -> None:
+        """Geladene Videos, deren Adresse nichts mehr nennt (Medium herausgenommen, Paket
+        entfernt): die Zeile weg — die Datei räumt `aufraeumen` danach mit."""
+        try:
+            urls = [str(r[0]) for r in self.con.execute("SELECT url FROM link_download")]
+        except sqlite3.OperationalError:
+            return
+        weg = [u for u in urls if not self.link_genannt(u)]
+        if weg:
+            self.con.executemany("DELETE FROM link_download WHERE url = ?", [(u,) for u in weg])
+            self.con.commit()
+
     def fehlende(self, namen: Iterable[str], im_paket: Iterable[str] = ()) -> list[str]:
         """Welche der ``namen`` weder hier liegen noch in der Paketdatei stecken."""
         dabei = set(im_paket)
@@ -124,12 +213,16 @@ class Paketablage:
                 continue
             for (wert,) in zeilen:
                 gefunden.update(n for n in _NAME.findall(str(wert or "")) if name_lesen(n))
+        # geladene Videos hinter Links (Migration 068) — solange ihre Adresse genannt ist
+        with contextlib.suppress(sqlite3.OperationalError):
+            gefunden.update(str(r[0]) for r in self.con.execute("SELECT name FROM link_download"))
         return gefunden
 
     def aufraeumen(self) -> int:
         """Löscht Dateien, die nichts mehr nennt (und liegen gebliebene ``.teil``) — wie viele."""
         if not self.ordner.is_dir():
             return 0
+        self._links_aufraeumen()
         behalten = {dateiname(n) for n in self.benutzte()}
         weg = 0
         for datei in self.ordner.iterdir():

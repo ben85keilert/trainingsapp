@@ -143,6 +143,7 @@ from trainingsapp.ui.components import einzel_seite, zaehl_stand
 from trainingsapp.ui.components.dialoge import Nachher, obersten_schliessen, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import ohne_auto_update, sicher
+from trainingsapp.ui.components.linkvideo import alle_laden, videolinks
 from trainingsapp.ui.components.material import material_blatt, material_knopf
 from trainingsapp.ui.components.modus_wahl import LISTE, modus_wahl
 from trainingsapp.ui.components.neu_laden import herkunft, neu_laden_blatt
@@ -2928,6 +2929,22 @@ def plan_view(
                 on_click=modus_wechseln,
             ),
         ]
+        # Videos hinter Links im ganzen Plan (Stufe 7, Ben 17.11.2026: „Kurse/Pläne sollen als
+        # Ganzes gedownloadet werden können“) — Planübungen und ihre Übungen
+        videos = videolinks(
+            [m for i in plan.items for m in i.media]
+            + [m for i in plan.items if (u := katalog.get(i.exercise_id)) for m in u.media]
+        )
+        if videos and not bearbeiten:
+            aktionen.insert(
+                0,
+                ft.IconButton(
+                    ft.Icons.DOWNLOAD_OUTLINED,
+                    tooltip="Videos laden",
+                    on_click=lambda _e=None: alle_laden(page, state, videos),
+                    data="videos_laden",
+                ),
+            )
 
     ansicht = ft.View(
         route=route,

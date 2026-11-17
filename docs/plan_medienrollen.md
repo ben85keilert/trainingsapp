@@ -264,7 +264,9 @@ oder Sync.
   (`.claude/rules/pakete.md`).
 - Kein Video startet von selbst.
 - „gesehen“ bleibt auf dem Gerät; die Rolle reist im Paket (Ben, 12.11.2026).
-- Keine neue Netzverbindung (Videos laden: P202, getrennt).
+- Keine neue Netzverbindung (Videos laden: P202, getrennt) — seit 17.11.2026 entschieden und gebaut
+  in `docs/plan_rueckweg_handy.md` Stufe 7 (Videos hinter Links: je Server nach Rückfrage, nur im
+  WLAN, `core/linkvideos.py`); die Rollen hier ändert das nicht.
 
 ## 6. Fragen an Ben (Katalog P209) — a bis e beantwortet am 16.11.2026
 

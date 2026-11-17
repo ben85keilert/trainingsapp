@@ -62,6 +62,7 @@ Funktionen `False`:
 | `paket_quellen` | der Netzzugriff der App (`urllib`) geht im Browser-Python nicht |
 | `hrv_bewertung` | die Web-Fassung dient dem Hausaufgabenprogramm — Grenze des Patientenmodus: anzeigen ja, Messwerte einordnen nein (`docs/recht/00_zweckbestimmung.md`). Stand 14.11.2026 hängt in der Oberfläche nichts an dem Schalter |
 | `geraete_sicherung` | Androids Geräte-Backup gibt es dort nicht |
+| `link_videos` | Videos hinter Links lädt die App über `urllib` (Stufe 7, `docs/plan_rueckweg_handy.md`) — das geht im Browser-Python nicht; ein Videolink öffnet dort wie bisher im Browser |
 
 `WEB.verweise` — die Karte „Rechtliches“ am Ende der Einstellungen: Impressum,
 Datenschutzerklärung, Quelltext. Wer die Adresse der Web-Fassung direkt öffnet, kommt an keiner

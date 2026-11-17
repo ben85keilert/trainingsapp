@@ -75,6 +75,19 @@
   erst, wenn die Person es unter Einstellungen → Updates einschaltet (Vorgabe aus);
   bis dahin stehen sie als Link, der auf Tipp öffnet. Beim Laden erfährt der Anbieter
   des Pakets IP-Adresse und Zeitpunkt.
+- **Videos hinter Links in der App** (seit 17.11.2026, Stufe 7 in `docs/plan_rueckweg_handy.md`,
+  Ben: „für jeden Server … whitelist“, „Erstmal nur WLAN mit Möglichkeit auf Umstellung“): Ein
+  Link auf eine Videodatei (Endung `.mp4`/`.m4v`/`.mov`, Dropbox `raw=1`) lädt die App auf Tipp
+  selbst und spielt ihn im eigenen Spieler; vorher öffnete ihn der Browser. **Neue Verbindung**
+  zum Server des Links — er sieht IP-Adresse, Zeitpunkt und welches Video. **Beim ersten Mal je
+  Server eine Rückfrage** mit diesem Hinweis; „Laden“ merkt den Server (Einstellungen → Updates,
+  einzeln zu entfernen; der Name genau, in ASCII-Form `xn--…`). **Nur im WLAN** (getaktetes Netz
+  wie bei den App-Updates), Schalter „Videos auch über mobile Daten laden“ (Vorgabe aus). Nur
+  https, auch nach Umleitungen; eine Webseite wird nicht geladen; höchstens 2 GB. Die Datei liegt
+  in der Paketablage (unter ihrer Prüfsumme), geht **nie ins Geräte-Backup**, steht unter
+  Einstellungen → Anhänge mit Größe und „Löschen“ und wird gelöscht, sobald nichts in der App den
+  Link mehr nennt. Keine eigenen Daten gehen hinaus. Restrisiko: eine präparierte Videodatei
+  trifft den Spieler — wie bei Videos in Paketdateien schon heute.
 - **Private Pakete** (seit 9.11.2026, U7, `docs/uebungspakete.md`; Nachtrag 11.11.2026, S33/S34):
   Pakete für eine einzelne Person liegen verschlüsselt unter einem Link mit Zufallsnamen und
   öffnen sich nur mit einem 8-stelligen Code. **In ein Paket gehören keine Personendaten** —

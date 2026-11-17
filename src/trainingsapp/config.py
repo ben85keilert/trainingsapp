@@ -93,6 +93,8 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
     # Paketquellen (core/paketquelle.py): Übungspakete online auf neue Stände prüfen.
     # Die Praxis-Edition bekommt ihre Pakete von der Praxis.
     "paket_quellen": {Edition.SOLO},
+    # Videos hinter Links in der App laden und abspielen (Stufe 7, Ben 17.11.2026)
+    "link_videos": {Edition.SOLO, Edition.PRAXIS},
     # Diagnosemodus: Rohmitschnitt, Zusatzströme, Marken (docs/plan_diagnosemodus.md) — in
     # beiden Editionen (Ben, 4.11.2026, P112): Die Daten bleiben auf dem Gerät, hinaus nur
     # über „Teilen“ und dann bereinigt; keine Netzverbindung.
@@ -138,7 +140,11 @@ WEB: Final[WebProfil] = WebProfil(
     #   einordnen nein (`docs/recht/00_zweckbestimmung.md`). Stand 14.11.2026 hängt nichts
     #   daran; DFA α1 bleibt sichtbar und ist als „experimentell“ gekennzeichnet.
     # - ``geraete_sicherung``: Androids Geräte-Backup gibt es dort nicht.
-    ohne=frozenset({"update_pruefung", "paket_quellen", "hrv_bewertung", "geraete_sicherung"}),
+    # - ``link_videos``: laden geht über `urllib` wie die Paketquellen — im Browser öffnet ein
+    #   Videolink wie bisher im Browser.
+    ohne=frozenset(
+        {"update_pruefung", "paket_quellen", "hrv_bewertung", "geraete_sicherung", "link_videos"}
+    ),
     # Die Seite steht unter `trainingsapp.osteo-ebert.de`: Wer die Adresse direkt öffnet, kommt
     # an keiner anderen Seite der Praxis vorbei — Impressum und Datenschutzerklärung müssen von
     # hier aus erreichbar sein (Ben, 14.11.2026). Wer die App unter eigenem Namen ins Netz

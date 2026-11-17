@@ -67,7 +67,7 @@ from trainingsapp.core.kurse import (
     status,
 )
 from trainingsapp.core.kursplan import Aenderung, kursplan_name, wahl_im_plan
-from trainingsapp.core.models import Exercise, Plan
+from trainingsapp.core.models import Exercise, Media, Plan
 from trainingsapp.core.plaene import erledigte, tage_text
 from trainingsapp.core.plan_durchlauf import startet_als_workout
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -77,6 +77,7 @@ from trainingsapp.ui.components.kursblock import kapitel_bloecke
 from trainingsapp.ui.components.kursplan_karte import KursplanKarte, kursplan_karte
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
+from trainingsapp.ui.components.linkvideo import alle_laden, videolinks
 from trainingsapp.ui.components.medienliste import medium_zeile
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
@@ -302,6 +303,24 @@ def _offene_wahl(
     return wahl
 
 
+def kurs_medien(kurs: Kurs, katalog: Mapping[str, Exercise]) -> list[Media]:
+    """Alle Medien eines Kurses: Kapitel, Blöcke „Medium“, Planübungen in Kapitelplänen und
+    im Kursplan, und die der Übungen darin."""
+    medien: list[Media] = []
+    vorlagen = [p for k in kurs.kapitel for p in k.plaene]
+    if kurs.kursplan is not None and kurs.kursplan.vorlage is not None:
+        vorlagen.append(kurs.kursplan.vorlage)
+    for k in kurs.kapitel:
+        medien += k.media
+        medien += [b.medium for b in k.bloecke if b.medium is not None]
+    for v in vorlagen:
+        for i in v.items:
+            medien += i.medien
+            if (u := katalog.get(i.exercise_id)) is not None:
+                medien += u.media
+    return medien
+
+
 def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
     """Die Kapitel untereinander mit Status; „Kurs beginnen“, Menü „Von vorn beginnen“;
     darunter die Karte „Dein Kursplan“, wenn der Kurs einen baut (`_dein_kursplan`), und die
@@ -311,6 +330,9 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
     staende = state.kurse.staende(state.profil.id, kurs.id)
     stati = status(kurs, staende)
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
+    # Videos hinter Links im ganzen Kurs (Stufe 7, Ben 17.11.2026: „Kurse/Pläne sollen als
+    # Ganzes gedownloadet werden können“): Kapitel, Blöcke, Planübungen, ihre Übungen
+    videos = videolinks(kurs_medien(kurs, katalog))
     nachher = Nachher()
 
     def melden(text: str) -> None:
@@ -496,6 +518,17 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
                         content="Von vorn beginnen",
                         icon=ft.Icons.RESTART_ALT,
                         on_click=zuruecksetzen_fragen,
+                    ),
+                    *(
+                        [
+                            ft.PopupMenuItem(
+                                content="Videos laden",
+                                icon=ft.Icons.DOWNLOAD,
+                                on_click=lambda _e=None: alle_laden(page, state, videos),
+                            )
+                        ]
+                        if videos
+                        else []
                     ),
                 ],
             )

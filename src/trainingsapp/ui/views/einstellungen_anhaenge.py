@@ -36,6 +36,7 @@ from trainingsapp.core.anhaenge import (
     verwaiste,
     zusammenfassung,
 )
+from trainingsapp.core.linkvideos import server
 from trainingsapp.data.anhaenge import (
     qualitaet_lesen,
     qualitaet_setzen,
@@ -65,6 +66,55 @@ def _zahl(n: int, einzahl: str, mehrzahl: str) -> str:
     ('1 Verweis', '2 Verweise')
     """
     return f"{n} {einzahl if n == 1 else mehrzahl}"
+
+
+def geladene_videos_karte(page: Any, state: AppState) -> ft.Control:
+    """Videos hinter Links, auf dem Gerät gespeichert (Stufe 7, Ben 17.11.2026: „das wird in
+    den Anhängen entsprechend angezeigt, um Platz machen zu können“) — je Video Größe und
+    „Löschen“; gelöscht wird nur die Kopie, der Link bleibt und lädt beim nächsten Antippen neu.
+    Fällt ein Medium aus Übung, Plan oder Kurs, räumt die App die Kopie selbst weg."""
+    ablage = state.pakete.ablage
+    spalte = ft.Column(spacing=0)
+    summe = ft.Text("", size=12, opacity=0.7)
+
+    def zeichnen() -> None:
+        videos = ablage.links() if ablage is not None else []
+        summe.value = (
+            f"{len(videos)} Video(s), {groesse_text(sum(v.bytes for v in videos))}"
+            if videos
+            else "Keine — ein Video hinter einem Link lädt die App beim Antippen."
+        )
+        spalte.controls = [
+            ft.ListTile(
+                title=ft.Text(v.title or server(v.url) or v.url),
+                subtitle=ft.Text(f"{server(v.url)} · {groesse_text(v.bytes)}", size=11),
+                trailing=ft.IconButton(
+                    ft.Icons.DELETE_OUTLINE, tooltip="Vom Gerät löschen", on_click=loescher(v.url)
+                ),
+                content_padding=ft.Padding.only(left=0, right=0),
+                data=("link_download", v.url),
+            )
+            for v in videos
+        ]
+
+    def loescher(url: str) -> Callable[..., None]:
+        def handler(_e: Any = None) -> None:
+            if ablage is not None:
+                ablage.link_loeschen(url)
+            zeichnen()
+            with contextlib.suppress(Exception):
+                spalte.update()
+                summe.update()
+
+        return handler
+
+    zeichnen()
+    return karte(
+        titel("Geladene Videos"),
+        summe,
+        spalte,
+        hinweis("Löschen nimmt nur die Kopie vom Gerät — der Link bleibt."),
+    )
 
 
 def einstellungen_anhaenge(page: Any, state: AppState) -> ft.View:
@@ -394,6 +444,7 @@ def einstellungen_anhaenge(page: Any, state: AppState) -> ft.View:
                             ),
                             liste,
                         ),
+                        geladene_videos_karte(page, state),
                         karte(titel("Aufräumen"), *aufraeumen),
                         karte(titel("Wo liegen die Aufnahmen?"), hinweis(HINWEIS)),
                     ],

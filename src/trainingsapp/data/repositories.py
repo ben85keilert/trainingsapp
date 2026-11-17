@@ -888,6 +888,11 @@ class SettingRepo:
     #: Tag eines Releases, das von selbst scheiterte (fremde Signatur, Android lehnte ab) —
     #: die Automatik lässt es aus, von Hand geht es weiter
     APP_UPDATE_AUSLASSEN = "app_update_auslassen"
+    #: Server, von denen die App Videos hinter Links laden darf (Stufe 7, Ben 17.11.2026: „je
+    #: Server“) — JSON-Liste, beim ersten Laden gefragt und gemerkt
+    LINK_SERVER = "link_server"
+    #: "1" = Videos hinter Links auch über mobile Daten laden (Vorgabe "0": nur im WLAN)
+    LINK_MOBIL = "link_mobil"
     #: Farbprofil, Hell/Dunkel, Verlauf (JSON, `core.darstellung`) — **je Profil**:
     #: Schlüssel `darstellung:<profil-id>`, damit man am Hintergrund sieht, wer dran ist
     DARSTELLUNG = "darstellung"

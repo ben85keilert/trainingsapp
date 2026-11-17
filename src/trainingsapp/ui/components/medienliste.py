@@ -1,9 +1,10 @@
 """Eine Zeile je Medium — Link oder Datei aus einem Paket (U3, Ben 9.11.2026).
 
-Ein **Link** öffnet im Browser (nur https, `components/links.py`). Eine **Paketdatei**
-(`MediaSource.PAKET`) öffnet ``…/paketmedium/<datei>`` (Video, Bild, Ton) bzw. „Öffnen mit …“
-(PDF); fehlt sie auf dem Gerät, steht das da. Für die Übungsseite, das „i“ einer Planübung, das
-Material beim Üben und die Kurskapitel — überall dieselbe Zeile.
+Ein **Link** öffnet im Browser (nur https, `components/links.py`) — ein Link auf eine
+**Videodatei** lädt und spielt die App selbst (Stufe 7, `components/linkvideo.py`). Eine
+**Paketdatei** (`MediaSource.PAKET`) öffnet ``…/paketmedium/<datei>`` (Video, Bild, Ton)
+bzw. „Öffnen mit …“ (PDF); fehlt sie auf dem Gerät, steht das da. Für die Übungsseite, das
+„i“ einer Planübung, das Material beim Üben und die Kurskapitel — überall dieselbe Zeile.
 """
 
 from __future__ import annotations
@@ -13,9 +14,12 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.config import ist_aktiv
+from trainingsapp.core.linkvideos import direkt, server
 from trainingsapp.core.models import Media, MediaKind
 from trainingsapp.core.paketmedien import MIME, dateiname, groesse_text, ist_paketmedium
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
+from trainingsapp.ui.components.linkvideo import video_oeffnen
 from trainingsapp.ui.components.weitergeben import datei_weitergeben
 
 #: Symbol je Art
@@ -41,6 +45,39 @@ def medium_zeile(
     Weg (das Material-Blatt schließt sich erst, `components/material.py`); ``beim_oeffnen``:
     gerufen, sobald das Stück wirklich aufgeht (das Blatt hakt „gesehen“ ab)."""
     symbol = SYMBOLE.get(medium.kind, ft.Icons.PLAY_CIRCLE_OUTLINE)
+    if (
+        not ist_paketmedium(medium)
+        and direkt(medium.uri)
+        and state.pakete.ablage is not None
+        and ist_aktiv("link_videos")
+    ):
+        # Ein Link auf eine Videodatei (Stufe 7): in der App — geladen, wenn er schon da ist
+        name = state.pakete.ablage.link_datei(medium.uri)
+
+        async def video(_e: Any = None) -> None:
+            if beim_oeffnen is not None:
+                beim_oeffnen()
+            await video_oeffnen(page, state, medium, browser=browser, uebergeben=uebergeben)
+
+        return ft.ListTile(
+            leading=ft.Icon(symbol),
+            title=ft.Text(medium.title or medium.uri),
+            subtitle=ft.Text(
+                f"auf dem Gerät · {groesse_text(state.pakete.ablage.groesse(name))}"
+                if name is not None
+                else f"Video von {server(medium.uri)} — in der App laden",
+                size=11,
+                opacity=0.6,
+            ),
+            trailing=ft.Icon(
+                ft.Icons.CHEVRON_RIGHT if name is not None else ft.Icons.DOWNLOAD,
+                size=18,
+                opacity=0.6,
+            ),
+            on_click=video,
+            content_padding=ft.Padding.only(left=0, right=0),
+            data=("linkvideo", medium.uri),
+        )
     if not ist_paketmedium(medium):
 
         async def link(_e: Any = None) -> None:

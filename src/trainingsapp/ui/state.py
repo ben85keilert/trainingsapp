@@ -1044,6 +1044,39 @@ class AppState:
     def app_update_hinweis_merken(self) -> None:
         self.einstellungen.setzen(SettingRepo.HINWEIS_APP_UPDATE, "1")
 
+    # -- Videos hinter Links (Stufe 7, `ui/components/linkvideo.py`) ------------------------
+
+    def link_server(self) -> list[str]:
+        """Die Server, von denen Videos geladen werden dürfen — beim ersten Mal gefragt."""
+        try:
+            wert = json.loads(self.einstellungen.lesen(SettingRepo.LINK_SERVER, "[]") or "[]")
+        except ValueError:
+            return []
+        return (
+            sorted({str(s) for s in wert if isinstance(s, str) and s})
+            if isinstance(wert, list)
+            else []
+        )
+
+    def link_server_erlaubt(self, server: str) -> bool:
+        return bool(server) and server in self.link_server()
+
+    def link_server_erlauben(self, server: str) -> None:
+        if server:
+            liste = sorted({*self.link_server(), server})
+            self.einstellungen.setzen(SettingRepo.LINK_SERVER, json.dumps(liste))
+
+    def link_server_entziehen(self, server: str) -> None:
+        liste = [s for s in self.link_server() if s != server]
+        self.einstellungen.setzen(SettingRepo.LINK_SERVER, json.dumps(liste))
+
+    def link_mobil(self) -> bool:
+        """Videos auch über mobile Daten laden? Vorgabe aus — nur im WLAN (Ben, 17.11.2026)."""
+        return self.einstellungen.lesen(SettingRepo.LINK_MOBIL, "0") == "1"
+
+    def link_mobil_setzen(self, an: bool) -> None:
+        self.einstellungen.setzen(SettingRepo.LINK_MOBIL, "1" if an else "0")
+
     def app_update_auslassen(self) -> str:
         """Tag des Releases, das die Automatik auslässt (es scheiterte von selbst), sonst ``""``."""
         return self.einstellungen.lesen(SettingRepo.APP_UPDATE_AUSLASSEN, "") or ""

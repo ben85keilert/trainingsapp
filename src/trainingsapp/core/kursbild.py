@@ -190,4 +190,39 @@ def planbild(sicht: Kurssicht, paketplan: PaketPlan | None = None) -> Planbild |
     )
 
 
-__all__ = ["GRUNDLAGE_NR", "Planbild", "Weg", "planbild"]
+def weg_baustein(bild: Planbild, von: str, nach: str) -> Block | None:
+    """Der Baustein „Weg“ zu einer **Geste im Bild** (Ben, 16.11.2026, Katalog P217: im
+    Kurs-Editor dieselben Gesten wie im Plan): Der Punkt der Planübung ``von`` wurde auf
+    ``nach`` gezogen — eine Planübung oder `core.ablauf.ENDE`. Zurück kommt ein
+    ``plan_weg`` mit den **Marken** der beiden (ohne ``id``: die vergibt, wer ihn ins Kapitel
+    hängt) — ``None``, wenn es nichts anzulegen gibt: dieselbe Übung, eine Übung ohne Marke
+    (der Kurs fände sie nicht wieder) oder ein Weg, den schon ein Baustein bringt.
+
+    >>> from trainingsapp.core.kursbloecke import PLAN_UEBUNG
+    >>> from trainingsapp.core.kurse import Kapitel, Kurs, Kursplan
+    >>> from trainingsapp.core.models import Exercise
+    >>> katalog = {k: Exercise(id=k, name=k.title()) for k in ("planke", "kaefer", "seit")}
+    >>> eins = Kapitel(id="k1", titel="A", bloecke=[
+    ...     Block(PLAN_UEBUNG, id="a", uebung="planke"),
+    ...     Block(PLAN_UEBUNG, id="b", uebung="kaefer"),
+    ...     Block(PLAN_UEBUNG, id="c", uebung="seit"),
+    ...     Block(PLAN_WEG, id="w", von="a", zu="b")])
+    >>> kurs = Kurs(name="K", kursplan=Kursplan("P"), kapitel=[eins])
+    >>> bild = planbild(Kurssicht(kurs, "k1", eins.bloecke, katalog))
+    >>> a, b, c = (i.id for i in bild.plan.items)
+    >>> neu = weg_baustein(bild, a, c)
+    >>> (neu.art, neu.von, neu.zu), weg_baustein(bild, c, ab.ENDE).zu
+    (('plan_weg', 'a', 'c'), 'ende')
+    >>> weg_baustein(bild, a, b) is None, weg_baustein(bild, a, a) is None  # gibt es · dieselbe
+    (True, True)
+    """
+    if von == nach or (von, nach) in bild.wege:
+        return None
+    marke_von = bild.marke(von)
+    marke_nach = ZU_ENDE if nach == ab.ENDE else bild.marke(nach)
+    if not marke_von or not marke_nach:
+        return None
+    return Block(PLAN_WEG, id="", von=marke_von, zu=marke_nach)
+
+
+__all__ = ["GRUNDLAGE_NR", "Planbild", "Weg", "planbild", "weg_baustein"]

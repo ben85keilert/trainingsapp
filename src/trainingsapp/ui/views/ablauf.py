@@ -18,22 +18,31 @@ neu aus — Ben: „Ansicht neu ausrichten nur mit dem Button“).
   ist. Ziehen oder Tippen setzt eine **Planübung** dieser Übung ins Bild: zuerst eine freie;
   gibt es keine, entsteht eine neue Planübung derselben Übung am Ende der Liste
   (`core.ablauf.vorrat`). **Eine Kachel bringt immer einen neuen Knoten** (Ben, 16.11.2026:
-  „Ich brauche das einheitlich, neue Übung erstellen“) — hinter den gewählten, in einen Slot
-  oder auf „Start“; nie entsteht dabei ein Weg zu einem Knoten, der schon im Bild steht (das
-  macht „Routing“). Nach dem Antippen ist der neue Knoten gewählt: Kachel für Kachel entsteht
-  eine Kette. Im Bild ist jede Planübung ein eigener Knoten mit ihrer Nummer (Frage
-  5: die Stelle in der Liste, ein Alias der festen ID). „+“ daneben fügt eine weitere Übung hinzu
-  (wie im Reiter „Plan“), „i“ erklärt alles Übrige. Waagerecht scrollt die Palette, nach unten
-  zieht man eine Übung in einen **Slot** (oder auf „Start“).
-- **Zeichnung** (`components/ablaufbild.py`): ein Tipp wählt einen Knoten, lang drücken zeigt nur
-  seinen Weg (vernebelt den Rest).
-- **Unter dem Bild** die Knöpfe zum gewählten Knoten (Ben: „Man könnte ein Symbol anklicken und die
-  verschiedenen Buttontypen anbieten“): **Routing ▾** (Wege einstellen — alle Wege des Knotens in
-  einem Blatt, „Kommt von“ und „Weiter zu“, wie in „Im Plan einstellen“ —, Weg zu einer
-  bestehenden Übung, Frage, Schleife, ◀ zurück, Ende, Start, Übung einstellen), **Neuer Slot**,
-  **Beiname**, **Aus dem Ablauf nehmen** (fragt: Lücke schließen oder Nachfolgereihe — die Übung
-  bleibt in der Palette; aus dem Plan nimmt sie dort Gedrückthalten);
-  daneben **Neu anordnen**, **Pfad abspielen**, Hinweise.
+  „Ich brauche das einheitlich, neue Übung erstellen“) — hinter den gewählten, **auf eine
+  Übung im Bild gezogen** hinter diese, oder auf „Start“. Nach dem Antippen ist der neue Knoten
+  gewählt: Kachel für Kachel entsteht eine Kette. Am Ende der Leiste steht die Kachel
+  **„Frage“** — eine Frage hinter die gewählte bzw. getroffene Übung. Im Bild ist jede
+  Planübung ein eigener Knoten mit ihrer Nummer (Frage 5: die Stelle in der Liste, ein Alias
+  der festen ID). „+“ daneben fügt eine weitere Übung hinzu (wie im Reiter „Plan“), „i“ erklärt
+  alles Übrige. Waagerecht scrollt die Palette, nach unten zieht man eine Kachel ins Bild.
+- **Im Bild bedienen** (Ben, 16.11.2026: „Alles, was sich auslagern lässt vom Routingmenü in
+  die Grafik, wird ausgelagert … möglichst ohne die Blätter schon viel machen“;
+  `components/ablaufbild.py`):
+  - **Ziehen verbindet:** Jede Übung und jede Frage hat unter sich **ihren Punkt**. Auf eine
+    andere gezogen: ein Weg dorthin; auf die eigene: noch einmal; auf **„Ende“** oder
+    **„◀ zurück“** — die zwei Ziele stehen am unteren Rand, solange gezogen wird. Von **„Start“**
+    auf eine Übung gezogen: Sie ist der Start. Was daraus wird, rechnet
+    `core.ablauf.verbinden`.
+  - **Tippen** wählt: eine Übung (die nächste Kachel kommt dahinter), den **Punkt eines Wegs**
+    (seine **Leiste** steht unter dem Bild: Auslöser, Zahl, Pflicht, „Mehr …“ →
+    `components/wege_form.weg_leiste`; jede Änderung speichert sofort), den **Abzweig** einer
+    Übung mit mehreren Wegen oder den Punkt einer Übung ohne Weg (das Blatt mit allen Wegen).
+  - **Gedrückt halten** öffnet das **Menü an der Übung** — am Ort, als Karte in der Fläche:
+    Übung einstellen, Beiname, nur ihren Weg zeigen, Als Start, Aus dem Ablauf nehmen (fragt:
+    Lücke schließen oder Nachfolgereihe — die Übung bleibt in der Palette; aus dem Plan nimmt
+    sie dort Gedrückthalten); an einer Frage: ändern, löschen.
+- **Unter dem Bild** stehen die Leiste des gewählten Wegs bzw. eine Zeile zur gewählten Übung
+  oder zu den Gesten, darunter **Neu anordnen**, **Pfad abspielen**, Hinweise.
 - **Leeren heißt leer** (Ben, 16.11.2026): Wer alle Übungen aus dem Bild nimmt, sieht „Start“
   und einen leeren Platz — nichts setzt sich von selbst wieder hinein
   (`core.ablauf.Ablauf.ohne_start`). „Wie die Liste“ unter dem leeren Bild holt die Kette der
@@ -41,7 +50,8 @@ neu aus — Ben: „Ansicht neu ausrichten nur mit dem Button“).
 - **Den Start setzt die Person** (Ben, 16.11.2026: „Start wird selbst verbunden … Wenn was
   fehlt, kommt eine Fehlermeldung, dass der Plan nachkorrigiert werden muss“): Fällt die
   Startübung weg, rückt nichts nach. Über dem Bild steht die rote Karte
-  (`core.ablauf.START_FEHLT`), unter dem Bild steht am gewählten Knoten **„Als Start“**.
+  (`core.ablauf.START_FEHLT`); „Start“ auf eine Übung ziehen, „Als Start“ in ihrem Menü oder
+  der Knopf **„Als Start“** unter dem Bild (an der gewählten Übung, solange der Start fehlt).
 
 Gespeichert wird sofort (`ablauf_speichern`): der Ablauf und, gespiegelt, die Hauptwege als
 Bedingungen der Planübungen — so stimmt auch „Der Reihe nach“.
@@ -50,8 +60,7 @@ Bedingungen der Planübungen — so stimmt auch „Der Reihe nach“.
 from __future__ import annotations
 
 import contextlib
-import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -62,7 +71,6 @@ from trainingsapp.core.ablauf import Ablauf, Frage, Kante
 from trainingsapp.core.models import Plan
 from trainingsapp.core.uebung_timer import timer_fuer
 from trainingsapp.ui.components import ablaufbild as abbild
-from trainingsapp.ui.components.ablaufbild import Slot
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
@@ -71,11 +79,26 @@ from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.plan_reiter import plan_reiter
 from trainingsapp.ui.components.uebungsbild import uebungsbild
-from trainingsapp.ui.components.wege_form import wege_karte
+from trainingsapp.ui.components.wege_form import weg_leiste, wege_karte, ziel_name
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.timer import timer_knopf
 
 LINEAR, VERZWEIGT = "linear", "verzweigt"
+#: Was die Kachel „Frage“ am Ende der Leiste trägt (``data`` ihres Draggable) — keine Übung
+FRAGE_KACHEL = "__frage__"
+#: Unter dem Bild, solange nichts gewählt ist: die Gesten
+GESTEN = (
+    "Zieh den Punkt unter einer Übung auf eine andere: ein Weg — auf dieselbe: noch einmal. "
+    "Eine Kachel von oben auf eine Übung: eine neue dahinter. Tipp auf einen Punkt: den Weg "
+    "einstellen. Gedrückt halten: Menü."
+)
+#: … und neben dem Namen der gewählten Übung
+GEWAEHLT = "Kachel oben antippen: neue Übung dahinter · gedrückt halten: Menü"
+NUR_IHR_WEG = "Nur ihren Weg zeigen"
+#: Liegt der Finger beim Gedrückthalten tiefer als dieser Anteil der Seitenhöhe, geht das Menü
+#: an der Übung nach oben auf — das Bild füllt etwa das untere Drittel bis zwei Drittel der
+#: Seite, seine Mitte liegt bei gut der Hälfte
+MENUE_NACH_OBEN_AB = 0.56
 
 
 # -- Gemeinsam mit „Plan“ und „Im Plan einstellen“ ------------------------------------------------
@@ -94,6 +117,102 @@ def knoten_namen(state: AppState, plan: Plan) -> dict[str, str]:
     return out
 
 
+def fehlende_namen(state: AppState, plan: Plan) -> dict[str, str]:
+    """Wie die Planübungen heißen, auf die der Ablauf zeigt, die es gerade aber nicht gibt
+    (`core.ablauf.fehlende`: Übung im Papierkorb, Paket ausgeschaltet) — gelesen aus dem Plan
+    mit seinen verborgenen Planübungen. Eine ID, zu der es gar keine Planübung mehr gibt,
+    fehlt hier."""
+    fehlt = ab.fehlende(plan.ablauf, [it.id for it in plan.items])
+    if not fehlt:
+        return {}
+    voll = state.plaene.laden(plan.id, mit_verborgenen=True)
+    namen: dict[str, str] = {}
+    for it in voll.items if voll is not None else []:
+        if it.id in fehlt:
+            u = state.uebungen.laden(it.exercise_id, mit_geloeschten=True)
+            namen[it.id] = u.name if u is not None else "Übung"
+    return namen
+
+
+def plan_warnungen(state: AppState, plan: Plan) -> list[str]:
+    """`core.ablauf.warnungen` zu diesem Plan — die fehlenden Übungen beim Namen."""
+    namen = {**knoten_namen(state, plan), **fehlende_namen(state, plan)}
+    return ab.warnungen(plan.ablauf, [it.id for it in plan.items], namen)
+
+
+def reparatur_knoepfe(
+    page: Any, state: AppState, plan: Plan, danach: Callable[[], Any]
+) -> list[ft.Control]:
+    """Was einen **unvollständigen** Ablauf repariert (Ben, 16.11.2026: „Wenn Plan
+    unvollständig kann er nicht durchgeführt werden, bis das repariert ist“): je fehlender
+    Übung ein Knopf, der sie aus dem Plan nimmt — mit Rückfrage; ihre Wege fallen mit ihr weg.
+    Zurückholen lässt sie sich im Papierkorb bzw. mit ihrem Paket. Leer, wenn nichts fehlt."""
+    ids = [it.id for it in plan.items]
+    fehlt = ab.fehlende(plan.ablauf, ids)
+    if not fehlt:
+        return []
+    namen = fehlende_namen(state, plan)
+
+    def fragen(item_id: str, name: str) -> Callable[[Any], None]:
+        def handler(_e: Any = None) -> None:
+            nachher = Nachher()
+            dialog: ft.AlertDialog
+
+            def entfernen(_e: Any = None) -> None:
+                state.plaene.uebung_entfernen(item_id)
+                nachher.danach(danach)
+                schliessen(dialog)
+
+            dialog = ft.AlertDialog(
+                title=ft.Text(f"„{name}“ aus dem Plan nehmen?"),
+                content=ft.Text(
+                    "Die Übung ist gerade nicht verfügbar (Papierkorb oder ausgeschaltetes "
+                    "Paket). Ihre Wege im Ablauf fallen weg. Einträge im Tagebuch bleiben."
+                ),
+                actions=[
+                    ft.TextButton("Abbrechen", on_click=lambda _e=None: schliessen(dialog)),
+                    ft.TextButton(
+                        "Aus dem Plan nehmen",
+                        style=ft.ButtonStyle(color=ft.Colors.ERROR),
+                        on_click=entfernen,
+                    ),
+                ],
+                on_dismiss=nachher.bei_schliessen,
+            )
+            with contextlib.suppress(Exception):
+                page.show_dialog(dialog)
+
+        return handler
+
+    def aufraeumen(_e: Any = None) -> None:
+        # Wege zu Planübungen, die es gar nicht mehr gibt: Das Speichern bereinigt sie
+        jetzt = state.plaene.laden(plan.id)
+        if jetzt is not None:
+            ablauf_speichern(state, plan.id, jetzt.ablauf)
+        danach()
+
+    knoepfe: list[ft.Control] = [
+        ft.TextButton(
+            f"„{namen[i]}“ aus dem Plan nehmen",
+            icon=ft.Icons.DELETE_OUTLINE,
+            on_click=fragen(i, namen[i]),
+            data=("reparatur", i),
+        )
+        for i in fehlt
+        if i in namen
+    ]
+    if any(i not in namen for i in fehlt):
+        knoepfe.append(
+            ft.TextButton(
+                "Wege zu fehlenden Übungen entfernen",
+                icon=ft.Icons.CLEANING_SERVICES_OUTLINED,
+                on_click=aufraeumen,
+                data=("reparatur", ""),
+            )
+        )
+    return knoepfe
+
+
 def ablauf_zusammenfassung(plan: Plan) -> str:
     """Was unter dem Schalter steht: Liste · Workout, das der Liste folgt · eigener Ablauf
     („5 Wege · 2 bei Bedarf · 1 Frage“)."""
@@ -108,6 +227,9 @@ def ablauf_zusammenfassung(plan: Plan) -> str:
             "Workout: Übung für Übung in der Reihenfolge der Liste. Wann es weitergeht und "
             "wohin sonst, stellst du im Reiter „Ablauf“ ein."
         )
+    if ab.fehlende(plan.ablauf, ids):
+        # eine Übung des Ablaufs fehlt — was zu tun ist, sagt die Warnung darunter
+        return "Workout mit eigenem Ablauf — unvollständig."
     if ab.ohne_start_text(plan.ablauf, ids):
         # geleert (Ben, 16.11.2026) — was zu tun ist, sagt die Warnung darunter
         return "Workout mit eigenem Ablauf — noch ohne Start."
@@ -225,12 +347,8 @@ def modus_zeile(page: Any, state: AppState, plan: Plan) -> ft.Control:
             ft.Text(ablauf_zusammenfassung(plan), size=12, opacity=0.7),
             # Kann der Plan hängen bleiben, steht es auch hier (Ben, 9.11.2026)
             *(
-                [warn_karte(gefahr)]
-                if (
-                    gefahr := ab.warnungen(
-                        plan.ablauf, [it.id for it in plan.items], knoten_namen(state, plan)
-                    )
-                )
+                [warn_karte(gefahr, reparatur_knoepfe(page, state, plan, state.neu_zeichnen))]
+                if (gefahr := plan_warnungen(state, plan))
                 else []
             ),
         ],
@@ -374,9 +492,10 @@ def entfernen_fragen(
         page.show_dialog(dialog)
 
 
-def warn_karte(warnungen: list[str]) -> ft.Control:
+def warn_karte(warnungen: list[str], knoepfe: Sequence[ft.Control] = ()) -> ft.Control:
     """Die Warnung „Der Plan kann hängen bleiben“ — im Ablauf über dem Bild, im Reiter „Plan“
-    unter dem Schalter (`core.ablauf.warnungen`)."""
+    unter dem Schalter (`core.ablauf.warnungen`). ``knoepfe``: was den Plan repariert
+    (`reparatur_knoepfe`) — unter den Sätzen."""
     return ft.Container(
         padding=ft.Padding.symmetric(horizontal=12, vertical=8),
         border_radius=10,
@@ -392,7 +511,11 @@ def warn_karte(warnungen: list[str]) -> ft.Control:
                     tight=True,
                     expand=True,
                     controls=[
-                        ft.Text(w, size=13, color=ft.Colors.ON_ERROR_CONTAINER) for w in warnungen
+                        *(
+                            ft.Text(w, size=13, color=ft.Colors.ON_ERROR_CONTAINER)
+                            for w in warnungen
+                        ),
+                        *knoepfe,
                     ],
                 ),
             ],
@@ -407,9 +530,9 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
     """Die Ansicht; ``basis`` ist die Bearbeiten-Route des Plans."""
     route = f"{basis}/ablauf"
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
-    lokal: dict[str, Any] = {"suche": "", "ziel_von": None}
+    # ``druck``: wo der Finger beim letzten Gedrückthalten lag (Anteil der Seitenhöhe)
+    lokal: dict[str, Any] = {"suche": "", "druck": 0.0}
     vernebelt = state.ablauf_vernebelt.setdefault(plan.id, set())
-    slots: list[str] = state.ablauf_slots.setdefault(plan.id, [])
     lagen: dict[str, Any] = state.ablauf_lagen.setdefault(plan.id, {})
 
     def melden(text: str) -> None:
@@ -424,6 +547,23 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
 
     def gewaehlt() -> str | None:
         return state.ablauf_wahl.get(plan.id)
+
+    def weg_wahl(p: Plan) -> tuple[Kante, int] | None:
+        """Der gewählte Weg (sein Punkt im Bild wurde angetippt) und seine Stelle unter den
+        Wegen seiner Übung (0 = Hauptweg) — ``None``, wenn keiner gewählt ist oder es ihn
+        nicht mehr gibt (dann fällt die Wahl weg)."""
+        paar = state.ablauf_weg.get(plan.id)
+        if paar is None:
+            return None
+        for n, k in enumerate(p.ablauf.von(paar[0])):
+            if k.nach == paar[1]:
+                return k, n
+        state.ablauf_weg[plan.id] = None
+        return None
+
+    def menue_zu() -> None:
+        """Das Menü an einer Übung ist zu — gezeichnet wird danach."""
+        state.ablauf_menue[plan.id] = None
 
     # -- Palette ------------------------------------------------------------------------------
     reihe = ft.Row(spacing=6, scroll=ft.ScrollMode.AUTO)
@@ -527,7 +667,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             )
             kacheln.append(
                 ft.Draggable(
-                    group="uebung",
+                    group=abbild.GRUPPE_KACHEL,
                     # die Übung, nicht eine Planübung — welche ins Bild kommt, entscheidet sich
                     # beim Ablegen (`ins_bild`)
                     data=v.uebung,
@@ -538,7 +678,8 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                         on_click=lambda _e, i=v.uebung: palette_getippt(i),
                         # Gedrückt halten nimmt sie aus dem Plan (Ben, 9.11.2026) — mit Rückfrage
                         on_long_press=lambda _e, i=v.uebung: aus_dem_plan(i),
-                        tooltip="Tippen oder ziehen: in den Ablauf · gedrückt halten: aus dem Plan",
+                        tooltip="Tippen oder auf eine Übung im Bild ziehen: in den Ablauf · "
+                        "gedrückt halten: aus dem Plan",
                         content=ft.Column(
                             spacing=3,
                             tight=True,
@@ -576,7 +717,45 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                     opacity=0.6,
                 )
             )
+        else:
+            kacheln.append(frage_kachel())
         reihe.controls = kacheln
+
+    def frage_kachel() -> ft.Control:
+        """Die Kachel **„Frage“** am Ende der Leiste (vorher „Routing → Frage dahinter“):
+        antippen — mit gewählter Übung im Bild — oder auf eine Übung ziehen setzt eine Frage
+        dahinter; danach öffnet ihr Blatt."""
+
+        def bild(flaeche: str, zeichen: str) -> ft.Control:
+            return ft.Container(
+                width=56,
+                height=56,
+                border_radius=12,
+                bgcolor=flaeche,
+                alignment=ft.Alignment.CENTER,
+                content=ft.Icon(ft.Icons.HELP_OUTLINE, size=28, color=zeichen),
+            )
+
+        return ft.Draggable(
+            group=abbild.GRUPPE_KACHEL,
+            data=FRAGE_KACHEL,
+            affinity=ft.Axis.VERTICAL,
+            content=ft.Container(
+                width=70,
+                on_click=lambda _e: frage_getippt(),
+                tooltip="Tippen oder auf eine Übung im Bild ziehen: eine Frage dahinter",
+                content=ft.Column(
+                    spacing=3,
+                    tight=True,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        bild(ft.Colors.SECONDARY_CONTAINER, ft.Colors.SECONDARY),
+                        ft.Text("Frage", size=10, text_align=ft.TextAlign.CENTER, width=68),
+                    ],
+                ),
+            ),
+            content_feedback=bild(ft.Colors.SECONDARY, ft.Colors.ON_SECONDARY),
+        )
 
     def aus_dem_plan(uebung_id: str) -> None:
         """Gedrückt halten an einer Kachel: **eine** Planübung dieser Übung aus dem Plan nehmen
@@ -641,98 +820,276 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         speichern(aendern(p.ablauf, item_id))
         return item_id, neu
 
+    def dahinter(von: str, uebung_id: str) -> None:
+        """Eine Kachel kommt **hinter** den Knoten ``von`` — angetippt (mit gewähltem Knoten)
+        oder auf ihn gezogen: immer ein **neuer Knoten** (`ins_bild`) mit einem Weg dorthin,
+        nie ein Weg zu einem, der schon im Bild steht (Ben, 16.11.2026: „Ich brauche das
+        einheitlich, neue Übung erstellen“). **Die Wahl geht auf den neuen Knoten** — Kachel für
+        Kachel entsteht so eine Kette; für einen Abzweig wählt man die Übung noch einmal oder
+        zieht die Kachel auf sie."""
+        item_id, neu = ins_bild(uebung_id, lambda a, i: a.mit_kante(Kante(von, i)))
+        if not item_id:
+            return
+        namen = knoten_namen(state, frisch())
+        state.ablauf_wahl[plan.id] = item_id
+        state.ablauf_weg[plan.id] = None
+        melden(
+            f"Weg {namen.get(von, '?')} → {namen.get(item_id, '?')}"
+            + (" — neu im Plan" if neu else "")
+        )
+        neu_zeichnen()
+
+    def frage_dahinter(von: str) -> None:
+        """Eine Frage hinter ``von`` — gewählt ist danach sie, ihr Blatt öffnet sich."""
+        jetzt = frisch()
+        f = Frage()
+        neu = replace(jetzt.ablauf, fragen=(*jetzt.ablauf.fragen, f))
+        speichern(neu.mit_kante(Kante(von, f.id)))
+        state.ablauf_wahl[plan.id] = f.id
+        state.ablauf_weg[plan.id] = None
+        neu_zeichnen()
+        frage_blatt(f)
+
     def palette_getippt(uebung_id: str) -> None:
-        """Ohne Ziehen — immer ein **neuer Knoten** (`ins_bild`), nie ein Weg zu einem, der
-        schon im Bild steht (Ben, 16.11.2026: „Ich brauche das einheitlich, neue Übung
-        erstellen“): mit gewähltem Knoten hinter diesem, sonst im ersten Slot; ohne Start wird
-        sie der Start. **Die Wahl geht auf den neuen Knoten** — Kachel für Kachel angetippt
-        entsteht so eine Kette; für einen Abzweig wählt man die Übung noch einmal."""
+        """Ohne Ziehen: mit gewähltem Knoten kommt die neue Übung hinter ihn (`dahinter`);
+        ohne Start wird sie der Start."""
+        menue_zu()
         p = frisch()
         von = gewaehlt()
         if von is not None and von in knoten_namen(state, p):
-            item_id, neu = ins_bild(uebung_id, lambda a, i: a.mit_kante(Kante(von, i)))
-            if item_id:
-                namen = knoten_namen(state, frisch())
-                state.ablauf_wahl[plan.id] = item_id
-                melden(
-                    f"Weg {namen.get(von, '?')} → {namen.get(item_id, '?')}"
-                    + (" — neu im Plan" if neu else "")
-                )
-                neu_zeichnen()
-            return
-        if slots:
-            einsetzen(Slot(slots[0]), uebung_id)
+            dahinter(von, uebung_id)
             return
         if p.ablauf.startknoten([it.id for it in p.items]) is None:
             start_ablegen(uebung_id)
             return
         melden(
-            "Erst eine Übung im Bild antippen — die neue kommt dahinter. Oder nach unten in "
-            "einen Slot ziehen."
+            "Erst eine Übung im Bild antippen — die neue kommt dahinter. Oder die Kachel auf "
+            "eine Übung im Bild ziehen."
+        )
+
+    def frage_getippt() -> None:
+        """Die Kachel „Frage“ angetippt: eine Frage hinter die gewählte Übung."""
+        menue_zu()
+        von = gewaehlt()
+        if von is not None and von in knoten_namen(state, frisch()):
+            frage_dahinter(von)
+            return
+        melden(
+            "Erst eine Übung im Bild antippen — die Frage kommt dahinter. Oder die Kachel "
+            "„Frage“ auf eine Übung im Bild ziehen."
         )
 
     # -- Zeichnung ------------------------------------------------------------------------------
 
-    def einsetzen(slot: Slot, uebung_id: str) -> None:
-        item_id, neu = ins_bild(uebung_id, lambda a, i: a.mit_kante(Kante(slot.von, i)))
-        if not item_id:
-            return
-        with contextlib.suppress(ValueError):
-            slots.remove(slot.von)
-        state.ablauf_wahl[plan.id] = item_id
-        if neu:
-            melden(f"„{knoten_namen(state, frisch()).get(item_id, '?')}“ ist neu im Plan.")
-        neu_zeichnen()
+    def kachel_auf(knoten: str, wert: str) -> None:
+        """Eine Kachel der Leiste fällt auf einen Knoten im Bild: eine neue Übung — oder eine
+        Frage — dahinter (Ben, 16.11.2026: „Slot weglassen“)."""
+        menue_zu()
+        if wert == FRAGE_KACHEL:
+            frage_dahinter(knoten)
+        else:
+            dahinter(knoten, wert)
 
     def start_ablegen(uebung_id: str) -> None:
         """Eine Kachel auf „Start“ (oder den leeren Platz darunter): wie überall kommt ein
         **neuer Knoten** ins Bild (`ins_bild`) und wird der Start (Ben, 16.11.2026: „Ich
         brauche das einheitlich, neue Übung erstellen“). Mit dem, was schon im Bild steht,
-        verbindet sich nichts von selbst — einen Knoten von dort macht „Als Start“ zum Start."""
+        verbindet sich nichts von selbst — einen Knoten von dort macht „Als Start“ zum Start
+        oder der Punkt von „Start“, auf ihn gezogen."""
+        menue_zu()
+        if uebung_id == FRAGE_KACHEL:
+            melden("Eine Frage kommt hinter eine Übung — zieh sie auf eine Übung im Bild.")
+            return
         item_id, neu = ins_bild(uebung_id, lambda a, i: replace(a, start=i))
         if not item_id:
             return
         state.ablauf_wahl[plan.id] = item_id
+        state.ablauf_weg[plan.id] = None
         melden("Neuer Start" + (" — neu im Plan" if neu else ""))
         neu_zeichnen()
 
-    def knoten_getippt(knoten: str) -> None:
-        von = lokal["ziel_von"]
-        if von is not None:
-            lokal["ziel_von"] = None
-            p = frisch()
-            if not any(k.von == von and k.nach == knoten for k in p.ablauf.kanten):
-                speichern(p.ablauf.mit_kante(Kante(von, knoten)))
-                melden("Weg angelegt — unter „Routing“ einstellen")
+    def verbinden(von: str, nach: str) -> None:
+        """Ein Punkt wurde gezogen und fiel auf ``nach`` (`components/ablaufbild`): von einer
+        Übung oder Frage auf eine andere — ein Weg; auf sich selbst — noch einmal; auf „Ende“
+        oder „◀ zurück“; von „Start“ auf eine Übung — der Start. Was daraus wird, rechnet
+        `core.ablauf.verbinden`. Der neue Weg ist danach gewählt: Seine Leiste steht unter dem
+        Bild, wann es weitergeht, lässt sich gleich einstellen."""
+        menue_zu()
+        p = frisch()
+        namen = knoten_namen(state, p)
+        neu = ab.verbinden(p.ablauf, von, nach)
+        if neu is None:
+            if von == ab.VOM_START:
+                melden(
+                    f"„{namen[nach]}“ ist schon der Start."
+                    if nach in namen
+                    else "„Start“ gehört auf eine Übung oder Frage."
+                )
+            elif von == nach and p.ablauf.frage(von) is not None:
+                melden("Eine Frage führt nicht zu sich selbst.")
+            else:
+                # den Weg gibt es schon: seine Leiste zeigen statt eines zweiten
+                state.ablauf_wahl[plan.id] = None
+                state.ablauf_weg[plan.id] = (von, nach)
+                melden("Diesen Weg gibt es schon.")
             neu_zeichnen()
             return
+        speichern(neu)
+        if von == ab.VOM_START:
+            state.ablauf_wahl[plan.id] = nach
+            state.ablauf_weg[plan.id] = None
+            melden("Neuer Start")
+        else:
+            state.ablauf_wahl[plan.id] = None
+            state.ablauf_weg[plan.id] = (von, nach)
+        neu_zeichnen()
+
+    def knoten_getippt(knoten: str) -> None:
+        """Ein Tipp wählt die Übung (noch einmal: nimmt die Wahl zurück) — die nächste Kachel
+        kommt hinter sie. Steht ein Menü offen, schließt der Tipp nur das."""
+        if state.ablauf_menue.get(plan.id) is not None:
+            menue_schliessen()
+            return
         state.ablauf_wahl[plan.id] = None if gewaehlt() == knoten else knoten
+        state.ablauf_weg[plan.id] = None
         neu_zeichnen()
 
     def knoten_lang(knoten: str) -> None:
-        p = frisch()
+        """Gedrückt halten: das **Menü an der Übung**, am Ort im Bild (Ben, 16.11.2026) —
+        vorher lag hier „nur ihren Weg zeigen“, das steht jetzt im Menü."""
+        state.ablauf_menue[plan.id] = knoten
+        state.ablauf_wahl[plan.id] = knoten
+        state.ablauf_weg[plan.id] = None
+        neu_zeichnen()
+
+    def menue_schliessen() -> None:
+        menue_zu()
+        neu_zeichnen()
+
+    def abseits(p: Plan, knoten: str) -> set[str]:
+        """Was nicht auf dem Weg durch ``knoten`` liegt — das wird vernebelt."""
         ids = [it.id for it in p.items]
         weg = ab.weg_durch(p.ablauf, ids, knoten)
-        alle = [*ids, *(f.id for f in p.ablauf.fragen)]
-        rest = {i for i in alle if i not in weg}
+        return {i for i in [*ids, *(f.id for f in p.ablauf.fragen)] if i not in weg}
+
+    def nur_ihr_weg(knoten: str) -> None:
+        """„Nur ihren Weg zeigen“: alles abseits des Wegs durch diese Übung wird blass — noch
+        einmal (oder „Alles zeigen“) holt es zurück."""
+        rest = abseits(frisch(), knoten)
         aus = vernebelt == rest
         vernebelt.clear()
         if not aus:
             vernebelt.update(rest)
         neu_zeichnen()
 
-    def kante_getippt(k: Kante) -> None:
-        """Der Griff eines Wegs (Punkt oder Etikett): das Blatt mit **nur diesem** Weg (Ben,
-        10.11.2026: „der Übersicht halber alleine“)."""
-        state.ablauf_wahl[plan.id] = k.von
+    def als_start(knoten: str) -> None:
+        speichern(replace(frisch().ablauf, start=knoten))
+        melden("Neuer Start")
         neu_zeichnen()
-        wege_blatt(k.von, fokus=k.nach, allein=True)
+
+    def herausnehmen(knoten: str) -> None:
+        # Nur aus der Zeichnung (9.11.2026) — die Übung bleibt oben in der Palette
+        entfernen_fragen(page, state, plan.id, knoten, neu_zeichnen, nur_ablauf=True)
+
+    def menue_jetzt(p: Plan) -> abbild.Menue | None:
+        """Das Menü der Übung, die gedrückt gehalten wurde — was vorher in der Knopfzeile und
+        unter „Routing“ stand und nicht ins Bild gewandert ist. Jeder Eintrag schließt das Menü
+        zuerst: Ein Blatt oder Dialog darüber fände es sonst nach dem Schließen noch offen."""
+        knoten = state.ablauf_menue.get(plan.id)
+        if knoten is None or knoten not in knoten_namen(state, p):
+            return None
+        # Eine Übung in der unteren Hälfte des Bildes: Das Menü geht nach oben auf — nach unten
+        # verschwänden seine letzten Zeilen unter dem Rand (Web-Foto 16.11.2026)
+        nach_oben = lokal["druck"] > MENUE_NACH_OBEN_AB
+
+        def dann(aktion: Callable[[], Any]) -> Callable[[], Any]:
+            def handler() -> Any:
+                menue_schliessen()
+                return aktion()
+
+            return handler
+
+        frage = p.ablauf.frage(knoten)
+        if frage is not None:
+            return abbild.Menue(
+                knoten,
+                [
+                    abbild.Eintrag(
+                        "Frage ändern …", dann(lambda: frage_blatt(frage)), ft.Icons.EDIT_OUTLINED
+                    ),
+                    abbild.Eintrag(
+                        "Frage löschen",
+                        dann(lambda: herausnehmen(knoten)),
+                        ft.Icons.DELETE_OUTLINE,
+                        gefahr=True,
+                    ),
+                ],
+                menue_schliessen,
+                nach_oben,
+            )
+        eintraege = [
+            abbild.Eintrag(
+                "Übung einstellen …",
+                dann(lambda: page.push_route(f"{basis}/ziel/{knoten}")),
+                ft.Icons.SETTINGS_OUTLINED,
+            ),
+            abbild.Eintrag(
+                "Beiname …", dann(lambda: beiname_blatt(knoten)), ft.Icons.LABEL_OUTLINE
+            ),
+            abbild.Eintrag(
+                "Alles zeigen" if vernebelt and vernebelt == abseits(p, knoten) else NUR_IHR_WEG,
+                dann(lambda: nur_ihr_weg(knoten)),
+                ft.Icons.FILTER_CENTER_FOCUS,
+            ),
+        ]
+        if p.ablauf.startknoten([it.id for it in p.items]) != knoten:
+            eintraege.append(
+                abbild.Eintrag(
+                    "Als Start", dann(lambda: als_start(knoten)), ft.Icons.PLAY_ARROW_OUTLINED
+                )
+            )
+        eintraege.append(
+            abbild.Eintrag(
+                "Aus dem Ablauf nehmen",
+                dann(lambda: herausnehmen(knoten)),
+                ft.Icons.DELETE_OUTLINE,
+                gefahr=True,
+            )
+        )
+        return abbild.Menue(knoten, eintraege, menue_schliessen, nach_oben)
+
+    def kante_getippt(k: Kante) -> None:
+        """Der Punkt eines Wegs (oder sein Etikett): Der Weg ist gewählt, seine **Leiste** steht
+        unter dem Bild (Ben, 16.11.2026: „möglichst ohne die Blätter schon viel machen“) — auch
+        beim einen Punkt eines eindeutigen Wegs. Noch einmal antippen nimmt die Wahl zurück."""
+        menue_zu()
+        paar = (k.von, k.nach)
+        state.ablauf_weg[plan.id] = None if state.ablauf_weg.get(plan.id) == paar else paar
+        state.ablauf_wahl[plan.id] = None
+        neu_zeichnen()
 
     def abzweig_getippt(knoten: str) -> None:
-        """Der Abzweig unter einer Übung: alle ihre Wege auf einmal."""
+        """Der Abzweig unter einer Übung mit mehreren Wegen — und der Punkt einer Übung ohne
+        Weg: das Blatt mit allen ihren Wegen (dort „+ Weg“)."""
+        menue_zu()
         state.ablauf_wahl[plan.id] = knoten
+        state.ablauf_weg[plan.id] = None
         neu_zeichnen()
         wege_blatt(knoten)
+
+    def weg_aendern(alt: Kante, neu: Kante) -> None:
+        """Die Leiste hat den gewählten Weg geändert: sofort speichern, neu zeichnen."""
+        speichern(frisch().ablauf.kante_ersetzen(alt, neu))
+        state.ablauf_weg[plan.id] = (neu.von, neu.nach)
+        neu_zeichnen()
+
+    def weg_entfernen(alt: Kante) -> None:
+        p = frisch()
+        speichern(p.ablauf.ohne_kante(alt))
+        state.ablauf_weg[plan.id] = None
+        namen = knoten_namen(state, p)
+        melden(f"Weg {namen.get(alt.von, '?')} → {ziel_name(alt, namen)} entfernt.")
+        neu_zeichnen()
 
     def pfad_abspielen() -> None:
         p = frisch()
@@ -754,8 +1111,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         neu = ab.lagen_ergaenzen(lagen, p.ablauf, ids)
         lagen.clear()
         lagen.update(neu)
-        namen = knoten_namen(state, p)
-        slots[:] = [s for s in slots if s in namen]
+        weg_wahl(p)  # ein gewählter Weg, den es nicht mehr gibt, fällt weg
         return abbild.zeichnung(
             state,
             p.ablauf,
@@ -764,17 +1120,23 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             lagen=lagen,
             vernebelt=sorted(vernebelt),
             gewaehlt=gewaehlt(),
-            slots=[Slot(v) for v in slots],
+            weg_gewaehlt=state.ablauf_weg.get(plan.id),
             zaehlung=state.einheiten.kanten_gezaehlt(state.profil.id, p.id) or None,
+            menue=menue_jetzt(p),
             on_knoten=knoten_getippt,
             on_knoten_lang=knoten_lang,
+            on_lang_ort=lambda anteil: lokal.__setitem__("druck", anteil),
             on_kante=kante_getippt,
             on_abzweig=abzweig_getippt,
-            on_slot=einsetzen,
             on_start=pfad_abspielen,
             on_start_ablegen=start_ablegen,
+            on_verbinden=verbinden,
+            on_kachel_auf=kachel_auf,
+            on_ziehen=ziele.zeigen,
         )
 
+    # „Ende“ und „◀ zurück“ am unteren Rand des Bildes — nur zu sehen, während gezogen wird
+    ziele = abbild.ziele(verbinden)
     erste = zeichnung_jetzt(frisch())
     flaeche = abbild.flaeche_neu(erste)
     bild = abbild.Bild(abbild.ansicht(flaeche), flaeche, erste.mitten, erste.knoten)
@@ -784,87 +1146,10 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
         bgcolor=ft.Colors.SURFACE,
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-        content=bild.control,
+        content=abbild.mit_zielen(bild.control, ziele),
     )
 
-    # -- Knöpfe unter dem Bild -----------------------------------------------------------------
-
-    def routing(knoten: str, p: Plan) -> ft.Control:
-        ist_frage = p.ablauf.frage(knoten) is not None
-
-        def tu(aktion: Callable[[], Any]) -> Callable[[Any], Any]:
-            async def handler(_e: Any = None) -> None:
-                ergebnis = aktion()
-                if inspect.isawaitable(ergebnis):
-                    await ergebnis
-
-            return handler
-
-        def kante_dazu(nach: str, **felder: Any) -> Callable[[], None]:
-            def handler() -> None:
-                jetzt = frisch()
-                speichern(jetzt.ablauf.mit_kante(Kante(knoten, nach, **felder)))
-                neu_zeichnen()
-
-            return handler
-
-        def bestehende() -> None:
-            lokal["ziel_von"] = knoten
-            neu_zeichnen()
-
-        def frage_dahinter() -> None:
-            jetzt = frisch()
-            f = Frage()
-            neu = replace(jetzt.ablauf, fragen=(*jetzt.ablauf.fragen, f))
-            speichern(neu.mit_kante(Kante(knoten, f.id)))
-            state.ablauf_wahl[plan.id] = f.id
-            neu_zeichnen()
-            frage_blatt(f)
-
-        def als_start() -> None:
-            speichern(replace(frisch().ablauf, start=knoten))
-            neu_zeichnen()
-
-        async def einstellen() -> None:
-            await page.push_route(f"{basis}/ziel/{knoten}")
-
-        eintraege: list[tuple[ft.IconData, str, Callable[[], Any]]] = [
-            (ft.Icons.TUNE, "Wege einstellen …", lambda: wege_blatt(knoten)),
-            (ft.Icons.CALL_SPLIT, "Weg zu einer Übung im Bild …", bestehende),
-            (ft.Icons.HELP_OUTLINE, "Frage dahinter", frage_dahinter),
-        ]
-        if not ist_frage:
-            eintraege.append(
-                (ft.Icons.REPLAY, "Noch einmal (Schleife)", kante_dazu(knoten, text="noch einmal"))
-            )
-        eintraege += [
-            (ft.Icons.UNDO, "◀ Zurück, wo ich herkam", kante_dazu(ab.ZURUECK)),
-            (ft.Icons.STOP_CIRCLE_OUTLINED, "Hier endet es", kante_dazu(ab.ENDE)),
-            (ft.Icons.PLAY_ARROW_OUTLINED, "Als Start", als_start),
-        ]
-        if not ist_frage:
-            eintraege.append((ft.Icons.SETTINGS_OUTLINED, "Übung einstellen …", einstellen))
-        return ft.PopupMenuButton(
-            content=ft.Container(
-                padding=ft.Padding.symmetric(horizontal=12, vertical=8),
-                border_radius=20,
-                bgcolor=ft.Colors.SECONDARY_CONTAINER,
-                content=ft.Row(
-                    tight=True,
-                    spacing=4,
-                    controls=[
-                        ft.Icon(ft.Icons.ALT_ROUTE, size=18),
-                        ft.Text("Routing", size=14),
-                        ft.Icon(ft.Icons.ARROW_DROP_DOWN, size=18),
-                    ],
-                ),
-            ),
-            tooltip="Wege dieses Knotens",
-            items=[
-                ft.PopupMenuItem(content=text, icon=symbol, on_click=tu(aktion))
-                for symbol, text, aktion in eintraege
-            ],
-        )
+    # -- Unter dem Bild ---------------------------------------------------------------------------
 
     def wie_die_liste(_e: Any = None) -> None:
         """Im leeren Bild: der Ablauf folgt wieder der Liste — Übung für Übung."""
@@ -882,9 +1167,9 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                 (
                     "Der Ablauf ist leer — tippe oben eine Übung an oder zieh sie auf „Start“."
                     if ganz_leer
-                    else "Der Ablauf hat keinen Start — tippe eine Übung im Bild an und dann "
-                    "„Als Start“. Eine Kachel von oben (antippen oder auf „Start“ ziehen) "
-                    "setzt eine neue Übung dorthin."
+                    else "Der Ablauf hat keinen Start — zieh den Punkt von „Start“ auf eine "
+                    "Übung im Bild, oder tippe sie an und dann „Als Start“. Eine Kachel von "
+                    "oben (antippen oder auf „Start“ ziehen) setzt eine neue Übung dorthin."
                 ),
                 size=12,
                 opacity=0.65,
@@ -904,76 +1189,59 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             ),
         ]
 
-    def knoten_knoepfe(p: Plan) -> list[ft.Control]:
-        knoten = gewaehlt()
+    def unter_dem_bild(p: Plan) -> list[ft.Control]:
+        """Direkt unter dem Bild: die **Leiste des gewählten Wegs** — sonst eine Zeile zur
+        gewählten Übung oder, ohne Wahl, zu den Gesten. Die Knopfzeile von früher (Routing,
+        Neuer Slot, Beiname, Aus dem Ablauf nehmen) ist ins Bild gewandert (Ben, 16.11.2026).
+        Fehlt der Start, steht an der gewählten Übung weiter der Knopf „Als Start“."""
         namen = knoten_namen(state, p)
-        if knoten is None or knoten not in namen:
-            if ab.ohne_start_text(p.ablauf, [it.id for it in p.items]):
-                return leer_hinweis(p)
+        ids = [it.id for it in p.items]
+        wahl = weg_wahl(p)
+        if wahl is not None:
+            k, n = wahl
+            item = next((it for it in p.items if it.id == k.von), None)
+            uebung = katalog.get(item.exercise_id) if item is not None else None
+            ohne = item is not None and uebung is not None and timer_fuer(uebung, p, item) is None
             return [
-                ft.Text(
-                    "Tipp auf eine Übung im Bild — dann stehen hier Routing, Slot, Beiname und "
-                    "Entfernen.",
-                    size=12,
-                    opacity=0.65,
+                weg_leiste(
+                    k,
+                    n,
+                    namen=namen,
+                    aendern=lambda neu: weg_aendern(k, neu),
+                    entfernen=lambda: weg_entfernen(k),
+                    mehr=lambda: wege_blatt(k.von, fokus=k.nach, allein=True),
+                    ohne_timer=ohne,
                 )
             ]
-        ist_frage = p.ablauf.frage(knoten) is not None
-
-        def neuer_slot(_e: Any = None) -> None:
-            slots.append(knoten)
-            neu_zeichnen()
-
-        def entfernen(_e: Any = None) -> None:
-            # Nur aus der Zeichnung (9.11.2026) — die Übung bleibt oben in der Palette
-            entfernen_fragen(page, state, plan.id, knoten, neu_zeichnen, nur_ablauf=True)
-
-        def als_start(_e: Any = None) -> None:
-            speichern(replace(frisch().ablauf, start=knoten))
-            melden("Neuer Start")
-            neu_zeichnen()
-
-        knoepfe: list[ft.Control] = [
-            ft.Text(namen[knoten], size=13, weight=ft.FontWeight.W_600),
-            routing(knoten, p),
-            ft.TextButton("Neuer Slot", icon=ft.Icons.ADD_BOX_OUTLINED, on_click=neuer_slot),
-        ]
-        if ab.ohne_start_text(p.ablauf, [it.id for it in p.items]):
+        knoten = gewaehlt()
+        kein_start = bool(ab.ohne_start_text(p.ablauf, ids))
+        if knoten is None or knoten not in namen:
+            if kein_start:
+                return leer_hinweis(p)
+            return [ft.Text(GESTEN, size=12, opacity=0.65, data="ablauf_gesten")]
+        zeile: list[ft.Control] = [ft.Text(namen[knoten], size=13, weight=ft.FontWeight.W_600)]
+        if kein_start:
             # Kein Start (Ben, 16.11.2026: „Start wird selbst verbunden. Wenn man möchte mit
-            # dem, was schon da ist“): der Knopf steht vorn, solange einer fehlt — sonst nur
-            # unter „Routing“
-            knoepfe.insert(
-                1,
+            # dem, was schon da ist“): der Knopf steht hier, solange einer fehlt — sonst im
+            # Menü der Übung
+            zeile.append(
                 ft.FilledTonalButton(
-                    "Als Start", icon=ft.Icons.PLAY_ARROW, on_click=als_start, data="als_start"
-                ),
-            )
-        if ist_frage:
-            frage = p.ablauf.frage(knoten)
-            knoepfe.append(
-                ft.TextButton(
-                    "Frage ändern",
-                    icon=ft.Icons.EDIT_OUTLINED,
-                    on_click=lambda _e: frage_blatt(frage),
+                    "Als Start",
+                    icon=ft.Icons.PLAY_ARROW,
+                    on_click=lambda _e: als_start(knoten),
+                    data="als_start",
                 )
             )
-        else:
-            knoepfe.append(
-                ft.TextButton(
-                    "Beiname",
-                    icon=ft.Icons.LABEL_OUTLINE,
-                    on_click=lambda _e: beiname_blatt(knoten),
-                )
+        zeile.append(ft.Text(GEWAEHLT, size=12, opacity=0.65))
+        return [
+            ft.Row(
+                wrap=True,
+                spacing=8,
+                run_spacing=2,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=zeile,
             )
-        knoepfe.append(
-            ft.TextButton(
-                "Frage löschen" if ist_frage else "Aus dem Ablauf nehmen",
-                icon=ft.Icons.DELETE_OUTLINE,
-                style=ft.ButtonStyle(color=ft.Colors.ERROR),
-                on_click=entfernen,
-            )
-        )
-        return knoepfe
+        ]
 
     def hinweise_zeigen(hinweise: list[str]) -> None:
         dialog: ft.AlertDialog = ft.AlertDialog(
@@ -1211,8 +1479,9 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                     ft.Text("Frage", size=18, weight=ft.FontWeight.W_600),
                     ft.Text(
                         "Ein Entscheidungsknoten fragt nach einer Skala und verzweigt nach dem "
-                        "Wert — die Wege von ihm tragen die Bereiche (0–6, 7–10), eingestellt "
-                        "unter „Routing → Wege einstellen“.",
+                        "Wert — die Wege von ihm tragen die Bereiche (0–6, 7–10): Zieh den "
+                        "Punkt unter der Frage auf die Übungen und stell an jedem Weg „Skala“ "
+                        "ein.",
                         size=12,
                         opacity=0.7,
                     ),
@@ -1238,10 +1507,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
 
     reiter_platz = ft.Container()
     einfuehrung = ft.Container(visible=False)
-    hinweis_ziel = ft.Container(visible=False)
-    knoten_leiste = ft.Row(
-        wrap=True, spacing=6, run_spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER
-    )
+    unten = ft.Column(spacing=4, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
     werkzeug_leiste = ft.Row(
         wrap=True, spacing=6, run_spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER
     )
@@ -1256,8 +1522,9 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         an = p.ablauf.an
         reiter_platz.content = plan_reiter(page, basis, "ablauf", ablauf_an=an)
         einfuehrung.visible = not an
-        for teil in (palette, rahmen, knoten_leiste, werkzeug_leiste):
+        for teil in (palette, rahmen, unten, werkzeug_leiste):
             teil.visible = an
+        ziele.control.visible = False  # nur, während gezogen wird
         if not an:
             einfuehrung.content = karte(
                 kartentitel("Workout"),
@@ -1275,35 +1542,12 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                 ),
                 abstand=10,
             )
-            hinweis_ziel.visible = False
             return
         palette_fuellen(p)
-        von = lokal["ziel_von"]
-        hinweis_ziel.visible = von is not None
-        if von is not None:
-            hinweis_ziel.content = ft.Container(
-                padding=ft.Padding.symmetric(horizontal=12, vertical=6),
-                border_radius=10,
-                bgcolor=ft.Colors.TERTIARY_CONTAINER,
-                content=ft.Row(
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Icon(ft.Icons.TOUCH_APP, size=18),
-                        ft.Text(
-                            "Ziel im Bild antippen — Weg von "
-                            + knoten_namen(state, p).get(von, "?"),
-                            size=13,
-                            expand=True,
-                        ),
-                        ft.TextButton("Abbrechen", on_click=lambda _e: ziel_abbrechen()),
-                    ],
-                ),
-            )
         # Was den Plan hängen lassen kann, steht sichtbar über dem Bild (Ben, 9.11.2026: „dafür
         # braucht es in der Planerstellung eine Warnung“)
         ids = [it.id for it in p.items]
-        gefahr = ab.warnungen(p.ablauf, ids, knoten_namen(state, p))
+        gefahr = plan_warnungen(state, p)
         # Ein ganz **leeres** Bild sagt unter sich, was zu tun ist (`leer_hinweis`) — die rote
         # Karte dazu gehört in den Reiter „Plan“. Fehlt der Start, während noch Wege im Bild
         # stehen, bleibt die Karte: Der Plan muss korrigiert werden (Ben, 16.11.2026)
@@ -1311,14 +1555,12 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         if kein_start != ab.START_FEHLT:
             gefahr = [g for g in gefahr if g != kein_start]
         warnung.visible = bool(gefahr)
-        warnung.content = warn_karte(gefahr) if gefahr else None
+        warnung.content = (
+            warn_karte(gefahr, reparatur_knoepfe(page, state, p, neu_zeichnen)) if gefahr else None
+        )
         abbild.aktualisieren(bild, zeichnung_jetzt(p))
-        knoten_leiste.controls = knoten_knoepfe(p)
+        unten.controls = unter_dem_bild(p)
         werkzeug_leiste.controls = werkzeuge(p)
-
-    def ziel_abbrechen() -> None:
-        lokal["ziel_von"] = None
-        neu_zeichnen()
 
     def neu_zeichnen() -> None:
         zeichnen()
@@ -1333,10 +1575,9 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             reiter_platz,
             einfuehrung,
             palette,
-            hinweis_ziel,
             warnung,
             rahmen,
-            knoten_leiste,
+            unten,
             werkzeug_leiste,
         ],
     )
@@ -1348,7 +1589,8 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             actions=[timer_knopf(page, state, "ablauf")],
         ),
         padding=ft.Padding.only(left=12, right=12, top=8, bottom=8),
-        controls=[sicher(inhalt, expand=True)],
+        # Das Netz um alles fängt einen Punkt, der ins Leere fällt (`abbild.fangnetz`)
+        controls=[sicher(abbild.fangnetz(inhalt, ziele), expand=True)],
     )
 
 
@@ -1359,6 +1601,10 @@ __all__ = [
     "ablauf_view",
     "ablauf_zusammenfassung",
     "entfernen_fragen",
+    "fehlende_namen",
     "knoten_namen",
     "modus_zeile",
+    "plan_warnungen",
+    "reparatur_knoepfe",
+    "warn_karte",
 ]

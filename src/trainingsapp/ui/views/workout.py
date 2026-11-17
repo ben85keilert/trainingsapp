@@ -62,6 +62,7 @@ from trainingsapp.ui.components.vorschlag import vorschlag_karte
 from trainingsapp.ui.plan_ablauf import GRUENDE
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.uebung_lauf import gewaehlte_ausfuehrung
+from trainingsapp.ui.views.ablauf import fehlende_namen, warn_karte
 from trainingsapp.ui.views.timer import timer_knopf
 from trainingsapp.ui.views.workout_eintrag import durchlauf_laden
 from trainingsapp.ui.views.workout_eintrag import route as workout_eintrag_route
@@ -370,7 +371,30 @@ def workout_view(
             )
         if gezeichnet:  # P100: Wege ohne Ausgang — Hinweis, kein Verbot
             namen = {s.item_id: s.name for s in schritte}
-            teile.extend(hinweis(t) for t in ab.pruefung(plan.ablauf, ids, namen))
+            # Geht das Workout so nicht (eine Übung des Ablaufs fehlt, kein Start), ist das
+            # eine **Fehlermeldung**, kein Hinweis (Ben, 16.11.2026) — rot, mit dem Namen der
+            # fehlenden Übung und dem Weg in den Plan-Editor
+            allgemein = ab.startet_nicht(plan.ablauf, ids, namen)
+            if allgemein:
+                sperre = ab.startet_nicht(
+                    plan.ablauf, ids, {**namen, **fehlende_namen(state, plan)}
+                )
+                teile.append(
+                    warn_karte(
+                        [sperre],
+                        [
+                            ft.TextButton(
+                                "Plan korrigieren",
+                                icon=ft.Icons.EDIT_OUTLINED,
+                                on_click=lambda _e: page.run_task(
+                                    page.push_route, f"/plan/{plan.id}/bearbeiten"
+                                ),
+                                data="plan_korrigieren",
+                            )
+                        ],
+                    )
+                )
+            teile.extend(hinweis(t) for t in ab.pruefung(plan.ablauf, ids, namen) if t != allgemein)
         uebungen = [s for s in schritte if s.frage is None]
         if not uebungen:
             teile.append(hinweis("Der Plan hat keine Übung — im Plan-Editor hinzufügen."))
@@ -394,11 +418,13 @@ def workout_view(
                     padding=6,
                 )
             )
-        # Geleert (Ben, 16.11.2026): Ohne Start beginnt das Workout nicht — was fehlt, steht oben
-        # als Hinweis (`core.ablauf.pruefung`); niemand setzt von selbst eine Übung an den Anfang
-        kein_start = gezeichnet and bool(ab.ohne_start_text(plan.ablauf, ids))
-        fort = plan_ablauf.fortsetzung_heute(state, plan) if gezeichnet else None
-        if uebungen and not (kein_start and fort is None):
+        # Ben, 16.11.2026: „Wenn Plan unvollständig kann er nicht durchgeführt werden, bis das
+        # repariert ist. Sonst ist es möglich, dass ein Plan durcheinander gerät“ — ohne Start
+        # oder mit einer fehlenden Übung im Ablauf gibt es weder „Starten“ noch „Fortsetzen“.
+        # Was fehlt, steht oben als Hinweis (`core.ablauf.pruefung`)
+        gesperrt = gezeichnet and bool(ab.startet_nicht(plan.ablauf, ids))
+        fort = plan_ablauf.fortsetzung_heute(state, plan) if gezeichnet and not gesperrt else None
+        if uebungen and not gesperrt:
             alles_weg = not offen()
             rund = ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26))
             if fort is not None:
@@ -416,12 +442,11 @@ def workout_view(
                         data="fortsetzen",
                     )
                 )
-                if not kein_start:
-                    teile.append(
-                        ft.OutlinedButton(
-                            "Von vorn", icon=ft.Icons.RESTART_ALT, on_click=von_vorn, style=rund
-                        )
+                teile.append(
+                    ft.OutlinedButton(
+                        "Von vorn", icon=ft.Icons.RESTART_ALT, on_click=von_vorn, style=rund
                     )
+                )
             else:
                 teile.append(
                     ft.FilledButton(
@@ -432,8 +457,7 @@ def workout_view(
                         style=rund,
                     )
                 )
-            if not kein_start:
-                teile.append(ft.OutlinedButton("Bereitstellen", on_click=bereitstellen))
+            teile.append(ft.OutlinedButton("Bereitstellen", on_click=bereitstellen))
         if einheit_ui.laeuft(state) is not None:
             teile.append(hinweis("Es läuft schon eine Einheit — erst oben mit ⏹ beenden."))
         return teile

@@ -9,13 +9,20 @@ nennt wie `KursRepo.plan_aenderungen` und wie der Editor damit umgeht, prüft
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+from trainingsapp.core import kurstest
 from trainingsapp.core.kursbau import (
     AB,
+    EIGEN,
     HOECHSTENS,
     OHNE,
+    STANDARD,
     VON_BIS,
     VORGABE_WAHL,
+    WIE,
     Kurssicht,
+    Laufwahl,
     Vorgabenwahl,
     faktor_lesen,
     faktor_text,
@@ -24,7 +31,9 @@ from trainingsapp.core.kursbau import (
     name_des_tests,
     timer_einbetten,
     timer_kern,
+    vorgabe_wahl,
     zielfeld,
+    zusatz_des_tests,
 )
 from trainingsapp.core.kursbloecke import (
     AUSWAHL,
@@ -46,6 +55,7 @@ from trainingsapp.core.pakete import PaketPlan
 from trainingsapp.core.result_spec import FELDVORRAT, ResultSpec, vorrat_feld
 from trainingsapp.core.takt import AUS, VORLAGEN
 from trainingsapp.core.timer import Abschnitt, TimerProfil
+from trainingsapp.core.varianten import Variante, mit_varianten
 
 
 def _katalog() -> dict[str, Exercise]:
@@ -647,3 +657,240 @@ def test_marke_fuer_einen_weg_aus_dem_bild() -> None:
     assert sicht.bringt("g:1") is None and sicht.bringt("gibt-es-nicht") is None
     assert sicht.bringt("t") is None  # ein Test bringt keine Planübung
     assert sicht.marke_name("b5") == "Brücke" and sicht.marke_name("b2:Käfer") == "Käfer"
+
+
+# -- Der Test, flexibel gestaltet: „So läuft der Test“ (Ben, 16.11.2026, Skizze F1) ----------
+
+
+def _tabata() -> TimerProfil:
+    return TimerProfil(
+        id="tabata",
+        name="Tabata",
+        abschnitte=[Abschnitt("Los", 20), Abschnitt("Pause", 10, zaehlt=False)],
+        runden=8,
+    )
+
+
+def _gestaltbar() -> dict[str, Exercise]:
+    """Der Katalog mit einem Käfer, an dem sich etwas gestalten lässt: Varianten, Seite,
+    Gewicht und eine Skala, dazu ein Timer und ein Takt; die Brücke hat Seite und Winkel."""
+    katalog = _katalog()
+    kaefer = ResultSpec(fields=[vorrat_feld(k) for k in ("reps", "weight", "side", "scale")])
+    katalog["Käfer"] = replace(
+        katalog["Käfer"],
+        result_spec=mit_varianten(kaefer, [Variante("auf Knien"), Variante("gestreckt")]),
+        timer=[_tabata().als_dict()],
+        takt=VORLAGEN["kniebeuge_2_1_2"],
+    )
+    bruecke = ResultSpec(fields=[vorrat_feld(k) for k in ("reps", "side", "angle")])
+    katalog["Brücke"] = replace(katalog["Brücke"], result_spec=bruecke)
+    return katalog
+
+
+def test_laufwahl_laesst_einen_test_wie_er_ist() -> None:
+    """Bens Grundsatz: Standardwerte, Überschreiben möglich. Ohne Angabe ist der Test der von
+    bisher (Stoppuhr, kein Takt, keine Ausführung) — und was der Dialog aus einem Block liest
+    und wieder hineinschreibt, ändert ihn nicht, auch nicht einen aus einem Paket, der zu einer
+    Zeile beides trägt (die eigene Angabe und „wie die Übung“)."""
+    ohne = Block(TEST, id="t", uebung="Käfer", feld="reps")
+    wahl = Laufwahl.aus(ohne)
+    assert (wahl.uhr, wahl.takt_art, wahl.ausfuehrung) == (STANDARD, STANDARD, STANDARD)
+    assert not wahl.gestaltet and not wahl.mit_timer
+    assert wahl.in_block(ohne) == ohne and not wahl.in_block(ohne).laeuft
+
+    aus_paket = Block.from_dict(
+        {
+            "art": "test",
+            "id": "t",
+            "uebung": "Käfer",
+            "feld": "reps",
+            "timer": {"name": "Runden", "abschnitte": [{"name": "Üben", "dauer_s": 40}]},
+            "takt": VORLAGEN["metronom_1"].als_dict(),
+            "ziel": {"side": "links"},
+            "felder": ["weight"],
+            "wie_uebung": ["parameter", "uhr", "takt"],
+        }
+    )
+    assert aus_paket is not None
+    wahl = Laufwahl.aus(aus_paket)
+    # die eigene Angabe geht vor — und beides bleibt stehen, solange niemand die Zeile stellt
+    assert (wahl.uhr, wahl.takt_art, wahl.ausfuehrung) == (EIGEN, EIGEN, EIGEN)
+    assert wahl.in_block(aus_paket) == aus_paket
+    assert wahl.in_block(aus_paket).to_dict() == aus_paket.to_dict()
+    # Wer eine Zeile stellt, räumt nur diese auf
+    gestellt = wahl.mit_uhr(WIE)
+    assert (gestellt.timer, gestellt.wie) == ({}, ("uhr", "takt", "parameter"))
+    assert gestellt.takt == wahl.takt and gestellt.ziel == wahl.ziel
+    assert wahl.mit_takt(STANDARD).wie == ("uhr", "parameter")
+    assert wahl.mit_ausfuehrung(STANDARD).wie == ("uhr", "takt")
+    # Zurück auf alle Vorgaben: der Test von bisher — er läuft nicht mehr von selbst
+    zurueck = wahl.mit_uhr(STANDARD).mit_takt(STANDARD).mit_ausfuehrung(STANDARD)
+    assert zurueck == Laufwahl() and not zurueck.in_block(aus_paket).laeuft
+    # Was die Wahl schreibt, übersteht das Paket
+    eigen = Laufwahl().mit_uhr(EIGEN, timer_einbetten(_tabata(), "t"))
+    eigen = eigen.mit_takt(EIGEN, VORLAGEN["metronom_1"])
+    eigen = eigen.mit_ausfuehrung(EIGEN, {"side": "links", "weight": ""}, ["variant", "side"])
+    block = eigen.in_block(ohne)
+    assert (block.ziel, block.felder, block.wie_uebung) == ({"side": "links"}, ["variant"], [])
+    assert block.timer["id"] == "kurs-t" and block.laeuft and block.gestaltet
+    assert Block.from_dict(block.to_dict()) == block
+
+
+def test_timer_und_vorgabe_zeit_gibt_es_nicht_zusammen() -> None:
+    """Mit einem Timer — dem eigenen oder dem der Übung — steht die Zeit fest: „Zeit“ steht
+    nicht zur Wahl, eine gesetzte wird „Ohne“; Menge und Anstrengung bleiben."""
+    assert list(vorgabe_wahl()) == list(VORGABE_WAHL) == [OHNE, MENGE, ZEIT, SKALA]
+    for wahl in (Laufwahl(wie=("uhr",)), Laufwahl(timer=_tabata().als_dict())):
+        assert wahl.mit_timer
+        assert list(vorgabe_wahl(wahl.mit_timer)) == [OHNE, MENGE, SKALA]
+    assert not Laufwahl(wie=("takt", "parameter")).mit_timer
+    # ein Test aus einem Paket, der beides trägt: Der Knopf bleibt, bis jemand umstellt
+    assert list(vorgabe_wahl(True, ZEIT)) == [OHNE, MENGE, ZEIT, SKALA]
+    zeit = Vorgabenwahl.aus(Vorgabe(ZEIT, 90))
+    assert zeit.ohne_zeit().vorgabe() is None and zeit.ohne_zeit().sekunden == 90
+    for bleibt in (Vorgabe(MENGE, 12), Vorgabe(SKALA, 7), None):
+        assert Vorgabenwahl.aus(bleibt).ohne_zeit().vorgabe() == bleibt
+    # … und der Lauf sieht es genauso: Mit Timer gilt eine Vorgabe „Zeit“ nicht
+    beides = Block(TEST, uebung="Käfer", vorgabe=Vorgabe(ZEIT, 60), wie_uebung=["uhr"])
+    uhr = kurstest.uhr_fuer(beides, _gestaltbar()["Käfer"])
+    assert not uhr.ist_stoppuhr and kurstest.vorgabe_fuer(beides, uhr) is None
+
+
+def test_gestalteter_test_laeuft_auch_ohne_vorgabe() -> None:
+    """Ein Test ohne Vorgabe, aber gestaltet, ist ein Lauf mit der Uhr (`Block.laeuft`):
+    „Gemessen wird“ nennt, was der Lauf misst, und ins Ziel kommt, was er liefert — nicht mehr
+    jedes Feld der Übung (das Gewicht misst keine Uhr)."""
+    katalog = _gestaltbar()
+    sicht = Kurssicht(Kurs(), "", [], katalog)
+    ohne = Block(TEST, id="t", uebung="Käfer", feld="reps")
+    assert sicht.misst(ohne) == []
+    assert [f.key for f in sicht.zielfelder(["Käfer"])[0]] == ["reps", "weight"]
+
+    takt = replace(ohne, wie_uebung=["takt"])
+    assert takt.laeuft and takt.vorgabe is None
+    assert sicht.misst(takt) == ["Wiederholungen", "Zeit", "Anstrengung"]
+    assert [f.key for f in sicht.zielfelder(["Käfer"], laeuft=True)[0]] == ["reps", "duration"]
+    assert [f.key for f in sicht.zielfelder(["Planke"], laeuft=True)[0]] == ["hold"]
+
+    # Mit einem Timer, den keine Vorgabe vorher beendet, steht die Zeit fest — gefragt wird der
+    # Lauf (`core.kurstest.gemessen` mit der Uhr des Tests), nichts ist hier nachgebaut
+    eigen = replace(ohne, timer=_tabata().als_dict())
+    assert sicht.misst(eigen) == ["Wiederholungen", "Anstrengung"]
+    assert sicht.misst(replace(ohne, wie_uebung=["uhr"])) == ["Wiederholungen", "Anstrengung"]
+    for vorgabe in (Vorgabe(MENGE, 30), Vorgabe(SKALA, 7)):
+        block = replace(eigen, vorgabe=vorgabe)
+        uhr = kurstest.uhr_fuer(block, katalog["Käfer"])
+        namen = {**kurstest.GROESSEN}
+        assert sicht.misst(block) == [namen[g] for g in kurstest.gemessen(vorgabe, timer=uhr)]
+    # „Timer der Übung“ an einer Übung ohne Timer: Der Test läuft mit der Stoppuhr
+    planke = Block(TEST, uebung="Planke", feld="hold", wie_uebung=["uhr"])
+    assert sicht.misst(planke) == ["Zeit", "Anstrengung"]
+    # Mit Ausführung steht sie dabei — „wie die Übung“ nur, wenn die Übung Parameter hat
+    assert sicht.misst(replace(takt, felder=["side"]))[-1] == "Ausführung"
+    assert sicht.misst(replace(ohne, wie_uebung=["parameter"]))[-1] == "Ausführung"
+    assert "Ausführung" not in sicht.misst(replace(planke, wie_uebung=["parameter"]))
+
+
+def test_ausfuehrung_was_zur_wahl_steht_sagt_der_lauf() -> None:
+    """Zur Ausführung gehört, was der Lauf nicht misst: Variante, Seite, Gewicht, Winkel,
+    Strecke — die Abgrenzung kommt aus `core/kurstest.py` (dieselbe, mit der der Testlauf
+    liest). Bei „der gewählten“ wie am Baustein „Übung dazu“: frei wählbar ist, was irgendeine
+    Übung der Auswahl hat; vorgeben lässt sich nur, was alle haben, und nie die Variante."""
+    katalog = _gestaltbar()
+    sicht = Kurssicht(Kurs(), "", [], katalog)
+    angebot, fest = sicht.ausfuehrung(["Käfer"])
+    assert [f.key for f in angebot] == ["variant", "side", "weight"]
+    assert angebot == kurstest.ausfuehrungsfelder(katalog["Käfer"])
+    assert fest == {"variant", "side", "weight"}
+    # was der Lauf misst oder fragt, steht nie zur Wahl — auch nicht ein zweites Feld der Art
+    viel = ResultSpec(
+        fields=[
+            vorrat_feld(k)
+            for k in ("reps", "hold_2", "duration", "scale_2", "note", "done", "distance")
+        ]
+    )
+    katalog["Viel"] = Exercise(id="Viel", name="Viel", result_spec=viel)
+    assert [f.key for f in sicht.ausfuehrung(["Viel"])[0]] == ["distance"]
+    assert sicht.ausfuehrung(["Planke"]) == ([], set())
+    # „die gewählte“: Käfer und Brücke haben nur die Seite gemeinsam
+    angebot, fest = sicht.ausfuehrung(["Käfer", "Brücke"])
+    assert [f.key for f in angebot] == ["variant", "side", "angle", "weight"]
+    assert fest == {"side"}
+    # … mit einer Übung ohne Parameter in der Auswahl lässt sich nichts vorgeben
+    assert sicht.ausfuehrung(["Käfer", "Brücke", "Planke"])[1] == set()
+
+    # Was der Editor schreibt, liest der Lauf als fest und frei
+    wahl = Laufwahl().mit_ausfuehrung(EIGEN, {"side": "links", "weight": 10}, ["variant"])
+    block = wahl.in_block(Block(TEST, id="t", uebung="Käfer", feld="reps"))
+    lauf = kurstest.ausfuehrung_fuer(block, katalog["Käfer"])
+    assert [(f.key, w) for f, w in lauf.fest] == [("side", "links"), ("weight", 10)]
+    assert [f.key for f in lauf.frei] == ["variant"]
+    # „wie die Übung“: Die Person wählt frei unter allem, was der Editor als Angebot nennt
+    alle = Laufwahl().mit_ausfuehrung(WIE).in_block(block)
+    assert alle.wie_uebung == ["parameter"] and not alle.ziel and alle.felder is None
+    frei = kurstest.ausfuehrung_fuer(alle, katalog["Käfer"]).frei
+    assert [f.key for f in frei] == [f.key for f in sicht.ausfuehrung(["Käfer"])[0]]
+
+
+def test_zeilen_unter_uhr_takt_ausfuehrung_und_der_zusatz() -> None:
+    """Was unter den drei Auswahlfeldern steht — der eigene Timer, der Takt, die Ausführung,
+    bei „wie die Übung“, was die Übung gerade hat — und der kurze Zusatz hinter der Überschrift
+    des Tests in Vorschau und Liste („· mit Takt · Timer …“)."""
+    katalog = _gestaltbar()
+    wahl_block = Block(AUSWAHL, id="w", uebungen=["Käfer", "Brücke"])
+    kapitel = Kapitel(id="k", bloecke=[wahl_block])
+    sicht = Kurssicht(Kurs(kapitel=[kapitel]), "k", kapitel.bloecke, katalog)
+    ohne = Block(TEST, id="t", uebung="Käfer", feld="reps")
+    assert (sicht.uhr_text(ohne), sicht.takt_text(ohne), sicht.ausfuehrung_text(ohne)) == ("",) * 3
+    assert zusatz_des_tests(ohne) == "" and sicht.test_kurz(ohne) == "Käfer · Wiederholungen"
+
+    wie = replace(ohne, wie_uebung=["uhr", "takt", "parameter"])
+    assert sicht.uhr_text(wie) == "Käfer: 0:20 Los · 0:10 Pause · 8 Runden · gesamt 4:00"
+    assert sicht.takt_text(wie) == "Käfer: Kniebeuge 2-1-2 · 2-1-2 · 12,0/min"
+    assert sicht.ausfuehrung_text(wie) == "wählt die Person: Variante, Seite, Gewicht"
+    assert zusatz_des_tests(wie) == "mit Takt · Timer der Übung"
+    # … an einer Übung, die nichts davon hat: Der Editor sagt, was dann gilt
+    planke = replace(wie, uebung="Planke", feld="hold")
+    assert sicht.uhr_text(planke) == "Planke hat gerade keinen Timer — dann läuft die Stoppuhr."
+    assert sicht.takt_text(planke) == "Planke hat gerade keinen Takt — dann läuft der Test ohne."
+    assert sicht.ausfuehrung_text(planke) == "Planke hat keine Parameter zur Wahl."
+    assert kurstest.uhr_fuer(planke, katalog["Planke"]).ist_stoppuhr  # so läuft er auch
+    # … bei „der gewählten“ steht die Übung noch nicht fest
+    gewaehlte = replace(wie, uebung="", aus="w")
+    assert sicht.uhr_text(gewaehlte).startswith("der Timer der gewählten Übung")
+    assert sicht.takt_text(gewaehlte).startswith("der Takt der gewählten Übung")
+    assert sicht.ausfuehrung_text(gewaehlte) == (
+        "wählt die Person: Variante, Seite, Winkel, Gewicht"
+    )
+
+    timer = timer_einbetten(replace(_tabata(), name="3 × 30 s"), "t")
+    eigen = replace(
+        ohne,
+        timer=timer,
+        takt=VORLAGEN["metronom_1"],
+        ziel={"weight": 10, "side": "links"},
+        felder=["variant"],
+        vorgabe=Vorgabe(SKALA, 7),
+    )
+    assert sicht.uhr_text(eigen) == "0:20 Los · 0:10 Pause · 8 Runden · gesamt 4:00"
+    assert sicht.takt_text(eigen) == "Metronom 1 s · 1 · 60,0/min"
+    assert sicht.ausfuehrung_text(eigen) == (
+        "vorgegeben: links · 10 kg — wählt die Person: Variante"
+    )
+    assert zusatz_des_tests(eigen) == "mit Takt · Timer „3 × 30 s“"
+    assert sicht.test_kurz(eigen) == (
+        "Käfer: bis Anstrengung 7 · Wiederholungen · mit Takt · Timer „3 × 30 s“"
+    )
+    # ohne eigenen Namen nennt der Zusatz die Gesamtzeit
+    namenlos = replace(eigen, timer={**timer, "name": "Timer"}, takt=None)
+    assert zusatz_des_tests(namenlos) == "Timer 4:00"
+    # „So steht es im Kapitel“: die Überschrift mit dem Zusatz, darunter der Satz der Testkarte
+    # — der kommt aus dem Lauf (`core.kurstest.lauf_satz`), nicht aus dem Editor
+    vorschau = sicht.test_vorschau(eigen)
+    assert vorschau.kopf == ("Käfer: bis Anstrengung 7 · mit Takt · Timer „3 × 30 s“",)
+    assert vorschau.lauf == (kurstest.lauf_satz(eigen, katalog["Käfer"]),) and vorschau.lauf[0]
+    assert sicht.test_vorschau(ohne).lauf == ("",)
+    # … bei „der gewählten“ je Übung der Beispielwahl
+    vorschau = sicht.test_vorschau(replace(eigen, uebung="", aus="w", ziel={}, felder=None))
+    assert vorschau.kopf == ("Käfer: bis Anstrengung 7 · mit Takt · Timer „3 × 30 s“",)
+    assert len(vorschau.lauf) == 1 and "Timer „3 × 30 s“" in vorschau.lauf[0]

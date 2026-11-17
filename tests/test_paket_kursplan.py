@@ -985,3 +985,25 @@ def test_hinweis_wenn_nicht_jede_uebung_der_auswahl_das_feld_des_tests_hat(tmp_p
         "Übung der Auswahl „wahl“ (kaefer, bruecke, beinheben) — für sie gibt es keinen "
         "Testwert, ihr Ziel bliebe offen"
     ]
+
+
+def test_gestalteter_test_wird_geprueft(tmp_path) -> None:
+    """Ein flexibel gestalteter Test (Ben, 16.11.2026; `docs/uebungspakete.md` „Test, flexibel
+    gestaltet“): Das Werkzeug nimmt an, was die App versteht — und meldet, was nicht zum Lauf
+    passt: Unbekanntes in `wie_uebung`, gemessene Felder in `ziel`/`felder`, einen Timer neben
+    der Vorgabe „Zeit“."""
+    roh = beispiel()
+    test = block(roh, "test")
+    test["text"] = "Mach dich vorher 5 Minuten warm."
+    test["ziel"] = {"side": "links"}
+    test["felder"] = ["weight"]
+    test["wie_uebung"] = ["uhr", "takt"]
+    assert pruefe(tmp_path, roh) == ([], [])
+
+    test["wie_uebung"] = ["uhr", "wetter"]
+    test["ziel"] = {"reps": 10}
+    test["vorgabe"] = {"art": "zeit", "n": 60}
+    fehler, hinweise = pruefe(tmp_path, roh)
+    assert any("`wie_uebung`: „wetter“ ist unbekannt" in f for f in fehler)
+    assert any("`ziel`: „reps“ misst der Lauf des Tests" in f for f in fehler)
+    assert any("die Vorgabe „Zeit“ gilt dann nicht" in h for h in hinweise)

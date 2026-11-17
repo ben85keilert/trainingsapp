@@ -86,6 +86,11 @@ VORGABEN: Final[dict[str, str]] = {MENGE: "Menge", ZEIT: "Zeit", SKALA: "Anstren
 SKALA_MAX: Final = 10
 
 
+#: Was ein Test von der Übung nehmen kann (`Block.wie_uebung`)
+WIE_UHR, WIE_TAKT, WIE_PARAMETER = "uhr", "takt", "parameter"
+WIE_UEBUNG: Final[tuple[str, ...]] = (WIE_UHR, WIE_TAKT, WIE_PARAMETER)
+
+
 @dataclass(frozen=True, slots=True)
 class Vorgabe:
     """Die Vorgabe eines Tests (Ben, 16.11.2026: „Anstrengung kann Menge, Zeit, Skala sein.
@@ -225,6 +230,17 @@ class Block:
     #: ``plan_weg``: Auslöser, Pflicht, „von selbst“, Beschriftung — wie
     #: `core.ablauf.Kante.als_dict` ohne ``von`` und ``nach``; leer = ein freier Weg
     kante: dict[str, Any] = field(default_factory=dict)
+    # -- der Test, flexibel gestaltet (Ben, 16.11.2026: „Der Test muss flexibel gestaltet
+    # werden können“; `docs/plan_kurs_ablauf.md` §15) -------------------------------------------
+    # Ein ``test`` nutzt dafür ``timer`` (womit er läuft — leer: die Stoppuhr), ``takt`` (ein
+    # eigener Takt — ``None``: keiner), ``ziel`` (die **vorgegebene** Ausführung: Feld → Wert)
+    # und ``felder`` (Parameter, die die Person vor dem Start **frei** wählt), dazu ``text``
+    # als Hinweis vor dem Start.
+    #: ``test``: was der Test **von der Übung nimmt**, wie sie gerade eingestellt ist — eine
+    #: Auswahl aus `WIE_UEBUNG` (ihr Timer, ihr Takt, ihre Parameter). Eine eigene Angabe im
+    #: Test (``timer``, ``takt``, ``ziel``/``felder``) geht vor. Leer = die Vorgaben: Stoppuhr,
+    #: kein Takt, keine Ausführung
+    wie_uebung: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Wie im Paket (`kapitel[].bloecke[]`) — nur, was zur Art gehört.
@@ -237,6 +253,10 @@ class Block:
         {'art': 'test', 'id': 'b5', 'aus': 'b1', 'feld': 'reps'}
         >>> Block(TEST, id="b6", uebung="u1", vorgabe=Vorgabe(SKALA, 7)).to_dict()["vorgabe"]
         {'art': 'skala', 'n': 7}
+        >>> frei = Block(TEST, id="b7", uebung="u1", ziel={"side": "links"}, felder=["weight"],
+        ...              wie_uebung=["uhr", "takt"]).to_dict()
+        >>> frei["ziel"], frei["felder"], frei["wie_uebung"]  # der Test, flexibel gestaltet
+        ({'side': 'links'}, ['weight'], ['uhr', 'takt'])
         >>> Block(PLAN_UEBUNG, id="b3", aus="b1", hinter="g:1", ziel_aus="b2").to_dict()
         {'art': 'plan_uebung', 'id': 'b3', 'aus': 'b1', 'hinter': 'g:1', 'ziel_aus': 'b2'}
         >>> Block(PLAN_WEG, id="b4", von="g:1", zu="b3", kante={"ausloeser": "zeit"}).to_dict()
@@ -261,6 +281,16 @@ class Block:
                 d["faktor"] = self.faktor
             if self.vorgabe is not None:
                 d["vorgabe"] = self.vorgabe.to_dict()
+            if self.timer:
+                d["timer"] = dict(self.timer)
+            if self.takt is not None and not self.takt.leer:
+                d["takt"] = self.takt.als_dict()
+            if self.ziel:
+                d["ziel"] = dict(self.ziel)
+            if self.felder:
+                d["felder"] = list(self.felder)
+            if self.wie_uebung:
+                d["wie_uebung"] = list(self.wie_uebung)
         if self.art == AUSWAHL:
             d["uebungen"] = list(self.uebungen)
             d["anzahl"] = self.anzahl
@@ -323,6 +353,12 @@ class Block:
         >>> v = {"art": "zeit", "n": 60}
         >>> Block.from_dict({"art": "test", "uebung": "u", "vorgabe": v}).vorgabe
         Vorgabe(art='zeit', n=60, bis=None)
+        >>> g = Block.from_dict({"art": "test", "uebung": "u", "wie_uebung": ["takt", "x", "uhr"],
+        ...                      "ziel": {"side": "links"}, "felder": ["weight", "weight"]})
+        >>> g.wie_uebung, g.ziel, g.felder, g.gestaltet
+        (['uhr', 'takt'], {'side': 'links'}, ['weight'], True)
+        >>> Block.from_dict({"art": "test", "uebung": "u"}).gestaltet
+        False
 
         Bausteine: Die Übung kommt wie beim Test über ihren Paketschlüssel; ein Baustein, der
         nichts ändern könnte, fällt weg.
@@ -379,6 +415,18 @@ class Block:
             block.vorgabe = Vorgabe.from_dict(roh.get("vorgabe"))
             if not block.uebung and not block.aus:
                 return None
+            block.timer = _timer_lesen(roh.get("timer"), block.id)
+            takt = _takt_lesen(roh.get("takt"))
+            block.takt = takt if takt is not None and not takt.leer else None
+            ziel = roh.get("ziel")
+            if isinstance(ziel, Mapping):
+                block.ziel = {str(k): v for k, v in ziel.items()}
+            felder = roh.get("felder")
+            if isinstance(felder, list) and felder:
+                block.felder = list(dict.fromkeys(str(k) for k in felder))
+            wie = roh.get("wie_uebung")
+            if isinstance(wie, list):
+                block.wie_uebung = [w for w in WIE_UEBUNG if w in {str(x) for x in wie}]
         if art == AUSWAHL:
             for u in roh.get("uebungen") or []:
                 uid = zu_id.get(str(u), str(u)).strip()
@@ -426,6 +474,32 @@ class Block:
     def baustein(self) -> bool:
         """Ein Block, der den Kursplan ändert (`BAUSTEINE`)."""
         return self.art in BAUSTEINE
+
+    @property
+    def laeuft(self) -> bool:
+        """Ein ``test``, der als **Lauf mit der Uhr** gemacht wird, statt den jüngsten Eintrag
+        der Übung zu lesen: mit Vorgabe — oder gestaltet (`gestaltet`: ein Timer, ein Takt,
+        eine Ausführung brauchen den Lauf).
+
+        >>> Block(TEST, uebung="u").laeuft, Block(TEST, uebung="u", wie_uebung=["uhr"]).laeuft
+        (False, True)
+        >>> Block(TEST, uebung="u", vorgabe=Vorgabe(MENGE, 30)).laeuft
+        True
+        """
+        return self.art == TEST and (self.vorgabe is not None or self.gestaltet)
+
+    @property
+    def gestaltet(self) -> bool:
+        """Ein ``test``, der mehr festlegt als Übung, Feld und Vorgabe: womit er läuft
+        (Timer), einen Takt, eine Ausführung oder etwas „wie die Übung“ — braucht im Paket die
+        Formatversion der Vorgabe (`core.pakete.nutzt_kursplan`)."""
+        return self.art == TEST and bool(
+            self.timer
+            or (self.takt is not None and not self.takt.leer)
+            or self.ziel
+            or self.felder
+            or self.wie_uebung
+        )
 
     @property
     def stellt_ein(self) -> bool:
@@ -743,6 +817,10 @@ __all__ = [
     "TEXT",
     "VORGABEN",
     "WEICH",
+    "WIE_PARAMETER",
+    "WIE_TAKT",
+    "WIE_UEBUNG",
+    "WIE_UHR",
     "ZEIT",
     "ZU_ENDE",
     "Antwort",

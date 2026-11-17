@@ -596,6 +596,44 @@ nicht mehr: „Ziel für Käfer: 18 Wiederholungen — 80 % von deinem Test (22 
 **Selbstauskunft** — die App misst sie nicht und deutet sie nicht. Ein Test mit `vorgabe`
 braucht Formatversion 6.
 
+**Test, flexibel gestaltet** (Ben, 16.11.2026: „Der Test muss flexibel gestaltet werden
+können“ · „Timer ist tatsächlich das wichtigste“ · „Übungsumgebung/Parameter können mit in den
+Test“; `docs/plan_kurs_ablauf.md` §15.2). Jede Einstellung hat eine Vorgabe und lässt sich
+überschreiben — ohne Angabe läuft der Test mit der Stoppuhr, ohne Takt, ohne Ausführung:
+
+| Feld am `test` | Bedeutung |
+|---|---|
+| `timer = { … }` | **womit er läuft:** ein eigener Timer (wie an einer Planübung, eingebettet). Der Test endet, wenn der Timer durch ist. |
+| `takt = { … }` | ein eigener Takt. Er führt nur — gezählt wird damit nicht; seine Runden stehen im Ergebnis als Vorschlag. |
+| `ziel = { side = "links", weight = 10 }` | die **vorgegebene** Ausführung (Feld → Wert) — steht vor dem Start zum Lesen und kommt in den Eintrag. |
+| `felder = ["variant", "weight"]` | Parameter, die die Person vor dem Start **frei** wählt. |
+| `wie_uebung = ["uhr", "takt", "parameter"]` | was der Test **von der Übung nimmt**, wie sie gerade eingestellt ist: ihren Timer, ihren Takt, ihre Parameter (frei zu wählen). Eine eigene Angabe geht vor. |
+| `text = "…"` | der Hinweis vor dem Start. |
+
+`ziel` und `felder` nennen nur, was der Lauf nicht misst (nicht `reps`, `hold`, `duration`,
+`scale`) — was den Lauf beendet, steht in `vorgabe`. **Ein Timer und die Vorgabe „Zeit“
+zusammen gelten nicht beide:** der Timer ist die Zeit (Hinweis von `trainingsapp-paket
+pruefen`). Ein gestalteter Test ist auch ohne `vorgabe` ein Lauf mit der Uhr und braucht
+Formatversion 6.
+
+```toml
+[[kurse.kapitel.bloecke]]
+art = "test"
+id = "test"
+uebung = "kaefer"
+feld = "reps"
+text = "Mach dich vorher 5 Minuten warm."
+vorgabe = { art = "skala", n = 7 }
+ziel = { variant = "auf Knien" }          # vorgegeben
+felder = ["weight"]                       # wählt die Person
+wie_uebung = ["takt"]                     # der Takt der Übung läuft mit
+```
+
+**Der Testwert ist eine Variable des Kurses** (Migration 065, `docs/plan_kurs_ablauf.md`
+§15.1): Der Lauf hinterlässt seinen Wert; ein Baustein mit `ziel_aus = "<test-id>"` bekommt
+ihn in **jedem** Kapitel danach — nicht mehr den jüngsten Eintrag der Übung. Am Paket ändert
+das nichts.
+
 **Gleichwertige Wege:** Führen von einer Planübung mehrere Wege zu den Gewählten desselben
 Bausteins (`zu = "<block-id>"` bei `anzahl` ≥ 2), geht man im Workout **einen** davon — die
 Kette der Liste zwischen den Gewählten entfällt, jede führt dorthin, wohin die letzte von ihnen

@@ -1185,3 +1185,105 @@ def test_testlauf_mit_vorgabe_wird_ein_gewoehnlicher_eintrag(con, profil) -> Non
     ]
     plan = repo.plan_uebernehmen(kurs, zwei, profil.id, {z.id for z in zeilen}, wahl=wahl)
     assert [(i.exercise_id, i.target) for i in plan.items][1] == (ids["kaefer"], {"reps": [18]})
+
+
+def test_testwert_ist_eine_variable_des_kurses(con, profil) -> None:
+    """Ben, 16.11.2026: „Testwert wird als Variable gespeichert und kann irgendwo verwendet
+    werden im Kurs/Planbau“ · „Die Übung hat erstmal ihren eigenen Wert“ (P214 a, Migration
+    065). Ohne Variable gilt der jüngste Eintrag der Übung; der Testlauf hinterlässt seinen
+    Wert, und gewöhnliches Weiterüben ändert ihn nicht mehr. „Nochmal“ überschreibt, „Von
+    vorn“ löscht."""
+    repo, sitzungen, uebungen = KursRepo(con), SessionRepo(con), ExerciseRepo(con)
+    kurs, ids = rumpf_kurs(con)
+    eins, zwei, _drei = kurs.kapitel
+    repo.starten(kurs, profil.id)
+    repo.plan_uebernehmen(
+        kurs, eins, profil.id, {z.id for z in repo.plan_aenderungen(kurs, eins, profil.id)}
+    )
+    repo.kapitel_abschliessen(kurs, eins, profil.id)
+    erreicht = repo.staende(profil.id, kurs.id)[zwei.id].erreicht
+    kaefer = uebungen.laden(ids["kaefer"])
+    assert kaefer is not None
+    session = sitzungen.session_fuer(profil.id, None, datetime.now(UTC).astimezone().date())
+
+    # der eigene Wert der Übung: ihr jüngster Eintrag — noch keine Variable
+    erster = sitzungen.eintrag_anlegen(session, kaefer, {"reps": [22]})
+    assert repo.testwerte(zwei, profil.id, erreicht) == {"test": 22.0}
+    assert repo.variablen(kurs.id, profil.id) == {}
+
+    # der Testlauf hinterlässt ihn; wer danach gewöhnlich weiterübt, ändert ihn nicht
+    repo.variable_setzen(kurs.id, profil.id, "test", 22.0, erster.id)
+    sitzungen.eintrag_anlegen(session, kaefer, {"reps": [10]})
+    assert repo.testwerte(zwei, profil.id, erreicht) == {"test": 22.0}
+    assert repo.testeintraege(zwei, profil.id, erreicht)["test"].id == erster.id
+    variable = repo.variablen(kurs.id, profil.id)["test"]
+    assert (variable.wert, variable.eintrag_id) == (22.0, erster.id) and variable.gesetzt
+
+    # „Nochmal“ überschreibt
+    zweiter = sitzungen.eintrag_anlegen(session, kaefer, {"reps": [25]})
+    repo.variable_setzen(kurs.id, profil.id, "test", 25.0, zweiter.id)
+    assert repo.testwerte(zwei, profil.id, erreicht) == {"test": 25.0}
+    assert repo.testeintraege(zwei, profil.id, erreicht)["test"].id == zweiter.id
+
+    # ein anderes Profil und ein neuer Durchlauf haben sie nicht
+    assert repo.variablen(kurs.id, "niemand") == {}
+    repo.zuruecksetzen(kurs, profil.id)
+    assert repo.variablen(kurs.id, profil.id) == {}
+
+
+def test_kapitelabschluss_haelt_den_wert_eines_tests_ohne_lauf_fest(con, profil) -> None:
+    """Ein Test ohne Lauf nimmt den eigenen Wert der Übung. Mit dem Abschließen seines Kapitels
+    wird daraus die Variable — spätere Kapitel rechnen mit dem Wert von damals, nicht mit dem,
+    was die Person inzwischen geübt hat."""
+    repo, sitzungen, uebungen = KursRepo(con), SessionRepo(con), ExerciseRepo(con)
+    kurs, ids = rumpf_kurs(con)
+    eins, zwei, _drei = kurs.kapitel
+    repo.starten(kurs, profil.id)
+    repo.kapitel_abschliessen(kurs, eins, profil.id)
+    erreicht = repo.staende(profil.id, kurs.id)[zwei.id].erreicht
+    kaefer = uebungen.laden(ids["kaefer"])
+    assert kaefer is not None
+    session = sitzungen.session_fuer(profil.id, None, datetime.now(UTC).astimezone().date())
+    damals = sitzungen.eintrag_anlegen(session, kaefer, {"reps": [30]})
+
+    repo.kapitel_abschliessen(kurs, zwei, profil.id)
+    variable = repo.variablen(kurs.id, profil.id)["test"]
+    assert (variable.wert, variable.eintrag_id) == (30.0, damals.id)
+    sitzungen.eintrag_anlegen(session, kaefer, {"reps": [12]})
+    assert repo.testwerte(zwei, profil.id, erreicht) == {"test": 30.0}
+    # ein Kapitel ohne Wert hinterlässt nichts
+    assert set(repo.variablen(kurs.id, profil.id)) == {"test"}
+
+
+def test_gestalteter_test_uebersteht_speichern_und_laden(con, profil) -> None:
+    """Ben, 16.11.2026: „Der Test muss flexibel gestaltet werden können“ — Timer, Takt,
+    vorgegebene und freie Ausführung, „wie die Übung“ und der Hinweis stehen am Test-Block und
+    kommen aus der Datenbank so zurück, wie sie gespeichert wurden (`docs/plan_kurs_ablauf.md`
+    §15.2). Ein Test ohne diese Angaben bleibt, wie er war."""
+    from trainingsapp.core.kursbloecke import WIE_PARAMETER, WIE_TAKT
+    from trainingsapp.core.takt import Phase, Takt
+    from trainingsapp.core.timer import Abschnitt, TimerProfil
+
+    repo = KursRepo(con)
+    kurs, _ids = rumpf_kurs(con)
+    test = next(b for b in kurs.kapitel[1].bloecke if b.art == TEST)
+    assert not test.gestaltet and not test.laeuft  # ohne Vorgabe, ohne Gestaltung
+    profil_timer = TimerProfil(name="3 × 30", abschnitte=[Abschnitt("Belastung", 30)], runden=3)
+    test.text = "Mach dich vorher 5 Minuten warm."
+    test.timer = profil_timer.als_dict()
+    test.takt = Takt((Phase("hoch", 2.0), Phase("runter", 2.0)))
+    test.ziel = {"side": "links"}
+    test.felder = ["weight"]
+    test.wie_uebung = [WIE_TAKT, WIE_PARAMETER]
+    repo.speichern(kurs)
+
+    geladen = repo.laden(kurs.id)
+    assert geladen is not None
+    wieder = next(b for b in geladen.kapitel[1].bloecke if b.art == TEST)
+    assert wieder.gestaltet and wieder.laeuft  # ein Lauf mit der Uhr, auch ohne Vorgabe
+    assert wieder.text == "Mach dich vorher 5 Minuten warm."
+    assert TimerProfil.aus_dict(wieder.timer) is not None
+    assert wieder.takt is not None and not wieder.takt.leer
+    assert (wieder.ziel, wieder.felder) == ({"side": "links"}, ["weight"])
+    assert wieder.wie_uebung == [WIE_TAKT, WIE_PARAMETER]
+    assert wieder.to_dict() == test.to_dict()

@@ -4,7 +4,7 @@
 Eine schieb- und zoombare Fläche (`ft.InteractiveViewer`) über einem `ft.Stack`: unten eine
 `ft.Canvas` mit den Kanten, darüber je Knoten das Bild der Übung (`uebungsbild`) mit Nummer und
 Namen, der Start als dunkle Pille (auch Ablagefläche: eine Übung darauf = neuer Start), Fragen als
-blaue Karte, leere Slots gestrichelt (`ft.DragTarget`).
+blaue Karte.
 
 **Lagen** (`core.ablauf.Lage`) bekommt das Bild von außen: Der Reiter hält sie fest, bis jemand
 „Neu anordnen“ tippt (`core.ablauf.lagen_ergaenzen`) — die Zeichnung springt beim Bearbeiten
@@ -15,15 +15,32 @@ Die Wege verlassen eine Übung **wie bei einem Nerv** (Ben, 10.11.2026): ein kur
 unten, dann der **Abzweig** — ein Knoten zum Antippen (``on_abzweig``: alle Wege dieser Übung) —,
 von dort die einzelnen Wege, jeder mit seinem **Griff** (Punkt und Etikett mit Auslöser,
 Beschriftung, Pflicht; ``on_kante``: nur dieser Weg). **Ist der Weg eindeutig** — die Übung hat
-genau einen —, steht zwischen den zwei Übungen **nur ein Punkt**, sein Griff (Ben, 16.11.2026);
-er steht dann auch für den Abzweig: mit ``on_abzweig`` öffnet er alle Wege der Übung (von dort
-kommt ein zweiter dazu), ohne meldet er ``on_kante`` mit seiner Kante. Der Ablauf kräftig, Wege
-zu Bedarfsübungen gestrichelt, ``◀ zurück`` gepunktet; Rückwege laufen in Gassen zwischen den
-Spalten. Wo was liegt, rechnet `core.ablauf_geometrie` — hier wird nur gezeichnet.
-**Vernebeln**: Knoten in ``vernebelt`` und ihre Kanten stehen auf 25 %.
+genau einen —, steht zwischen den zwei Übungen **nur ein Punkt**, sein Griff (Ben, 16.11.2026):
+Er meldet ``on_kante`` mit seiner Kante (wer nur ``on_abzweig`` gibt, bekommt den Knoten). Der
+Ablauf kräftig, Wege zu Bedarfsübungen gestrichelt, ``◀ zurück`` gepunktet; Rückwege laufen in
+Gassen zwischen den Spalten. Wo was liegt, rechnet `core.ablauf_geometrie` — hier wird nur
+gezeichnet. **Vernebeln**: Knoten in ``vernebelt`` und ihre Kanten stehen auf 25 %.
 
-**Ohne Start** (der Ablauf ist geleert, `core.ablauf.Ablauf.ohne_start`) steht „Start“ links von
-allem über einem **leeren Platz** (`core.ablauf.startplatz`) — im Reiter eine Ablage: Was dort
+**Im Bild bedienen** (Ben, 16.11.2026: „Alles, was sich auslagern lässt vom Routingmenü in die
+Grafik, wird ausgelagert“) — alles nur, wenn der Aufrufer den Rückruf gibt; ohne Rückrufe sieht
+das Bild aus wie zuvor und nichts lässt sich ziehen (Workout, Workout-Eintrag):
+
+- ``on_verbinden(von, nach)``: Jeder Knoten hat **seinen Punkt** (`Geometrie.punkte` — der
+  Abzweig, der eine Griff oder, ohne Weg, ein kleiner Ring unter der Übung), „Start“ ebenso.
+  Der Punkt lässt sich **ziehen** (`ft.Draggable`, Gruppe `GRUPPE_WEG`) und auf einen Knoten
+  fallen lassen — auch auf den eigenen; ``von`` ist die ID des Knotens oder `START`, ``nach``
+  die ID des Knotens, auf den er fiel. Für `core.ablauf.ENDE` und `ZURUECK` gibt es die
+  Ziele am Rand des Bildes (`ziele`, `mit_zielen`), sichtbar nur, während gezogen wird
+  (``on_ziehen``); was ins Leere fällt, fängt `fangnetz` — Flet meldet keinen Abbruch.
+- ``on_kachel_auf(knoten, wert)``: Eine Kachel der Leiste (Gruppe `GRUPPE_KACHEL`) fällt auf
+  einen Knoten; ``wert`` ist das ``data`` ihres Draggable.
+- ``menue``: ein **Menü an einem Knoten** (`Menue`) als Karte in der Fläche, dahinter ein
+  Schirm, der den schließenden Tipp fängt — kein Flutter-Menü: Die reichen den Tipp, der sie
+  schließt, an das Darunter weiter. Geöffnet wird es vom Aufrufer, z. B. auf
+  ``on_knoten_lang``.
+
+**Ohne Start** (der Ablauf ist geleert, `core.ablauf.Ablauf.ohne_start`) steht „Start“ über
+einem **leeren Platz** (`core.ablauf.startplatz`) — im Reiter eine Ablage: Was dort
 hineinfällt, wird der Start (``on_start_ablegen``).
 
 Für den Reiter, der die Fläche einmal baut und dann nur ihren Inhalt tauscht (die Ansicht behält
@@ -34,6 +51,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import math
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -58,6 +76,7 @@ from trainingsapp.core.ablauf_geometrie import (
     START_H,
 )
 from trainingsapp.core.models import Exercise, PlanItem
+from trainingsapp.ui.components.layout import ohne_auto_update
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 
 #: größte Breite eines Etiketts neben seinem Griff
@@ -66,15 +85,62 @@ ETIKETT_B = 108
 PUNKT = 14
 ABZWEIG = 20
 GRIFF = 44
+#: der Hof um den Punkt eines gewählten Wegs — und unter dem Finger beim Ziehen
+HOF = 30
+#: Höhe der Fläche am Punkt von „Start“ — flacher als `GRIFF`: darunter beginnt die Startübung
+START_GRIFF = 36
 #: so durchsichtig wird Vernebeltes
 NEBEL = 0.25
+#: Gruppen beim Ziehen: die Kacheln der Leiste (Übungen, „Frage“) und die Punkte der Knoten —
+#: eine Ablage kennt nur eine Gruppe, darum nimmt ein Knoten beide verschachtelt an
+GRUPPE_KACHEL = "uebung"
+GRUPPE_WEG = "weg"
+#: „Start“ als Herkunft in ``on_verbinden`` (kein Knoten)
+START = ab.VOM_START
+#: Breite der Menükarte an einem Knoten und Höhe einer Zeile darin
+MENUE_B = 216
+MENUE_ZEILE = 42
 
 
 @dataclass(frozen=True, slots=True)
-class Slot:
-    """Ein leerer Platz unter einem Knoten — wartet auf eine Übung aus der Palette."""
+class Eintrag:
+    """Eine Zeile im Menü an einem Knoten — ``aktion`` darf auch eine Koroutine liefern."""
 
-    von: str
+    text: str
+    aktion: Callable[[], Any]
+    symbol: ft.IconData | None = None
+    #: rot (herausnehmen, löschen)
+    gefahr: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Menue:
+    """Das Menü an einem Knoten (Ben, 16.11.2026: „gedrückt halten von Kachel um ein Menü zu
+    öffnen“): ``knoten`` trägt es, ``schliessen`` läuft beim Tipp daneben. Die Aktionen
+    schließen es selbst — die Zeichnung hält nichts. ``nach_oben``: Die Karte steht über dem
+    Knoten statt darunter — für eine Übung unten im sichtbaren Ausschnitt, deren Menü sonst
+    unter dem Rand verschwände (``on_lang_ort`` der Zeichnung sagt, wo der Finger lag)."""
+
+    knoten: str
+    eintraege: Sequence[Eintrag]
+    schliessen: Callable[[], Any]
+    nach_oben: bool = False
+
+
+@dataclass(slots=True)
+class Ziele:
+    """„Ende“ und „◀ zurück“ als Ablagen am unteren Rand des Bildes (`ziele`) — sichtbar nur,
+    während ein Punkt gezogen wird."""
+
+    control: ft.Container
+
+    def zeigen(self, an: bool) -> None:
+        """Ein- oder ausblenden — als ``on_ziehen`` der Zeichnung."""
+        if bool(self.control.visible) == an:
+            return
+        self.control.visible = an
+        with contextlib.suppress(Exception):  # noch nicht auf der Seite
+            self.control.update()
 
 
 @dataclass(slots=True)
@@ -134,37 +200,53 @@ def zeichnung(
     erledigt: Sequence[str] = (),
     vernebelt: Sequence[str] = (),
     gewaehlt: str | None = None,
+    weg_gewaehlt: tuple[str, str] | None = None,
     zaehlung: Counter[tuple[str, str]] | None = None,
-    slots: Sequence[Slot] = (),
+    menue: Menue | None = None,
     on_knoten: Callable[[str], Any] | None = None,
     on_knoten_lang: Callable[[str], Any] | None = None,
+    on_lang_ort: Callable[[float], Any] | None = None,
     on_kante: Callable[[Kante], Any] | None = None,
     on_abzweig: Callable[[str], Any] | None = None,
-    on_slot: Callable[[Slot, str], Any] | None = None,
     on_start: Callable[[], Any] | None = None,
     on_start_ablegen: Callable[[str], Any] | None = None,
+    on_verbinden: Callable[[str, str], Any] | None = None,
+    on_kachel_auf: Callable[[str, str], Any] | None = None,
+    on_ziehen: Callable[[bool], Any] | None = None,
 ) -> Zeichnung:
     """Die Schichten der Fläche. ``lagen``: wo jeder Knoten liegt (sonst `core.ablauf.layout`);
     ``laufend`` leuchtet, ``erledigt`` ist blass, ``vernebelt`` auf 25 %, ``gewaehlt`` hat einen
-    Rahmen; ``zaehlung`` macht oft gegangene Kanten dicker; ``slots`` sind leere Plätze —
-    ``on_slot(slot, wert)`` läuft, wenn eine Kachel aus der Palette hineinfällt (``wert`` =
-    ``data`` ihres Draggable; im Reiter „Ablauf“ die ID der **Übung** — welche Planübung daraus
-    wird, entscheidet der Reiter), ``on_start_ablegen(wert)`` beim Ablegen auf „Start“ oder auf
-    den leeren Platz darunter. ``on_kante``: der Griff eines Wegs, ``on_abzweig(knoten)``: der
-    Abzweig einer Übung (alle ihre Wege) — und der Griff ihres **einzigen** Wegs; ohne
-    ``on_abzweig`` meldet auch der ``on_kante``."""
+    Rahmen, ``weg_gewaehlt`` (von, nach) einen Hof um seinen Griff; ``zaehlung`` macht oft
+    gegangene Kanten dicker.
+
+    Antippen: ``on_knoten(knoten)``, ``on_knoten_lang(knoten)`` (gedrückt halten; kurz davor
+    meldet ``on_lang_ort(anteil)``, wo der Finger auf der Seite liegt — 0 oben, 1 unten),
+    ``on_kante(kante)`` — der Griff eines Wegs, auch der eine Punkt eines eindeutigen Wegs —,
+    ``on_abzweig(knoten)`` — der Abzweig einer Übung (alle ihre Wege) und der Punkt einer Übung
+    **ohne** Weg; wer nur ``on_abzweig`` gibt, bekommt auch den einen Punkt so gemeldet.
+    ``on_start()``: die Pille „Start“.
+
+    Ziehen (jedes nur mit seinem Rückruf, sonst lässt sich nichts ziehen und nichts ablegen):
+
+    - ``on_start_ablegen(wert)``: eine Kachel der Leiste fällt auf „Start“ oder den leeren
+      Platz darunter (``wert`` = ``data`` ihres Draggable; im Reiter „Ablauf“ die ID der
+      **Übung** — welche Planübung daraus wird, entscheidet der Reiter);
+    - ``on_kachel_auf(knoten, wert)``: eine Kachel fällt auf einen Knoten im Bild;
+    - ``on_verbinden(von, nach)``: der Punkt von ``von`` (ID eines Knotens oder `START`) fällt
+      auf den Knoten ``nach`` — ``von == nach`` heißt: auf sich selbst. „Ende“ und „◀ zurück“
+      melden die Ziele am Rand (`ziele`) mit `core.ablauf.ENDE` bzw. `ZURUECK` als ``nach``;
+    - ``on_ziehen(an)``: ein Punkt wird gezogen (``True``) bzw. ist abgelegt (``False``) —
+      dafür gedacht, die Ziele ein- und auszublenden (`Ziele.zeigen`). Fällt der Punkt ins
+      Leere, kommt **kein** ``False`` (`fangnetz`).
+
+    ``menue``: das Menü an einem Knoten (`Menue`) — Schirm über allem, der Knoten und die Karte
+    darüber."""
     ids = [it.id for it in items]
     nummer = ab.nummern(ids)
     namen = {it.id: katalog[it.exercise_id].name for it in items if it.exercise_id in katalog}
     namen.update({f.id: f.text for f in ablauf.fragen})
     lage = dict(lagen) if lagen is not None else ab.layout(ablauf, ids)
     lage = {k: v for k, v in lage.items() if k in namen}
-    slot_lage: dict[int, Lage] = {}
-    for n, slot in enumerate(slots):
-        oben = lage.get(slot.von)
-        if oben is not None:
-            belegt = [*lage.values(), *slot_lage.values()]
-            slot_lage[n] = ab.freie_lage(belegt, oben.x, oben.ebene + 1)
     nebel = set(vernebelt)
     fertig = set(erledigt)
     bedarf = set(ab.bedarf(ablauf, ids))
@@ -173,7 +255,7 @@ def zeichnung(
     if start is not None and start not in lage:
         start = None  # es gibt ihn, aber er lässt sich nicht zeichnen
     # Ohne Start: „Start“ und der leere Platz darunter stehen links von allem (Ben, 16.11.2026)
-    platz = ab.startplatz([*lage.values(), *slot_lage.values()]) if start is None else None
+    platz = ab.startplatz(lage.values()) if start is None else None
 
     def text_hoehe(it: PlanItem) -> float:
         """So hoch ist die Beschriftung unter dem Bild etwa — der Stamm beginnt darunter."""
@@ -184,8 +266,7 @@ def zeichnung(
         ablauf,
         lage,
         beschriftung={it.id: text_hoehe(it) for it in items},
-        weitere=[*slot_lage.values(), *([platz] if platz is not None else [])],
-        mit_abzweig=[s.von for s in slots],
+        weitere=[platz] if platz is not None else [],
     )
     mitten = g.mitten
     breite, hoehe = g.breite, g.hoehe
@@ -195,6 +276,7 @@ def zeichnung(
 
     formen: list[cv.Shape] = []
     etiketten: list[ft.Control] = []
+    hoefe: list[ft.Control] = []
 
     def farbe_fuer(k: Kante) -> str:
         if ablauf.frage(k.von) is not None:
@@ -233,6 +315,16 @@ def zeichnung(
             ],
             paint=ft.Paint(color=ft.Colors.with_opacity(NEBEL if dimm else 1.0, farbe)),
         )
+
+    def kante_tippen(k: Kante) -> tuple[Callable[[Any], Any] | None, str]:
+        """Was der Griff eines Wegs beim Antippen tut, und der Zusatz für den Hinweis: seine
+        Kante melden — der eine Punkt eines eindeutigen Wegs meldet den Knoten, wenn der
+        Aufrufer nur ``on_abzweig`` kennt."""
+        if on_kante is not None:
+            return (lambda _e, kk=k: on_kante(kk)), " — diesen Weg einstellen"
+        if k.von not in g.abzweige and on_abzweig is not None:
+            return (lambda _e, kk=k.von: on_abzweig(kk)), " — Wege einstellen"
+        return None, ""
 
     def etikett(k: Kante, x: float, y: float, dimm: bool, seite: int = 1) -> None:
         """Der Griff einer Verbindung bei (x, y) — ein Punkt in der Mitte zwischen den Ebenen
@@ -303,15 +395,21 @@ def zeichnung(
             mitte_punkt = rand + PUNKT / 2  # so weit liegt die Punktmitte vom Rand
             left = x + mitte_punkt - breite if links else x - mitte_punkt
             ausrichtung = ft.Alignment.CENTER_RIGHT if links else ft.Alignment.CENTER_LEFT
-        # Der einzige Weg seiner Übung: sein Griff ist der eine Punkt zwischen den zwei
-        # Übungen und steht auch für den Abzweig — er öffnet alle Wege (dort kommt ein zweiter
-        # dazu); wer keinen Abzweig kennt (Workout, Kursplan), bekommt die Kante gemeldet
-        tippen: Callable[[Any], Any] | None = None
-        hinweis = ""
-        if k.von not in g.abzweige and on_abzweig is not None:
-            tippen, hinweis = (lambda _e, kk=k.von: on_abzweig(kk)), " — Wege einstellen"
-        elif on_kante is not None:
-            tippen, hinweis = (lambda _e, kk=k: on_kante(kk)), " — nur diesen Weg einstellen"
+        tippen, hinweis = kante_tippen(k)
+        if weg_gewaehlt == (k.von, k.nach):
+            # der gewählte Weg: ein Hof um seinen Punkt (unter dem Griff, verschiebt nichts)
+            hoefe.append(
+                ft.Container(
+                    left=x - HOF / 2,
+                    top=y - HOF / 2,
+                    width=HOF,
+                    height=HOF,
+                    border_radius=HOF / 2,
+                    bgcolor=ft.Colors.with_opacity(0.22, farbe_fuer(k)),
+                    border=ft.Border.all(2, farbe_fuer(k)),
+                    data=("weg_gewaehlt", k.von, k.nach),
+                )
+            )
         etiketten.append(
             ft.Container(
                 left=left,
@@ -397,7 +495,7 @@ def zeichnung(
         )
         formen.append(pfeil(sx, oben_y, math.radians(90), ft.Colors.PRIMARY, False))
     elif platz is not None:
-        # kein Start: „Start“ über dem leeren Platz, gestrichelt verbunden wie ein Slot
+        # kein Start: „Start“ über dem leeren Platz, gestrichelt verbunden
         sx, sy = mitte(platz)
         if kein_start and on_start_ablegen is not None:
             formen.append(
@@ -414,41 +512,90 @@ def zeichnung(
     else:
         sx = RAND_X + KNOTEN / 2
 
-    # Slots: Linie vom Knoten, gestricheltes Feld
-    for n, slot in enumerate(slots):
-        lg = slot_lage.get(n)
-        if lg is None or slot.von not in mitten:
-            continue
-        x, y = mitte(lg)
-        x0, y0 = g.austritte[slot.von]
-        formen.append(
-            cv.Path(
-                [
-                    cv.Path.MoveTo(x0, y0),
-                    cv.Path.CubicTo(x0, y0 + 50, x, y - 74, x, y - 24),
-                ],
-                paint=ft.Paint(
-                    color=ft.Colors.OUTLINE,
-                    stroke_width=2,
-                    style=ft.PaintingStyle.STROKE,
-                    stroke_dash_pattern=[4, 4],
+    knoten_controls: dict[str, ft.Control] = {}
+    leinwand = cv.Canvas(shapes=formen, width=breite, height=hoehe)
+    schichten: list[ft.Control] = [leinwand]
+
+    def wert_von(e: Any) -> str:
+        """Was das abgelegte Draggable trägt (sein ``data``) — leer, wenn es nichts ist."""
+        wert = getattr(getattr(e, "src", None), "data", None)
+        return wert if isinstance(wert, str) else ""
+
+    def leuchten(form: ft.Container) -> tuple[Callable[[Any], None], Callable[[Any], None]]:
+        """Schwebt etwas Passendes über einer Ablage, bekommt ihre Form einen kräftigen Rand —
+        der Finger verdeckt sonst, ob man getroffen hat. Zurück: was beim Hineinkommen und
+        beim Verlassen läuft."""
+        vorher = form.border
+
+        def setzen(rand: ft.Border | None) -> None:
+            ohne_auto_update()  # kommt beim Ziehen dauernd: nur diese Form neu zeichnen
+            form.border = rand
+            with contextlib.suppress(Exception):  # noch nicht auf der Seite
+                form.update()
+
+        def hinein(e: Any) -> None:
+            if getattr(e, "accept", True):  # die andere Gruppe meldet sich auch — abgelehnt
+                setzen(ft.Border.all(3, ft.Colors.TERTIARY))
+
+        return hinein, lambda _e: setzen(vorher)
+
+    def lang_ort(e: Any) -> None:
+        """Wo der Finger beim Gedrückthalten liegt, als Anteil der Seitenhöhe — der Aufrufer
+        entscheidet damit, ob das Menü nach oben aufgeht (`Menue.nach_oben`)."""
+        y = getattr(getattr(e, "global_position", None), "y", None)
+        hoch = getattr(getattr(e, "page", None), "height", None)
+        if on_lang_ort is not None and isinstance(y, int | float) and hoch:
+            ohne_auto_update()  # gezeichnet wird gleich danach, mit dem Menü
+            on_lang_ort(float(y) / float(hoch))
+
+    def gesten(knoten: str, inhalt: ft.Control, form: ft.Container) -> ft.Control:
+        """Tippen und Gedrückthalten auf einem Knoten — und, mit den Rückrufen dazu, der Knoten
+        als Ablage: für einen Punkt (ein Weg hierher) und für eine Kachel der Leiste (eine neue
+        Übung dahinter). Zwei Ablagen ineinander, weil jede nur eine Gruppe annimmt."""
+        if on_knoten is not None or on_knoten_lang is not None:
+            inhalt = ft.GestureDetector(
+                content=inhalt,
+                on_tap=(lambda _e, kk=knoten: on_knoten(kk)) if on_knoten is not None else None,
+                on_long_press=(
+                    (lambda _e, kk=knoten: on_knoten_lang(kk))
+                    if on_knoten_lang is not None
+                    else None
+                ),
+                # dasselbe Gedrückthalten, mit Ort — Flutter meldet es vor ``on_long_press``
+                on_long_press_start=(
+                    lang_ort if on_knoten_lang is not None and on_lang_ort is not None else None
                 ),
             )
-        )
-
-    knoten_controls: dict[str, ft.Control] = {}
-    schichten: list[ft.Control] = [cv.Canvas(shapes=formen, width=breite, height=hoehe)]
-
-    def gesten(knoten: str, inhalt: ft.Control) -> ft.Control:
-        if on_knoten is None and on_knoten_lang is None:
+        if on_verbinden is None and on_kachel_auf is None:
             return inhalt
-        return ft.GestureDetector(
-            content=inhalt,
-            on_tap=(lambda _e, kk=knoten: on_knoten(kk)) if on_knoten is not None else None,
-            on_long_press=(
-                (lambda _e, kk=knoten: on_knoten_lang(kk)) if on_knoten_lang is not None else None
-            ),
-        )
+        hinein, hinaus = leuchten(form)
+        if on_verbinden is not None:
+
+            def punkt_faellt(e: Any, kk: str = knoten) -> None:
+                if (von := wert_von(e)) and on_verbinden is not None:
+                    on_verbinden(von, kk)
+
+            inhalt = ft.DragTarget(
+                group=GRUPPE_WEG,
+                content=inhalt,
+                on_accept=punkt_faellt,
+                on_will_accept=hinein,
+                on_leave=hinaus,
+            )
+        if on_kachel_auf is not None:
+
+            def kachel_faellt(e: Any, kk: str = knoten) -> None:
+                if (wert := wert_von(e)) and on_kachel_auf is not None:
+                    on_kachel_auf(kk, wert)
+
+            inhalt = ft.DragTarget(
+                group=GRUPPE_KACHEL,
+                content=inhalt,
+                on_accept=kachel_faellt,
+                on_will_accept=hinein,
+                on_leave=hinaus,
+            )
+        return inhalt
 
     def ablage(inhalt: ft.Control, wenn: Callable[[str], Any] | None) -> ft.Control:
         """Eine Fläche, auf die man eine Kachel aus der Palette ziehen kann."""
@@ -456,11 +603,10 @@ def zeichnung(
             return inhalt
 
         def fallen(e: ft.DragTargetEvent) -> None:
-            wert = getattr(getattr(e, "src", None), "data", None)
-            if isinstance(wert, str) and wert:
+            if wert := wert_von(e):
                 wenn(wert)
 
-        return ft.DragTarget(group="uebung", content=inhalt, on_accept=fallen)
+        return ft.DragTarget(group=GRUPPE_KACHEL, content=inhalt, on_accept=fallen)
 
     # Start-Pille: tippen = Pfad abspielen, eine Übung darauf = neuer Start
     schichten.append(
@@ -523,25 +669,23 @@ def zeichnung(
             )
         elif ist_bedarf:
             rahmen = ft.Border.all(2, ft.Colors.TERTIARY)
-        zeichen: list[ft.Control] = [
-            ft.Container(
-                width=KNOTEN,
-                height=KNOTEN,
-                border_radius=14,
-                border=rahmen,
-                shadow=schatten,
-                bgcolor=ft.Colors.TERTIARY_CONTAINER if ist_bedarf else ft.Colors.PRIMARY_CONTAINER,
-                alignment=ft.Alignment.CENTER,
-                content=uebungsbild(
-                    state,
-                    u.icon_key if u else None,
-                    u.image_path if u else None,
-                    groesse=34,
-                    color=ft.Colors.TERTIARY if ist_bedarf else ft.Colors.PRIMARY,
-                ),
+        form = ft.Container(
+            width=KNOTEN,
+            height=KNOTEN,
+            border_radius=14,
+            border=rahmen,
+            shadow=schatten,
+            bgcolor=ft.Colors.TERTIARY_CONTAINER if ist_bedarf else ft.Colors.PRIMARY_CONTAINER,
+            alignment=ft.Alignment.CENTER,
+            content=uebungsbild(
+                state,
+                u.icon_key if u else None,
+                u.image_path if u else None,
+                groesse=34,
+                color=ft.Colors.TERTIARY if ist_bedarf else ft.Colors.PRIMARY,
             ),
-            badge(str(nummer.get(it.id, "?"))),
-        ]
+        )
+        zeichen: list[ft.Control] = [form, badge(str(nummer.get(it.id, "?")))]
         if it.id in fertig:
             zeichen.append(
                 ft.Container(
@@ -583,7 +727,7 @@ def zeichnung(
             width=NAME_B,
             opacity=NEBEL if dimm else (0.55 if it.id in fertig and it.id != laufend else 1.0),
             animate_opacity=ft.Animation(400, ft.AnimationCurve.EASE_IN_OUT),
-            content=gesten(it.id, inhalt),
+            content=gesten(it.id, inhalt, form),
             data=("knoten", it.id),
         )
         knoten_controls[it.id] = knoten
@@ -595,37 +739,35 @@ def zeichnung(
         x, y = mitten[f.id]
         dimm = f.id in nebel
         dick = 3 if f.id in (gewaehlt, laufend) else 1.5
-        zeichen = [
-            ft.Container(
-                width=FRAGE_B,
-                height=FRAGE_H,
-                border_radius=14,
-                border=ft.Border.all(dick, ft.Colors.SECONDARY),
-                bgcolor=ft.Colors.SECONDARY_CONTAINER,
-                padding=8,
-                content=ft.Column(
-                    spacing=2,
-                    tight=True,
-                    controls=[
-                        ft.Row(
-                            spacing=6,
-                            controls=[
-                                ft.Icon(ft.Icons.HELP_OUTLINE, size=16, color=ft.Colors.SECONDARY),
-                                ft.Text(
-                                    f.text,
-                                    size=11,
-                                    weight=ft.FontWeight.W_600,
-                                    color=ft.Colors.ON_SECONDARY_CONTAINER,
-                                    expand=True,
-                                    max_lines=2,
-                                ),
-                            ],
-                        ),
-                        ft.Text(f"Skala {f.min}–{f.max}", size=10, opacity=0.65),
-                    ],
-                ),
+        form = ft.Container(
+            width=FRAGE_B,
+            height=FRAGE_H,
+            border_radius=14,
+            border=ft.Border.all(dick, ft.Colors.SECONDARY),
+            bgcolor=ft.Colors.SECONDARY_CONTAINER,
+            padding=8,
+            content=ft.Column(
+                spacing=2,
+                tight=True,
+                controls=[
+                    ft.Row(
+                        spacing=6,
+                        controls=[
+                            ft.Icon(ft.Icons.HELP_OUTLINE, size=16, color=ft.Colors.SECONDARY),
+                            ft.Text(
+                                f.text,
+                                size=11,
+                                weight=ft.FontWeight.W_600,
+                                color=ft.Colors.ON_SECONDARY_CONTAINER,
+                                expand=True,
+                                max_lines=2,
+                            ),
+                        ],
+                    ),
+                    ft.Text(f"Skala {f.min}–{f.max}", size=10, opacity=0.65),
+                ],
             ),
-        ]
+        )
         knoten = ft.Container(
             left=x - FRAGE_B / 2,
             top=y - FRAGE_H / 2,
@@ -637,9 +779,10 @@ def zeichnung(
                 ft.Stack(
                     width=FRAGE_B,
                     height=FRAGE_H,
-                    controls=zeichen,
+                    controls=[form],
                     clip_behavior=ft.ClipBehavior.NONE,
                 ),
+                form,
             ),
             data=("frage", f.id),
         )
@@ -668,8 +811,7 @@ def zeichnung(
                 feld.update()
 
         def fallen(e: ft.DragTargetEvent) -> None:
-            wert = getattr(getattr(e, "src", None), "data", None)
-            if isinstance(wert, str) and wert:
+            if wert := wert_von(e):
                 wenn(wert)
 
         schichten.append(
@@ -677,7 +819,7 @@ def zeichnung(
                 left=x - KNOTEN / 2,
                 top=y - 22,
                 content=ft.DragTarget(
-                    group="uebung",
+                    group=GRUPPE_KACHEL,
                     content=feld,
                     on_accept=fallen,
                     on_will_accept=drueber,
@@ -687,23 +829,283 @@ def zeichnung(
             )
         )
 
-    for n, slot in enumerate(slots):
-        lg = slot_lage.get(n)
-        if lg is None or slot.von not in mitten:
-            continue
-
-        def in_den_slot(wert: str, s: Slot = slot) -> None:
-            if on_slot is not None:
-                on_slot(s, wert)
-
-        ablagefeld(*mitte(lg), in_den_slot, ("slot", slot.von))
     # Der leere Platz unter „Start“ — nur, wo man etwas hineinlegen kann (Reiter „Ablauf“)
     if kein_start and platz is not None and on_start_ablegen is not None:
         ablagefeld(*mitte(platz), on_start_ablegen, ("startplatz",))
     # über allem, damit sie antippbar bleiben: erst die Abzweige, darüber die Griffe der Wege
     schichten.extend(abzweig_punkte)
+    schichten.extend(hoefe)
     schichten.extend(etiketten)
+
+    # -- Im Bild bedienen: der Punkt jedes Knotens zum Ziehen ---------------------------------
+    def zieht(an: bool) -> Callable[[Any], None] | None:
+        melden = on_ziehen
+        if melden is None:
+            return None
+        return lambda _e: melden(an)
+
+    def ziehpunkt(
+        von: str,
+        x: float,
+        y: float,
+        *,
+        tippen: Callable[[Any], Any] | None,
+        zeichen: ft.Control | None = None,
+        hoch: float = GRIFF,
+        dimm: bool = False,
+    ) -> ft.Control:
+        """Die Fläche über dem Punkt eines Knotens: ziehen = verbinden, tippen wie der Punkt
+        darunter. ``zeichen``: was dort zu sehen ist, wenn sonst nichts dort steht (der Ring
+        einer Übung ohne Weg, der Punkt von „Start“). Die Fläche ist durchsichtig, aber
+        gefüllt — sonst träfe der Finger nur das Zeichen. Kein Tooltip: Sein Gedrückthalten
+        gewönne gegen das Ziehen, wer den Finger erst ruhen lässt, zöge dann nichts."""
+        return ft.Container(
+            left=x - GRIFF / 2,
+            top=y - hoch / 2,
+            opacity=NEBEL if dimm else 1.0,
+            data=("punkt", von),
+            content=ft.Draggable(
+                group=GRUPPE_WEG,
+                data=von,
+                on_drag_start=zieht(True),
+                on_drag_complete=zieht(False),
+                content=ft.Container(
+                    width=GRIFF,
+                    height=hoch,
+                    bgcolor=ft.Colors.TRANSPARENT,
+                    alignment=ft.Alignment.CENTER,
+                    on_click=tippen,
+                    content=zeichen,
+                ),
+                # unter dem Finger: ein Hof, der um die Fingerkuppe herum sichtbar bleibt
+                content_feedback=ft.Container(
+                    width=GRIFF,
+                    height=hoch,
+                    alignment=ft.Alignment.CENTER,
+                    content=ft.Container(
+                        width=HOF,
+                        height=HOF,
+                        border_radius=HOF / 2,
+                        bgcolor=ft.Colors.with_opacity(0.3, ft.Colors.TERTIARY),
+                        border=ft.Border.all(2, ft.Colors.TERTIARY),
+                        alignment=ft.Alignment.CENTER,
+                        content=ft.Container(
+                            width=PUNKT,
+                            height=PUNKT,
+                            border_radius=PUNKT / 2,
+                            bgcolor=ft.Colors.TERTIARY,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+    if on_verbinden is not None:
+        einzige = {w.kante.von: w.kante for w in g.wege if w.kante.von not in g.abzweige}
+        for knoten_id, (x, y) in g.punkte.items():
+            ist_frage = ablauf.frage(knoten_id) is not None
+            # antippen wie das, was dort schon steht: der Abzweig (alle Wege) oder der eine
+            # Griff (dieser Weg) — ohne Weg die Wege der Übung („+ Weg“)
+            tippen: Callable[[Any], Any] | None = None
+            ring: ft.Control | None = None
+            if knoten_id in einzige:
+                tippen, _ = kante_tippen(einzige[knoten_id])
+            elif on_abzweig is not None:
+                tippen = lambda _e, kk=knoten_id: on_abzweig(kk)  # noqa: E731
+            if knoten_id not in g.abzweige and knoten_id not in einzige:
+                # ohne Weg: ein kleiner, hohler Punkt unter der Übung (Ben, 16.11.2026)
+                ring = ft.Container(
+                    width=PUNKT,
+                    height=PUNKT,
+                    border_radius=PUNKT / 2,
+                    bgcolor=ft.Colors.SURFACE,
+                    border=ft.Border.all(
+                        2.5, ft.Colors.SECONDARY if ist_frage else ft.Colors.PRIMARY
+                    ),
+                )
+            schichten.append(
+                ziehpunkt(knoten_id, x, y, tippen=tippen, zeichen=ring, dimm=knoten_id in nebel)
+            )
+        if mitten:
+            # „Start“ hat denselben Punkt: auf eine Übung gezogen ist sie der Start. Seine
+            # Fläche ist flacher — darunter beginnt gleich die Startübung
+            schichten.append(
+                ziehpunkt(
+                    START,
+                    *geo.start_punkt(sx),
+                    tippen=(lambda _e: on_start()) if on_start is not None else None,
+                    zeichen=ft.Container(
+                        width=PUNKT,
+                        height=PUNKT,
+                        border_radius=PUNKT / 2,
+                        bgcolor=ft.Colors.PRIMARY,
+                        border=ft.Border.all(2, ft.Colors.SURFACE),
+                    ),
+                    hoch=START_GRIFF,
+                )
+            )
+
+    # -- Das Menü an einem Knoten: Schirm über allem, der Knoten und die Karte darüber --------
+    if menue is not None and menue.knoten in mitten and menue.eintraege:
+        x, y = mitten[menue.knoten]
+        links = max(x - MENUE_B / 2, 4.0)
+        # so hoch ist die Karte: ihre Zeilen und die Linien dazwischen
+        karte_h = len(menue.eintraege) * (MENUE_ZEILE + 1) - 1
+        oben = max(y - 10 - karte_h, 4.0) if menue.nach_oben else y + 10
+        # die Karte muss in der Fläche liegen — außerhalb nähme sie keinen Tipp an
+        breite = max(breite, links + MENUE_B + 12)
+        hoehe = max(hoehe, oben + karte_h + 24)
+        leinwand.width, leinwand.height = breite, hoehe
+
+        def waehlen(eintrag: Eintrag) -> Callable[[Any], Any]:
+            async def handler(_e: Any = None) -> None:
+                ergebnis = eintrag.aktion()
+                if inspect.isawaitable(ergebnis):
+                    await ergebnis
+
+            return handler
+
+        zeilen: list[ft.Control] = []
+        for n, eintrag in enumerate(menue.eintraege):
+            ton = ft.Colors.ERROR if eintrag.gefahr else None
+            if n:
+                zeilen.append(ft.Container(height=1, bgcolor=ft.Colors.OUTLINE_VARIANT))
+            zeilen.append(
+                ft.Container(
+                    height=MENUE_ZEILE,
+                    padding=ft.Padding.symmetric(horizontal=14),
+                    alignment=ft.Alignment.CENTER_LEFT,
+                    ink=True,
+                    on_click=waehlen(eintrag),
+                    data=("menue_eintrag", eintrag.text),
+                    content=ft.Row(
+                        spacing=10,
+                        controls=[
+                            *(
+                                [ft.Icon(eintrag.symbol, size=18, color=ton)]
+                                if eintrag.symbol is not None
+                                else []
+                            ),
+                            ft.Text(eintrag.text, size=14, color=ton, expand=True, max_lines=1),
+                        ],
+                    ),
+                )
+            )
+        schirm = ft.GestureDetector(
+            left=0,
+            top=0,
+            on_tap=lambda _e: menue.schliessen(),
+            data=("schirm",),
+            content=ft.Container(
+                width=breite,
+                height=hoehe,
+                bgcolor=ft.Colors.with_opacity(0.6, ft.Colors.SURFACE),
+            ),
+        )
+        # der Knoten, an dem das Menü hängt, steht über dem Schirm — er bleibt klar
+        traeger = knoten_controls[menue.knoten]
+        schichten.remove(traeger)
+        schichten += [
+            schirm,
+            traeger,
+            ft.Container(
+                left=links,
+                top=oben,
+                width=MENUE_B,
+                height=karte_h,
+                border_radius=14,
+                bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                shadow=ft.BoxShadow(
+                    blur_radius=18,
+                    spread_radius=1,
+                    color=ft.Colors.with_opacity(0.3, ft.Colors.SHADOW),
+                    offset=ft.Offset(0, 4),
+                ),
+                data=("menue", menue.knoten),
+                content=ft.Column(spacing=0, tight=True, controls=zeilen),
+            ),
+        ]
     return Zeichnung(schichten, breite, hoehe, mitten, knoten_controls)
+
+
+def ziele(on_verbinden: Callable[[str, str], Any]) -> Ziele:
+    """Die zwei Ziele, die kein Knoten sind — **„Ende“** und **„zurück“** (dorthin, wo man
+    herkam) — als Ablagen für den Punkt eines Knotens: ``on_verbinden(von, core.ablauf.ENDE)``
+    bzw. ``…ZURUECK``. Sie stehen am unteren Rand des Bildes (`mit_zielen`) und sind nur zu
+    sehen, während gezogen wird: ``on_ziehen=ziele.zeigen`` an der Zeichnung. **In den Ecken**,
+    kurz beschriftet: Was sie verdecken, lässt sich nicht treffen — mittig lag eine Übung
+    genau unter „zurück, wo ich herkam“ (Web-Foto 16.11.2026)."""
+    leiste = ft.Container(left=8, right=8, bottom=8, visible=False, data=("ziele",))
+    z = Ziele(leiste)
+
+    def ziel(text: str, symbol: ft.IconData, nach: str) -> ft.Control:
+        pille = ft.Container(
+            padding=ft.Padding.symmetric(horizontal=14, vertical=9),
+            border_radius=20,
+            border=ft.Border.all(2, ft.Colors.OUTLINE),
+            bgcolor=ft.Colors.SURFACE,
+            shadow=ft.BoxShadow(blur_radius=8, color=ft.Colors.with_opacity(0.2, ft.Colors.SHADOW)),
+            content=ft.Row(
+                tight=True,
+                spacing=6,
+                controls=[ft.Icon(symbol, size=16), ft.Text(text, size=13)],
+            ),
+        )
+
+        def faerben(an: bool) -> None:
+            pille.border = ft.Border.all(
+                2.5 if an else 2, ft.Colors.TERTIARY if an else ft.Colors.OUTLINE
+            )
+            pille.bgcolor = ft.Colors.TERTIARY_CONTAINER if an else ft.Colors.SURFACE
+            with contextlib.suppress(Exception):  # noch nicht auf der Seite
+                pille.update()
+
+        def drueber(e: Any, an: bool = True) -> None:
+            """Schwebt ein Punkt über dem Ziel, leuchtet es."""
+            if an and not getattr(e, "accept", True):
+                return
+            ohne_auto_update()  # kommt beim Ziehen dauernd: nur die Pille neu zeichnen
+            faerben(an)
+
+        def fallen(e: Any) -> None:
+            von = getattr(getattr(e, "src", None), "data", None)
+            faerben(False)
+            z.zeigen(False)
+            if isinstance(von, str) and von:
+                on_verbinden(von, nach)
+
+        return ft.DragTarget(
+            group=GRUPPE_WEG,
+            content=pille,
+            on_accept=fallen,
+            on_will_accept=drueber,
+            on_leave=lambda e: drueber(e, False),
+            data=("ziel", nach),
+        )
+
+    leiste.content = ft.Row(
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        controls=[
+            ziel("Ende", ft.Icons.STOP, ab.ENDE),
+            ziel("zurück", ft.Icons.UNDO, ab.ZURUECK),
+        ],
+    )
+    return z
+
+
+def mit_zielen(bild_ansicht: ft.Control, z: Ziele) -> ft.Stack:
+    """Die Fläche mit den Zielen darüber — sie stehen fest am unteren Rand, auch wenn das Bild
+    geschoben oder gezoomt ist."""
+    return ft.Stack(controls=[bild_ansicht, z.control])
+
+
+def fangnetz(inhalt: ft.Control, z: Ziele) -> ft.DragTarget:
+    """Eine Ablage um die ganze Ansicht: Fällt ein Punkt **ins Leere**, verschwinden die Ziele
+    wieder. Flet meldet einem Draggable nur das angenommene Ablegen (``on_drag_complete``),
+    einen Abbruch nicht — ohne dieses Netz blieben „Ende“ und „◀ zurück“ stehen. Was außerhalb
+    liegt (die Titelleiste), fängt es nicht; dort räumt das nächste Neuzeichnen auf."""
+    return ft.DragTarget(group=GRUPPE_WEG, content=inhalt, on_accept=lambda _e: z.zeigen(False))
 
 
 def flaeche_neu(z: Zeichnung) -> ft.Stack:
@@ -774,17 +1176,25 @@ async def abspielen(page: Any, bild: Bild, pfad: Sequence[str], schritt_s: float
 __all__ = [
     "ABZWEIG",
     "EBENE",
+    "GRUPPE_KACHEL",
+    "GRUPPE_WEG",
     "KNOTEN",
     "NEBEL",
     "SPALTE",
+    "START",
     "Bild",
-    "Slot",
+    "Eintrag",
+    "Menue",
     "Zeichnung",
+    "Ziele",
     "ablaufbild",
     "abspielen",
     "aktualisieren",
     "ansicht",
     "etikett_text",
+    "fangnetz",
     "flaeche_neu",
+    "mit_zielen",
     "zeichnung",
+    "ziele",
 ]

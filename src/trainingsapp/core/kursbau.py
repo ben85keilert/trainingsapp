@@ -23,6 +23,13 @@ Bausteinen für die Teilnehmenden wird; dieses Modul rechnet, was die **Autorin*
   und `zielfeld` („Ins Ziel kommt“: das Angebot und die Vorbelegung), `Kurssicht.misst`
   („Gemessen wird“), `Kurssicht.test_vorschau` („So steht es im Kapitel“). Was der Lauf selbst
   tut und wie er heißt, rechnet `core/kurstest.py`.
+- Der **Test, flexibel gestaltet** (Ben, 16.11.2026, Skizze F1 — Abschnitt „So läuft der
+  Test“): `Laufwahl` — Uhr, Takt und Ausführung, jede mit Vorgabe (Stoppuhr, ohne, ohne), „wie
+  die Übung“ oder einer eigenen Angabe —, `vorgabe_wahl` und `Vorgabenwahl.ohne_zeit` (Timer
+  und Vorgabe „Zeit“ zusammen gibt es nicht), `Kurssicht.ausfuehrung` (welche Parameter sich
+  vorgeben oder freigeben lassen), die Zeilen dazu (`Kurssicht.uhr_text`, `takt_text`,
+  `ausfuehrung_text`) und `zusatz_des_tests` („· mit Takt · Timer …“ in Vorschau und Liste). Ein
+  gestalteter Test ist ein Lauf, auch ohne Vorgabe (`Block.laeuft`).
 - Das **Bild des Kursplans** (§14, `core/kursbild.py`): `Kurssicht.marke_fuer_weg` und
   `Kurssicht.bringt` — womit ein Weg dieses Kapitels eine Planübung aus dem Bild nennt, und
   welches Kapitel sie bringt.
@@ -52,6 +59,10 @@ from .kursbloecke import (
     SKALA_MAX,
     TEST,
     VORGABEN,
+    WIE_PARAMETER,
+    WIE_TAKT,
+    WIE_UEBUNG,
+    WIE_UHR,
     ZEIT,
     ZU_ENDE,
     Block,
@@ -70,7 +81,21 @@ from .kursplan import (
     grundstand,
     zielwert_text,
 )
-from .kurstest import ANSTRENGUNG, GROESSEN, SKALA_NAME, gemessen, skala_name, vorgabe_text
+from .kurstest import (
+    ANSTRENGUNG,
+    GROESSEN,
+    OHNE_VORGABE,
+    SKALA_NAME,
+    ausfuehrung_fuer,
+    ausfuehrungsfelder,
+    gemessen,
+    lauf_satz,
+    skala_name,
+    takt_fuer,
+    uhr_fuer,
+    vorgabe_fuer,
+    vorgabe_text,
+)
 from .kurstest import felder as lauf_felder
 from .models import Exercise, new_id
 from .result_spec import (
@@ -80,12 +105,14 @@ from .result_spec import (
     ResultSpec,
     basis_key,
     geordnet,
+    ist_leer,
     vorrat_feld,
 )
 from .standards import waehlbare_felder, ziel_spec
 from .takt import Takt
 from .timer import TimerProfil, dauer_text, ohne_verweise
 from .timer_eintrag import ZEITFELDER
+from .uebung_timer import ausfuehrung_text
 from .varianten import ist_variante
 
 if TYPE_CHECKING:
@@ -137,6 +164,37 @@ SKALA_FORMEN: Final[dict[str, str]] = {AB: "ab", HOECHSTENS: "höchstens", VON_B
 FAKTOR_MIN: Final = 0.1
 FAKTOR_MAX: Final = 3.0
 _WDH: Final = "reps"
+#: Der Test-Dialog, Abschnitt „So läuft der Test“ (Ben, 16.11.2026: „Der Test muss flexibel
+#: gestaltet werden können … Dinge mit Standardwerten versehen. Überschreiben ist möglich“,
+#: Skizze F1): Jede Zeile — Uhr, Takt, Ausführung — steht auf der **Vorgabe** (Stoppuhr, kein
+#: Takt, keine Ausführung), auf **wie die Übung** gerade eingestellt ist
+#: (`core.kursbloecke.Block.wie_uebung`) oder auf einer **eigenen** Angabe im Test (`Laufwahl`)
+STANDARD: Final = "standard"
+WIE: Final = "wie"
+EIGEN: Final = "eigen"
+UHR_WAHL: Final[dict[str, str]] = {
+    STANDARD: "Stoppuhr",
+    WIE: "Timer der Übung",
+    EIGEN: "Eigener Timer …",
+}
+TAKT_WAHL: Final[dict[str, str]] = {
+    STANDARD: "Ohne",
+    WIE: "Wie die Übung",
+    EIGEN: "Eigener Takt …",
+}
+AUSFUEHRUNG_WAHL: Final[dict[str, str]] = {
+    STANDARD: "Ohne",
+    WIE: "Wie die Übung",
+    EIGEN: "Eigene Angabe …",
+}
+#: Die Zeile im Test-Dialog, wenn ein Timer eine gesetzte Vorgabe „Zeit“ abgelöst hat
+ZEIT_FAELLT_WEG: Final = (
+    "Mit einem Timer steht die Zeit fest — die Vorgabe „Zeit“ ist darum jetzt „Ohne“."
+)
+#: … und wenn ein Test von früher beides trägt (der Dialog ändert ihn nicht von selbst)
+ZEIT_UND_TIMER: Final = (
+    "Timer und Vorgabe „Zeit“ zusammen gibt es nicht — stell die Vorgabe oder die Uhr um."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,6 +299,17 @@ class Vorgabenwahl:
         """Eine andere Art — alles andere gilt als „Ohne“; die Zahlen bleiben."""
         return replace(self, art=art if art in VORGABEN else OHNE)
 
+    def ohne_zeit(self) -> Vorgabenwahl:
+        """Die Wahl, sobald der Test mit einem **Timer** läuft: Eine Vorgabe „Zeit“ wird
+        „Ohne“ (mit dem Timer steht die Zeit fest, `vorgabe_wahl`) — Menge und Anstrengung
+        bleiben. Die Sekunden bleiben gemerkt, falls die Stoppuhr zurückkommt.
+
+        >>> w = Vorgabenwahl(ZEIT, sekunden=90).ohne_zeit()
+        >>> w.art, w.sekunden, Vorgabenwahl(MENGE).ohne_zeit().art
+        ('ohne', 90, 'menge')
+        """
+        return self.mit_art(OHNE) if self.art == ZEIT else self
+
     def mit_form(self, form: str) -> Vorgabenwahl:
         return replace(self, form=form if form in SKALA_FORMEN else AB)
 
@@ -308,6 +377,164 @@ class Vorgabenwahl:
         if marke == "bis":
             return replace(self, bis=min(max(self.bis + um, min(self.von + 1, oben)), oben))
         return self
+
+
+def vorgabe_wahl(mit_timer: bool = False, gewaehlt: str = OHNE) -> dict[str, str]:
+    """Die Knöpfe unter „Vorgabe — wann der Test endet“ (`VORGABE_WAHL`). **Timer und Vorgabe
+    „Zeit“ zusammen gibt es nicht** — mit einem Timer steht die Zeit fest: Läuft der Test mit
+    einem (`Laufwahl.mit_timer`), steht „Zeit“ nicht zur Wahl. Ist sie trotzdem gewählt (ein
+    Test aus einem Paket, der beides trägt), bleibt der Knopf stehen: Man sieht, was gilt, und
+    kann es umstellen.
+
+    >>> list(vorgabe_wahl()), list(vorgabe_wahl(mit_timer=True))
+    (['ohne', 'menge', 'zeit', 'skala'], ['ohne', 'menge', 'skala'])
+    >>> vorgabe_wahl(mit_timer=True, gewaehlt=ZEIT) == VORGABE_WAHL
+    True
+    """
+    if not mit_timer or gewaehlt == ZEIT:
+        return dict(VORGABE_WAHL)
+    return {art: name for art, name in VORGABE_WAHL.items() if art != ZEIT}
+
+
+@dataclass(frozen=True, slots=True)
+class Laufwahl:
+    """Was im Test-Dialog unter „So läuft der Test“ eingestellt ist (Skizze F1): womit der
+    Test läuft, sein Takt und seine Ausführung — so, wie der Block sie trägt (`aus`,
+    `in_block`).
+
+    Jede Zeile hat drei Stellungen (`uhr`, `takt_art`, `ausfuehrung`): `STANDARD` — Stoppuhr,
+    kein Takt, keine Ausführung, der Test von bisher —, `WIE` — die Übung, wie sie gerade
+    eingestellt ist — oder `EIGEN`. **Eine eigene Angabe geht vor**: Trägt ein Block beides,
+    zeigt die Zeile die eigene. Wer eine Zeile stellt (`mit_uhr`, `mit_takt`,
+    `mit_ausfuehrung`), räumt die andere Angabe dieser Zeile weg; was niemand anfasst, bleibt,
+    wie es am Block stand — ein Test ändert sich nicht dadurch, dass man ihn öffnet.
+
+    >>> Laufwahl().uhr, Laufwahl().takt_art, Laufwahl().ausfuehrung, Laufwahl().mit_timer
+    ('standard', 'standard', 'standard', False)
+    >>> b = Block(TEST, uebung="u", wie_uebung=["uhr", "parameter"], ziel={"side": "links"})
+    >>> w = Laufwahl.aus(b)
+    >>> w.uhr, w.takt_art, w.ausfuehrung, w.mit_timer
+    ('wie', 'standard', 'eigen', True)
+    >>> w.in_block(b) == b, Laufwahl().in_block(Block(TEST, uebung="u")).gestaltet
+    (True, False)
+
+    Stellen:
+
+    >>> timer = {"id": "kurs-t", "name": "Timer", "abschnitte": [{"name": "Üben", "dauer_s": 30}]}
+    >>> eigen = w.mit_uhr(EIGEN, timer)
+    >>> eigen.uhr, eigen.wie, eigen.mit_uhr(STANDARD).timer, eigen.mit_uhr(WIE).wie
+    ('eigen', ('parameter',), {}, ('uhr', 'parameter'))
+    >>> w.mit_uhr(EIGEN) == w  # ohne Timer keine eigene Uhr
+    True
+    >>> frei = w.mit_ausfuehrung(EIGEN, {"side": "links", "weight": None}, ["weight", "side"])
+    >>> frei.ziel, frei.felder, frei.wie  # vorgegeben geht vor „frei“, Leeres fällt weg
+    ({'side': 'links'}, ('weight',), ('uhr',))
+    >>> w.mit_ausfuehrung(EIGEN).ausfuehrung, w.mit_ausfuehrung(WIE).wie
+    ('standard', ('uhr', 'parameter'))
+    >>> from trainingsapp.core.takt import AUS, VORLAGEN
+    >>> w.mit_takt(EIGEN, VORLAGEN["metronom_1"]).takt_art, w.mit_takt(EIGEN, AUS).takt_art
+    ('eigen', 'standard')
+    >>> w.mit_takt(WIE).wie, w.mit_takt(WIE).mit_takt(STANDARD).wie
+    (('uhr', 'takt', 'parameter'), ('uhr', 'parameter'))
+    """
+
+    #: der eigene Timer (`Block.timer`) — leer: keiner
+    timer: Mapping[str, Any] = field(default_factory=dict)
+    #: der eigene Takt — ``None``: keiner (ein leerer Takt ist am Test keiner)
+    takt: Takt | None = None
+    #: die **vorgegebene** Ausführung: Feld → Wert (`Block.ziel`)
+    ziel: Mapping[str, Any] = field(default_factory=dict)
+    #: Parameter, die die Person vor dem Start **frei** wählt (`Block.felder`)
+    felder: tuple[str, ...] = ()
+    #: was der Test von der Übung nimmt (`Block.wie_uebung`), in der Folge von `WIE_UEBUNG`
+    wie: tuple[str, ...] = ()
+
+    @classmethod
+    def aus(cls, block: Block) -> Laufwahl:
+        """Die Wahl, wie der Test-Block sie trägt."""
+        takt = block.takt if block.takt is not None and not block.takt.leer else None
+        return cls(
+            timer=dict(block.timer),
+            takt=takt,
+            ziel=dict(block.ziel),
+            felder=tuple(block.felder or ()),
+            wie=tuple(w for w in WIE_UEBUNG if w in block.wie_uebung),
+        )
+
+    def in_block(self, block: Block) -> Block:
+        """Eine Kopie des Blocks mit dieser Wahl — das Gegenstück zu `aus`."""
+        return replace(
+            block,
+            timer=dict(self.timer),
+            takt=self.takt,
+            ziel=dict(self.ziel),
+            felder=list(self.felder) or None,
+            wie_uebung=list(self.wie),
+        )
+
+    @property
+    def uhr(self) -> str:
+        """Womit der Test läuft: `STANDARD` (Stoppuhr), `WIE` (Timer der Übung), `EIGEN`."""
+        return EIGEN if self.timer else WIE if WIE_UHR in self.wie else STANDARD
+
+    @property
+    def takt_art(self) -> str:
+        return EIGEN if self.takt is not None else WIE if WIE_TAKT in self.wie else STANDARD
+
+    @property
+    def ausfuehrung(self) -> str:
+        """`STANDARD` (keine), `WIE` (die Person wählt frei unter den Parametern der Übung)
+        oder `EIGEN` (je Parameter vorgegeben oder frei)."""
+        if self.ziel or self.felder:
+            return EIGEN
+        return WIE if WIE_PARAMETER in self.wie else STANDARD
+
+    @property
+    def mit_timer(self) -> bool:
+        """Läuft der Test mit einem Timer — einem eigenen oder dem der Übung? Dann steht die
+        Zeit fest (`vorgabe_wahl`)."""
+        return self.uhr != STANDARD
+
+    @property
+    def gestaltet(self) -> bool:
+        """Steht eine der drei Zeilen nicht auf ihrer Vorgabe? Dann ist der Test ein Lauf mit
+        der Uhr, auch ohne Vorgabe (`Block.gestaltet`, `Block.laeuft`).
+
+        >>> [w.gestaltet for w in (Laufwahl(), Laufwahl(wie=("takt",)), Laufwahl(felder=("side",)))]
+        [False, True, True]
+        """
+        return bool(self.timer or self.takt is not None or self.ziel or self.felder or self.wie)
+
+    def _wie(self, was: str, an: bool) -> tuple[str, ...]:
+        return tuple(w for w in WIE_UEBUNG if (w == was and an) or (w != was and w in self.wie))
+
+    def mit_uhr(self, art: str, timer: Mapping[str, Any] | None = None) -> Laufwahl:
+        """Die Zeile „Uhr“ gestellt — `EIGEN` mit dem eingebetteten Timer (`timer_einbetten`);
+        ohne einen bleibt die Wahl, wie sie ist."""
+        if art == EIGEN:
+            return (
+                replace(self, timer=dict(timer), wie=self._wie(WIE_UHR, False)) if timer else self
+            )
+        return replace(self, timer={}, wie=self._wie(WIE_UHR, art == WIE))
+
+    def mit_takt(self, art: str, takt: Takt | None = None) -> Laufwahl:
+        """Die Zeile „Takt“ gestellt — `EIGEN` ohne Takt (oder mit dem leeren) heißt „Ohne“."""
+        if art == EIGEN and takt is not None and not takt.leer:
+            return replace(self, takt=takt, wie=self._wie(WIE_TAKT, False))
+        return replace(self, takt=None, wie=self._wie(WIE_TAKT, art == WIE))
+
+    def mit_ausfuehrung(
+        self, art: str, ziel: Mapping[str, Any] | None = None, felder: Iterable[str] = ()
+    ) -> Laufwahl:
+        """Die Zeile „Ausführung“ gestellt — `EIGEN` mit dem, was **vorgegeben** ist (``ziel``:
+        Feld → Wert, leere Werte fallen weg), und dem, was die Person **frei** wählt
+        (``felder``; ein vorgegebenes Feld ist nicht auch frei). Ohne beides heißt es „Ohne“."""
+        if art == EIGEN:
+            fest = {k: v for k, v in (ziel or {}).items() if not ist_leer(v)}
+            frei = tuple(k for k in dict.fromkeys(felder) if k not in fest)
+            if fest or frei:
+                return replace(self, ziel=fest, felder=frei, wie=self._wie(WIE_PARAMETER, False))
+        return replace(self, ziel={}, felder=(), wie=self._wie(WIE_PARAMETER, art == WIE))
 
 
 def faktor_text(faktor: float, prozent: bool = False) -> str:
@@ -562,6 +789,62 @@ def timer_text(timer: Mapping[str, Any]) -> str:
     return profil.kurztext() if profil is not None else "ein Timer"
 
 
+def _timer_zeile(profil: TimerProfil) -> str:
+    """Ein Timer in einer Zeile mit seiner Gesamtzeit — wie am Baustein, zugeklappt."""
+    return f"{profil.kurztext()} · gesamt {dauer_text(profil.gesamt_s())}"
+
+
+def _takt_zeile(takt: Takt) -> str:
+    """Ein Takt, wie Formulare ihn nennen: sein Name, dann die Kurzform."""
+    return f"{takt.name} · {takt.kurztext()}" if takt.name else takt.kurztext()
+
+
+def timer_kurzname(timer: Mapping[str, Any]) -> str:
+    """Ein eingebetteter Timer in zwei, drei Worten — für den Zusatz hinter einer Überschrift
+    (`zusatz_des_tests`): sein Name in Anführungszeichen, wenn er einen eigenen trägt, sonst seine
+    Gesamtzeit.
+
+    >>> from trainingsapp.core.timer import Abschnitt
+    >>> t = TimerProfil(id="x", name="3 × 30 s", runden=3,
+    ...                 abschnitte=[Abschnitt("Üben", 30), Abschnitt("Pause", 15)])
+    >>> timer_kurzname(t.als_dict()), timer_kurzname({**t.als_dict(), "name": "Timer"})
+    ('„3 × 30 s“', '2:15')
+    >>> timer_kurzname({})
+    ''
+    """
+    profil = TimerProfil.aus_dict(dict(timer)) if timer else None
+    if profil is None:
+        return ""
+    name = profil.name.strip()
+    return f"„{name}“" if name and name != "Timer" else dauer_text(profil.gesamt_s())
+
+
+def zusatz_des_tests(block: Block) -> str:
+    """Was ein **gestalteter** Test hinter seiner Überschrift kurz dazusagt — in der Vorschau
+    „So steht es im Kapitel“ und in der Zeile des Editors: sein Takt und sein Timer. Leer beim
+    Test von bisher (Stoppuhr, kein Takt).
+
+    >>> from trainingsapp.core.takt import VORLAGEN
+    >>> timer = {"id": "t", "name": "3 × 30 s", "abschnitte": [{"name": "Üben", "dauer_s": 30}]}
+    >>> zusatz_des_tests(Block(TEST, uebung="u", takt=VORLAGEN["metronom_1"], timer=timer))
+    'mit Takt · Timer „3 × 30 s“'
+    >>> zusatz_des_tests(Block(TEST, uebung="u", wie_uebung=["uhr", "takt"]))
+    'mit Takt · Timer der Übung'
+    >>> ohne = Block(TEST, uebung="u")
+    >>> zusatz_des_tests(ohne), zusatz_des_tests(replace(ohne, felder=["side"]))
+    ('', '')
+    """
+    wahl = Laufwahl.aus(block)
+    teile: list[str] = []
+    if wahl.takt_art != STANDARD:
+        teile.append("mit Takt")
+    if wahl.uhr == EIGEN:
+        teile.append(f"Timer {timer_kurzname(wahl.timer)}".strip())
+    elif wahl.uhr == WIE:
+        teile.append("Timer der Übung")
+    return " · ".join(teile)
+
+
 def timer_kern(timer: Mapping[str, Any]) -> dict[str, Any] | None:
     """Der Inhalt eines Timers zum Vergleichen — ohne ID und Vermerk der Bibliothek."""
     profil = TimerProfil.aus_dict(dict(timer)) if timer else None
@@ -675,6 +958,9 @@ class Kapitelvorschau:
     zeilen: tuple[tuple[str, Aenderung], ...] = ()
     #: „Beispiel mit …“ zur ersten Zeile — leer ohne Zeilen
     beispiel: str = ""
+    #: wie der Test läuft — der Satz der Testkarte (`core.kurstest.lauf_satz`), je Überschrift
+    #: einer; leer beim Test von bisher (Stoppuhr, kein Takt, keine Ausführung)
+    lauf: tuple[str, ...] = ()
 
 
 def _gemeinsame(je_uebung: Sequence[Sequence[FieldSpec]]) -> tuple[list[FieldSpec], bool]:
@@ -983,12 +1269,13 @@ class Kurssicht:
         return geordnet(felder), gemeinsam
 
     def zielfelder(
-        self, uebungen: Sequence[str], vorgabe: Vorgabe | None = None
+        self, uebungen: Sequence[str], vorgabe: Vorgabe | None = None, *, laeuft: bool = False
     ) -> tuple[list[FieldSpec], bool]:
         """Was bei einem Test **ins Ziel kommen** kann — das Feld, dessen Wert er liefert
         (`Block.feld`). Ohne Vorgabe wie `testfelder`: was die Übung misst.
 
-        Mit Vorgabe ist der Test ein Lauf mit der Uhr (`core.kurstest`). Zur Wahl steht, was
+        Mit Vorgabe — oder ``laeuft``: gestaltet, auch ohne sie (`Block.laeuft`) — ist der
+        Test ein Lauf mit der Uhr (`core.kurstest`). Zur Wahl steht, was
         der Lauf vorgibt oder misst, **nie die Skala** (sie ist Selbstauskunft): zuerst die
         Wiederholungen — wenn die Übung welche hat oder die Vorgabe eine Menge ist —, dann die
         Zeitfelder der Übung; hat sie keines, „Zeit“ (dorthin zählt die Uhr,
@@ -1017,9 +1304,17 @@ class Kurssicht:
         ((['reps'], True), (['reps', 'duration', 'hold'], False))
         >>> keys([], Vorgabe(SKALA, 7))
         ([], True)
+
+        Ein gestalteter Test ohne Vorgabe läuft ebenso — das Gewicht misst kein Lauf:
+
+        >>> [f.key for f in s.zielfelder(["b"], laeuft=True)[0]]
+        ['reps', 'hold']
+        >>> [f.key for f in s.zielfelder(["p"], laeuft=True)[0]]
+        ['hold']
         """
-        if vorgabe is None:
+        if vorgabe is None and not laeuft:
             return self.testfelder(uebungen)
+        menge = vorgabe is not None and vorgabe.art == MENGE
         je_uebung: list[list[FieldSpec]] = []
         for u in dict.fromkeys(uebungen):
             uebung = self.katalog.get(u)
@@ -1027,7 +1322,7 @@ class Kurssicht:
                 continue
             eigene = uebung.result_spec.fields
             wdh = [f for f in eigene if basis_key(f.key) == _WDH]
-            if not wdh and vorgabe.art == MENGE:
+            if not wdh and menge:
                 wdh = [f for f in (vorrat_feld(_WDH),) if f is not None]
             zeit = [f for f in eigene if basis_key(f.key) in ZEITFELDER]
             if not zeit:
@@ -1058,15 +1353,25 @@ class Kurssicht:
         return namen.pop() if len(namen) == 1 else SKALA_NAME
 
     def misst(self, block: Block) -> list[str]:
-        """„Gemessen wird“ — die Größen, die der Lauf eines Tests mit Vorgabe misst, in Worten
+        """„Gemessen wird“ — die Größen, die der Lauf eines Tests misst, in Worten
         (`core.kurstest.gemessen`): alle außer der Vorgabe. Die Wiederholungen stehen nur
         dabei, wenn der Lauf sie bei wenigstens einer seiner Übungen einträgt
         (`core.kurstest.felder`: Die Übung hat welche — oder sie kommen ins Ziel); solange
-        keine Übung gewählt ist, auch. Ohne Vorgabe misst kein Lauf.
+        keine Übung gewählt ist, auch. Ein Test, der nicht läuft (`Block.laeuft`: ohne Vorgabe
+        und nicht gestaltet), misst nichts — er liest einen Eintrag.
 
-        >>> felder = (("p", ("hold",)), ("k", ("reps",)))
-        >>> katalog = {n: Exercise(id=n, result_spec=ResultSpec(
+        Der **gestaltete** Test: Gefragt wird der Lauf selbst, mit der Uhr, mit der er bei
+        dieser Übung liefe (`core.kurstest.uhr_fuer`) — läuft ein Timer durch, ohne dass eine
+        Vorgabe ihn vorher beendet, steht die Zeit fest und wird nicht gemessen. Hat der Test
+        eine Ausführung (`core.kurstest.ausfuehrung_fuer`), wird sie mit eingetragen und steht
+        dabei. Bei mehreren Übungen („die gewählte“) steht, was bei wenigstens einer gilt.
+
+        >>> from trainingsapp.core.timer import Abschnitt
+        >>> timer = TimerProfil(id="t", name="Runden", abschnitte=[Abschnitt("Üben", 30)])
+        >>> felder = (("p", ("hold",)), ("k", ("reps", "side")))
+        >>> katalog = {n: Exercise(id=n, name=n, result_spec=ResultSpec(
         ...     fields=[vorrat_feld(k) for k in keys])) for n, keys in felder}
+        >>> katalog["t"] = replace(katalog["k"], id="t", timer=[timer.als_dict()])
         >>> s = Kurssicht(Kurs(), "", [], katalog)
         >>> s.misst(Block(TEST, uebung="k", feld="reps", vorgabe=Vorgabe(SKALA, 7)))
         ['Wiederholungen', 'Zeit']
@@ -1080,13 +1385,215 @@ class Kurssicht:
         []
         >>> s.misst(Block(TEST, vorgabe=Vorgabe(ZEIT, 9)))  # noch keine Übung gewählt
         ['Wiederholungen', 'Anstrengung']
+
+        Gestaltet — ohne Vorgabe, mit eigenem Timer, mit dem Timer der Übung, mit Ausführung:
+
+        >>> s.misst(Block(TEST, uebung="k", feld="reps", wie_uebung=["takt"]))
+        ['Wiederholungen', 'Zeit', 'Anstrengung']
+        >>> s.misst(Block(TEST, uebung="k", feld="reps", timer=timer.als_dict()))
+        ['Wiederholungen', 'Anstrengung']
+        >>> uhr = Block(TEST, uebung="t", feld="reps", wie_uebung=["uhr"], felder=["side"])
+        >>> s.misst(uhr)
+        ['Wiederholungen', 'Anstrengung', 'Ausführung']
+        >>> s.misst(replace(uhr, uebung="k"))  # „k“ hat keinen Timer: die Stoppuhr
+        ['Wiederholungen', 'Zeit', 'Anstrengung', 'Ausführung']
+        >>> s.misst(Block(TEST, uebung="p", feld="hold", wie_uebung=["parameter"]))  # hat keine
+        ['Zeit', 'Anstrengung']
         """
-        if block.vorgabe is None:
+        if not block.laeuft:
             return []
         ids = self.uebungen_von(block)
-        zaehlt = not ids or any(lauf_felder(block, self.katalog[u]).wdh is not None for u in ids)
+        uebungen: list[Exercise | None] = [self.katalog[u] for u in ids] or [None]
+        groessen: set[str] = set()
+        for u in uebungen:
+            zaehlt = u is None or lauf_felder(block, u).wdh is not None
+            groessen.update(gemessen(block.vorgabe, zaehlt_wdh=zaehlt, timer=uhr_fuer(block, u)))
+        if ids:
+            ausfuehrung = any(not ausfuehrung_fuer(block, self.katalog[u]).leer for u in ids)
+        else:
+            ausfuehrung = Laufwahl.aus(block).ausfuehrung != STANDARD
         namen = {**GROESSEN, ANSTRENGUNG: self.skala(ids)}
-        return [namen[g] for g in gemessen(block.vorgabe, zaehlt_wdh=zaehlt)]
+        return [
+            *(namen[g] for g in GROESSEN if g in groessen),
+            *(["Ausführung"] if ausfuehrung else []),
+        ]
+
+    # -- Der Test, flexibel gestaltet: „So läuft der Test“ ------------------------------------
+
+    def ausfuehrung(self, uebungen: Sequence[str]) -> tuple[list[FieldSpec], set[str]]:
+        """Was ein Test als **Ausführung** festlegen kann (Ben, 16.11.2026: „Kann vorgegeben
+        sein; Varianten können vorgegeben sein, oder frei“): die Felder der Übung, die der Lauf
+        nicht selbst misst oder fragt — was das ist, sagt der Lauf
+        (`core.kurstest.ausfuehrungsfelder`: die Variante zuerst, dann in der Ordnung des
+        Vorrats). Der zweite Wert: welche davon sich **vorgeben** lassen (Schlüssel).
+
+        Bei einer Übung alle. Bei mehreren („die gewählte“ einer Auswahl) gilt, was am Baustein
+        „Übung dazu“ gilt: **Frei** wählen kann die Person unter den Parametern **aller** —
+        welche Übung es wird, steht erst mit der Wahl fest (`parameter`). Ein **fester Wert**
+        geht nur in einem Feld, das alle haben, und nie in der Variante: Jede Übung hat ihre
+        eigenen (`ziel_spec`).
+
+        >>> from trainingsapp.core.varianten import Variante, mit_varianten
+        >>> def spec(*keys, varianten=()):
+        ...     s = ResultSpec(fields=[vorrat_feld(k) for k in keys])
+        ...     return mit_varianten(s, [Variante(n) for n in varianten]) if varianten else s
+        >>> katalog = {
+        ...     "k": Exercise(id="k", result_spec=spec("weight", "reps", "side", "scale",
+        ...                                            varianten=("auf Knien", "gestreckt"))),
+        ...     "b": Exercise(id="b", result_spec=spec("reps", "side", "angle",
+        ...                                            varianten=("hoch",))),
+        ...     "p": Exercise(id="p", result_spec=spec("hold", "note")),
+        ... }
+        >>> s = Kurssicht(Kurs(), "", [], katalog)
+        >>> angebot, fest = s.ausfuehrung(["k"])
+        >>> [f.key for f in angebot], sorted(fest)
+        (['variant', 'side', 'weight'], ['side', 'variant', 'weight'])
+        >>> angebot, fest = s.ausfuehrung(["k", "b", "fehlt"])
+        >>> [f.key for f in angebot], sorted(fest)
+        (['variant', 'side', 'angle', 'weight'], ['side'])
+        >>> s.ausfuehrung(["p"]), s.ausfuehrung([])
+        (([], set()), ([], set()))
+        """
+        je_uebung = [
+            ausfuehrungsfelder(self.katalog[u])
+            for u in dict.fromkeys(uebungen)
+            if u in self.katalog
+        ]
+        alle: dict[str, FieldSpec] = {}
+        for felder in je_uebung:
+            for f in felder:
+                alle.setdefault(f.key, f)
+        angebot = [
+            *(f for f in alle.values() if ist_variante(f)),
+            *geordnet([f for f in alle.values() if not ist_variante(f)]),
+        ]
+        if len(je_uebung) <= 1:
+            return angebot, set(alle)
+        fest = {
+            k
+            for k, f in alle.items()
+            if not ist_variante(f) and all(any(g.key == k for g in fs) for fs in je_uebung)
+        }
+        return angebot, fest
+
+    def _eine(self, block: Block) -> Exercise | None:
+        """Die Übung des Tests, wenn es genau eine sein kann — die feste oder die einzige der
+        Auswahl; ``None`` bei mehreren (welche es wird, steht erst mit der Wahl fest) und ohne."""
+        ids = list(dict.fromkeys(self.uebungen_von(block)))
+        return self.katalog[ids[0]] if len(ids) == 1 else None
+
+    def uhr_text(self, block: Block) -> str:
+        """Die Zeile unter „Uhr“: der **eigene** Timer in Kurzform mit seiner Gesamtzeit — bei
+        „Timer der Übung“, welcher das gerade ist, oder dass sie keinen hat und der Test dann
+        mit der Stoppuhr läuft (`core.kurstest.uhr_fuer`). Leer bei der Stoppuhr.
+
+        >>> from trainingsapp.core.timer import Abschnitt
+        >>> t = TimerProfil(id="x", name="Halten", abschnitte=[Abschnitt("Halten", 30)], runden=3)
+        >>> katalog = {"p": Exercise(id="p", name="Planke", timer=[t.als_dict()]),
+        ...            "k": Exercise(id="k", name="Käfer")}
+        >>> wahl = Block(AUSWAHL, id="w", uebungen=["p", "k"])
+        >>> s = Kurssicht(Kurs(kapitel=[Kapitel(id="a")]), "a", [wahl], katalog)
+        >>> s.uhr_text(Block(TEST, uebung="p"))
+        ''
+        >>> s.uhr_text(Block(TEST, uebung="p", timer=t.als_dict()))
+        '0:30 Halten · 3 Runden · gesamt 1:30'
+        >>> s.uhr_text(Block(TEST, uebung="p", wie_uebung=["uhr"]))
+        'Planke: 0:30 Halten · 3 Runden · gesamt 1:30'
+        >>> s.uhr_text(Block(TEST, uebung="k", wie_uebung=["uhr"]))
+        'Käfer hat gerade keinen Timer — dann läuft die Stoppuhr.'
+        >>> s.uhr_text(Block(TEST, aus="w", wie_uebung=["uhr"]))
+        'der Timer der gewählten Übung — hat sie keinen, die Stoppuhr'
+        """
+        wahl = Laufwahl.aus(block)
+        if wahl.uhr == EIGEN:
+            return _timer_zeile(uhr_fuer(block))
+        if wahl.uhr != WIE:
+            return ""
+        uebung = self._eine(block)
+        if uebung is None:
+            return (
+                "der Timer der gewählten Übung — hat sie keinen, die Stoppuhr" if block.aus else ""
+            )
+        profil = uhr_fuer(block, uebung)
+        if profil.ist_stoppuhr:
+            return f"{uebung.name} hat gerade keinen Timer — dann läuft die Stoppuhr."
+        return f"{uebung.name}: {_timer_zeile(profil)}"
+
+    def takt_text(self, block: Block) -> str:
+        """Die Zeile unter „Takt“: der **eigene** Takt, wie Formulare ihn nennen (Name und
+        Kurzform) — bei „Wie die Übung“ ihr Takt, oder dass sie keinen hat
+        (`core.kurstest.takt_fuer`). Leer ohne Takt.
+
+        >>> from trainingsapp.core.takt import VORLAGEN
+        >>> katalog = {"a": Exercise(id="a", name="Atmen", takt=VORLAGEN["atmung_4_6"]),
+        ...            "k": Exercise(id="k", name="Käfer")}
+        >>> s = Kurssicht(Kurs(), "", [], katalog)
+        >>> s.takt_text(Block(TEST, uebung="k", takt=VORLAGEN["atmung_4_6"]))
+        'Atmung 4-6 · 4-6 · 6,0/min'
+        >>> s.takt_text(Block(TEST, uebung="a", wie_uebung=["takt"]))
+        'Atmen: Atmung 4-6 · 4-6 · 6,0/min'
+        >>> s.takt_text(Block(TEST, uebung="k", wie_uebung=["takt"])), s.takt_text(Block(TEST))
+        ('Käfer hat gerade keinen Takt — dann läuft der Test ohne.', '')
+        """
+        wahl = Laufwahl.aus(block)
+        if wahl.takt_art == EIGEN and wahl.takt is not None:
+            return _takt_zeile(wahl.takt)
+        if wahl.takt_art != WIE:
+            return ""
+        uebung = self._eine(block)
+        if uebung is None:
+            return "der Takt der gewählten Übung — hat sie keinen, ohne" if block.aus else ""
+        takt = takt_fuer(block, uebung)
+        if takt is None:
+            return f"{uebung.name} hat gerade keinen Takt — dann läuft der Test ohne."
+        return f"{uebung.name}: {_takt_zeile(takt)}"
+
+    def ausfuehrung_text(self, block: Block) -> str:
+        """Die Zeile unter „Ausführung“: was **vorgegeben** ist (die Werte, wie eine Runde des
+        Timers sie nennt — `core.uebung_timer.ausfuehrung_text`) und was die Person **wählt**
+        (die Namen der Parameter). Bei „Wie die Übung“ die Parameter, unter denen sie wählt
+        (`ausfuehrung`). Leer ohne Ausführung.
+
+        >>> katalog = {"k": Exercise(id="k", name="Käfer", result_spec=ResultSpec(
+        ...     fields=[vorrat_feld(k) for k in ("reps", "side", "weight")])),
+        ...     "p": Exercise(id="p", name="Planke")}
+        >>> s = Kurssicht(Kurs(), "", [], katalog)
+        >>> s.ausfuehrung_text(Block(TEST, uebung="k", wie_uebung=["parameter"]))
+        'wählt die Person: Seite, Gewicht'
+        >>> s.ausfuehrung_text(Block(TEST, uebung="k", ziel={"weight": 10, "side": "links"}))
+        'vorgegeben: links · 10 kg'
+        >>> s.ausfuehrung_text(Block(TEST, uebung="k", ziel={"weight": 10}, felder=["side"]))
+        'vorgegeben: 10 kg — wählt die Person: Seite'
+        >>> s.ausfuehrung_text(Block(TEST, uebung="p", wie_uebung=["parameter"]))
+        'Planke hat keine Parameter zur Wahl.'
+        >>> s.ausfuehrung_text(Block(TEST, uebung="k"))
+        ''
+        """
+        wahl = Laufwahl.aus(block)
+        ids = self.uebungen_von(block)
+        angebot, _ = self.ausfuehrung(ids)
+        if wahl.ausfuehrung == WIE:
+            if angebot:
+                return "wählt die Person: " + ", ".join(f.label for f in angebot)
+            uebung = self._eine(block)
+            if uebung is not None:
+                return f"{uebung.name} hat keine Parameter zur Wahl."
+            return "die Parameter der gewählten Übung" if block.aus else ""
+        if wahl.ausfuehrung != EIGEN:
+            return ""
+        bekannt = {f.key: f for f in angebot}
+        teile: list[str] = []
+        if wahl.ziel:
+            # in der Folge des Angebots; was es nicht kennt (ein Feld von früher), am Ende
+            reihe = [k for k in bekannt if k in wahl.ziel] + [
+                k for k in wahl.ziel if k not in bekannt
+            ]
+            felder = [bekannt.get(k) or self.feld(ids, k) for k in reihe]
+            teile.append("vorgegeben: " + ausfuehrung_text(wahl.ziel, felder))
+        if wahl.felder:
+            namen = [(bekannt.get(k) or self.feld(ids, k)).label for k in wahl.felder]
+            teile.append("wählt die Person: " + ", ".join(namen))
+        return " — ".join(teile)
 
     def parameter(self, uebungen: Sequence[str]) -> tuple[list[FieldSpec], list[FieldSpec]]:
         """Was ein Baustein als Parameter anbieten kann — wie in „Im Plan einstellen“
@@ -1198,6 +1705,11 @@ class Kurssicht:
         'Käfer: 1 Minute — wird Ziel im Plan (80 %)'
         >>> s.test_kurz(Block(TEST, uebung="x"), kapitelplan=True, fehlt="Übung wählen")
         'Übung wählen — wird Ziel im Plan'
+
+        Ein gestalteter Test nennt am Ende seinen Takt und seinen Timer (`zusatz_des_tests`):
+
+        >>> s.test_kurz(Block(TEST, uebung="k", feld="reps", wie_uebung=["takt", "uhr"]))
+        'Käfer · Wiederholungen · mit Takt · Timer der Übung'
         """
         uebungen = self.uebungen_von(block)
         if block.aus:
@@ -1208,12 +1720,13 @@ class Kurssicht:
         if block.vorgabe is not None:
             wie = vorgabe_text(block.vorgabe, self.skala(uebungen), satzanfang=False)
             kopf = f"{kopf}: {wie}"
+        zusatz = f" · {z}" if (z := zusatz_des_tests(block)) else ""
         if kapitelplan:
             anteil = f" ({round(block.faktor * 100)} %)" if block.faktor != 1.0 else ""
-            return f"{kopf} — wird Ziel im Plan{anteil}"
+            return f"{kopf} — wird Ziel im Plan{anteil}{zusatz}"
         if feld_ist_vorgabe(block.vorgabe, block.feld):
-            return kopf
-        return f"{kopf} · {self.feld(uebungen, block.feld).label}"
+            return f"{kopf}{zusatz}"
+        return f"{kopf} · {self.feld(uebungen, block.feld).label}{zusatz}"
 
     def _angaben(self, block: Block, uebungen: Sequence[str]) -> list[str]:
         teile: list[str] = []
@@ -1392,6 +1905,8 @@ class Kurssicht:
 
         - die **Überschrift der Testkarte** (`name_des_tests`: die Aufforderung, sonst die
           Übung und ihre Vorgabe) — misst er „die gewählte“, je Übung der Beispielwahl eine;
+          bei einem gestalteten Test dahinter Takt und Timer, darunter der Satz der Karte,
+          wie der Test läuft (`Kapitelvorschau.lauf`);
         - im Kurs mit Kursplan die **Zeilen der Sammelkarte**, die ihr Ziel aus diesem Test
           nehmen — in diesem Kapitel und in späteren (ein Baustein darf den Test eines
           früheren Kapitels nennen). Sie kommen aus `vorschau` des jeweiligen Kapitels, also
@@ -1413,16 +1928,49 @@ class Kurssicht:
         >>> ohne = Kurssicht(Kurs(kapitel=[kap]), "a", kap.bloecke, katalog).test_vorschau(test)
         >>> ohne.kopf, ohne.zeilen
         (('Käfer: bis Anstrengung 7',), ())
+
+        Ein gestalteter Test nennt hinter der Überschrift Takt und Timer (`zusatz_des_tests`),
+        darunter steht der Satz der Testkarte (`core.kurstest.lauf_satz` — hier nicht nachgebaut):
+
+        >>> from trainingsapp.core.takt import VORLAGEN
+        >>> mit_takt = replace(test, takt=VORLAGEN["metronom_1"], felder=["side"])
+        >>> sicht = Kurssicht(Kurs(kapitel=[kap]), "a", kap.bloecke, katalog)
+        >>> v = sicht.test_vorschau(mit_takt)
+        >>> v.kopf, v.lauf == (lauf_satz(mit_takt, katalog["k"]),), ohne.lauf
+        (('Käfer: bis Anstrengung 7 · mit Takt',), True, ('',))
+
+        Gilt im Lauf keine Vorgabe — ein gestalteter Test ohne, oder eine „Zeit“ neben einem
+        Timer (`core.kurstest.vorgabe_fuer`) —, fragt die Karte wie beim Test von bisher:
+
+        >>> sicht.test_vorschau(replace(mit_takt, vorgabe=None)).kopf
+        ('Käfer: was schaffst du? · mit Takt',)
+        >>> timer = {"id": "t", "name": "Runden", "abschnitte": [{"name": "Üben", "dauer_s": 30}]}
+        >>> sicht.test_vorschau(replace(test, vorgabe=Vorgabe(ZEIT, 60), timer=timer)).kopf
+        ('Käfer: was schaffst du? · Timer „Runden“',)
         """
         sicht = self.mit(block)
+
+        def ueberschrift(uebung: Exercise | None, name: str, skala: str) -> str:
+            """Wie über der Testkarte: die Aufforderung, sonst die Übung mit der Vorgabe, die
+            im Lauf **gilt** — ohne eine (bei einem Test, der läuft) die Frage `OHNE_VORGABE`."""
+            gilt = replace(block, vorgabe=vorgabe_fuer(block, uhr_fuer(block, uebung)))
+            kopf = name_des_tests(gilt, self.katalog, name, skala)
+            fragt = block.laeuft and gilt.vorgabe is None and not block.titel
+            return f"{kopf}: {OHNE_VORGABE}" if fragt else kopf
+
         gemessen = [u for u in gemessene_uebungen(block, sicht.beispielwahl()) if u in self.katalog]
         if block.aus and gemessen and not block.titel:
             kopf = tuple(
-                name_des_tests(block, self.katalog, self.name(u), self.skala([u])) for u in gemessen
+                ueberschrift(self.katalog[u], self.name(u), self.skala([u])) for u in gemessen
             )
+            lauf = tuple(lauf_satz(block, self.katalog[u]) for u in gemessen)
         else:
+            eine = sicht._eine(block)
             wie = self.skala(sicht.uebungen_von(block))
-            kopf = (name_des_tests(block, self.katalog, sicht.wer(block), wie),)
+            kopf = (ueberschrift(eine, sicht.wer(block), wie),)
+            lauf = (lauf_satz(block, eine),)
+        if zusatz := zusatz_des_tests(block):
+            kopf = tuple(f"{k} · {zusatz}" for k in kopf)
         zeilen: list[tuple[str, Aenderung]] = []
         beispiel = ""
         ab_hier = False
@@ -1450,7 +1998,7 @@ class Kurssicht:
                 baustein = dort.block(z.block_id)
                 if not beispiel and baustein is not None:
                     beispiel = dort.beispiel_text(baustein, vorschau)
-        return Kapitelvorschau(kopf, tuple(zeilen), beispiel)
+        return Kapitelvorschau(kopf, tuple(zeilen), beispiel, lauf)
 
 
 def folgen_anwenden(bloecke: Sequence[Block], folgen: Iterable[Folge]) -> list[Block]:
@@ -1547,7 +2095,9 @@ def _kursplan_kopie(
 
 __all__ = [
     "AB",
+    "AUSFUEHRUNG_WAHL",
     "BEISPIELWERT",
+    "EIGEN",
     "FAKTOR_MAX",
     "FAKTOR_MIN",
     "FELDNAME",
@@ -1555,14 +2105,22 @@ __all__ = [
     "ID_VORSATZ",
     "MIT_GELOESCHT",
     "OHNE",
+    "OHNE_VORGABE",
     "SKALA_FORMEN",
+    "STANDARD",
+    "TAKT_WAHL",
     "TESTFELDER",
+    "UHR_WAHL",
     "VERWEISFELDER",
     "VON_BIS",
     "VORGABE_WAHL",
+    "WIE",
+    "ZEIT_FAELLT_WEG",
+    "ZEIT_UND_TIMER",
     "Folge",
     "Kapitelvorschau",
     "Kurssicht",
+    "Laufwahl",
     "Vorgabenwahl",
     "Vorschau",
     "auswahl_name",
@@ -1580,9 +2138,12 @@ __all__ = [
     "ohne_verweis",
     "timer_einbetten",
     "timer_kern",
+    "timer_kurzname",
     "timer_text",
     "umschreiben",
     "vergebene_ids",
     "verweise",
+    "vorgabe_wahl",
     "zielfeld",
+    "zusatz_des_tests",
 ]

@@ -1,6 +1,7 @@
 """Die Geometrie des Ablaufbilds (Ben, 10.11.2026): ein Austrittspunkt je Übung, Wege ohne
 fremde Knoten zu kreuzen, Rückwege in Gassen, Stummel für „◀ zurück“ und „Ende“. Seit
-16.11.2026: ein Abzweig nur, wo mehrere Wege abgehen — ein eindeutiger Weg hat einen Punkt."""
+16.11.2026: ein Abzweig nur, wo mehrere Wege abgehen — ein eindeutiger Weg hat einen Punkt;
+und jeder Knoten hat **seinen** Punkt, an dem man im Reiter „Ablauf“ einen Weg zieht."""
 
 from __future__ import annotations
 
@@ -133,11 +134,58 @@ def test_eindeutiger_weg_hat_nur_einen_punkt() -> None:
     (weg,) = [w for w in g.wege if w.kante.von == "b"]
     assert g.austritte["b"][1] < weg.griff[1] < g.mitten["d"][1] - 32
     assert len(g.wege) == len(a.kanten)
-    # Ein Slot an einer Übung ohne Weg bekommt einen Austritt, aber keinen Abzweig
+    # Eine Übung ohne Weg hat weder Austritt noch Stamm noch Abzweig
     leer = Ablauf(True, "a")
-    g = geo.geometrie(leer, ab.layout(leer, ["a"]), mit_abzweig=["a"])
-    assert sorted(g.austritte) == ["a"] and g.abzweige == {}
+    g = geo.geometrie(leer, ab.layout(leer, ["a"]))
+    assert g.austritte == {} and g.staemme == {} and g.abzweige == {}
     # Zeigt einer von zwei Wegen auf einen Knoten, der nicht gezeichnet wird, bleibt ein Punkt
     halb = Ablauf(True, "a", (Kante("a", "b"), Kante("a", "x")))
     g = geo.geometrie(halb, ab.layout(halb, ["a", "b"]))
     assert g.abzweige == {} and [w.kante.nach for w in g.wege] == ["b"]
+
+
+def test_jeder_knoten_hat_seinen_punkt() -> None:
+    """Ben, 16.11.2026: „Ziehen von einem Knoten auf eine Übung zum Verbinden“ — der Punkt, an
+    dem gezogen wird, ist bei mehreren Wegen der Abzweig, bei genau einem dessen Griff (es
+    bleibt bei einem Punkt zwischen zwei Übungen) und ohne Weg eine Stelle knapp unter der
+    Beschriftung. Wo er liegt, sagt die Geometrie, nicht die Oberfläche."""
+    a = Ablauf(
+        True,
+        "a",
+        (
+            Kante("a", "b"),  # a: zwei Wege → der Abzweig
+            Kante("a", "c"),
+            Kante("b", "d"),  # b: ein Weg → sein Griff
+            Kante("c", "f"),  # c: ein Weg zu einer Frage
+            Kante("f", ab.ENDE),  # die Frage: nur der Stummel „Ende“
+        ),
+        (Frage("f", "Wie geht es?"),),
+    )
+    ids = ["a", "b", "c", "d"]
+    lage = ab.layout(a, ids)
+    g = geo.geometrie(a, lage, beschriftung={"d": 48.0})
+    assert sorted(g.punkte) == sorted(g.mitten) == ["a", "b", "c", "d", "f"]
+    assert g.punkte["a"] == g.abzweige["a"]
+    griff = {w.kante.von: w.griff for w in g.wege}
+    assert g.punkte["b"] == griff["b"] and g.punkte["c"] == griff["c"]
+    assert g.punkte["f"] == griff["f"]  # der Stummel „Ende“ der Frage
+    # „d“ hat keinen Weg: der Punkt liegt mittig unter Bild und Beschriftung — so tief, wie
+    # der Austritt läge; einen Stamm dorthin gibt es nicht
+    x, y = g.mitten["d"]
+    assert g.punkte["d"] == (x, y + geo.KNOTEN / 2 + 48.0 + geo.AUSTRITT)
+    assert "d" not in g.austritte and "d" not in g.staemme
+    # Keine zwei Punkte liegen aufeinander, jeder liegt in der Fläche
+    punkte = list(g.punkte.values())
+    for i, p in enumerate(punkte):
+        assert 0 < p[0] < g.breite and 0 < p[1] < g.hoehe
+        for q in punkte[i + 1 :]:
+            assert abs(p[0] - q[0]) + abs(p[1] - q[1]) > 30
+    # Eine Frage ohne Weg: unter der Karte
+    nur = Ablauf(True, "a", (Kante("a", "f"),), (Frage("f"),))
+    g = geo.geometrie(nur, ab.layout(nur, ["a"]))
+    x, y = g.mitten["f"]
+    assert g.punkte["f"] == (x, y + geo.FRAGE_H / 2 + geo.AUSTRITT_FRAGE)
+    # „Start“ hat denselben Punkt: an der Unterkante der Pille, über der Startübung
+    sx, sy = geo.start_punkt(g.mitten["a"][0])
+    assert sx == g.mitten["a"][0] and sy == geo.RAND + geo.START_H
+    assert sy < g.mitten["a"][1] - geo.KNOTEN / 2

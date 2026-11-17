@@ -111,7 +111,7 @@ def test_migration_062_fuellt_die_uebung_der_strecke(tmp_path) -> None:
         )
     con.commit()
 
-    assert migrieren(con) == 64
+    assert migrieren(con) == 65
     strecken = StreckeRepo(con)
     assert strecken.laden("mit").exercise_id == "u"
     assert strecken.laden("ohne").exercise_id is None

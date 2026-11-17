@@ -7,7 +7,10 @@ ihm der **Abzweig** (ein Knoten zum Antippen: alle Wege dieser Übung), und jede
 seinen eigenen **Griff** (Punkt mit Beschriftung: nur dieser Weg). Ist der Weg **eindeutig** —
 genau einer —, gibt es keinen Abzweig: Zwischen den zwei Übungen steht nur der Griff (Ben,
 16.11.2026: „wenn ein Weg eindeutig ist, keine zwei Knoten zwischen den Übungen, sondern nur
-1“). Die Wege:
+1“). So hat jeder Knoten **seinen Punkt** (`Geometrie.punkte`): den Abzweig, den einen Griff
+oder — ohne Weg — die Stelle unter der Beschriftung, an der der Austritt läge; im Reiter
+„Ablauf“ zieht man ihn auf eine andere Übung (Ben, 16.11.2026). „Start“ hat denselben Punkt
+(`start_punkt`). Die Wege:
 
 - **ab**: zu einem Knoten weiter unten — eine weiche Kurve zur Oberkante; liegt ein anderer
   Knoten im Weg (der Weg überspringt Ebenen), weicht sie seitlich aus;
@@ -24,7 +27,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from .ablauf import Ablauf, Kante, Lage
@@ -125,8 +128,7 @@ class Geometrie:
 
     #: Pixelmitte je Knoten (Mitte des Übungsbilds bzw. der Fragekarte)
     mitten: dict[str, Punkt]
-    #: der Austritt je Knoten mit Wegen (oder Slot): dort endet der Stamm, dort beginnen alle
-    #: seine Wege
+    #: der Austritt je Knoten mit Wegen: dort endet der Stamm, dort beginnen alle seine Wege
     austritte: dict[str, Punkt]
     #: der Abzweig — ein Punkt zum Antippen am Austritt —, nur wo **mehrere** Wege abgehen;
     #: bei genau einem Weg steht allein dessen Griff zwischen den Übungen
@@ -138,6 +140,10 @@ class Geometrie:
     hoehe: float
     #: die kleinste Spalte — für `ort`
     x_min: float
+    #: **der Punkt** je gezeichnetem Knoten — an ihm beginnen seine Wege, an ihm zieht man
+    #: einen neuen (Ben, 16.11.2026): bei mehreren Wegen der Abzweig, bei genau einem dessen
+    #: Griff, ohne gezeichneten Weg die Stelle knapp unter der Beschriftung
+    punkte: dict[str, Punkt]
 
 
 def ort(lage: Lage, x_min: float = 0.0) -> Punkt:
@@ -152,18 +158,26 @@ def ort(lage: Lage, x_min: float = 0.0) -> Punkt:
     )
 
 
+def start_punkt(x: float) -> Punkt:
+    """Der Punkt von „Start“ — an der Unterkante der Pille bei ``x``, von dort führt der Pfeil
+    zur Startübung. Im Reiter „Ablauf“ zieht man ihn auf eine Übung: Sie wird der Start.
+
+    >>> start_punkt(140.0) == (140.0, RAND + START_H)
+    True
+    """
+    return (x, float(RAND + START_H))
+
+
 def geometrie(
     ablauf: Ablauf,
     lage: Mapping[str, Lage],
     *,
     beschriftung: Mapping[str, float] | None = None,
     weitere: Sequence[Lage] = (),
-    mit_abzweig: Iterable[str] = (),
 ) -> Geometrie:
     """Die Geometrie zu den Lagen der gezeichneten Knoten. ``beschriftung``: Höhe des Texts
-    unter dem Bild je Planübung (sonst `NAME_H`); ``weitere``: Lagen ohne Knoten (leere Slots)
-    — sie zählen für die Größe; ``mit_abzweig``: Knoten, die auch ohne Weg einen Austritt
-    bekommen (ein Slot hängt daran).
+    unter dem Bild je Planübung (sonst `NAME_H`); ``weitere``: Lagen ohne Knoten (der leere
+    Platz unter „Start“) — sie zählen für die Größe.
 
     >>> a = Ablauf(True, "p", (Kante("p", "k"), Kante("p", "r"), Kante("k", "p")))
     >>> g = geometrie(a, {"p": Lage(0.5, 0), "k": Lage(0.0, 1), "r": Lage(1.0, 1)})
@@ -175,6 +189,11 @@ def geometrie(
     True
     >>> sorted(g.abzweige)  # „p“ hat zwei Wege: Abzweig und Griffe; „k“ einen: nur den Griff
     ['p']
+    >>> weg_k = next(w for w in g.wege if w.kante.von == "k")
+    >>> g.punkte["p"] == g.abzweige["p"], g.punkte["k"] == weg_k.griff  # je Knoten ein Punkt
+    (True, True)
+    >>> g.punkte["r"][1] - g.mitten["r"][1] == KNOTEN / 2 + NAME_H + AUSTRITT  # ohne Weg
+    True
     """
     text_h = dict(beschriftung or {})
     fragen = {f.id for f in ablauf.fragen}
@@ -218,18 +237,22 @@ def geometrie(
                         n += 1
         return n
 
-    austritte: dict[str, Punkt] = {}
-    staemme: dict[str, tuple[Punkt, Punkt]] = {}
-    for kn in dict.fromkeys([*(x.von for x in ablauf.kanten), *mit_abzweig]):
-        if kn not in mitten:
-            continue
-        x, y = mitten[kn]
+    def unter(kn: str) -> tuple[float, float]:
+        """Wo der Stamm eines Knotens beginnt und wo er endet (Höhe des Austritts)."""
+        y = mitten[kn][1]
         if kn in fragen:
             beginn = y + FRAGE_H / 2
-            unten = beginn + AUSTRITT_FRAGE
-        else:
-            beginn = y + KNOTEN / 2 + text_h.get(kn, NAME_H) + 2
-            unten = y + KNOTEN / 2 + text_h.get(kn, NAME_H) + AUSTRITT
+            return beginn, beginn + AUSTRITT_FRAGE
+        text = y + KNOTEN / 2 + text_h.get(kn, NAME_H)
+        return text + 2, text + AUSTRITT
+
+    austritte: dict[str, Punkt] = {}
+    staemme: dict[str, tuple[Punkt, Punkt]] = {}
+    for kn in dict.fromkeys(x.von for x in ablauf.kanten):
+        if kn not in mitten:
+            continue
+        x = mitten[kn][0]
+        beginn, unten = unter(kn)
         austritte[kn] = (x, unten)
         staemme[kn] = ((x, min(beginn, unten - 8)), (x, unten))
 
@@ -339,7 +362,15 @@ def geometrie(
     # zwischen den zwei Übungen ein Punkt — sein Griff (Ben, 16.11.2026)
     anzahl = Counter(w.kante.von for w in wege)
     abzweige = {kn: p for kn, p in austritte.items() if anzahl[kn] >= 2}
-    return Geometrie(mitten, austritte, abzweige, staemme, tuple(wege), breite, hoehe, x_min)
+    # Der Punkt je Knoten: der Abzweig, der Griff des einen Wegs — oder, ohne gezeichneten Weg,
+    # die Stelle, an der der Austritt läge
+    griffe = {w.kante.von: w.griff for w in wege if anzahl[w.kante.von] == 1}
+    punkte = {
+        kn: abzweige.get(kn) or griffe.get(kn) or (mitten[kn][0], unter(kn)[1]) for kn in mitten
+    }
+    return Geometrie(
+        mitten, austritte, abzweige, staemme, tuple(wege), breite, hoehe, x_min, punkte
+    )
 
 
 __all__ = [
@@ -364,4 +395,5 @@ __all__ = [
     "geometrie",
     "gerade",
     "ort",
+    "start_punkt",
 ]

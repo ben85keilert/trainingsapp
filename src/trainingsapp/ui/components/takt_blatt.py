@@ -78,6 +78,7 @@ def takt_blatt(
     starten: Callable[[Takt], Any] | None = None,
     zuruecksetzen: Callable[[], Any] | None = None,
     uebung_name: str = "",
+    plan_ort: str = "In diesem Plan",
 ) -> ft.BottomSheet:
     """Das Blatt. ``takt`` ist der Ausgangspunkt (``None`` = die erste Vorlage); jeder Knopf
     bekommt den gebauten Takt — oder ``None`` für „kein Takt“ (✕ „Kein Takt“). ``fuer_jetzt``:
@@ -89,7 +90,9 @@ def takt_blatt(
     **Ein Blatt für alle Orte** (K5, Ben 8.11.2026, `docs/plan_uhren.md` §4.8): Oben steht die
     **Geltung** — Für jetzt · Abschnitt · In diesem Plan · Übung (· Vorlage) —, vorbelegt nach dem
     Ort, der das Blatt öffnete; unten ein einziges „Übernehmen“. ``in_die_bibliothek``: ein
-    Eintrag der Takt-Bibliothek (Timer → Vorlagen → Takte), ``None`` = löschen."""
+    Eintrag der Takt-Bibliothek (Timer → Vorlagen → Takte), ``None`` = löschen.
+    ``plan_ort``: wie der Ort von ``in_den_plan`` heißt — der Test eines Kurses sagt „In
+    diesem Test“ (Web-Foto 16.11.2026: dort stand „Gilt: In diesem Plan“)."""
     nachher = Nachher()
     blatt: ft.BottomSheet
     zeilen: list[_Zeile] = []
@@ -461,7 +464,7 @@ def takt_blatt(
     if in_den_abschnitt is not None:
         ziele.append(("abschnitt", "Abschnitt", in_den_abschnitt))
     if in_den_plan is not None:
-        ziele.append(("plan", "In diesem Plan", in_den_plan))
+        ziele.append(("plan", plan_ort, in_den_plan))
     if in_die_uebung is not None:
         ziele.append(
             ("uebung", f"Übung{' „' + uebung_name + '“' if uebung_name else ''}", in_die_uebung)

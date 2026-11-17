@@ -27,6 +27,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import ablauf as ab
 from trainingsapp.core import varianten as var
 from trainingsapp.core import zaehlen as zl
 from trainingsapp.core.abgleich import schluessel_abschnitte
@@ -619,7 +620,22 @@ def uebung_detail(
         state.uebungen.in_papierkorb(uebung.id)
         entfernt.danach(lambda: page.push_route("/"))
         obersten_schliessen(page)
-        page.show_dialog(meldung(f"„{uebung.name}“ liegt im Papierkorb", rueckgaengig))
+        # Fehlt sie jetzt im Ablauf eines Workouts, sagt es die Meldung gleich (Ben,
+        # 16.11.2026: „Wenn was fehlt, kommt eine Fehlermeldung … sonst ändert sich was und
+        # man merkt es nicht“) — das Workout beginnt nicht, bis der Plan repariert ist
+        betroffen = [
+            p.name
+            for p in state.plaene.alle(state.profil.id)
+            if ab.fehlende(p.ablauf, [it.id for it in p.items])
+        ]
+        zusatz = (
+            f" — im Ablauf von „{'“, „'.join(betroffen)}“ fehlt sie jetzt: "
+            + ("Der Plan muss" if len(betroffen) == 1 else "Die Pläne müssen")
+            + " korrigiert werden."
+            if betroffen
+            else ""
+        )
+        page.show_dialog(meldung(f"„{uebung.name}“ liegt im Papierkorb{zusatz}", rueckgaengig))
 
     def rueckgaengig() -> None:
         state.uebungen.aus_papierkorb(uebung.id)

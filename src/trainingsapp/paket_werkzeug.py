@@ -61,6 +61,8 @@ from trainingsapp.core.kursbloecke import (
     SKALA,
     TEST,
     VORGABEN,
+    WIE_UEBUNG,
+    WIE_UHR,
     ZEIT,
     ZU_ENDE,
     Block,
@@ -776,6 +778,15 @@ def _kurs_pruefen(
         fehler.extend(f"{s.ort}: {x}" for x in f_vorgabe)
         hinweise.extend(f"{s.ort}: {x}" for x in h_vorgabe)
 
+    # Ein gestalteter Test (Timer, Takt, Ausführung, „wie die Übung“): was er festlegt, muss
+    # zum Lauf passen
+    for s in stellen:
+        if s.art != TEST:
+            continue
+        f_frei, h_frei = _gestaltung_pruefen(s.roh)
+        fehler.extend(f"{s.ort}: {x}" for x in f_frei)
+        hinweise.extend(f"{s.ort}: {x}" for x in h_frei)
+
     # Ein Test, der „die gewählte“ misst (`aus`), braucht seine Auswahl — hier oder davor
     for s in stellen:
         aus = _marke_roh(s.roh.get("aus")) if s.art == TEST else ""
@@ -872,6 +883,78 @@ def _vorgabe_pruefen(
         hinweise.append(
             f"`vorgabe` Menge, aber „{uebung}“ hat kein Wiederholungsfeld — der Eintrag des "
             "Tests bringt es mit, im Plan zeigt die Übung es nicht"
+        )
+    return fehler, hinweise
+
+
+#: Was der Lauf eines Tests misst — das kann nicht zur Ausführung gehören (nach der Art)
+_GEMESSEN = ("reps", "hold", "duration", "seconds", "scale")
+
+
+def _gestaltung_pruefen(block: Mapping[str, Any]) -> tuple[list[str], list[str]]:
+    """``(Fehler, Hinweise)`` zu einem **gestalteten** Test (`core.kursbloecke.Block.gestaltet`,
+    `docs/uebungspakete.md` „Test, flexibel gestaltet“): ``wie_uebung``, ``timer``, ``takt``,
+    ``ziel`` (vorgegebene Ausführung) und ``felder`` (frei gewählte Parameter).
+
+    >>> _gestaltung_pruefen({"art": "test", "wie_uebung": ["uhr", "takt"]})
+    ([], [])
+    >>> _gestaltung_pruefen({"art": "test", "wie_uebung": ["uhr", "wetter"]})[0][0][:36]
+    '`wie_uebung`: „wetter“ ist unbekannt'
+    >>> _gestaltung_pruefen({"art": "test", "ziel": {"reps": 10}, "felder": ["weight"]})[0][0][:39]
+    '`ziel`: „reps“ misst der Lauf des Tests'
+    >>> zeit = {"art": "zeit", "n": 60}
+    >>> _gestaltung_pruefen({"art": "test", "vorgabe": zeit, "wie_uebung": ["uhr"]})[1][0][:36]
+    'Der Test läuft mit einem Timer — die'
+    """
+    fehler: list[str] = []
+    hinweise: list[str] = []
+    wie = block.get("wie_uebung")
+    if wie is not None:
+        if not isinstance(wie, list):
+            fehler.append("`wie_uebung` ist keine Liste (aus: " + ", ".join(WIE_UEBUNG) + ")")
+            wie = []
+        for w in wie:
+            if str(w) not in WIE_UEBUNG:
+                bekannt = ", ".join(WIE_UEBUNG)
+                fehler.append(f"`wie_uebung`: „{w}“ ist unbekannt (bekannt: {bekannt})")
+    if "ziel" in block:
+        ziel = block["ziel"]
+        if not isinstance(ziel, Mapping):
+            fehler.append("`ziel` ist keine Tabelle (beim Test: die vorgegebene Ausführung)")
+        else:
+            for k in ziel:
+                if basis_key(str(k)) in _GEMESSEN:
+                    fehler.append(
+                        f"`ziel`: „{k}“ misst der Lauf des Tests — beim Test gibt `ziel` nur "
+                        "die Ausführung vor (Variante, Seite, Gewicht …); was den Lauf beendet, "
+                        "steht in `vorgabe`"
+                    )
+    if "felder" in block:
+        felder = block["felder"]
+        if not isinstance(felder, list):
+            fehler.append("`felder` ist keine Liste (beim Test: frei gewählte Parameter)")
+        else:
+            for k in felder:
+                if basis_key(str(k)) in _GEMESSEN:
+                    fehler.append(
+                        f"`felder`: „{k}“ misst der Lauf des Tests — frei wählen lässt sich nur "
+                        "die Ausführung"
+                    )
+    if "takt" in block and block["takt"] != {}:
+        f_takt, h_takt = takt_pruefen(block["takt"])
+        fehler.extend(f"takt: {x}" for x in f_takt)
+        hinweise.extend(f"takt: {x}" for x in h_takt)
+    if "timer" in block and not isinstance(block["timer"], Mapping):
+        fehler.append("`timer` ist keine Tabelle (ein Timer wie bei einer Planübung)")
+    mit_timer = bool(block.get("timer")) or WIE_UHR in [str(w) for w in wie or []]
+    vorgabe = block.get("vorgabe")
+    zeit_vorgegeben = (
+        isinstance(vorgabe, Mapping) and str(vorgabe.get("art") or "").strip().lower() == ZEIT
+    )
+    if mit_timer and zeit_vorgegeben:
+        hinweise.append(
+            "Der Test läuft mit einem Timer — die Vorgabe „Zeit“ gilt dann nicht (der Timer "
+            "ist die Zeit)"
         )
     return fehler, hinweise
 

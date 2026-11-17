@@ -56,6 +56,7 @@ from ..core.kurse import (
     Kapitelstand,
     Kurs,
     Kursplan,
+    Kursvariable,
     PlanVorlage,
     Stand,
     aktuelles,
@@ -394,23 +395,77 @@ class KursRepo:
         return self.kapitel_plaene(kapitel.id, subject_id)
 
     def testwerte(self, kapitel: Kapitel, subject_id: str, seit: datetime) -> dict[str, float]:
-        """Je Test-Block der Wert aus dem jüngsten Eintrag seiner Übung seit ``seit`` (dem
-        Erreichen des Kapitels) — ein gewöhnlicher Eintrag, kein Messwert.
+        """Je Test-Block sein Wert: die **Variable**, die er hinterlassen hat (`variablen` —
+        der Testlauf oder das abgeschlossene Kapitel), sonst der eigene Wert der Übung: ihr
+        jüngster Eintrag seit ``seit`` (dem Erreichen des Kapitels) — ein gewöhnlicher
+        Eintrag, kein Messwert.
 
         Ein Test mit ``aus`` misst „die gewählte“ (Ben, 16.11.2026): Er bekommt je Übung, die
         in seiner Auswahl zur Wahl steht, einen Wert unter ``<block>:<übung>``
         (`core.kursbloecke.wert_schluessel`) — welcher zählt, sagt die Wahl."""
         ergebnis: dict[str, float] = {}
+        gespeichert = self.variablen(kapitel.kurs_id, subject_id) if kapitel.kurs_id else {}
         eintraege = self.testeintraege(kapitel, subject_id, seit)
         for block in kapitel.bloecke:
             if block.art != TEST:
                 continue
             for uebung in self._zu_messen(kapitel, block):
-                eintrag = eintraege.get(wert_schluessel(block, uebung))
+                name = wert_schluessel(block, uebung)
+                if name in gespeichert:  # die Variable geht vor (Migration 065)
+                    ergebnis[name] = gespeichert[name].wert
+                    continue
+                eintrag = eintraege.get(name)
                 wert = wert_im_test(eintrag.result, block.feld) if eintrag is not None else None
                 if wert is not None and wert > 0:
-                    ergebnis[wert_schluessel(block, uebung)] = wert
+                    ergebnis[name] = wert
         return ergebnis
+
+    # -- Variablen (Migration 065, `docs/plan_kurs_ablauf.md` §15.1) ---------------------
+
+    def variablen(self, kurs_id: str, subject_id: str) -> dict[str, Kursvariable]:
+        """Was die Tests dieses Kurses für das Profil hinterlassen haben — nach Namen."""
+        zeilen = self.con.execute(
+            "SELECT name, value, entry_id, set_at FROM course_variable "
+            "WHERE subject_id = ? AND course_id = ?",
+            (subject_id, kurs_id),
+        ).fetchall()
+        return {
+            r["name"]: Kursvariable(
+                r["name"], float(r["value"]), r["entry_id"], datetime.fromisoformat(r["set_at"])
+            )
+            for r in zeilen
+        }
+
+    def variable_setzen(
+        self, kurs_id: str, subject_id: str, name: str, wert: float, eintrag_id: str | None = None
+    ) -> None:
+        """Ein Test hinterlässt seinen Wert (Ben, 16.11.2026: „Testwert wird als Variable
+        gespeichert“) — überschreibt, was unter dem Namen stand („Nochmal“). ``wert``: der Wert
+        im Feld des Tests, ohne Faktor."""
+        with transaktion(self.con):
+            self.con.execute(
+                "INSERT INTO course_variable "
+                "(subject_id, course_id, name, value, entry_id, set_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(subject_id, course_id, name) DO UPDATE SET "
+                "value = excluded.value, entry_id = excluded.entry_id, set_at = excluded.set_at",
+                (subject_id, kurs_id, name, float(wert), eintrag_id, jetzt().isoformat()),
+            )
+
+    def _variablen_festhalten(self, kapitel: Kapitel, subject_id: str, seit: datetime) -> None:
+        """Beim Abschließen des Kapitels: Jeder Test ohne Lauf hinterlässt, was bis hierher
+        galt — den Wert aus dem jüngsten Eintrag seiner Übung („Die Übung hat erstmal ihren
+        eigenen Wert“). Danach ändert gewöhnliches Weiterüben ihn nicht mehr."""
+        if not kapitel.kurs_id:
+            return
+        schon = self.variablen(kapitel.kurs_id, subject_id)
+        eintraege = self.testeintraege(kapitel, subject_id, seit)
+        for name, wert in self.testwerte(kapitel, subject_id, seit).items():
+            if name not in schon:
+                eintrag = eintraege.get(name)
+                self.variable_setzen(
+                    kapitel.kurs_id, subject_id, name, wert, eintrag.id if eintrag else None
+                )
 
     def testeintraege(
         self, kapitel: Kapitel, subject_id: str, seit: datetime
@@ -421,14 +476,24 @@ class KursRepo:
         `testwerte`."""
         ergebnis: dict[str, SessionEntry] = {}
         eintraege = SessionRepo(self.con)
+        gespeichert = self.variablen(kapitel.kurs_id, subject_id) if kapitel.kurs_id else {}
         for block in kapitel.bloecke:
             if block.art != TEST:
                 continue
             for uebung in self._zu_messen(kapitel, block):
+                name = wert_schluessel(block, uebung)
+                if name in gespeichert:
+                    # Der Eintrag der Variable — nie ein späterer der Übung (P214 a). Gibt es
+                    # ihn nicht mehr, bleibt nur der Wert
+                    eintrag_id = gespeichert[name].eintrag_id
+                    eintrag = eintraege.eintrag_laden(eintrag_id) if eintrag_id else None
+                    if eintrag is not None:
+                        ergebnis[name] = eintrag
+                    continue
                 letzter = eintraege.letzter_eintrag(subject_id, uebung)
                 if letzter is None or letzter.started_at is None or letzter.started_at < seit:
                     continue
-                ergebnis[wert_schluessel(block, uebung)] = letzter
+                ergebnis[name] = letzter
         return ergebnis
 
     def _zu_messen(self, kapitel: Kapitel, test: Block) -> list[str]:
@@ -463,7 +528,10 @@ class KursRepo:
         """
         plaene = PlanRepo(self.con)
         stempel = jetzt().isoformat()
+        erreicht = self.staende(subject_id, kurs.id).get(kapitel.id)
         with transaktion(self.con):
+            if erreicht is not None:
+                self._variablen_festhalten(kapitel, subject_id, erreicht.erreicht)
             self.con.execute(
                 "INSERT INTO course_progress "
                 "(id, subject_id, course_id, chapter_id, reached_at, completed_at, skipped) "
@@ -499,6 +567,11 @@ class KursRepo:
         with transaktion(self.con):
             self.con.execute(
                 "DELETE FROM course_progress WHERE subject_id = ? AND course_id = ?",
+                (subject_id, kurs.id),
+            )
+            # die Variablen gehören zum Durchlauf: Der neue misst neu (Migration 065)
+            self.con.execute(
+                "DELETE FROM course_variable WHERE subject_id = ? AND course_id = ?",
                 (subject_id, kurs.id),
             )
             nummer = self._naechster_durchlauf(kurs, subject_id)
@@ -665,8 +738,10 @@ class KursRepo:
         Wahl, die Namen der Übungen, die es hier gibt, ihre Felder und alle Blöcke des Kurses
         (ein Baustein darf sich auf Test und Auswahl eines anderen Kapitels beziehen).
 
-        Testwerte kommen wie in `testwerte` aus dem jüngsten Eintrag seit dem Erreichen des
-        Kapitels, in dem der Test steht — gewöhnliche Einträge, keine Messwerte."""
+        Testwerte kommen wie in `testwerte` aus der Variable des Tests, sonst aus dem jüngsten
+        Eintrag seit dem Erreichen des Kapitels, in dem der Test steht — gewöhnliche Einträge,
+        keine Messwerte. So kann ein Baustein **jedes** Kapitels den Wert eines Tests
+        verwenden (``ziel_aus``)."""
         staende = self.staende(subject_id, kurs.id)
         werte: dict[str, float] = {}
         for kapitel in kurs.kapitel:

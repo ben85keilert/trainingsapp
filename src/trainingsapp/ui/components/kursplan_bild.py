@@ -25,7 +25,7 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.ablauf import Kante
+from trainingsapp.core.ablauf import ENDE, Kante
 from trainingsapp.core.kursbild import GRUNDLAGE_NR, Planbild, Weg
 from trainingsapp.core.kurse import Kapitel
 from trainingsapp.core.models import Exercise
@@ -43,6 +43,7 @@ BEISPIEL = (
     "die erste Übung, die zur Wahl steht."
 )
 KEIN_BAUSTEIN = "Dieser Schritt ist die Reihenfolge der Liste — er gehört zu keinem Baustein."
+START_FEST = "„Start“ ist kein Baustein — der Kursplan beginnt mit seiner ersten Übung."
 OHNE_WEG = (
     "Ohne Weg im Ablauf — im Workout kommt sie nicht dran, in der Liste steht sie. Ein Weg zu "
     "ihr holt sie ins Bild:"
@@ -83,6 +84,12 @@ class KursplanBild:
     melden: Callable[[str], None]
     #: der gerechnete Plan (`core.kursbild.planbild`)
     bild: Planbild
+    #: der Punkt einer Planübung wurde auf eine andere (oder das Ende) gezogen
+    ziehen: Callable[[str, str], None] = lambda _von, _nach: None
+    #: gedrückt halten auf einer Planübung — öffnet (oder schließt) ihr Menü
+    lang: Callable[[str], None] = lambda _item: None
+    #: das offene Menü an einer Übung — ``None``: keines
+    menue: Callable[[], abbild.Menue | None] = lambda: None
 
 
 def kursplan_bild_karte(
@@ -95,14 +102,22 @@ def kursplan_bild_karte(
     bis: int | None = None,
     weg_von: Callable[[str], Any] | None = None,
     weg_oeffnen: Callable[[Weg], Any] | None = None,
+    weg_ziehen: Callable[[str, str], Any] | None = None,
+    einstellen: Callable[[str], Any] | None = None,
     hoehe: int | None = None,
 ) -> KursplanBild:
     """Die Karte zu ``bild``. ``kapitel``: die Kapitel des Kurses in ihrer Folge (für die Chips
     und den Namen); ``bis``: das zuerst gewählte Kapitel — ohne Angabe das letzte (alles da).
     ``weg_von(marke)``: Tipp auf eine Übung; ``weg_oeffnen(weg)``: Tipp auf einen Weg, der aus
-    einem Baustein kommt. ``hoehe``: ohne Angabe **so hoch wie die Zeichnung** (bis
-    `MAX_HOEHE`) — das Formular rollt, das Bild muss man dafür nicht schieben (ein Finger auf
-    dem Bild rollt die Seite; Web-Foto 16.11.2026: 340 px zeigten nur anderthalb Übungen)."""
+    einem Baustein kommt. ``weg_ziehen(von, nach)``: der Punkt der Planübung ``von`` wurde auf
+    ``nach`` gezogen (eine Planübung oder `core.ablauf.ENDE`) — dieselbe Geste wie im Reiter
+    „Ablauf“ eines Plans, hier legt der Aufrufer daraus einen Baustein „Weg“ an (Ben,
+    16.11.2026, P217). Mit ``weg_ziehen`` hat jede Übung ihren **Punkt zum Ziehen**, und
+    **gedrückt halten** öffnet das Menü an der Übung: „Weg von hier …“ (``weg_von``), „Weg zum
+    Ende“ und „Einstellen …“ (``einstellen(marke)`` — ein Baustein „Einstellen“ an ihr).
+    ``hoehe``: ohne Angabe **so hoch wie die Zeichnung** (bis `MAX_HOEHE`) — das Formular
+    rollt, das Bild muss man dafür nicht schieben (ein Finger auf dem Bild rollt die Seite;
+    Web-Foto 16.11.2026: 340 px zeigten nur anderthalb Übungen)."""
     del page  # die Karte braucht die Seite nicht — der Platz bleibt für Blätter der Aufrufer
     gewaehlt = len(kapitel) if bis is None else max(GRUNDLAGE_NR, min(bis, len(kapitel)))
     items = bild.plan.items
@@ -129,7 +144,59 @@ def kursplan_bild_karte(
         if weg_oeffnen is not None:
             weg_oeffnen(weg)
 
+    def ziehen(von: str, nach: str) -> None:
+        melden("")
+        if von == abbild.START:
+            # „Start“ ist kein Baustein — der Kursplan beginnt mit seiner ersten Übung
+            melden(START_FEST)
+            return
+        if weg_ziehen is not None:
+            weg_ziehen(von, nach)
+
+    # -- Menü an der Übung (gedrückt halten) — nur, wo sich im Bild etwas setzen lässt ------
+    offen: dict[str, Any] = {"menue": None, "oben": False}
+
+    def neu_malen() -> None:
+        abbild.aktualisieren(flaeche_bild, zeichnung())
+        with contextlib.suppress(Exception):
+            flaeche_bild.control.update()
+
+    def menue_zu() -> None:
+        if offen["menue"] is not None:
+            offen["menue"] = None
+            neu_malen()
+
+    def lang(item_id: str) -> None:
+        offen["menue"] = None if offen["menue"] == item_id else item_id
+        neu_malen()
+
+    def menue_jetzt() -> abbild.Menue | None:
+        item_id = offen["menue"]
+        if item_id is None:
+            return None
+        marke = bild.marke(item_id)
+
+        def tun(aktion: Callable[[], Any]) -> Callable[[], Any]:
+            def handler() -> Any:
+                menue_zu()
+                return aktion()
+
+            return handler
+
+        eintraege = [
+            abbild.Eintrag("Weg von hier …", tun(lambda: knoten(item_id)), ft.Icons.ALT_ROUTE),
+            # „Ende“ als Ziel am Bildrand (wie im Plan) läge hier oft unter dem Bildschirmrand:
+            # Das Bild ist so hoch wie die Zeichnung, das Formular rollt (Web-Foto 16.11.2026)
+            abbild.Eintrag("Weg zum Ende", tun(lambda: ziehen(item_id, ENDE)), ft.Icons.STOP),
+        ]
+        if einstellen is not None and marke:
+            eintraege.append(
+                abbild.Eintrag("Einstellen …", tun(lambda: einstellen(marke)), ft.Icons.TUNE)
+            )
+        return abbild.Menue(item_id, eintraege, menue_zu, offen["oben"])
+
     def zeichnung() -> abbild.Zeichnung:
+        setzbar = weg_ziehen is not None
         return abbild.zeichnung(
             state,
             bild.ablauf,
@@ -138,6 +205,13 @@ def kursplan_bild_karte(
             vernebelt=bild.spaeter(gewaehlt),
             on_knoten=knoten if weg_von is not None else None,
             on_kante=kante,
+            # dieselben Gesten wie im Reiter „Ablauf“ (P217): Punkt ziehen, gedrückt halten
+            on_verbinden=ziehen if setzbar else None,
+            on_knoten_lang=lang if setzbar and weg_von is not None else None,
+            on_lang_ort=(lambda anteil: offen.__setitem__("oben", anteil > 0.56))
+            if setzbar
+            else None,
+            menue=menue_jetzt() if setzbar else None,
         )
 
     if not items:
@@ -149,6 +223,9 @@ def kursplan_bild_karte(
             lambda: gewaehlt,
             melden,
             bild,
+            ziehen,
+            lang,
+            menue_jetzt,
         )
 
     erste = zeichnung()
@@ -190,6 +267,7 @@ def kursplan_bild_karte(
             chip.selected = n == gewaehlt
         stand.value = stand_text(bild, kapitel, gewaehlt)
         melden("")
+        offen["menue"] = None
         abbild.aktualisieren(flaeche_bild, zeichnung())
         lose_fuellen()
         for control in (reihe, stand, lose_reihe):
@@ -207,12 +285,19 @@ def kursplan_bild_karte(
             data=("kursbild_bis", nr),
         )
     reihe = ft.Row(wrap=True, spacing=6, run_spacing=6, controls=list(chips.values()))
-    tipp = (
-        "Tippe eine Übung an, um von ihr einen Weg zu setzen — oder den Punkt eines Wegs, um "
-        "ihn zu ändern."
-        if weg_von is not None
-        else ""
-    )
+    if weg_ziehen is not None:
+        tipp = (
+            "Zieh den Punkt unter einer Übung auf eine andere: Das legt einen Weg in diesem "
+            "Kapitel an. Tippen auf eine Übung oder gedrückt halten öffnet, was sich an ihr "
+            "setzen lässt; der Punkt eines Wegs öffnet seinen Baustein."
+        )
+    elif weg_von is not None:
+        tipp = (
+            "Tippe eine Übung an, um von ihr einen Weg zu setzen — oder den Punkt eines Wegs, "
+            "um ihn zu ändern."
+        )
+    else:
+        tipp = ""
     inhalt: list[ft.Control] = [titel(TITEL), reihe, stand, flaeche_bild.control]
     if lose_reihe.controls:
         inhalt += [hinweis(OHNE_WEG), lose_reihe]
@@ -221,7 +306,16 @@ def kursplan_bild_karte(
         inhalt.append(hinweis(LISTE))
     inhalt.append(hinweis(f"{tipp} {BEISPIEL}".strip()))
     return KursplanBild(
-        karte(*inhalt, abstand=8), waehlen, knoten, kante, lambda: gewaehlt, melden, bild
+        karte(*inhalt, abstand=8),
+        waehlen,
+        knoten,
+        kante,
+        lambda: gewaehlt,
+        melden,
+        bild,
+        ziehen,
+        lang,
+        menue_jetzt,
     )
 
 
@@ -232,6 +326,7 @@ __all__ = [
     "LISTE",
     "MAX_HOEHE",
     "OHNE_WEG",
+    "START_FEST",
     "TITEL",
     "KursplanBild",
     "kursplan_bild_karte",

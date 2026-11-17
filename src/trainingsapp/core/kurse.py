@@ -560,6 +560,19 @@ class Kapitelstand:
     uebersprungen: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class Kursvariable:
+    """Ein Wert, den ein Test im Kurs hinterlassen hat (Tabelle ``course_variable``, Ben
+    16.11.2026: „Testwert wird als Variable gespeichert und kann irgendwo verwendet werden im
+    Kurs/Planbau“). ``name``: der Schlüssel des Tests (`core.kursbloecke.wert_schluessel`)."""
+
+    name: str
+    wert: float
+    #: der Eintrag des Testlaufs — ``None``, wenn es ihn nicht mehr gibt
+    eintrag_id: str | None = None
+    gesetzt: datetime | None = None
+
+
 @dataclass(slots=True)
 class Stand:
     """Wie weit eine Bedingung erfüllt ist: ``ist`` von ``soll``."""
@@ -985,6 +998,7 @@ __all__ = [
     "Kapitelstand",
     "Kurs",
     "Kursplan",
+    "Kursvariable",
     "PlanVorlage",
     "Stand",
     "VorlageItem",

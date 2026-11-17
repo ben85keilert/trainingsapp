@@ -190,12 +190,16 @@ def bereitstellen(
     ``vorher``: woher ein fortgesetztes Workout dorthin kam (für ``◀ zurück``).
 
     Raises:
-        ValueError: Der Plan hat keine Übung — oder keine bleibt übrig.
+        ValueError: Der Plan hat keine Übung — oder keine bleibt übrig; oder sein Ablauf ist
+            unvollständig bzw. ohne Start (`core.ablauf.startet_nicht`): Dann beginnt er nicht
+            und setzt nicht fort, bis er repariert ist (Ben, 16.11.2026).
         RuntimeError: Es läuft schon eine Einheit.
     """
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
     if plan.ablauf.an:
         ohne = ()  # durcharbeiten, nicht abarbeiten (P166)
+        if grund := ab.startet_nicht(plan.ablauf, [it.id for it in plan.items]):
+            raise ValueError(grund)
     schritte = [s for s in schritte_fuer(plan, katalog) if s.item_id not in set(ohne)]
     teil = PlanAblaufBaustein(
         plan.id,

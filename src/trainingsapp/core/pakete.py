@@ -1441,8 +1441,9 @@ def nutzt_kursplan(kurs: Kurs) -> bool:
     """Nutzt der Kurs, was es erst seit Formatversion 6 gibt — einen Kursplan
     (``kurse[].kursplan``), einen Baustein (``plan_*``-Block, `core.kursbloecke`), einen
     Test, der „die gewählte“ misst (``test`` mit ``aus`` — eine ältere App ließe ihn fallen),
-    oder einen Test mit Vorgabe (``vorgabe`` — eine ältere App überläse sie und nähme
-    irgendeinen Eintrag)?
+    einen Test mit Vorgabe (``vorgabe`` — eine ältere App überläse sie und nähme irgendeinen
+    Eintrag) oder einen **gestalteten** Test (Timer, Takt, Ausführung, „wie die Übung“ —
+    `core.kursbloecke.Block.gestaltet`)?
 
     >>> nutzt_kursplan(Kurs(name="K", kapitel=[Kapitel(titel="A", bloecke=[Block("text")])]))
     False
@@ -1458,9 +1459,12 @@ def nutzt_kursplan(kurs: Kurs) -> bool:
     >>> lauf = Block("test", id="t", uebung="u1", vorgabe=Vorgabe("menge", 30))
     >>> nutzt_kursplan(Kurs(name="K", kapitel=[Kapitel(titel="A", bloecke=[lauf])]))
     True
+    >>> frei = Block("test", id="t", uebung="u1", wie_uebung=["uhr"])
+    >>> nutzt_kursplan(Kurs(name="K", kapitel=[Kapitel(titel="A", bloecke=[frei])]))
+    True
     """
     return kurs.kursplan is not None or any(
-        b.baustein or (b.art == "test" and (bool(b.aus) or b.vorgabe is not None))
+        b.baustein or (b.art == "test" and (bool(b.aus) or b.vorgabe is not None or b.gestaltet))
         for kap in kurs.kapitel
         for b in kap.bloecke
     )

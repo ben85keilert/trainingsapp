@@ -215,3 +215,73 @@ def test_liste_und_leerer_plan(state) -> None:
     karte = kursplan_bild_karte(None, state, _bild(leer), KATALOG, leer.kapitel)
     assert LEER in _texte(karte.control)
     karte.waehlen(1)  # tut nichts, wirft nicht
+
+
+def test_gesten_des_plans_nur_wo_sich_etwas_setzen_laesst(state) -> None:
+    """Ben, 16.11.2026 (P217): im Kurs-Editor dieselben Gesten wie im Reiter „Ablauf“. Mit
+    ``weg_ziehen`` hat jede Übung ihren Punkt zum Ziehen, gedrückt halten öffnet das Menü
+    („Weg zum Ende“ steht dort — das Bild ist oft höher als der Bildschirm). Ohne den Rückruf — die
+    Karte im Kurs-Formular — ist das Bild nur zum Ansehen."""
+    kurs = _kurs()
+    bild = _bild(kurs)
+    planke, kaefer, _seit = (i.id for i in bild.plan.items)
+
+    def daten(karte, art: str) -> list[tuple]:
+        return [
+            x.data
+            for x in _alle_tief(karte.control)
+            if isinstance(getattr(x, "data", None), tuple) and x.data[:1] == (art,)
+        ]
+
+    lesend = kursplan_bild_karte(None, state, bild, KATALOG, kurs.kapitel)
+    assert daten(lesend, "punkt") == [] and daten(lesend, "ziel") == []
+
+    gezogen: list[tuple[str, str]] = []
+    von: list[str] = []
+    eingestellt: list[str] = []
+    karte = kursplan_bild_karte(
+        None,
+        state,
+        bild,
+        KATALOG,
+        kurs.kapitel,
+        weg_von=von.append,
+        weg_ziehen=lambda v, n: gezogen.append((v, n)),
+        einstellen=eingestellt.append,
+    )
+    assert {d[1] for d in daten(karte, "punkt")} >= {planke, kaefer}
+    assert daten(karte, "ziel") == []  # „Ende“ steht hier im Menü, nicht am Bildrand
+    karte.ziehen(planke, kaefer)
+    assert gezogen == [(planke, kaefer)]
+    # „Start“ ist kein Baustein
+    from trainingsapp.ui.components.ablaufbild import START
+    from trainingsapp.ui.components.kursplan_bild import START_FEST
+
+    karte.ziehen(START, planke)
+    assert len(gezogen) == 1 and _mit(karte.control, "kursbild_meldung").value == START_FEST
+    # gedrückt halten: das Menü an der Übung, mit dem, was sich an ihr setzen lässt
+    assert karte.menue() is None
+    karte.lang(kaefer)
+    menue = karte.menue()
+    assert menue is not None and menue.knoten == kaefer
+    assert [e.text for e in menue.eintraege] == ["Weg von hier …", "Weg zum Ende", "Einstellen …"]
+    menue.eintraege[0].aktion()
+    assert von == ["dazu:kaefer"] and karte.menue() is None
+    karte.lang(kaefer)
+    karte.menue().eintraege[1].aktion()  # „Weg zum Ende“ meldet wie das Ziehen
+    assert gezogen[-1] == (kaefer, ab.ENDE) and karte.menue() is None
+    karte.lang(planke)
+    karte.menue().eintraege[2].aktion()
+    assert eingestellt == ["a"]
+
+
+def _alle_tief(c):
+    """Wie `_alle`, dazu die Schichten eines `ft.Stack` und der Inhalt von Ablagen."""
+    yield c
+    for name in ("content", "controls", "title", "subtitle", "leading", "trailing", "actions"):
+        kind = getattr(c, name, None)
+        if isinstance(kind, list):
+            for k in kind:
+                yield from _alle_tief(k)
+        elif kind is not None and hasattr(kind, "__dict__"):
+            yield from _alle_tief(kind)

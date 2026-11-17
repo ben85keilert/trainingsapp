@@ -676,10 +676,76 @@ Ben, drei Punkte zum Reiter „Ablauf“ — alle gebaut:
      wer dort die erste Übung löscht, hat die zweite als erste; das ist die Liste, kein
      eigener Start. Ein von Hand gezeichneter Ablauf, der genau der Liste gleicht, gilt
      weiter als „folgt“ (§8.12). Altbestand und Pakete mit Wegen ohne ``start`` beginnen bei
-     der ersten Planübung. **Nicht angefasst:** Ist die Startübung nur **verborgen** (Übung
-     im Papierkorb, Paket ausgeschaltet), geht das Workout wie bisher durch sie hindurch
-     (`PlanAblaufBaustein._ziel`) und das Bild zeigt die erste sichtbare als Start — offen
-     als P216.
+     der ersten Planübung. Die **verborgene** Startübung (Übung im Papierkorb, Paket
+     ausgeschaltet) regelt Punkt 5.
+5. **Ein unvollständiger Plan wird nicht durchgeführt** (Ben, 16.11.2026 spät, auf P216):
+   „Fehlermeldung soll kommen. Wenn Plan unvollständig kann er nicht durchgeführt werden, bis
+   das repariert ist. Sonst ist es möglich, dass ein Plan durcheinander gerät.“
+   - **Unvollständig** ist ein eigener Ablauf, der auf eine Planübung zeigt — als Start oder
+     am Ende eines Wegs —, die es gerade nicht gibt: Ihre Übung liegt im Papierkorb, oder ihr
+     Paket ist ausgeschaltet (`core.ablauf.fehlende`). Ihre Wege bleiben gespeichert (N47),
+     aber das Workout ging bisher still „durch sie hindurch“ (`PlanAblaufBaustein._ziel`), und
+     fehlte die Startübung, wurde die erste sichtbare Planübung der Start.
+   - **Jetzt:** `Ablauf.startknoten` kennt keinen Rückfall mehr für einen gesetzten Start, den
+     es nicht gibt (ohne Angabe gilt weiter die erste Planübung). `core.ablauf.startet_nicht`
+     sagt, warum ein Workout nicht geht — „Im Ablauf fehlt eine Übung (Kniebeuge) — der Plan
+     muss korrigiert werden: die Übung zurückholen oder aus dem Plan nehmen.“ bzw. der Satz
+     zum fehlenden Start. Solange er etwas sagt, gibt es weder **Starten** noch
+     **Bereitstellen** noch **Fortsetzen** (`ui/plan_ablauf.bereitstellen` lehnt mit
+     `ValueError` ab, das Start-Bild zeigt die Knöpfe nicht). Das gilt damit auch für den
+     Ablauf ohne Start — die erste Fassung ließ „Fortsetzen“ noch zu.
+   - **Reparieren:** Die rote Karte (Reiter „Plan“ unter dem Schalter, Reiter „Ablauf“ über
+     dem Bild) nennt die fehlende Übung und hat je Übung den Knopf „… aus dem Plan nehmen“
+     (`views/ablauf.reparatur_knoepfe`, mit Rückfrage; ihre Wege fallen mit ihr weg, war sie
+     der Start, bleibt er leer). Zurückholen aus dem Papierkorb oder das Einschalten des
+     Pakets repariert ebenso. Wege zu einer Planübung, die es gar nicht mehr gibt, räumt
+     „Wege zu fehlenden Übungen entfernen“ ab.
+   - **Wo man es merkt:** In der Liste der Pläne steht „muss korrigiert werden“. Wer eine
+     Übung in den Papierkorb legt, liest in der Meldung, in welchem Workout sie jetzt fehlt.
+   - **Was bleibt:** Eine Liste und ein Workout, das der Liste folgt, sind nie unvollständig
+     — dort ist die Liste der Ablauf, eine verborgene Übung steht einfach nicht darin. Der
+     Baustein geht weiter durch einen Schritt hindurch, der **während** des Laufs fehlt.
+6. **Im Bild bedienen** (Ben, 16.11.2026 nachts, Katalog P217, Skizzen G1–G4) — „Versuche den
+   Ablaufplan in Plan und Kurs noch weiter zu vereinheitlichen … durch z.B. Ziehen von einem
+   Knoten auf eine Übung zum Verbinden · gedrückt halten von Kachel um ein Menü zu öffnen,
+   oder diese zu verschieben … · Alles was sich auslagern lässt vom Routingmenü in die
+   Grafik, wird ausgelagert für intuitiver Anwendung · die Wegmenüs müssten übersichtlicher
+   sein: die Überschriften fallen in den Hintergrund … Wenn möglich arbeite daran, dass man
+   möglichst ohne die Blätter schon viel machen kann.“ Auf die Skizzen: „Menü“ · „Slot
+   weglassen“ · „Ja. Hauptknoten wieder Blatt“ · im Kurs-Editor „ja“. **Damit sind in §8.11
+   und in den Punkten 1–4 überholt:** die Slots, das Menü „Routing“, die Knopfzeile unter dem
+   Bild, „Weg zu einer Übung im Bild …“ und dass der eine Punkt eines eindeutigen Wegs das
+   Blatt öffnet.
+   - **Der Punkt jeder Übung** (`core.ablauf_geometrie.Geometrie.punkte`): bei mehreren Wegen
+     der Abzweig, bei einem der eine Griff, ohne Weg ein Punkt unter der Beschriftung. Er
+     lässt sich **ziehen** (`ft.Draggable` in der schiebbaren Fläche — mit Maus und Finger
+     geprüft): auf eine Übung oder Frage = Weg dorthin; auf die eigene Übung = „noch einmal“;
+     auf **„Ende“** oder **„zurück“** — zwei Ziele in den unteren Ecken des Bildes, nur zu
+     sehen, während gezogen wird; **von „Start“** auf eine Übung = sie ist der Start. Die
+     Regel: `core.ablauf.verbinden(ablauf, von, nach)` (``None``: den Weg gibt es schon).
+     Nach dem Verbinden ist der neue Weg gewählt.
+   - **Kachel aus der Leiste auf eine Übung** = neue Übung dahinter (`on_kachel_auf`); die
+     Kachel **„Frage“** am Ende der Leiste setzt eine Frage dahinter.
+   - **Gedrückt halten = Menü an der Übung**, nicht verschieben (das Bild ordnet sich selbst,
+     verschobene Lagen würden nicht gespeichert): „Übung einstellen …“ · „Beiname …“ · „Nur
+     ihren Weg zeigen“ · „Als Start“ · „Aus dem Ablauf nehmen“; an einer Frage „Frage ändern
+     …“ · „Frage löschen“. Eine eigene Karte in der Fläche mit Schirm dahinter
+     (`abbild.Menue`) — kein Flutter-Menü; unten im Bild geht sie nach oben auf.
+   - **Tipp auf den Punkt eines Wegs = Leiste unter dem Bild** (`wege_form.weg_leiste`): Marke
+     und „von → nach“, „Wann geht es weiter?“ mit den Auslösern, die Zahl mit − / +
+     (`core.ablauf.ausloeser_wechsel`, `kante_schritt`), „Pflicht“, ✕ (Weg entfernen), „Mehr
+     …“ = das Blatt mit nur diesem Weg. **Tipp auf den Hauptknoten mit mehreren Wegen** (und
+     auf den Punkt einer Übung ohne Weg) = das Blatt mit allen Wegen.
+   - **Das Wege-Formular** (`components/wege_form.py`): „KOMMT VON“ und „WEITER ZU“ mit Symbol
+     und Linie in der Hauptfarbe; jede Weg-Karte mit Marke (Hauptweg gefüllt) und Ziel im
+     Kopf; „Wann geht es weiter?“; der gewählte Auslöser mit Haken.
+   - **Im Kurs-Editor dieselben Gesten** (`docs/plan_kurs_ablauf.md` §16.3): Ziehen legt nach
+     einer Bestätigung den Baustein „Weg“ an, das Menü bietet „Weg von hier …“, „Weg zum
+     Ende“ und „Einstellen …“.
+   - **Nur am Gerät:** die Trefferfläche der Punkte mit dem Finger (44 px, schrumpft
+     herausgezoomt); wer auf einem Punkt ansetzt, zieht den Punkt, nicht das Bild; der Punkt
+     von „Start“ sitzt eng; fällt ein Punkt auf die Titelleiste, bleiben „Ende/zurück“ bis zum
+     nächsten Tipp stehen.
 
 **Offen / nur am Gerät:** Ziehen mit dem Finger in den leeren Platz und auf „Start“ (im
 Browser mit der Maus geprüft), Treffen des einen Punkts mit dem Finger, „2×“ neben dem Rand der

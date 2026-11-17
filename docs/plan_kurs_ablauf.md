@@ -7,11 +7,16 @@ die Kurse einstellbar.“ Dazu zwei Fragen: Konflikte (Kursplan existiert schon 
 einmal durchlaufen) und ob ein **Ablaufeditor wie beim Workout** für Kurse lohnt — auch bei
 Verschachtelungen in den Entscheidungen.
 
-**Stand 16.11.2026: Stufe 0 ist gebaut** („Von vorn“ fragt Test und Auswahl neu, §5.2, §7),
-**alles andere ist Plan.** Bens Setzung vom 21.10.2026 („Pläne und Kurse nicht ohne Rückfrage
-ändern“) gilt: Jede berührte Stelle steht in §9, die Fragen in §10 (Katalog P207). Die
-Korrekturen am Workout-Bildschirm aus demselben Auftrag stehen in `plan_uhr_fokus.md` §10, die
-Kennzeichnung der Medien und die Animation beim Üben in `plan_medienrollen.md`.
+**Stand 16.11.2026 nachts** (die Übersicht steht in §7, das Leitbild in §16): **gebaut** sind
+Stufe 0 („Von vorn“ fragt neu), Stufe 1 (der Kurs baut einen Plan: Kursplan, Bausteine,
+Sammelkarte, Kurs-Editor, §11), Stufe 2 (der Test läuft mit der Uhr, §13), A1 („Das kommt
+noch“, §13.6), das Bild des Kursplans im Editor (§14) und der Testwert als **Variable des
+Kurses** (§15.1), der flexibel gestaltete Test (§15.2–15.5) und das Bedienen des Plan-Bilds
+mit denselben Gesten wie im Plan (§16.3). **Plan** bleiben Stufe 3–5 und A2.
+Bens Setzung vom 21.10.2026 („Pläne und Kurse nicht ohne Rückfrage ändern“) gilt: Jede
+berührte Stelle steht in §9, die Fragen in §10 (Katalog P207). Die Korrekturen am
+Workout-Bildschirm aus demselben Auftrag stehen in `plan_uhr_fokus.md` §10, die Kennzeichnung
+der Medien und die Animation beim Üben in `plan_medienrollen.md`.
 
 **Durchsicht 16.11.2026** (Ben: „gehe den Plan noch einmal durch“). Für die erste Fassung
 waren `plan_verzweigungen.md` und die Zweckbestimmung nur angelesen; jetzt sind beide ganz
@@ -363,10 +368,14 @@ ist.“
 | 0 | **Von vorn bei Test/Auswahl** (§5.2): Marke „Durchlauf beendet“ (Migration 063, `plan.course_run_ended_at`), neu fragen, „Wie beim letzten Mal“; Tests `tests/test_kurse.py`, `tests/test_ui_kursbloecke.py` | **gebaut 16.11.2026** — Gerätetest T141 |
 | 1 | Kursplan wächst (`plan = wachsend`, Marken, Spalte `plan.course_id`), Bausteine `plan_uebung`, `plan_einstellen`, `plan_weg`; Rest von B2 (Timer, Übergang … in `VorlageItem`/`PlanVorlage`); Sammelkarte „Das ändert sich an deinem Plan“; **Kurs-Editor** (`views/kurs_bearbeiten.py`: Baustein hinzufügen) und **Werkzeug** (`trainingsapp-paket pruefen`); neue Formatversion nur für Pakete, die das nutzen (Formatversion 6) | **gebaut 16.11.2026** — Bauplan §11, Abweichungen §11.8; Gerätetest T142; P211 und P212 entschieden (Ben: „Ja“), P212 noch zu bauen; Grenzen N171 |
 | 2 | Test im Fokus mit Vorgabe Menge · Zeit · Skala ab/bis/dazwischen (§3.3), „Als Ziel übernehmen“ | **gebaut 16.11.2026** — §13; Skizzen T1–T5; Gerätetest T143 |
+| 2a | **Der Testwert ist eine Variable des Kurses** (§15.1): Tabelle `course_variable` (Migration 065); der Lauf setzt sie, „Nochmal“ überschreibt, das abgeschlossene Kapitel hält den Wert eines Tests ohne Lauf fest; jeder Baustein danach kann sie verwenden (`ziel_aus`) | **gebaut 16.11.2026** — Ben: „Testwert wird als Variable gespeichert“ |
+| 2b | **Der Test, flexibel gestaltet** (§15.2): Uhr (Stoppuhr · Timer der Übung · eigener Timer), Takt, Ausführung (vorgegeben oder frei), Hinweis vor dem Start — jede Einstellung mit Vorgabe, „wie die Übung“ oder eigener Angabe | **gebaut 16.11.2026** — §15.2–15.5; Skizzen F1–F4; Gerätetest T143. Nicht gebaut: der Satz der Sammelkarte mit Ausführung |
 | 3 | Antworten speichern, Folgen (`zeige`, `baustein`), `zeigen_wenn`; Tabelle `course_answer`; Editor (Liste mit „Wenn …“) = **K1**; im laufenden Kurs nur der eigene Weg (§6 „Zwei Sichten“) | Frage 3: **ja** |
 | 4 | Kursbild lesend **im Kurs-Editor** = **K2** (Knoten-Darsteller aus `ablaufbild` herauslösen) | Frage 5: **ja**; Stufe 3 |
 | 5 | Kursbild zeichnen = **K3**, gemeinsame Graph-Schicht, Kapitel-Auslöser „Tor offen“ | Entscheidung nach Stufe 4 |
 | A1 | **Vorschau „Das kommt noch“** auf der Kursseite: was spätere Kapitel am Plan ändern werden, gerechnet aus ihren Bausteinen — ohne Sperren (§12) | **gebaut 16.11.2026** — §13.6; Skizze V1; Gerätetest T143 |
+| B1 | **Das Plan-Bild bedienen wie im Plan** (§16.3, Katalog P217): im Kurs-Editor dieselben Gesten wie im Reiter „Ablauf“ — den Punkt einer Übung auf eine andere ziehen legt nach kurzer Bestätigung den Baustein „Weg“ im bearbeiteten Kapitel an; gedrückt halten öffnet das Menü an der Übung | **gebaut 16.11.2026** — Skizze G4; Gerätetest T144 |
+| V | **Variablen weiter verwenden** (§16.2): andere Abnehmer als das Ziel (Auslöser eines Wegs „ab deinem Testwert“, Dauer eines Timers), ein Wert von Hand, die Antwort einer Frage als Variable (trifft Stufe 3) | Vorschlag — Bens Wort |
 | A2 | **Autorenwerkzeug „vom fertigen Plan aus“**: Zielplan im Plan- und Ablauf-Editor bauen, jede Übung, jeden Weg und jede Einstellung einem Kapitel zuordnen („ab Kapitel 2“); der Editor erzeugt daraus die Bausteine (§12) | Skizzen; Bens Wort |
 
 Vor Stufe 1: **T134** (Material, Kurse aus Blöcken am Gerät, `offene_fragen.md` §2) sollte
@@ -387,7 +396,15 @@ Web-Fotos (`web-fotos`) der Karten; Gerätetest im Katalog; Doku in `plan_kurse.
 - **Erklären, nicht bewerten** (Kurstexte, `plan_kurseditor.md` §1) — die bestehende Regel für
   Texte. Eine eigene Regel „der Kurs deutet die Antwort nicht“ gibt es **nicht** (Ben,
   16.11.2026: „Das ist übertrieben“).
-- **Kapitel-`key`s und Block-IDs nie ändern** — Fortschritt, Marken und Antworten hängen daran.
+- **Vorgabe und Überschreiben** (Ben, 16.11.2026: „Wir dürfen hier gar nicht zu kompliziert
+  sein, Dinge mit Standardwerten versehen. Überschreiben ist möglich“): Jede Einstellung eines
+  Bausteins hat eine Vorgabe, die ohne Zutun gilt. Wer nichts einstellt, bekommt einen
+  brauchbaren Baustein; die Übung bringt ihre Umgebung (Timer, Takt, Parameter) mit, der
+  Baustein überschreibt nur, was anders sein soll (§16.1).
+- **Werte sind Variablen des Kurses** (§15.1): Was ein Baustein erzeugt (heute: der Wert eines
+  Tests), steht unter einem Namen am Kurs und lässt sich in jedem Kapitel danach verwenden.
+- **Kapitel-`key`s und Block-IDs nie ändern** — Fortschritt, Marken, Antworten und die Namen
+  der Variablen hängen daran.
 - **Pakete:** Kurse reisen mit Bausteinen im Paket; Antworten, „gesehen“ und Fortschritt nicht.
   Verweise auf Timer als eingebettete Kopie (`ohne_verweise`, `plan_timer_zuordnen.md`).
 - **Neue Datenbank-Tabellen/Spalten:** nummerierte Migration, SQL mit `?`.
@@ -756,8 +773,9 @@ nie ins Ziel.
   `teil`), damit die Uhr am Ende nichts doppelt einträgt (`ui.uebung_lauf.einzutragen`).
   Neue Ereignisarten gibt es nicht.
 - **Der Ablauf** (`ui/views/kurs_testlauf.py`, Stand in `AppState.kurs_test`): „Test starten“
-  im Kapitel startet eine **Stoppuhr** der Übung (nie der Aufbau der Ansicht) → der Knopf der
-  Vorgabe bzw. „Vorher aufgehört …“ **hält die Uhr an** → die Ergebnis-Seite fragt, was fehlt
+  im Kapitel startet eine **Stoppuhr** der Übung (nie der Aufbau der Ansicht; seit §15.3 bei
+  einem gestalteten Test erst die Seite „bereit“, und statt der Stoppuhr wahlweise ein Timer)
+  → der Knopf der Vorgabe bzw. „Vorher aufgehört …“ **hält die Uhr an** → die Ergebnis-Seite fragt, was fehlt
   (Wiederholungen, wenn niemand zählte; die Skala — bei „bis n“ ist n vorbelegt) → „Eintragen
   und zurück zum Kapitel“ schreibt den Eintrag, vermerkt ihn und beendet den Lauf; „Verwerfen“
   und „Nochmal“ brechen ab (nichts eingetragen, der Lauf steht unter „Läufe heute“). Ohne
@@ -768,14 +786,16 @@ nie ins Ziel.
   Skala gefragt sind.
 - **Vorgabe Menge mit Sensor:** Zählt der Sensor schon bei dieser Übung, tritt die Uhr dem
   Zählen bei, die Karte zeigt die Zahl, und bei n hält die Uhr von selbst an. Den Takt der
-  Übung bringt der Test nicht an (Katalog P214 b).
+  Übung bringt der Test **von sich aus** nicht an — seit §15.2 lässt er sich einstellen („wie
+  die Übung“ oder ein eigener); er führt dann, zählt aber nicht.
 - **Zurück** (Geste) verlässt die Ansicht, der Lauf läuft weiter; das Kapitel zeigt „Zum
   Test“. ✕ bricht ab.
 - **Der Kurs liest wie bisher:** `KursRepo.testwerte` nimmt aus dem jüngsten Eintrag der Übung
   den Wert des Feldes — ein von Hand geschriebener Eintrag zählt darum weiter. Was der Lauf
   sonst gemessen hat, liest die Karte aus demselben Eintrag (`KursRepo.testeintraege`,
-  `core.kurstest.lauf_aus`, `neben_text`). Folge: Ein **späterer** gewöhnlicher Eintrag löst
-  den Wert des Laufs ab, solange sein Ziel nicht übernommen ist (Katalog P214 a).
+  `core.kurstest.lauf_aus`, `neben_text`). Die Folge davon — ein **späterer** gewöhnlicher
+  Eintrag löste den Wert des Laufs ab (Katalog P214 a) — ist seit §15.1 behoben: Der Lauf
+  hinterlässt seinen Wert als Variable des Kurses.
 - **Die Skala ist die der Übung** (ihr Name gilt in allen Texten); hat die Übung keine oder
   heißt sie wie im Vorrat, heißt sie „Anstrengung“. Sie ist Selbstauskunft — die App misst
   sie nicht und deutet sie nicht (§3.3 „Rechtlich“).
@@ -880,3 +900,205 @@ mit „Wenn …“), kein Ziehen von Übungen im Bild, kein Bauen „vom fertige
 Zuordnung zu Kapiteln. Die Lagen im Bild ordnet es selbst (`core.ablauf.layout`); gemerkt wird
 nichts.
 
+
+## 15. Der Test, flexibel gestaltet · der Testwert als Variable (Ben, 16.11.2026 spät)
+
+Ben, auf die Fragen zu Stufe 2 (P214) und die Skizzen F1–F4: „Der Test muss flexibel gestaltet
+werden können“ · „Mach das“ · „Ja, aber Timer ist tatsächlich das wichtigste“ · Ausführung:
+„beides. Kann vorgegeben sein; Varianten können vorgegeben sein, oder frei“ · Takt führt nur,
+die Person bestätigt die Zahl: „Ok“ · „Übungsumgebung/Parameter können mit in den Test“ ·
+„Testwert wird als Variable gespeichert und kann irgendwo verwendet werden im Kurs/Planbau“ ·
+„Die Übung hat erstmal ihren eigenen Wert. Wenn man eine Übung macht, kann man diesen Wert
+weitergeben und übernehmen. Nimm den Plan-/Kursbauplan als grafisches Programmieren, ähnlich
+wie bei LabView. Wir dürfen hier gar nicht zu kompliziert sein, Dinge mit Standardwerten
+versehen. Überschreiben ist möglich.“
+
+**Leitbild daraus:** Ein Baustein hat Eingänge und einen Ausgang wie ein Knoten im
+grafischen Programmieren. Jede Einstellung hat eine **Vorgabe**, die ohne Zutun gilt, und lässt
+sich **überschreiben**. Ein Test gibt einen Wert aus; den kann jeder Baustein danach
+verwenden.
+
+### 15.1 Der Testwert ist eine Variable des Kurses (Migration 065)
+
+- **Bisher** las der Kurs den Wert eines Tests jedes Mal neu aus dem jüngsten Eintrag der
+  Übung seit dem Erreichen des Kapitels. Wer nach dem Test gewöhnlich weiterübte, hatte einen
+  anderen „Test“ (P214 a, nachgestellt: 22 im Test, danach 10 geübt → „Dein Test: 10“).
+- **Jetzt** hinterlässt der Test seinen Wert: Tabelle `course_variable` (je Profil und Kurs,
+  gerätelokal wie `course_progress`; `name` = `core.kursbloecke.wert_schluessel` — die Block-ID
+  des Tests, bei „die gewählte“ `<block>:<übung>`; `value` ohne Faktor; `entry_id` = der
+  Eintrag des Laufs). `KursRepo.variablen`, `variable_setzen`.
+  - **Der Testlauf** setzt sie beim „Eintragen“ (`ui/views/kurs_testlauf.eintragen`);
+    **„Nochmal“** überschreibt sie.
+  - **Ohne Lauf** (ein Test ohne Vorgabe und ohne Gestaltung) gilt die Vorgabe „der eigene Wert
+    der Übung“: ihr jüngster Eintrag seit dem Kapitel — wie bisher. **Mit dem Abschließen des
+    Kapitels** wird er festgehalten (`KursRepo._variablen_festhalten`); danach ändert
+    gewöhnliches Weiterüben ihn nicht mehr.
+  - **Verwenden:** `KursRepo.testwerte` nimmt die Variable vor dem jüngsten Eintrag,
+    `testeintraege` zeigt den Eintrag der Variable (nie einen späteren). Die Rechnung des
+    Kursplans bekommt die Werte **aller** erreichten Kapitel (`_kursplan_eingaben`) — ein
+    Baustein mit `ziel_aus` darf den Test eines früheren Kapitels nennen, in jedem Kapitel
+    danach. Der Faktor gehört dem, der verwendet, nicht der Variable.
+  - **„Von vorn beginnen“** löscht die Variablen des Kurses — der neue Durchlauf misst neu.
+- Nicht gebaut: ein Wert, den die Person von Hand setzt; weitere Abnehmer als das Ziel
+  (Bedingungen an Wegen, Dauer eines Timers). Die Tabelle trägt beides.
+
+### 15.2 Was am Test einstellbar ist (`core/kursbloecke.Block`, `art = "test"`)
+
+| Einstellung | Vorgabe (nichts gesetzt) | wie die Übung | eigene Angabe |
+|---|---|---|---|
+| **Uhr** — womit der Test läuft | Stoppuhr | `wie_uebung` enthält `"uhr"`: ihr Timer | `timer` (wie bei einer Planübung, eingebettet) |
+| **Takt** | keiner | `"takt"`: ihr Takt | `takt` |
+| **Ausführung** — Variante, Seite, Gewicht … | keine | `"parameter"`: ihre Parameter, die Person wählt frei | `ziel` = **vorgegeben** (Feld → Wert), `felder` = **frei** zu wählen |
+| **Hinweis vor dem Start** | keiner | — | `text` |
+
+- Eine eigene Angabe geht vor „wie die Übung“. Ohne jede Angabe ist der Test der von §13 —
+  bestehende Tests ändern sich nicht.
+- **`Block.gestaltet`**: irgendetwas davon ist gesetzt. **`Block.laeuft`**: Vorgabe **oder**
+  gestaltet — dann ist der Test ein Lauf mit der Uhr, auch ohne Vorgabe (ein Timer beendet
+  ihn, sonst „Fertig“).
+- **Timer und Vorgabe „Zeit“ zusammen gibt es nicht:** Läuft der Test mit einem Timer, ist der
+  Timer die Zeit. Der Editor bietet „Zeit“ dann nicht an; kommt die Kombination aus einem
+  Paket, gilt der Timer (`trainingsapp-paket pruefen` gibt einen Hinweis). Vorgabe Menge und
+  Anstrengung gelten mit Timer weiter und können vorher beenden.
+- **Der Takt führt, er zählt nicht** („Ein Soll ist keine Messung“,
+  `.claude/rules/sensor_takt.md`): Der Test endet nicht von selbst mit dem Takt. Seine Runden
+  stehen im Ergebnis als **Vorschlag** bei den Wiederholungen; die Person bestätigt oder ändert.
+- **Ausführung** ist, was der Lauf nicht misst: nicht Wiederholungen, Halte- und Zeitfelder,
+  Skala (nach der Art verglichen, `core.result_spec.basis_key`), nicht Freitext, nicht
+  „Vollständig“. Sie kommt in den Eintrag des Tests; bietet die Übung ein Feld nicht an,
+  bringt der Eintrag es in seiner Kopie mit (wie Zeit und Skala in §13.2).
+
+### 15.3 Der Lauf (`core/kurstest.py`, `ui/views/kurs_testlauf.py`; Skizzen F2–F4)
+
+- **Rechnung** (flet-frei): `uhr_fuer(block, uebung)` (eigener Timer → Timer der Übung →
+  Stoppuhr), `vorgabe_fuer(block, profil)` (neben einem Timer keine „Zeit“),
+  `takt_fuer(block, uebung)`, `takt_runden(profil, takt, gelaufen_s)` (nur Runden aus
+  zählenden Abschnitten), `ausfuehrung_fuer(block, uebung)` → `Ausfuehrung(fest, frei,
+  vorbelegt)`, `ausfuehrung_aus(result, spec)`, `lauf_satz` (der Satz der Testkarte),
+  `karten_ueberschrift`.
+- **Bereit:** Ein gestalteter Test startet nicht sofort, sondern zeigt erst die Seite vor dem
+  Start: Vorgabe, der Hinweis des Kurses, „So machst du den Test“ (Vorgegebenes zum Lesen,
+  Freies zum Wählen — Chips für Variante und Seite, − / + für Zahlen), „Takt läuft mit“,
+  „Start“. Ein Test nur mit Vorgabe startet wie bisher mit dem Tipp im Kapitel.
+- **Läuft mit Timer:** Es ist der echte Timer der Einheit — Abschnitte, Klänge und Marken wie
+  beim Üben. Ist er durch, erscheint das Ergebnis von selbst („Der Timer ist durch“, die Zeit
+  „vom Timer“); die Einheit beenden erst „Eintragen“ und „Verwerfen“. „Vorher aufgehört …“
+  bleibt.
+- **Läuft mit Takt:** sichtbar und hörbar wie im Fokus der Übung; er zählt nicht und beendet
+  nichts. Im Ergebnis stehen seine Runden als Vorschlag („Der Takt lief 7 Runden. Stimmt die
+  Zahl?“) mit − / +; „Eintragen“ bestätigt. Zählt der Sensor, gilt der wie bisher.
+- **Ausführung:** Was vor dem Start gewählt ist, steht im Lauf unter der Vorgabe, im Ergebnis
+  und im Eintrag; die Testkarte nennt sie danach neben dem Wert.
+- **Nicht gebaut:** der Satz der Sammelkarte mit Ausführung („… 23 Wdh. auf Knien mit 10 kg“,
+  Skizze F4 unten) — die Rechnung des Kursplans bekommt nur den Wert, nicht den Eintrag.
+
+### 15.4 Der Editor (`core/kursbau.py`, `ui/views/kurs_bearbeiten.py`; Skizze F1)
+
+- Im Test-Dialog der Abschnitt **„So läuft der Test“**: Uhr · Takt · Ausführung, je ein
+  Auswahlfeld mit Vorgabe · „Wie die Übung“ · eigene Angabe; darunter klein, was gilt. Die
+  eigene Angabe öffnet ein Blatt über dem Dialog: den Timer-Editor (derselbe wie am Baustein,
+  `baustein_form.timer_editor_teil`), das Takt-Blatt („Gilt: In diesem Test“), für die
+  Ausführung je Parameter „vorgegeben“ (mit Wert) oder „frei“. Dazu „Hinweis vor dem Start“
+  (`text`).
+- **Mit einem Timer steht „Zeit“ nicht zur Wahl**; eine gesetzte Vorgabe „Zeit“ wird beim
+  Wechsel zu „Ohne“, und eine Zeile sagt es (`core.kursbau.vorgabe_wahl`, `Laufwahl`).
+- **„Die gewählte“:** frei wählbar ist, was irgendeine Übung der Auswahl hat; vorgeben lässt
+  sich nur, was alle haben, und nie die Variante — wie am Baustein „Übung dazu“.
+- „Gemessen wird“, „Ins Ziel kommt“ und die Vorschau fragen den Lauf (`kurstest.gemessen`);
+  die Vorschau und die Zeile der Liste nennen Takt und Timer („· mit Takt · Timer 2:15“).
+
+### 15.5 Paket und Adressen
+
+- Der gestaltete Test braucht Formatversion 6 (`core.pakete.nutzt_kursplan`);
+  `trainingsapp-paket pruefen` meldet Unbekanntes in `wie_uebung`, gemessene Felder in `ziel`
+  und `felder` und einen Timer neben der Vorgabe „Zeit“ (`paket_werkzeug._gestaltung_pruefen`).
+- **IDs in der Adresse des Tests sind frei wählbar:** Ein Test-Block namens „timer“ öffnete
+  die Timer-Ansicht statt des Tests. Die Wörter „timer“, „anhang“, „paketmedium“ zählen in
+  ``/kurse/<kurs>/<kapitel>/test/<block>/<übung>`` jetzt erst hinter den IDs (`ui/app.py`).
+
+## 16. Der Kursbau als grafisches Programm (Ben, 16.11.2026) — Leitbild und nächste Schritte
+
+Ben: „Nimm den Plan-/Kursbauplan als grafisches Programmieren, ähnlich wie bei LabView. Wir
+dürfen hier gar nicht zu kompliziert sein, Dinge mit Standardwerten versehen. Überschreiben ist
+möglich.“ · „Die Übung hat erstmal ihren eigenen Wert. Wenn man eine Übung macht, kann man
+diesen Wert weitergeben und übernehmen.“ · „Testwert wird als Variable gespeichert und kann
+irgendwo verwendet werden im Kurs/Planbau.“
+
+Dieser Abschnitt ordnet, was gebaut ist, nach diesem Bild — und sagt, was daraus als Nächstes
+folgt. Er ändert kein Verhalten; Neues steht als Vorschlag da.
+
+### 16.1 Bausteine als Knoten: Eingänge, Ausgang, Vorgaben
+
+Ein Baustein nimmt etwas entgegen, tut eines und gibt etwas weiter. Jede Einstellung hat eine
+**Vorgabe**; überschrieben wird nur, was anders sein soll.
+
+| Baustein | Eingänge | Ausgang | Vorgabe ohne Angabe | Überschreiben |
+|---|---|---|---|---|
+| **Auswahl** (`auswahl`) | Übungen zur Wahl, wie viele | die **Wahl** der Person | 1 aus den genannten | Anzahl |
+| **Test** (`test`) | eine Übung — fest oder „die gewählte“ einer Auswahl | ein **Wert** (Variable, §15.1) | jüngster Eintrag der Übung; als Lauf: Stoppuhr, kein Takt, keine Ausführung | Vorgabe (Menge · Zeit · Skala), Uhr, Takt, Ausführung, Hinweis (§15.2) |
+| **Übung dazu** (`plan_uebung`) | eine Übung — fest oder die gewählte; hinter welcher Marke; optional ein Wert (`ziel_aus`) | eine **Planübung** mit Marke | ans Ende; sie folgt der Übung (Ziel, Parameter, Timer, Takt wie dort) | Platz, Ziel (fest oder Wert × Faktor), Parameter, Timer, Takt |
+| **Einstellen** (`plan_einstellen`) | eine Marke oder der Plan; optional ein Wert | — (ändert, was da ist) | nichts — nur was genannt ist | Ziel, Parameter, Timer, Takt, Übergang, Pause |
+| **Weg** (`plan_weg`) | zwei Marken (von, zu) | ein **Weg** im Ablauf | ein freier Weg | Auslöser, Pflicht, von selbst, Beschriftung |
+
+Verbunden sind sie über **Namen**: die Block-ID einer Auswahl (`aus`), die Marke einer
+Planübung (`hinter`, `an`, `von`, `zu`) und die Variable eines Tests (`ziel_aus`). Ein
+Baustein darf nur nennen, was davor entsteht (`trainingsapp-paket pruefen` meldet es).
+
+**Die Person bleibt am Schalter:** Aus dem Ausgang eines Bausteins wird am Plan erst etwas,
+wenn sie die Zeile der Sammelkarte übernimmt (§3, „Nichts am Plan ohne Tipp“).
+
+### 16.2 Variablen — was es gibt und was folgen kann
+
+- **Gebaut:** Der Wert eines Tests (§15.1). Abnehmer ist das Ziel einer Planübung
+  (`ziel_aus` mit `faktor`), in jedem Kapitel nach dem Test.
+- **Vorschlag (Stufe V, nichts davon gebaut):**
+  1. **Auslöser eines Wegs aus einer Variable** — „weiter nach 80 % deiner Test-Wiederholungen“
+     statt einer festen Zahl im Baustein „Weg“ (`kante.n` aus einer Variable × Faktor).
+  2. **Dauer eines Timers aus einer Variable** — „halte 80 % deiner Testzeit“ als Abschnitt
+     des Timers, nicht nur als Ziel.
+  3. **Ein Wert von Hand** — die Person trägt den Wert selbst ein oder ändert ihn, ohne den
+     Test zu wiederholen („Überschreiben ist möglich“).
+  4. **Die Antwort einer Frage als Variable** — das ist Stufe 3 (Antworten speichern, Folgen)
+     in diesem Bild: Die Antwort ist ein Ausgang wie der Testwert.
+  5. **Im Editor sichtbar:** bei „Ziel aus …“ die Liste der Variablen des Kurses mit ihrem
+     Baustein und Kapitel, statt nur der Tests desselben Kapitels.
+- **Grenze bleibt:** Variablen kommen aus Einträgen, Selbstauskunft und eigener Wahl — nie aus
+  Messwerten (§8; `docs/recht/00_zweckbestimmung.md`). Eine Variable aus Herzfrequenz oder HRV,
+  die Plan oder Workout steuert, gibt es nicht.
+
+### 16.3 Ein Bild, dieselben Gesten — Plan und Kurs (Katalog P217)
+
+Ben, 16.11.2026: „Versuche den Ablaufplan in Plan und Kurs noch weiter zu vereinheitlichen“;
+auf die Skizzen G1–G4: gedrückt halten = „Menü“ · „Slot weglassen“ · Weg-Leiste unter dem Bild
+„Ja. Hauptknoten wieder Blatt“ · im Kurs-Editor dieselben Gesten: „ja“.
+
+| Geste im Bild | im Plan (Reiter „Ablauf“) | im Kurs-Editor („So wächst der Plan“) |
+|---|---|---|
+| Punkt unter einer Übung auf eine andere ziehen | ein Weg | nach kurzer Bestätigung der Baustein „Weg“ im bearbeiteten Kapitel |
+| Tipp auf den Punkt eines Wegs | seine Einstellungen in der Leiste unter dem Bild | sein Baustein |
+| Tipp auf den Hauptknoten mit mehreren Wegen | das Blatt mit allen Wegen | — |
+| gedrückt halten auf einer Übung | ihr Menü (einstellen, Beiname, nur ihren Weg, Start, herausnehmen) | ihr Menü (Weg von hier, Weg zum Ende, Einstellen als Baustein) |
+| Kachel aus der Leiste auf eine Übung | neue Übung dahinter | — (Übungen bringt der Baustein „Übung dazu“) |
+
+**Stand 16.11.2026 nachts: gebaut** — im Plan-Reiter (`docs/plan_verzweigungen.md` §8.13
+Punkt 6) und im Kapitel-Formular (`ui/components/kursplan_bild.py`,
+`ui/views/kurs_bearbeiten.weg_gezogen`, `einstellen_an`; Rechnung
+`core.kursbild.weg_baustein`). Im Kurs steht „Weg zum Ende“ im Menü statt als Ziel am Bildrand
+(das Bild ist oft höher als der Bildschirm), „noch einmal“ und „zurück“ gibt es dort nicht
+als Baustein, und „Start“ lässt sich nicht versetzen. Im Kurs-Formular (ohne Kapitel) bleibt
+das Bild zum Ansehen.
+
+Die Zeichnung ist dieselbe (`ui/components/ablaufbild.py`); was eine Geste bewirkt, sagt der
+Aufrufer über Rückrufe. Im Plan ändert sie den Ablauf sofort, im Kurs entsteht ein Baustein —
+am Plan der Person ändert sich dadurch nichts ohne ihren Tipp.
+
+### 16.4 Reihenfolge, wie ich sie vorschlage
+
+1. **Fertig bauen, was entschieden ist:** flexibler Test (Editor, Lauf), Bedienen im Bild im
+   Plan-Reiter, danach im Kurs-Editor (B1). Web-Fotos, Gerätetests T143/T144.
+2. **Stufe V, Punkte 5 und 3** (Variablen im Editor sichtbar; Wert von Hand) — klein, macht
+   das Bild von §16.1 im Editor erst sichtbar. Braucht Bens Wort und eine Skizze.
+3. **Stufe 3** (Antworten als Variable, Folgen) — der nächste große Baustein; mit Skizzen.
+4. **A2** („vom fertigen Plan aus“) — liegt nach B1 näher: Wer im Bild Wege ziehen kann, kann
+   dort auch Übungen einem Kapitel zuordnen. Mit Skizzen.
+5. Stufe V 1–2, Stufe 4/5 nach Bedarf.

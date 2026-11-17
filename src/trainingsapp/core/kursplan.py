@@ -62,7 +62,7 @@ from .kursbloecke import (
     ziel_aus_test,
 )
 from .kurse import Kapitel, Kurs, Kursplan, PlanVorlage, plan_aus_vorlage
-from .kurstest import SKALA_NAME, herkunft, skala_name
+from .kurstest import SKALA_NAME, herkunft, skala_name, uhr_fuer, vorgabe_fuer
 from .models import Plan, PlanItem
 from .result_spec import FieldSpec, FieldType, ResultSpec, vorrat_feld, wert_text
 from .takt import AUS, Takt
@@ -799,10 +799,13 @@ class _Lauf:
         ziel = {**bisher, test.feld: [zahl] if je_satz else zahl}
         text = self._ziel_text(uebung, ziel, (test.feld,))
         # Die Regel des Kurses, ohne Wertung: woher die Zahl kommt (Faktor, gemessener Wert,
-        # Vorgabe des Tests) — `core.kurstest.herkunft`
-        woher = herkunft(
-            b.faktor, _kurzwert(feld, wert), test.vorgabe, test.feld, self._skala_name(uebung)
-        )
+        # Vorgabe des Tests) — `core.kurstest.herkunft`. Genannt wird die Vorgabe, die im Lauf
+        # **galt**: Lief der Test mit seinem eigenen Timer, gilt eine Vorgabe „Zeit“ nicht
+        # (`vorgabe_fuer`) — sonst stünde hier „in 1 Minute“, obwohl der Timer die Zeit war.
+        # (Den Timer „wie die Übung“ kennt die Rechnung nicht; der Editor lässt die
+        # Kombination mit „Zeit“ nicht zu.)
+        galt = vorgabe_fuer(test, uhr_fuer(test))
+        woher = herkunft(b.faktor, _kurzwert(feld, wert), galt, test.feld, self._skala_name(uebung))
         self._wert(
             zid=zid,
             b=b,

@@ -159,6 +159,7 @@ from trainingsapp.ui.views.geraeteprobe import geraeteprobe_view
 from trainingsapp.ui.views.gps_test import gps_test_view
 from trainingsapp.ui.views.heute import heute
 from trainingsapp.ui.views.kurs_bearbeiten import kapitel_bearbeiten, kurs_bearbeiten
+from trainingsapp.ui.views.kurs_testlauf import SEGMENT as KURS_TEST_SEGMENT
 from trainingsapp.ui.views.kurs_testlauf import aus_route as kurs_test_aus_route
 from trainingsapp.ui.views.kurs_testlauf import kurs_test_view
 from trainingsapp.ui.views.kurse import kapitel_view, kurs_view
@@ -962,21 +963,27 @@ def main(page: ft.Page, browserspeicher: Browserspeicher | None = None) -> None:
         was der Stapel braucht. Unbekannte IDs enden beim letzten gültigen Element."""
         ablage.clear()
         teile = navigation.teile(route)  # "/plan/abc" → ["plan", "abc"]
+        # In der Adresse eines Kurs-Tests (``/kurse/<kurs>/<kapitel>/test/<block>/<übung>``)
+        # stehen frei gewählte IDs: Ein Block namens „timer“ ist kein Timer (Befund
+        # 16.11.2026 — der Tipp auf „Test starten“ tat dann nichts). Die Wörter „paketmedium“,
+        # „anhang“ und „timer“ zählen dort erst hinter den IDs
+        fest = 6 if teile[:1] == ["kurse"] and teile[3:4] == [KURS_TEST_SEGMENT] else 0
+
+        def wo(wort: str) -> int | None:
+            return teile.index(wort, fest) if wort in teile[fest:] else None
+
         # Dateien aus Paketen (U3) legen sich wie Anhänge über jede Ansicht
-        if "paketmedium" in teile:
-            i = teile.index("paketmedium")
+        if (i := wo("paketmedium")) is not None:
             stapel(teile[:i])
             if len(teile) > i + 1:
                 medium_basis, medium_name = "/" + "/".join(teile[:i]), teile[i + 1]
                 ablegen(lambda: paketmedium_view(page, state, medium_basis, medium_name))
         # Anhänge (Foto, Video) legen sich wie der Timer über jede Ansicht
-        elif "anhang" in teile:
-            i = teile.index("anhang")
+        elif (i := wo("anhang")) is not None:
             stapel(teile[:i])
             anhang_routen("/" + "/".join(teile[:i]), teile[i + 1 :])
         # Der Timer legt sich über jede Ansicht: erst deren Stapel, dann er.
-        elif "timer" in teile:
-            i = teile.index("timer")
+        elif (i := wo("timer")) is not None:
             stapel(teile[:i])
             basis = "/" + "/".join(teile[:i])
             if teile[i + 1 : i + 2] == ["uebung"]:

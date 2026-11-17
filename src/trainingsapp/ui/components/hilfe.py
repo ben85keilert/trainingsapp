@@ -419,33 +419,47 @@ dann in der Palette, bis du sie einsetzt.
 - **Palette** oben: die **Übungen** des Plans, jede einmal — **„2×“, „3×“**, wenn sie mehrfach
   im Plan steht, **„frei“**, solange sie nicht im Bild ist. Eine Kachel bringt immer einen
   **neuen Knoten** ins Bild: **Antippen** (mit gewählter Übung im Bild: die neue kommt
-  dahinter) oder **nach unten ziehen** in einen **Slot** oder auf „Start“. Dabei kommt zuerst
-  eine Planübung, die noch nicht im Bild steht — sonst kommt die Übung **noch einmal** in den
-  Plan. Zwei Übungen, die schon im Bild stehen, verbindest du unter **Routing**. „+“ fügt eine
+  dahinter) oder **nach unten ziehen** — auf eine **Übung im Bild** (die neue kommt hinter
+  sie) oder auf „Start“. Dabei kommt zuerst eine Planübung, die noch nicht im Bild steht —
+  sonst kommt die Übung **noch einmal** in den Plan. Am Ende der Leiste steht die Kachel
+  **„Frage“**: antippen oder auf eine Übung ziehen setzt eine Frage dahinter. „+“ fügt eine
   andere Übung hinzu.
 - Im Bild ist **jede Verwendung ein eigener Knoten** mit ihrer **Nummer** (die Stelle in der
   Liste — sie ändert sich beim Umordnen, die Wege bleiben).
-- **Tipp auf eine Übung im Bild** wählt sie. Darunter: **Routing** (Wege einstellen, Weg zu
-  einer Übung im Bild, Frage, Schleife, ◀ zurück, Ende, Start, Übung einstellen), **Neuer
-  Slot**, **Beiname**, **Aus dem Ablauf nehmen** (Lücke schließen oder die Reihe danach
-  mitnehmen — die Übung bleibt im Plan und in der Palette). **Aus dem Plan** nimmt sie erst
+- **Verbinden durch Ziehen:** Jede Übung und jede Frage hat unter sich **ihren Punkt**. Zieh
+  ihn auf eine **andere** Übung: ein Weg dorthin. Auf **dieselbe** Übung: noch einmal. Während
+  du ziehst, stehen unten im Bild **„Ende“** (hier endet das Workout) und **„zurück“** (dorthin,
+  wo du herkamst) bereit. Der Punkt von **„Start“**, auf eine Übung gezogen, macht sie zum
+  Start.
+- **Tipp auf eine Übung im Bild** wählt sie — die nächste Kachel kommt hinter sie.
+- **Tipp auf den Punkt eines Wegs** zeigt seine **Leiste** unter dem Bild: *wann* es
+  weitergeht (frei, Zeit ab, Wiederholungen, in einer Zeit, Skala), die Zahl dazu mit − und +,
+  **Pflicht**; ✕ entfernt den Weg. Jede Änderung gilt sofort. **„Mehr …“** öffnet das Blatt
+  mit Ziel, Beschriftung („Rücken tut weh“), anbieten oder von selbst und Inhalt.
+- **Gedrückt halten** auf einer Übung öffnet ihr **Menü**: Übung einstellen, Beiname, nur
+  ihren Weg zeigen („Alles zeigen“ holt den Rest zurück), Als Start, **Aus dem Ablauf nehmen**
+  (Lücke schließen oder die Reihe danach mitnehmen — die Übung bleibt im Plan und in der
+  Palette). An einer Frage: ändern, löschen. **Aus dem Plan** nimmt eine Übung erst
   **Gedrückthalten** an ihrer Kachel in der Palette — bei „2×“ die zuletzt hinzugekommene.
 - **Leer bleibt leer:** Nimmst du alles aus dem Bild, stehen dort „Start“ und ein leerer Platz
   — nichts setzt sich von selbst hinein. Eine Übung antippen oder auf „Start“ ziehen beginnt
   neu; „Wie die Liste“ holt die Reihenfolge der Liste zurück.
 - **Den Start setzt du selbst:** Nimmst du die Startübung heraus oder löschst sie, rückt keine
   andere nach — der Ablauf hat keinen Start, das Workout beginnt nicht und sagt, dass der Plan
-  korrigiert werden muss. Übung im Bild antippen und **„Als Start“** setzt einen neuen.
-- Hat eine Übung **einen** Weg, steht zwischen ihr und der nächsten **ein Punkt** — er öffnet
-  ihre Wege (dort kommt auch ein zweiter dazu). Mit **mehreren** Wegen beginnen alle an ihrem
-  **Abzweig**, dem Punkt unter ihr: **Tipp auf den Abzweig** öffnet alle ihre Wege, **Tipp auf
-  den Punkt eines Wegs** nur diesen.
-- **Wege einstellen** zeigt alle Wege der Übung untereinander: *Kommt von* und *Weiter zu* —
-  je Weg das Ziel, *wann* (frei, Zeit ab, Wiederholungen, in einer Zeit, Skala), anbieten oder
-  von selbst, Pflicht, Beschriftung („Rücken tut weh“). Dasselbe steht in „Im Plan einstellen“.
-  Der erste Weg ist der **Hauptweg** (er steht auch als Bedingung in der Liste). Gibt es
-  mehrere gleichwertige Wege, fragt das Workout, wohin es weitergeht.
-- **Lang drücken** zeigt nur den Weg durch diese Übung, „Alles zeigen“ holt den Rest zurück.
+  korrigiert werden muss. Den Punkt von „Start“ auf eine Übung ziehen setzt einen neuen —
+  ebenso Übung antippen und **„Als Start“**.
+- **Fehlt eine Übung des Ablaufs** (sie liegt im Papierkorb, oder ihr Paket ist ausgeschaltet),
+  beginnt das Workout nicht, bis der Plan repariert ist: die Übung zurückholen — oder an der
+  roten Karte **aus dem Plan nehmen**.
+- Hat eine Übung **einen** Weg, steht zwischen ihr und der nächsten **ein Punkt** — der Punkt
+  dieses Wegs und zugleich der, an dem du einen zweiten ziehst. Mit **mehreren** Wegen
+  beginnen alle an ihrem **Abzweig**, dem Punkt unter ihr: **Tipp auf den Abzweig** öffnet das
+  Blatt mit **allen** ihren Wegen, **Tipp auf den Punkt eines Wegs** seine Leiste. Eine Übung
+  **ohne** Weg hat einen kleinen Ring: ziehen verbindet, antippen öffnet das Blatt.
+- Das **Blatt mit allen Wegen** zeigt sie untereinander: *Kommt von* und *Weiter zu* — je Weg
+  das Ziel, *wann*, anbieten oder von selbst, Pflicht, Beschriftung. Dasselbe steht in „Im Plan
+  einstellen“. Der erste Weg ist der **Hauptweg** (er steht auch als Bedingung in der Liste).
+  Gibt es mehrere gleichwertige Wege, fragt das Workout, wohin es weitergeht.
 - **Neu anordnen** räumt die Zeichnung auf und richtet die Ansicht aus — sonst bleibt alles,
   wo es ist. Zwei Finger zoomen, ein Finger schiebt.
 - **Start** antippen spielt den Hauptweg ab.

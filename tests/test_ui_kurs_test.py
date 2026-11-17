@@ -32,7 +32,8 @@ from trainingsapp.core.kursbloecke import (  # noqa: E402
 from trainingsapp.core.kurse import Kapitel, Kurs  # noqa: E402
 from trainingsapp.core.models import Exercise  # noqa: E402
 from trainingsapp.core.result_spec import ResultSpec, vorrat_feld  # noqa: E402
-from trainingsapp.core.timer import stoppuhr  # noqa: E402
+from trainingsapp.core.takt import VORLAGEN  # noqa: E402
+from trainingsapp.core.timer import Abschnitt, TimerProfil, stoppuhr  # noqa: E402
 from trainingsapp.devices.einheit import Einheitslauf  # noqa: E402
 from trainingsapp.devices.messlauf import Messlauf  # noqa: E402
 from trainingsapp.ui import einheit as einheit_ui  # noqa: E402
@@ -331,6 +332,43 @@ def test_route_legt_den_testlauf_ueber_kurs_und_kapitel(tmp_path, monkeypatch) -
         asyncio.run(seite.push_route(route))  # der Weg: aus dem Kapitel in den Test
         assert seite.routen()[-2:] == [zum_kapitel, route]
         assert state.einheit is None
+    finally:
+        state.schliessen()
+
+
+def test_block_namens_timer_oeffnet_den_test_nicht_den_timer(tmp_path, monkeypatch) -> None:
+    """Befund 16.11.2026: Die IDs in der Adresse eines Kurs-Tests sind frei wählbar (Pakete).
+    Hieß ein Test-Block „timer“, las `app.main` das Wort als die Timer-Ansicht — der Tipp auf
+    „Test starten“ tat nichts. Die Wörter „timer“, „anhang“, „paketmedium“ zählen in dieser
+    Adresse erst hinter den IDs; der Timer **über** dem Test geht weiter auf."""
+    monkeypatch.setenv("TRAININGSAPP_DATA_DIR", str(tmp_path))
+    from trainingsapp.ui import app
+
+    vorher = AppState.starten()
+    kurs, kapitel, block, kaefer = _kurs(vorher, Vorgabe(SKALA, 7))
+    block.id = "timer"
+    vorher.kurse.speichern(kurs)
+    vorher.schliessen()
+    route = kurs_test.route_zum_test(kurs.id, kapitel.id, "timer", kaefer.id)
+
+    gestartet: list[AppState] = []
+    original = AppState.starten
+
+    def starten(*a, **k):
+        s = original(*a, **k)
+        gestartet.append(s)
+        return s
+
+    monkeypatch.setattr(AppState, "starten", staticmethod(starten))
+    seite = AppSeite()
+    seite.route = route
+    app.main(seite)
+    state = gestartet[-1]
+    try:
+        assert seite.routen()[-1] == route
+        assert seite.views[-1].appbar.title.value == "Test · Käfer"
+        asyncio.run(seite.push_route(f"{route}/timer"))  # der Timer legt sich darüber
+        assert seite.routen()[-2:] == [route, f"{route}/timer"]
     finally:
         state.schliessen()
 
@@ -737,3 +775,479 @@ async def test_der_gewaehlten_je_uebung_ein_knopf(umgebung) -> None:
     assert _daten(danach, ("testwert", "test", kaefer.id)).value == "noch kein Test"
     assert _daten(danach, ("test_starten", "test", bruecke.id)).content == "Nochmal"
     assert _daten(danach, ("test_starten", "test", kaefer.id)).content == "Test starten"
+
+
+# -- Der gestaltete Test (Ben, 16.11.2026: „Der Test muss flexibel gestaltet werden können“) --
+
+INTERVALL = TimerProfil(
+    id="intervall",
+    name="Intervall",
+    abschnitte=[Abschnitt("Los", 20), Abschnitt("Pause", 10, zaehlt=False)],
+    runden=2,
+)
+HALTEN = TimerProfil(id="halten", name="Halten", abschnitte=[Abschnitt("Halten", 45)])
+KNIEBEUGE = VORLAGEN["kniebeuge_2_1_2"]  # eine Runde dauert 5 s; beim Üben zählt er
+
+
+def _uebung(name: str, *felder: str, **mehr) -> Exercise:
+    return Exercise(
+        name=name, result_spec=ResultSpec(fields=[vorrat_feld(k) for k in felder]), **mehr
+    )
+
+
+def _gestaltet(state, uebung: Exercise, **block):
+    """Ein Kurs mit einem Kapitel und einem Test bei ``uebung`` mit den Angaben ``block`` —
+    erreicht eine Stunde vor der Uhr der Attrappen (wie `_kurs`)."""
+    state.uebungen.speichern(uebung)
+    test = Block(TEST, id="test", uebung=uebung.id, **block)
+    kurs = Kurs(name="Rumpf-Kurs", kapitel=[Kapitel(titel="Erweiterung", bloecke=[test])])
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    kapitel = kurs.kapitel[0]
+    _erreichen(state, kurs, kapitel)
+    return kurs, kapitel, kapitel.bloecke[0], state.uebungen.laden(uebung.id)
+
+
+def _chip(c, text: str) -> ft.Chip:
+    return next(x for x in _alle(c) if isinstance(x, ft.Chip) and x.label.value == text)
+
+
+def _symbolknopf(c, tooltip: str) -> ft.IconButton:
+    return next(x for x in _alle(c) if isinstance(x, ft.IconButton) and x.tooltip == tooltip)
+
+
+async def _oeffnen_und_starten(u, kurs, kapitel, block, uebung) -> None:
+    """Ein gestalteter Test: „Test starten“ im Kapitel öffnet ihn bereit, „Start“ startet."""
+    await _starten(u, kurs, kapitel)
+    assert vorbei(u.state) and u.state.kurs_test is None  # nur geöffnet, nichts läuft
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, uebung), "test_start"))
+
+
+async def test_gestalteter_test_oeffnet_sich_bereit_und_zeigt_wie_er_laeuft(umgebung) -> None:
+    """F2: Die Karte sagt in einem Satz, wie der Test läuft; „Test starten“ öffnet ihn
+    **bereit** — Hinweis, Ausführung (vorgegeben zum Lesen, frei zum Wählen), Timer, Takt —
+    und startet nichts. Erst „Start“ startet die Uhr, mit dem Timer des Tests."""
+    u = umgebung
+    state = u.state
+    kaefer = _uebung("Käfer", "reps", "weight", "side")
+    kurs, kapitel, block, kaefer = _gestaltet(
+        state,
+        kaefer,
+        feld="reps",
+        text="Mach dich vorher 5 Minuten warm.",
+        timer=INTERVALL.als_dict(),
+        takt=KNIEBEUGE,
+        ziel={"side": "links"},
+        felder=["weight"],
+    )
+    assert block.vorgabe is None and block.laeuft
+    karte = _kapitel(u, kurs, kapitel)
+    texte = _texte(karte)
+    assert "Käfer: was schaffst du?" in texte and "Mach dich vorher 5 Minuten warm." in texte
+    assert _daten(karte, ("test_wie", "test")).value == (
+        "Läuft mit dem Timer „Intervall“ (1:00) und im Takt Kniebeuge 2-1-2. "
+        "Ausführung: links. Gewicht wählst du vor dem Start."
+    )
+    assert "Noch kein Test, seit du dieses Kapitel öffnest." in texte
+    knopf = _daten(karte, ("test_starten", "test"))
+    assert knopf.content == "Test starten" and not _hat(karte, ("test_oeffnen", "test"))
+    await klick(knopf)
+    assert u.seite.route == f"/kurse/{kurs.id}/{kapitel.id}/test/test/{kaefer.id}"
+    assert state.einheit is None and state.kurs_test is None  # nur geöffnet
+    bereit = _ansicht(u, kurs, kapitel, block, kaefer)
+    texte = _texte(bereit)
+    assert bereit.data is None and bereit.appbar.leading is None
+    assert "TIMER" in texte and _daten(bereit, "test_vorgabe").value == "Intervall · 1:00"
+    assert (
+        "Der Timer läuft 1 Minute. Danach sagst du, wie viele es waren und wie anstrengend "
+        "es war." in texte
+    )
+    assert _daten(bereit, "test_hinweis").value == "Mach dich vorher 5 Minuten warm."
+    assert "SO MACHST DU DEN TEST" in texte
+    assert _daten(bereit, ("test_fest", "side")).value == "links" and "vorgegeben" in texte
+    assert not [x for x in _alle(bereit) if isinstance(x, ft.Chip)]  # die Seite steht fest
+    # der Timer steht schon groß im Kopf — die Karte nennt seine Abschnitte
+    assert _daten(bereit, "test_timer").value == "Abschnitte"
+    assert _daten(bereit, "test_abschnitte").value == "0:20 Los · 0:10 Pause · 2 Runden"
+    assert "Takt läuft mit" in texte
+    assert _daten(bereit, "test_takt").value == "12,0/min · 2 s ab, 1 s halten, 2 s auf"
+    # das Gewicht ist frei: mit „+“ gewählt — die Wahl überlebt den Neuaufbau der Ansicht
+    await klick(_symbolknopf(bereit, "Gewicht mehr"))
+    bereit = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert "5 kg" in _texte(bereit)
+    await klick(_symbolknopf(bereit, "Gewicht mehr"))
+    assert state.einheit is None
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_start"))
+    e = state.einheit
+    stand = state.kurs_test
+    assert e is not None and e.laeuft and stand.phase == LAEUFT
+    assert e.timer.lauf.profil.name == "Intervall" and stand.timer is not None
+    assert not e.ende_mit_timer  # ist der Timer durch, wartet das Ergebnis
+    assert e.timer.lauf.takt_uebung == KNIEBEUGE and e.teil("zaehlen") is None
+    assert stand.vorgabe is None and stand.ausfuehrung == {"side": "links", "weight": 6}
+    assert stand.ausfuehrung_text == "links · 6 kg"
+    # Solange er läuft, führt die Karte zum Test
+    laufend = _daten(_kapitel(u, kurs, kapitel), ("test_starten", "test"))
+    assert laufend.content == "Zum Test"
+    await klick(laufend)
+    assert state.einheit is e and state.kurs_test is stand
+
+
+async def test_timer_mit_abschnitten_endet_von_selbst_und_traegt_einmal_ein(umgebung) -> None:
+    """Der Test läuft mit seinem Timer aus zwei Abschnitten: Die Ansicht zeigt den Abschnitt
+    und seinen Rest, ein Knopf zum Beenden fehlt; ist der Timer durch, wartet das Ergebnis
+    (die Einheit läuft weiter). Die Zeit des Tests ist, was in den zählenden Abschnitten lief;
+    eingetragen wird genau einmal."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _gestaltet(
+        state, _uebung("Käfer", "reps"), feld="reps", timer=INTERVALL.als_dict()
+    )
+    await _oeffnen_und_starten(u, kurs, kapitel, block, kaefer)
+    await _sekunden(u, 12)
+    ansicht = _ansicht(u, kurs, kapitel, block, kaefer)
+    texte = _texte(ansicht)
+    assert ansicht.data == FOKUS_ANSICHT and "TIMER" in texte
+    assert _daten(ansicht, "test_zeit").value == "0:08"  # der Rest des Abschnitts
+    assert _daten(ansicht, "test_abschnitt").value == "Los · Runde 1 von 2"
+    assert _daten(ansicht, "test_gesamt").value == "0:12 von 1:00"
+    assert "danach Pause 0:10" in texte and "Timer läuft · endet von selbst" in texte
+    assert len(_daten(ansicht, "test_leiste").content.controls) == 4  # vier Abschnitte
+    assert not _hat(ansicht, "test_fertig") and _hat(ansicht, "test_vorher")
+    assert "Du zählst selbst" in texte and "Wie viele es waren, sagst du danach." in texte
+    assert "Ist der Timer durch, hält die Uhr von selbst an." in texte
+    # der Ticker frischt Zeit und Abschnitt auf
+    u.uhr.t += 10
+    state.timer_beobachter[kurs_test.BEOBACHTER]()
+    assert _daten(ansicht, "test_zeit").value == "0:08"  # 22 s: die Pause, noch 8 s
+    assert _daten(ansicht, "test_abschnitt").value == "Pause · Runde 1 von 2 · zählt nicht"
+    assert kurs_test.pruefen(u.seite, state) is False
+    await _sekunden(u, 39)  # 61 s — der Timer ist seit einer Sekunde durch
+    # Die Einheit endet nicht mit dem Timer: Sie wartet auf das Ergebnis. Der Wächter sieht
+    # alle 0,2 s (echte Zeit) nach — war er noch nicht da, tut der Test dasselbe
+    assert state.einheit.laeuft
+    kurs_test.pruefen(u.seite, state)
+    stand = state.kurs_test
+    assert stand.phase == ERGEBNIS and stand.durch and not stand.vorher
+    assert stand.sekunden == 40.0 and stand.ende_t_s == 60.0  # zweimal „Los“; Ende bei 1:00
+    await _sekunden(u, 20)  # die Einheit wartet auf „Eintragen“ — nichts ist eingetragen
+    assert state.einheit.laeuft and not _eintraege(state, kaefer)
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    texte = _texte(ergebnis)
+    assert _daten(ergebnis, "test_ende").value == "Der Timer ist durch"
+    assert _daten(ergebnis, "zeit").value == "0:40" and "vom Timer" in texte
+    assert _daten(ergebnis, "test_eintragen").disabled
+    feld = _daten(ergebnis, "test_wdh")
+    feld.value = "14"
+    feld.on_change(SimpleNamespace(control=feld))
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, kaefer)  # genau einer — das Ende der Einheit trug nichts ein
+    assert eintrag.result == {"reps": [14], "duration": 40}
+    assert eintrag.started_at == UTC0 and eintrag.ended_at == UTC0 + timedelta(seconds=60)
+    assert state.kurse.testwerte(kapitel, state.profil.id, SEIT) == {"test": 14.0}
+    (lauf,) = uebung_lauf.laeufe_heute(state, kaefer.id)
+    assert lauf.eintrag_id == eintrag.id and lauf.eingetragen == {"uhr"}
+    assert not lauf.abgebrochen and not lauf.nachtragbar and not lauf.offen
+    assert [(z.name, z.sekunden) for z in lauf.zeiten] == [
+        ("Los", 20.0),
+        ("Pause", 10.0),
+        ("Los", 20.0),
+        ("Pause", 10.0),
+    ]
+    # In der laufenden Aufnahme stehen die Abschnitte des Timers — wie beim Üben
+    notizen = [n["text"] for n in state.messlauf.aufnahme.ereignisse]
+    assert notizen[0] == "Käfer: Start" and notizen[-1] == "Käfer: Ende"
+    assert "Pause (Runde 1/2)" in notizen and "Los (Runde 2/2)" in notizen
+    assert _daten(_kapitel(u, kurs, kapitel), "testwert").value == "14 Wdh."
+
+
+async def test_timer_durch_und_verworfen_traegt_nichts_ein(umgebung) -> None:
+    """Ein Timer, der durchlief, lässt sich an der Uhr nicht mehr abbrechen — „Verwerfen“
+    trägt trotzdem nichts ein, auch nicht mit dem Ende der Einheit: Der Lauf steht
+    abgebrochen unter „Läufe heute“."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _gestaltet(
+        state, _uebung("Käfer", "reps"), feld="reps", timer=INTERVALL.als_dict()
+    )
+    await _oeffnen_und_starten(u, kurs, kapitel, block, kaefer)
+    await _sekunden(u, 62)
+    kurs_test.pruefen(u.seite, state)  # der Wächter tut dasselbe
+    assert state.kurs_test.phase == ERGEBNIS and state.kurs_test.durch
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_verwerfen"))
+    assert u.seite.route == f"/kurse/{kurs.id}/{kapitel.id}" and state.kurs_test is None
+    await _bis_vorbei(u)
+    assert not _eintraege(state, kaefer)
+    assert state.kurse.testwerte(kapitel, state.profil.id, SEIT) == {}
+    (lauf,) = uebung_lauf.laeufe_heute(state, kaefer.id)
+    assert lauf.abgebrochen and lauf.eintrag_id is None and not lauf.offen and lauf.nachtragbar
+    # … und vor dem Ende des Timers: „Vorher aufgehört …“ nimmt die Zeit bis dahin, ✕ bricht ab
+    await _oeffnen_und_starten(u, kurs, kapitel, block, kaefer)
+    await _sekunden(u, 25)  # 20 s „Los“, 5 s Pause
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_vorher"))
+    stand = state.kurs_test
+    assert stand.phase == ERGEBNIS and stand.vorher and not stand.durch
+    assert stand.sekunden == 20.0
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert _daten(ergebnis, "test_ende").value == "Vorher aufgehört"
+    await klick(_daten(ergebnis, "test_abbrechen"))
+    await _bis_vorbei(u)
+    assert not _eintraege(state, kaefer)
+    assert [x.abgebrochen for x in uebung_lauf.laeufe_heute(state, kaefer.id)] == [True, True]
+
+
+async def test_takt_fuehrt_zaehlt_nicht_und_schlaegt_seine_runden_vor(umgebung) -> None:
+    """F3, F4: Der Takt läuft mit, aber er zählt nicht — kein Zähl-Teil, „Du zählst selbst“
+    weicht seiner Karte. Im Ergebnis stehen seine Runden als Vorschlag in den Wiederholungen;
+    „Eintragen“ bestätigt, −/+ ändern. Die vor dem Start gewählte Ausführung steht im
+    Eintrag."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _gestaltet(
+        state,
+        _uebung("Käfer", "reps", "side"),
+        feld="reps",
+        vorgabe=Vorgabe(SKALA, 7),
+        takt=KNIEBEUGE,
+        felder=["side"],
+    )
+    await _starten(u, kurs, kapitel)
+    assert state.einheit is None  # gestaltet: erst bereit
+    bereit = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert _daten(bereit, "test_vorgabe").value == "Bis Anstrengung 7"
+    assert [x.label.value for x in _alle(bereit) if isinstance(x, ft.Chip)] == [
+        "links",
+        "rechts",
+        "beide",
+    ]
+    assert not any(x.selected for x in _alle(bereit) if isinstance(x, ft.Chip))
+    _chip(bereit, "rechts").on_select()
+    bereit = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert _chip(bereit, "rechts").selected and not _chip(bereit, "links").selected
+    await klick(_daten(bereit, "test_start"))
+    e = state.einheit
+    assert e.timer.lauf.profil.ist_stoppuhr and e.timer.lauf.takt_uebung == KNIEBEUGE
+    assert e.teil("zaehlen") is None  # der Takt zählt nicht — auch wenn er es beim Üben täte
+    await _sekunden(u, 92)
+    assert e.teil("zaehlen") is None and kurs_test.pruefen(u.seite, state) is False
+    ansicht = _ansicht(u, kurs, kapitel, block, kaefer)
+    texte = _texte(ansicht)
+    assert _daten(ansicht, "test_zeit").value == "1:32" and "TAKT" in texte
+    assert _daten(ansicht, "test_ausfuehrung").value == "rechts"
+    assert _daten(ansicht, "test_takt").value == "12,0/min · 2 s ab, 1 s halten, 2 s auf"
+    assert "Der Takt führt — gezählt hat damit noch niemand." in texte
+    assert "Runde 19 · 12,0/min" in texte  # die Anzeige des Takts wie im Fokus
+    assert "Du zählst selbst" not in texte and not _hat(ansicht, "test_zahl")
+    assert "Ein Tipp hält Uhr und Takt an. Danach sagst du, wie viele es waren." in texte
+    await klick(_daten(ansicht, "test_fertig"))
+    stand = state.kurs_test
+    assert stand.phase == ERGEBNIS and not stand.gezaehlt
+    assert stand.wdh == 18 and stand.takt_runden == 18 and stand.skala == 7
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    texte = _texte(ergebnis)
+    assert _daten(ergebnis, "test_ende").value == "Bei 7 angekommen"
+    assert "Der Takt lief 18 Runden. Stimmt die Zahl?" in texte and "sagst du" not in texte
+    assert _daten(ergebnis, "test_wdh").value == "18"
+    assert not _daten(ergebnis, "test_eintragen").disabled  # „Eintragen“ bestätigt
+    assert _daten(ergebnis, "ausfuehrung").value == "rechts"
+    assert "wie vor dem Start gewählt" in texte
+    await klick(_daten(ergebnis, "test_wdh_plus"))
+    await klick(_daten(ergebnis, "test_wdh_plus"))
+    await klick(_daten(ergebnis, "test_wdh_minus"))
+    assert stand.wdh == 19 and _daten(ergebnis, "test_wdh").value == "19"
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, kaefer)
+    assert eintrag.result == {"reps": [19], "duration": 92, "scale": 7, "side": "rechts"}
+    assert [f.key for f in eintrag.spec_snapshot.fields] == ["reps", "side", "duration", "scale"]
+    ereignisse = state.einheiten.ereignisse(e.id)
+    assert [x.daten["name"] for x in ereignisse if (x.quelle, x.art) == ("timer", "takt")] == [
+        "Kniebeuge 2-1-2"
+    ]
+    assert not [x for x in ereignisse if x.quelle == "zaehlen"]
+    danach = _kapitel(u, kurs, kapitel)
+    assert _daten(danach, "testwert").value == "19 Wdh."
+    assert _daten(danach, "testneben").value == "in 1:32 · Anstrengung 7 · rechts"
+
+
+async def test_der_takt_beendet_eine_menge_nicht(umgebung) -> None:
+    """Vorgabe Menge mit Takt: Auch wenn der Takt die Menge längst durchlaufen hat, endet der
+    Test nicht von selbst — erst der Knopf. Die Menge ist dann die Vorgabe, kein Vorschlag."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _gestaltet(
+        state,
+        _uebung("Käfer", "reps"),
+        feld="duration",
+        vorgabe=Vorgabe(MENGE, 4),
+        takt=VORLAGEN["metronom_1"],
+    )
+    await _oeffnen_und_starten(u, kurs, kapitel, block, kaefer)
+    await _sekunden(u, 12)  # zwölf Schläge — dreimal die Menge
+    assert kurs_test.pruefen(u.seite, state) is False and state.kurs_test.phase == LAEUFT
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_fertig"))
+    stand = state.kurs_test
+    assert stand.wdh == 4 and stand.takt_runden is None
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert _daten(ergebnis, "wdh").value == "4" and "die Vorgabe" in _texte(ergebnis)
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, kaefer)
+    assert eintrag.result == {"reps": [4], "duration": 12}
+
+
+async def test_wie_die_uebung_nimmt_ihren_timer_takt_und_ihre_parameter(umgebung) -> None:
+    """„Wie die Übung“: ihr Timer, ihr Takt, ihre Parameter (frei, vorbelegt mit ihrem
+    Standard). Neben dem Timer gilt eine Vorgabe „Zeit“ nicht — der Timer ist die Zeit."""
+    u = umgebung
+    state = u.state
+    planke = _uebung(
+        "Planke",
+        "hold",
+        "weight",
+        timer=[HALTEN.als_dict()],
+        takt=VORLAGEN["atmung_4_6"],
+        default_target={"weight": 10},
+    )
+    kurs, kapitel, block, planke = _gestaltet(
+        state,
+        planke,
+        feld="hold",
+        vorgabe=Vorgabe(ZEIT, 60),
+        wie_uebung=["uhr", "takt", "parameter"],
+    )
+    karte = _kapitel(u, kurs, kapitel)
+    assert "Planke: was schaffst du?" in _texte(karte)  # nicht „Planke: 1 Minute“
+    assert _daten(karte, ("test_wie", "test")).value == (
+        "Läuft mit dem Timer „Halten“ (0:45) und im Takt Atmung 4-6. "
+        "Gewicht wählst du vor dem Start."
+    )
+    await _starten(u, kurs, kapitel)
+    bereit = _ansicht(u, kurs, kapitel, block, planke)
+    assert _daten(bereit, "test_vorgabe").value == "Halten · 0:45"
+    assert "10 kg" in _texte(bereit)  # vorbelegt mit dem Standard der Übung
+    await klick(_daten(bereit, "test_start"))
+    stand = state.kurs_test
+    lauf = state.einheit.timer.lauf
+    assert stand.vorgabe is None and lauf.profil.name == "Halten"
+    assert lauf.takt_uebung == VORLAGEN["atmung_4_6"] and stand.ausfuehrung == {"weight": 10}
+    await _sekunden(u, 30)
+    ansicht = _ansicht(u, kurs, kapitel, block, planke)
+    assert _daten(ansicht, "test_zeit").value == "0:15"
+    assert _daten(ansicht, "test_ausfuehrung").value == "10 kg"
+    assert not _hat(ansicht, "test_fertig") and _hat(ansicht, "test_vorher")
+    await _sekunden(u, 16)
+    kurs_test.pruefen(u.seite, state)  # der Wächter tut dasselbe
+    assert stand.phase == ERGEBNIS and stand.durch and stand.sekunden == 45.0
+    assert stand.wdh is None and stand.takt_runden is None  # eine Haltezeit hat keine
+    ergebnis = _ansicht(u, kurs, kapitel, block, planke)
+    assert "Wiederholungen" not in _texte(ergebnis)
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, planke)
+    assert eintrag.result == {"hold": [45], "weight": 10}
+    assert state.kurse.testwerte(kapitel, state.profil.id, SEIT) == {"test": 45.0}
+
+
+async def test_vorgegebene_ausfuehrung_ohne_vorgabe_endet_mit_fertig(umgebung) -> None:
+    """Ein Test, der nur die Ausführung vorgibt: Er läuft mit der Stoppuhr und endet mit
+    „Fertig“ („Vorher aufgehört“ gibt es ohne Vorgabe nicht). Die Ausführung steht im Eintrag
+    — in seiner Kopie der Felder, auch wenn die Übung das Feld nicht anbietet."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, planke = _gestaltet(
+        state, _uebung("Planke", "hold"), feld="hold", ziel={"angle": 90}
+    )
+    route = kurs_test.route_zum_test(kurs.id, kapitel.id, block.id, planke.id).split("/")[4:]
+    assert kurs_test.aus_route(state, kurs, kapitel, route) is not None  # auch ohne Vorgabe
+    await _starten(u, kurs, kapitel)
+    bereit = _ansicht(u, kurs, kapitel, block, planke)
+    texte = _texte(bereit)
+    assert "TEST" in texte and _daten(bereit, "test_vorgabe").value == "Was schaffst du?"
+    assert (
+        "Die App misst die Zeit, bis du „Fertig“ tippst. Danach sagst du, wie anstrengend es "
+        "war." in texte
+    )
+    assert _daten(bereit, ("test_fest", "angle")).value == "90°"
+    assert not _hat(bereit, "test_timer") and not _hat(bereit, "test_takt")
+    await klick(_daten(bereit, "test_start"))
+    assert state.einheit.timer.lauf.profil.ist_stoppuhr and state.einheit.ende_mit_timer
+    await _sekunden(u, 48)
+    ansicht = _ansicht(u, kurs, kapitel, block, planke)
+    assert _daten(ansicht, "test_zeit").value == "0:48"
+    assert _daten(ansicht, "test_fertig").content == "Fertig" and not _hat(ansicht, "test_vorher")
+    assert _daten(ansicht, "test_ausfuehrung").value == "90°"
+    await klick(_daten(ansicht, "test_fertig"))
+    ergebnis = _ansicht(u, kurs, kapitel, block, planke)
+    texte = _texte(ergebnis)
+    assert _daten(ergebnis, "test_ende").value == "Fertig"
+    assert _daten(ergebnis, "zeit").value == "0:48" and "von der Uhr" in texte
+    assert _daten(ergebnis, "ausfuehrung").value == "90°" and "vorgegeben" in texte
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, planke)
+    assert eintrag.result == {"hold": [48], "angle": 90}
+    assert [f.key for f in eintrag.spec_snapshot.fields] == ["hold", "angle"]
+    assert [f.key for f in state.uebungen.laden(planke.id).result_spec.fields] == ["hold"]
+    danach = _kapitel(u, kurs, kapitel)
+    assert _daten(danach, "testwert").value == "48s Haltezeit"
+    assert _daten(danach, "testneben").value == "90°"
+
+
+async def test_vorgabe_mit_timer_und_takt_der_timer_kann_eher_durch_sein(umgebung) -> None:
+    """Vorgabe Anstrengung, eigener Timer und Takt zusammen: Der Knopf der Vorgabe beendet
+    vorher; ist der Timer eher durch, gilt die Vorgabe als nicht erreicht (die Skala wird
+    gefragt, nicht vorbelegt). Die Runden des Takts zählen nur in den zählenden Abschnitten
+    in den Vorschlag."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _gestaltet(
+        state,
+        _uebung("Käfer", "reps"),
+        feld="reps",
+        vorgabe=Vorgabe(SKALA, 7),
+        timer=INTERVALL.als_dict(),
+        takt=KNIEBEUGE,
+    )
+    await _starten(u, kurs, kapitel)
+    bereit = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert _daten(bereit, "test_vorgabe").value == "Bis Anstrengung 7"
+    assert _daten(bereit, "test_timer").value == "Timer: Intervall · 1:00"
+    assert any(
+        t.endswith("Ist der Timer vorher durch (1 Minute), endet der Test.") for t in _texte(bereit)
+    )
+    await klick(_daten(bereit, "test_start"))
+    await _sekunden(u, 35)  # 20 s „Los“, 10 s Pause, 5 s „Los“
+    ansicht = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert _daten(ansicht, "test_fertig").content == "Bei 7 angekommen"
+    assert _hat(ansicht, "test_vorher") and "TAKT" in _texte(ansicht)
+    assert _daten(ansicht, "test_abschnitt").value == "Los · Runde 2 von 2"
+    assert _hat(ansicht, "test_balken")  # die Marke der Anstrengung
+    await klick(_daten(ansicht, "test_fertig"))
+    stand = state.kurs_test
+    assert stand.phase == ERGEBNIS and not stand.vorher and not stand.durch
+    assert stand.sekunden == 25.0 and stand.skala == 7
+    assert stand.wdh == 5 and stand.takt_runden == 5  # vier Runden, Pause, eine Runde
+    assert _daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_ende").value == (
+        "Bei 7 angekommen"
+    )
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_nochmal"))
+    await _bis_vorbei(u)
+    # noch einmal — diesmal ist der Timer eher durch
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_start"))
+    await _sekunden(u, 62)
+    kurs_test.pruefen(u.seite, state)  # der Wächter tut dasselbe
+    stand = state.kurs_test
+    assert stand.phase == ERGEBNIS and stand.durch and stand.vorher
+    assert stand.sekunden == 40.0 and stand.skala is None
+    assert stand.wdh == 8 and stand.takt_runden == 8
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    texte = _texte(ergebnis)
+    assert _daten(ergebnis, "test_ende").value == "Der Timer ist durch"
+    assert "Der Takt lief 8 Runden. Stimmt die Zahl?" in texte and "vom Timer" in texte
+    assert all(_daten(ergebnis, ("test_skala", w)).bgcolor is None for w in range(11))
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, kaefer)
+    assert eintrag.result == {"reps": [8], "duration": 40}

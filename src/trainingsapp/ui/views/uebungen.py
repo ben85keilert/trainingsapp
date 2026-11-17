@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 
 import flet as ft
 
+from trainingsapp.core import ablauf as ab
 from trainingsapp.core.models import Plan
 from trainingsapp.core.plaene import erledigte, tage_text
 from trainingsapp.core.plan_durchlauf import startet_als_workout
@@ -101,6 +102,10 @@ def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
             teile.append("heute dran")
         if gemacht:
             teile.append(f"{gemacht} heute gemacht")
+        if ab.startet_nicht(plan.ablauf, [it.id for it in plan.items]):
+            # ohne Start oder mit einer fehlenden Übung im Ablauf (Ben, 16.11.2026) — das
+            # Workout beginnt so nicht; der Plan-Editor sagt, was zu tun ist
+            teile.append("muss korrigiert werden")
         # Tipp = bearbeiten, „Trainieren“ daneben; Zielsymbol oder Gedrückthalten zeigt
         # Üben · Bearbeiten · Ablauf starten (Ben, 28.10.2026)
         haupt = zl.Ziel(zl.BEARBEITEN, oeffner(plan.id))

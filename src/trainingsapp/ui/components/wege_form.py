@@ -15,6 +15,13 @@ angetippt, Ben 10.11.2026) steht **nur** er da — „Alle Wege …“ holt den 
 
 Das Formular hält nichts selbst: ``lesen`` liefert den Ablauf, ``setzen`` nimmt den geänderten —
 wann gespeichert wird, sagt der Ort (Speichern der Seite bzw. Schließen des Blatts).
+
+**Die Leiste eines Wegs** (`weg_leiste`, Ben 16.11.2026: „möglichst ohne die Blätter schon viel
+machen“): Ein Weg, im Bild an seinem Punkt angetippt, steht **unter dem Bild** — Marke und
+„von → nach“, die Auslöser als Chips, die Zahl dazu mit − und +, „Pflicht“; „Mehr …“ führt ins
+Blatt (Ziel, Beschriftung, anbieten oder von selbst, Inhalt). Welche Zahl nach einem Wechsel
+des Auslösers gilt und wie weit − und + gehen, rechnet `core.ablauf` (`ausloeser_wechsel`,
+`kante_schritt`) — für Blatt und Leiste dasselbe.
 """
 
 from __future__ import annotations
@@ -30,6 +37,14 @@ from trainingsapp.core.ablauf import Ablauf, Kante
 from trainingsapp.core.bedingung import ENDE, Inhalt
 
 KARTE = ft.Colors.SURFACE_CONTAINER_HIGHEST
+#: Die Auslöser in Kurzform — in der Leiste unter dem Bild stehen alle fünf in einer Zeile
+AUSLOESER_KURZ: dict[str, str] = {
+    ab.FREI: "frei",
+    ab.ZEIT: "Zeit ab",
+    ab.WDH: "Wdh.",
+    ab.WDH_IN_ZEIT: "in Zeit",
+    ab.SKALA: "Skala",
+}
 
 
 def wege_karte(
@@ -138,9 +153,7 @@ def wege_karte(
         return handler
 
     # -- Kommt von ---------------------------------------------------------------------------
-    teile: list[ft.Control] = [
-        ft.Text("KOMMT VON", size=11, weight=ft.FontWeight.BOLD, opacity=0.6)
-    ]
+    teile: list[ft.Control] = [_abschnitt(ft.Icons.LOGIN, "KOMMT VON")]
     ist_start = a.startknoten([k for k in namen if a.frage(k) is None]) == knoten
     if ist_start:
         teile.append(
@@ -202,8 +215,9 @@ def wege_karte(
     # -- Weiter zu ---------------------------------------------------------------------------
     if nur:
         teile.clear()  # nur der eine Weg — die Herkunft steht bei „Alle Wege …“
-    teile.append(ft.Text("WEITER ZU", size=11, weight=ft.FontWeight.BOLD, opacity=0.6))
     raus = [(i, k) for i, k in enumerate(a.kanten) if k.von == knoten]
+    zahl_wege = "" if nur or len(raus) < 2 else f"{len(raus)} Wege"
+    teile.append(_abschnitt(ft.Icons.ALT_ROUTE, "WEITER ZU", zahl_wege))
     if not raus:
         teile.append(ft.Text("Kein Weg weiter — hier endet das Workout.", size=12, opacity=0.7))
     ziele = [
@@ -291,6 +305,248 @@ def wege_karte(
     return ft.Column(spacing=8, tight=True, controls=teile)
 
 
+def _abschnitt(symbol: ft.IconData, text: str, zusatz: str = "") -> ft.Control:
+    """Die Überschrift eines Abschnitts im Wege-Formular — deutlich statt klein und grau (Ben,
+    16.11.2026: „die Überschriften fallen in den Hintergrund“): Symbol und kräftige Schrift in
+    der Hauptfarbe, darunter eine Linie. ``zusatz``: rechts daneben, z. B. „2 Wege“."""
+    return ft.Container(
+        padding=ft.Padding.only(top=6, bottom=4),
+        border=ft.Border.only(bottom=ft.BorderSide(1, ft.Colors.OUTLINE_VARIANT)),
+        data=("abschnitt", text),
+        content=ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Icon(symbol, size=18, color=ft.Colors.PRIMARY),
+                ft.Text(
+                    text,
+                    size=13,
+                    weight=ft.FontWeight.W_700,
+                    color=ft.Colors.PRIMARY,
+                    expand=True,
+                ),
+                *([ft.Text(zusatz, size=12, opacity=0.7)] if zusatz else []),
+            ],
+        ),
+    )
+
+
+def _zeilentitel(text: str) -> ft.Control:
+    """Der kleine Titel über einer Gruppe in der Weg-Karte („Wann geht es weiter?“)."""
+    return ft.Text(text, size=12, weight=ft.FontWeight.W_600, opacity=0.8)
+
+
+def _marke(n: int) -> ft.Control:
+    """Die Marke eines Wegs: der Hauptweg (``n`` = 0) gefüllt, „Weg 2“, „Weg 3“ umrandet."""
+    haupt = n == 0
+    return ft.Container(
+        padding=ft.Padding.symmetric(horizontal=8, vertical=2),
+        border_radius=10,
+        bgcolor=ft.Colors.PRIMARY if haupt else None,
+        border=None if haupt else ft.Border.all(1, ft.Colors.OUTLINE),
+        data="weg_marke",
+        content=ft.Text(
+            "Hauptweg" if haupt else f"Weg {n + 1}",
+            size=11,
+            weight=ft.FontWeight.W_700,
+            color=ft.Colors.ON_PRIMARY if haupt else None,
+        ),
+    )
+
+
+def _wechseln(aendern: Callable[..., None], i: int, k: Kante, art: str) -> None:
+    """Der Weg ``i`` bekommt den Auslöser ``art`` — mit der Zahl, die dann gilt."""
+    neu = ab.ausloeser_wechsel(k, art)
+    aendern(i, zeichnen=True, ausloeser=neu.ausloeser, n=neu.n, sekunden=neu.sekunden)
+
+
+def ziel_name(k: Kante, namen: Mapping[str, str]) -> str:
+    """Wohin ein Weg führt, in Worten: der Knoten mit Nummer, „Ende“, „◀ zurück“ oder — bei
+    einer Schleife — „noch einmal“."""
+    if k.zum_ende:
+        return "Ende"
+    if k.zurueck:
+        return "◀ zurück"
+    if k.schleife:
+        return "noch einmal"
+    return namen.get(k.nach, "?")
+
+
+def weg_leiste(
+    k: Kante,
+    nummer: int,
+    *,
+    namen: Mapping[str, str],
+    aendern: Callable[[Kante], Any],
+    entfernen: Callable[[], Any],
+    mehr: Callable[[], Any],
+    ohne_timer: bool = False,
+) -> ft.Control:
+    """Ein Weg als **Leiste unter dem Bild** (Reiter „Ablauf“, Ben 16.11.2026): das Wichtigste
+    ohne Blatt. ``nummer``: seine Stelle unter den Wegen seiner Übung (0 = Hauptweg);
+    ``aendern(kante)`` nimmt den geänderten Weg — der Ort speichert sofort und zeichnet neu;
+    ``entfernen()`` nimmt ihn heraus, ``mehr()`` öffnet das Blatt mit nur diesem Weg.
+    ``ohne_timer``: die Übung hat keinen Timer (Hinweis zu „Zeit ab“)."""
+
+    def stufe(feld: str, text: str, vor: str = "") -> ft.Control:
+        """Eine Zahl mit − und + — wie weit es geht, sagt `core.ablauf.kante_schritt`."""
+
+        def knopf(schritt: int) -> ft.Control:
+            return ft.IconButton(
+                ft.Icons.REMOVE if schritt < 0 else ft.Icons.ADD,
+                icon_size=18,
+                width=36,
+                height=36,
+                padding=0,
+                style=ft.ButtonStyle(bgcolor=ft.Colors.SURFACE),
+                tooltip="weniger" if schritt < 0 else "mehr",
+                on_click=lambda _e: aendern(ab.kante_schritt(k, feld, schritt)),
+                data=("schritt", feld, schritt),
+            )
+
+        return ft.Row(
+            tight=True,
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                *([ft.Text(vor, size=12, opacity=0.75)] if vor else []),
+                knopf(-1),
+                ft.Text(
+                    text,
+                    size=14,
+                    weight=ft.FontWeight.W_600,
+                    text_align=ft.TextAlign.CENTER,
+                    data=("zahl", feld),
+                ),
+                knopf(1),
+            ],
+        )
+
+    zahlen: list[ft.Control] = []
+    if k.ausloeser in (ab.WDH, ab.WDH_IN_ZEIT):
+        zahlen.append(stufe("n", f"{k.n} Wdh."))
+    if k.ausloeser == ab.WDH_IN_ZEIT:
+        zahlen.append(stufe("sekunden", ab.sekunden_text(k.sekunden), "in"))
+    if k.ausloeser == ab.SKALA:
+        zahlen.append(stufe("n", str(k.n), "ab"))
+        zahlen.append(stufe("bis", "offen" if k.bis is None else str(k.bis), "bis"))
+    pflicht = ft.Row(
+        tight=True,
+        spacing=6,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[
+            ft.Text("Pflicht", size=13),
+            ft.Switch(
+                value=k.pflicht,
+                tooltip="Andere Wege erst, wenn dieser erfüllt ist",
+                on_change=lambda e: aendern(replace(k, pflicht=bool(e.control.value))),
+                data="pflicht",
+            ),
+        ],
+    )
+    zeilen: list[ft.Control] = [
+        ft.Row(
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                _marke(nummer),
+                # von → nach: der Pfeil als Symbol (das Zeichen „→“ fehlt der fetten Schrift)
+                ft.Text(
+                    namen.get(k.von, "?"),
+                    size=14,
+                    weight=ft.FontWeight.W_600,
+                    expand_loose=True,
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                    data="weg_von",
+                ),
+                ft.Icon(ft.Icons.ARROW_FORWARD, size=16),
+                ft.Text(
+                    ziel_name(k, namen),
+                    size=14,
+                    weight=ft.FontWeight.W_600,
+                    expand=True,
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                    data="weg_nach",
+                ),
+                ft.IconButton(
+                    ft.Icons.CLOSE,
+                    icon_size=18,
+                    width=36,
+                    height=36,
+                    padding=0,
+                    tooltip="Weg entfernen",
+                    on_click=lambda _e: entfernen(),
+                    data="weg_entfernen",
+                ),
+            ],
+        ),
+        # „Pflicht“ steht neben dem Titel — so kostet der Schalter keine eigene Zeile, und das
+        # Bild darüber bleibt hoch genug (412 px breit, Web-Foto 16.11.2026)
+        ft.Row(
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Container(content=_zeilentitel("Wann geht es weiter?"), expand=True),
+                pflicht,
+            ],
+        ),
+        # alle fünf in einer Zeile; reicht die Breite nicht, lässt sie sich schieben
+        ft.Row(
+            spacing=6,
+            scroll=ft.ScrollMode.AUTO,
+            controls=[
+                ft.Chip(
+                    label=ft.Text(text, size=12),
+                    selected=k.ausloeser == art,
+                    show_checkmark=True,
+                    selected_color=ft.Colors.PRIMARY_CONTAINER,
+                    visual_density=ft.VisualDensity.COMPACT,
+                    label_padding=ft.Padding.symmetric(horizontal=2),
+                    tooltip=ab.AUSLOESER_TEXT[art],
+                    on_select=lambda _e, art=art: aendern(ab.ausloeser_wechsel(k, art)),
+                    data=("ausloeser", art),
+                )
+                for art, text in AUSLOESER_KURZ.items()
+            ],
+        ),
+    ]
+    if zahlen:
+        zeilen.append(
+            ft.Row(
+                wrap=True,
+                spacing=14,
+                run_spacing=2,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=zahlen,
+            )
+        )
+    if k.ausloeser == ab.ZEIT and ohne_timer:
+        zeilen.append(
+            ft.Text(
+                "Die Übung hat keinen Timer — „Zeit ab“ gilt, sobald „Fertig“ getippt ist.",
+                size=12,
+                color=ft.Colors.TERTIARY,
+            )
+        )
+    zeilen.append(
+        ft.TextButton(
+            "Mehr … (Ziel, Beschriftung, von selbst, Inhalt)",
+            style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=4, vertical=0)),
+            on_click=lambda _e: mehr(),
+            data="weg_mehr",
+        )
+    )
+    return ft.Container(
+        padding=ft.Padding.only(left=12, right=8, top=6, bottom=4),
+        border_radius=14,
+        bgcolor=KARTE,
+        data="weg_leiste",
+        content=ft.Column(spacing=4, tight=True, controls=zeilen),
+    )
+
+
 def _weg(
     i: int,
     k: Kante,
@@ -304,15 +560,23 @@ def _weg(
     ohne_timer: bool,
 ) -> ft.Control:
     """Ein Weg als Karte — Ziel, wann, anbieten/ausführen, Pflicht, Danach, Beschriftung."""
+    ziel = next((str(o.text) for o in ziele if o.key == k.nach), "?")
     kopf = ft.Row(
-        spacing=4,
+        spacing=6,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
         controls=[
+            # Die Marke sagt, welcher Weg es ist; daneben groß, wohin er führt (Ben,
+            # 16.11.2026: „die Überschriften fallen in den Hintergrund“)
+            _marke(n),
+            ft.Icon(ft.Icons.ARROW_FORWARD, size=16),
             ft.Text(
-                "Hauptweg" if n == 0 else f"Weg {n + 1}",
-                size=13,
+                ziel,
+                size=15,
                 weight=ft.FontWeight.W_600,
                 expand=True,
+                max_lines=1,
+                overflow=ft.TextOverflow.ELLIPSIS,
+                data="weg_ziel",
             ),
             *(
                 [
@@ -340,6 +604,7 @@ def _weg(
             options=ziele,
             on_select=lambda e: aendern(i, zeichnen=True, nach=str(e.control.value or ENDE)),
         ),
+        _zeilentitel("Wann geht es weiter?"),
         ft.Row(
             wrap=True,
             spacing=6,
@@ -348,24 +613,12 @@ def _weg(
                 ft.Chip(
                     label=ft.Text(text),
                     selected=k.ausloeser == art,
-                    show_checkmark=False,
-                    on_select=lambda _e, art=art: aendern(
-                        i,
-                        zeichnen=True,
-                        ausloeser=art,
-                        # Die Zahl wandert nur zwischen den beiden Wiederholungs-Auslösern mit:
-                        # aus „12 Wdh.“ würde sonst „Skala ≥ 12“, nie erfüllbar (N72)
-                        n=(
-                            k.n
-                            if k.n and {art, k.ausloeser} <= {ab.WDH, ab.WDH_IN_ZEIT}
-                            else 12
-                            if art in (ab.WDH, ab.WDH_IN_ZEIT)
-                            else 7
-                            if art == ab.SKALA
-                            else 0
-                        ),
-                        sekunden=k.sekunden or (60.0 if art == ab.WDH_IN_ZEIT else 0.0),
-                    ),
+                    # der gewählte Auslöser mit Haken und kräftiger Fläche — vorher hob er
+                    # sich kaum ab
+                    show_checkmark=True,
+                    selected_color=ft.Colors.PRIMARY_CONTAINER,
+                    # welche Zahl dann gilt, sagt `core.ablauf.ausloeser_wechsel` (N72)
+                    on_select=lambda _e, art=art: _wechseln(aendern, i, k, art),
                 )
                 for art, text in ab.AUSLOESER_TEXT.items()
             ],
@@ -500,4 +753,4 @@ def _weg(
     )
 
 
-__all__ = ["wege_karte"]
+__all__ = ["AUSLOESER_KURZ", "weg_leiste", "wege_karte", "ziel_name"]

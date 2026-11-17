@@ -21,7 +21,11 @@ from trainingsapp.core.timer import Abschnitt, TimerProfil  # noqa: E402
 from trainingsapp.devices.messlauf import Messlauf  # noqa: E402
 from trainingsapp.devices.plan_ablauf import UEBERZEIT, UEBUNG  # noqa: E402
 from trainingsapp.ui import plan_ablauf  # noqa: E402
-from trainingsapp.ui.components.ablaufbild import NEBEL, Slot, ablaufbild  # noqa: E402
+from trainingsapp.ui.components.ablaufbild import (  # noqa: E402
+    GRUPPE_KACHEL,
+    NEBEL,
+    ablaufbild,
+)
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.workout import workout_view  # noqa: E402
 
@@ -252,17 +256,20 @@ def test_ablaufbild_zeichnet_knoten_etiketten_und_nebel(tmp_path, monkeypatch) -
             vernebelt=[id_],
             gewaehlt=iw,
             zaehlung=Counter({(iw, id_): 3}),
-            slots=[Slot(ik)],
             on_knoten=lambda k: getippt.append(("knoten", k)),
             on_kante=lambda k: getippt.append(("kante", k.nach)),
-            on_slot=lambda s, e: getippt.append(("slot", s.von, e)),
+            on_kachel_auf=lambda k, wert: getippt.append(("kachel", k, wert)),
         )
         assert set(bild.mitten) == {iw, ik, id_}
         # Der Wandsitz steht mittig über seinen Kindern (Kniebeuge, Dehnung) und darüber
         assert bild.mitten[ik][0] < bild.mitten[iw][0] < bild.mitten[id_][0]
         assert bild.mitten[iw][1] < bild.mitten[ik][1]
         daten = [c.data for c in _alle(bild.control) if isinstance(c, ft.Container) and c.data]
-        assert ("start",) in daten and ("slot", ik) in daten
+        assert ("start",) in daten
+        # Slots gibt es nicht mehr (Ben, 16.11.2026: „Slot weglassen“) — und ohne den Rückruf
+        # zum Verbinden lässt sich im Bild nichts ziehen
+        assert not [d for d in daten if d[:1] in (("slot",), ("punkt",))]
+        assert not [x for x in _alle(bild.control) if isinstance(x, ft.Draggable)]
         texte = _texte(bild.control)
         assert "Skala ≥ 7 · Beine krampfen · 3×" in texte and "◀ zurück" in texte
         # Ein freier Weg ohne Beschriftung hat kein Etikett; die Nummer ist die Stelle in der Liste
@@ -275,11 +282,16 @@ def test_ablaufbild_zeichnet_knoten_etiketten_und_nebel(tmp_path, monkeypatch) -
             if isinstance(c, ft.Container) and c.data == ("kante", iw, id_)
         )
         etikett.on_click(None)
-        ziel = next(
-            x for x in _alle(bild.control) if isinstance(x, ft.DragTarget) and x.on_will_accept
-        )
-        ziel.on_accept(type("E", (), {"src": type("D", (), {"data": "u9"})()})())
-        assert getippt == [("kante", id_), ("slot", ik, "u9")]
+        # Eine Kachel der Leiste fällt auf eine Übung im Bild: der neue Rückruf, mit Knoten und
+        # dem Wert der Kachel — das löst den Slot ab
+        ziele = [
+            x
+            for x in _alle(bild.knoten[ik])
+            if isinstance(x, ft.DragTarget) and x.group == GRUPPE_KACHEL
+        ]
+        assert len(ziele) == 1
+        ziele[0].on_accept(type("E", (), {"src": type("D", (), {"data": "u9"})()})())
+        assert getippt == [("kante", id_), ("kachel", ik, "u9")]
         assert isinstance(bild.control, ft.InteractiveViewer)
     finally:
         state.schliessen()

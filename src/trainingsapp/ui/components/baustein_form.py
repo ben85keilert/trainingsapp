@@ -69,7 +69,7 @@ from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.takt_blatt import takt_blatt, takt_zeile_text
-from trainingsapp.ui.components.timer_editor import timer_editor
+from trainingsapp.ui.components.timer_editor import TimerEditor, timer_editor
 from trainingsapp.ui.components.timer_zeile import neuer_timer
 
 #: Titel des Blatts je Art
@@ -183,6 +183,35 @@ def vorschau_zeilen(sicht: Kurssicht, block: Block) -> list[ft.Control]:
         )
     )
     return teile
+
+
+def timer_editor_teil(editor: TimerEditor, daten: str) -> ft.Control:
+    """Der Timer-Editor (`components/timer_editor.py`) zum Einsetzen in ein Blatt: die Reiter
+    Zeiten · Klänge, daneben die Gesamtzeit, darunter die Teile — Wischen wechselt den Reiter.
+    Für den eigenen Timer eines Bausteins und den eines Tests
+    (`views/kurs_bearbeiten.lauf_timer_blatt`). ``daten``: die Kennung des Teils."""
+    return ft.Container(
+        data=daten,
+        content=ft.Column(
+            spacing=8,
+            tight=True,
+            controls=[
+                ft.Row(
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Container(expand=True, content=editor.reiter),
+                        ft.Column(
+                            spacing=0,
+                            horizontal_alignment=ft.CrossAxisAlignment.END,
+                            controls=[editor.gesamt, ft.Text("gesamt", size=11, opacity=0.7)],
+                        ),
+                    ],
+                ),
+                ft.GestureDetector(on_horizontal_drag_end=editor.gewischt, content=editor.inhalt()),
+            ],
+        ),
+    )
 
 
 def baustein_blatt(
@@ -623,35 +652,7 @@ def baustein_blatt(
         profil.bibliothek = ""
         editor = timer_editor(page, state, profil, spec=timer_spec(), geaendert=timer_geaendert)
         zustand["editor"] = editor
-        teile.append(
-            ft.Container(
-                data="baustein_timer_editor",
-                content=ft.Column(
-                    spacing=8,
-                    tight=True,
-                    controls=[
-                        ft.Row(
-                            spacing=8,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            controls=[
-                                ft.Container(expand=True, content=editor.reiter),
-                                ft.Column(
-                                    spacing=0,
-                                    horizontal_alignment=ft.CrossAxisAlignment.END,
-                                    controls=[
-                                        editor.gesamt,
-                                        ft.Text("gesamt", size=11, opacity=0.7),
-                                    ],
-                                ),
-                            ],
-                        ),
-                        ft.GestureDetector(
-                            on_horizontal_drag_end=editor.gewischt, content=editor.inhalt()
-                        ),
-                    ],
-                ),
-            )
-        )
+        teile.append(timer_editor_teil(editor, "baustein_timer_editor"))
         return teile
 
     def takt_teil(leer: str, wer: str) -> ft.Control:
@@ -1060,5 +1061,6 @@ __all__ = [
     "TAKT",
     "WAEHLEN",
     "baustein_blatt",
+    "timer_editor_teil",
     "vorschau_zeilen",
 ]

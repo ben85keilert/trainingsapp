@@ -412,9 +412,11 @@ class AppState:
     #: Ablaufbild (`components/ablaufbild.py`): je Plan die vernebelten Knoten — für diese
     #: Sitzung, im Editor wie im Workout
     ablauf_vernebelt: dict[str, set[str]] = field(default_factory=dict)
-    #: Reiter „Ablauf“ (`views/ablauf.py`): je Plan der gewählte Knoten und die leeren Slots
+    #: Reiter „Ablauf“ (`views/ablauf.py`): je Plan der gewählte Knoten, der gewählte Weg
+    #: (von, nach — seine Leiste steht unter dem Bild) und der Knoten, dessen Menü offen ist
     ablauf_wahl: dict[str, str | None] = field(default_factory=dict)
-    ablauf_slots: dict[str, list[str]] = field(default_factory=dict)
+    ablauf_weg: dict[str, tuple[str, str] | None] = field(default_factory=dict)
+    ablauf_menue: dict[str, str | None] = field(default_factory=dict)
     #: … und wo die Knoten liegen (`core.ablauf.Lage`) — sie bleiben stehen, bis „Neu anordnen“
     #: (Ben, 8.11.2026: „Ansicht neu ausrichten nur mit dem Button“)
     ablauf_lagen: dict[str, dict[str, Any]] = field(default_factory=dict)

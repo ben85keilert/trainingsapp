@@ -277,11 +277,18 @@ class Ablauf:
         return next((f for f in self.fragen if f.id == knoten), None)
 
     def startknoten(self, items: Sequence[str]) -> str | None:
-        """Der Start: ``start``, wenn es ihn gibt, sonst die erste Planübung — mit ``ohne_start``
-        keiner: Wer den Start aus dem Bild nimmt, bekommt keinen neuen gesetzt.
+        """Der Start: ``start``, wenn es ihn unter ``items`` gibt. **Ohne Angabe** (ein
+        Workout, das der Liste folgt; Altbestand und Pakete ohne ``start``) die erste
+        Planübung. Kein Start, wenn er **ausdrücklich leer** ist (``ohne_start``) — und wenn
+        er gesetzt ist, die Startübung aber fehlt (im Papierkorb, ihr Paket ausgeschaltet):
+        Dann rückt keine andere nach, der Plan ist unvollständig (`fehlende`; Ben,
+        16.11.2026: „Wenn Plan unvollständig kann er nicht durchgeführt werden, bis das
+        repariert ist. Sonst ist es möglich, dass ein Plan durcheinander gerät“).
 
-        >>> Ablauf(start="b").startknoten(["a", "b"]), Ablauf(start="x").startknoten(["a"])
+        >>> Ablauf(start="b").startknoten(["a", "b"]), Ablauf().startknoten(["a", "b"])
         ('b', 'a')
+        >>> Ablauf(start="x").startknoten(["a"]) is None  # die Startübung fehlt
+        True
         >>> Ablauf().startknoten([]) is None
         True
         >>> Ablauf(True, ohne_start=True).startknoten(["a", "b"]) is None
@@ -289,9 +296,9 @@ class Ablauf:
         >>> replace(Ablauf(True, ohne_start=True), start="b").ohne_start  # ein Start hebt ihn auf
         False
         """
-        bekannt = set(items) | {f.id for f in self.fragen}
-        if self.start and self.start in bekannt:
-            return self.start
+        if self.start:
+            bekannt = set(items) | {f.id for f in self.fragen}
+            return self.start if self.start in bekannt else None
         if self.ohne_start:
             return None
         return items[0] if items else None
@@ -1005,6 +1012,79 @@ def ohne_start_text(ablauf: Ablauf, items: Sequence[str]) -> str:
     return "Der Ablauf ist leer — im Reiter „Ablauf“ eine Übung auf „Start“ setzen."
 
 
+def fehlende(ablauf: Ablauf, items: Sequence[str]) -> list[str]:
+    """Die Planübungen, auf die der Ablauf zeigt — als Start oder am Ende eines Wegs —, die es
+    unter ``items`` (den sichtbaren Planübungen) **nicht gibt**: Ihre Übung liegt im
+    Papierkorb, oder ihr Paket ist ausgeschaltet. Ihre Wege bleiben gespeichert (N47), aber
+    der Plan ist so **unvollständig**. Eine Liste und ein Workout, das der Liste folgt, haben
+    keine (dort ist die Liste der Ablauf).
+
+    >>> a = Ablauf(True, "a", (Kante("a", "x"), Kante("x", "b"), Kante("b", ENDE)))
+    >>> fehlende(a, ["a", "b"]), fehlende(a, ["a", "x", "b"]), fehlende(Ablauf(), ["a"])
+    (['x'], [], [])
+    >>> fehlende(Ablauf(True, "s", (Kante("a", "b"),)), ["a", "b"])  # die Startübung
+    ['s']
+    """
+    if not ablauf.an:
+        return []
+    bekannt = set(items) | {f.id for f in ablauf.fragen} | {ENDE, ZURUECK}
+    out: list[str] = []
+    for knoten in (ablauf.start, *(x for k in ablauf.kanten for x in (k.von, k.nach))):
+        if knoten and knoten not in bekannt and knoten not in out:
+            out.append(knoten)
+    return out
+
+
+def unvollstaendig_text(
+    ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str] | None = None
+) -> str:
+    """Der Satz zu einem unvollständigen Ablauf (`fehlende`) — leer, wenn nichts fehlt.
+    ``namen``: wie die fehlenden Planübungen heißen, soweit bekannt.
+
+    >>> a = Ablauf(True, "a", (Kante("a", "x"), Kante("x", "b")))
+    >>> unvollstaendig_text(a, ["a", "b"], {"x": "Planke"})
+    'Im Ablauf fehlt eine Übung (Planke) — der Plan muss korrigiert werden: die Übung \
+zurückholen oder aus dem Plan nehmen.'
+    >>> unvollstaendig_text(a, ["b"]).startswith("Im Ablauf fehlen 2 Übungen — der Plan")
+    True
+    >>> unvollstaendig_text(a, ["a", "x", "b"])
+    ''
+    """
+    fehlt = fehlende(ablauf, items)
+    if not fehlt:
+        return ""
+    wer = ", ".join(n for k in fehlt if (n := (namen or {}).get(k)))
+    klammer = f" ({wer})" if wer else ""
+    if len(fehlt) == 1:
+        return (
+            f"Im Ablauf fehlt eine Übung{klammer} — der Plan muss korrigiert werden: die Übung "
+            "zurückholen oder aus dem Plan nehmen."
+        )
+    return (
+        f"Im Ablauf fehlen {len(fehlt)} Übungen{klammer} — der Plan muss korrigiert werden: "
+        "die Übungen zurückholen oder aus dem Plan nehmen."
+    )
+
+
+def startet_nicht(
+    ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str] | None = None
+) -> str:
+    """Warum ein Workout so **nicht durchgeführt werden kann** — leer, wenn es geht (Ben,
+    16.11.2026: „Wenn Plan unvollständig kann er nicht durchgeführt werden, bis das repariert
+    ist“): Im Ablauf fehlt eine Übung (`unvollstaendig_text`), oder er hat keinen Start
+    (`ohne_start_text`). Gilt für Beginnen und Fortsetzen.
+
+    >>> startet_nicht(Ablauf(True, "a", (Kante("a", "b"),)), ["a", "b"])
+    ''
+    >>> startet_nicht(Ablauf(True, "x", (Kante("x", "b"),)), ["a", "b"]).startswith("Im Ablauf f")
+    True
+    >>> startet_nicht(Ablauf(True, kanten=(Kante("a", "b"),), ohne_start=True), ["a", "b"])
+    'Der Ablauf hat keinen Start — der Plan muss korrigiert werden: im Reiter „Ablauf“ eine \
+Übung als Start setzen.'
+    """
+    return unvollstaendig_text(ablauf, items, namen) or ohne_start_text(ablauf, items)
+
+
 def warnungen(ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str]) -> list[str]:
     """Was den Plan hängen lassen kann — sichtbar beim Erstellen, nicht hinter einem Knopf (Ben,
     9.11.2026): ein Kreis ohne Weg hinaus und ein Kreis, der von selbst weiterläuft; dazu ein
@@ -1019,8 +1099,8 @@ def warnungen(ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str]) ->
     if not ablauf.an:
         return []
     out: list[str] = []
-    if kein_start := ohne_start_text(ablauf, items):
-        out.append(kein_start)
+    if geht_nicht := startet_nicht(ablauf, items, namen):
+        out.append(geht_nicht)
     if kreis := ohne_ausweg(ablauf, items):
         liste = ", ".join(namen.get(i, i) for i in kreis)
         out.append(f"Kein Weg hinaus ab: {liste} — dort käme das Workout nie zum Ende.")
@@ -1076,7 +1156,7 @@ def pruefung(ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str]) -> 
     """
     out: list[str] = []
     da = erreichbar(ablauf, items)
-    if kein_start := ohne_start_text(ablauf, items):
+    if kein_start := startet_nicht(ablauf, items, namen):
         out.append(kein_start)
     for i in items:
         if i not in da and not ablauf.zu(i) and not kein_start:
@@ -1562,6 +1642,132 @@ def nachfolgereihe(ablauf: Ablauf, items: Sequence[str], knoten: str) -> list[st
     return [k for k in reihe if k in hinter and k not in bleibt]
 
 
+# -- Im Bild bedienen ------------------------------------------------------------------------------
+
+#: Kein Knoten, sondern „Start“ als Herkunft beim Verbinden im Bild (`verbinden`)
+VOM_START: Final = "__start__"
+#: Beschriftung der Schleife, die beim Verbinden einer Übung mit sich selbst entsteht
+NOCH_EINMAL: Final = "noch einmal"
+#: so viele Sekunden je Schritt bei „Wdh. in einer Zeit“ (`kante_schritt`)
+SEKUNDEN_SCHRITT: Final = 5.0
+
+
+def verbinden(ablauf: Ablauf, von: str, nach: str) -> Ablauf | None:
+    """Im Bild verbinden (Ben, 16.11.2026: „Ziehen von einem Knoten auf eine Übung zum
+    Verbinden“): Der Punkt von ``von`` fällt auf ``nach`` — ein neuer, freier Weg. Auf die
+    **eigene** Übung: noch einmal (Schleife). ``nach`` darf auch `ENDE` oder `ZURUECK` sein.
+    Von „Start“ (`VOM_START`) gezogen wird ``nach`` der Start. ``None``, wenn sich nichts
+    ändert: Den Weg gibt es schon, die Übung ist schon der Start, „Start“ zeigt nicht auf ein
+    Ende, eine Frage nicht auf sich selbst.
+
+    >>> a = Ablauf(True, "a", (Kante("a", "b"),), (Frage("f"),))
+    >>> [(k.von, k.nach, k.text) for k in verbinden(a, "b", "a").kanten]
+    [('a', 'b', ''), ('b', 'a', '')]
+    >>> schleife = verbinden(a, "b", "b").kanten[-1]  # auf sich selbst: noch einmal
+    >>> schleife.von, schleife.nach, schleife.text, schleife.schleife
+    ('b', 'b', 'noch einmal', True)
+    >>> [verbinden(a, "b", z).kanten[-1].nach for z in (ENDE, ZURUECK)] == [ENDE, ZURUECK]
+    True
+    >>> verbinden(a, "a", "b") is None, verbinden(a, "f", "f") is None  # schon da · Frage
+    (True, True)
+    >>> ohne = Ablauf(True, kanten=(Kante("b", "c"),), ohne_start=True)
+    >>> neu = verbinden(ohne, VOM_START, "b")  # von „Start“ gezogen: der Start
+    >>> neu.start, neu.ohne_start, len(neu.kanten)
+    ('b', False, 1)
+    >>> verbinden(neu, VOM_START, "b") is None, verbinden(neu, VOM_START, ENDE) is None
+    (True, True)
+    >>> verbinden(neu, "b", VOM_START) is None
+    True
+    """
+    if nach == VOM_START or not von or not nach:
+        return None
+    if von == VOM_START:
+        if nach in (ENDE, ZURUECK) or ablauf.start == nach:
+            return None
+        return replace(ablauf, start=nach)
+    if any(k.von == von and k.nach == nach for k in ablauf.kanten):
+        return None
+    if von == nach:
+        if ablauf.frage(von) is not None:
+            return None
+        return ablauf.mit_kante(Kante(von, von, text=NOCH_EINMAL))
+    return ablauf.mit_kante(Kante(von, nach))
+
+
+def ausloeser_wechsel(k: Kante, art: str) -> Kante:
+    """Ein Weg bekommt einen anderen Auslöser — mit der Zahl, die dann gilt. Die Zahl wandert
+    **nur zwischen den beiden Wiederholungs-Auslösern** mit: Aus „12 Wdh.“ würde sonst
+    „Skala ≥ 12“, nie erfüllbar (N72). Sonst gilt die Vorgabe: 12 Wiederholungen, Skala ab 7,
+    60 Sekunden bei „in einer Zeit“ (gesetzte Sekunden bleiben).
+
+    >>> k = Kante("a", "b", WDH, 15)
+    >>> neu = ausloeser_wechsel(k, WDH_IN_ZEIT)
+    >>> neu.ausloeser, neu.n, neu.sekunden  # die Zahl geht mit, die Zeit ist die Vorgabe
+    ('wdh_in_zeit', 15, 60.0)
+    >>> ausloeser_wechsel(neu, WDH).n, ausloeser_wechsel(k, SKALA).n  # Skala: nie die 15
+    (15, 7)
+    >>> ausloeser_wechsel(Kante("a", "b", SKALA, 3), WDH).n, ausloeser_wechsel(k, ZEIT).n
+    (12, 0)
+    >>> ausloeser_wechsel(Kante("a", "b"), WDH).n, ausloeser_wechsel(k, FREI).ausloeser
+    (12, 'frei')
+    """
+    wiederholungen = (WDH, WDH_IN_ZEIT)
+    if k.n and art in wiederholungen and k.ausloeser in wiederholungen:
+        n = k.n
+    elif art in wiederholungen:
+        n = 12
+    elif art == SKALA:
+        n = 7
+    else:
+        n = 0
+    sekunden = k.sekunden or (60.0 if art == WDH_IN_ZEIT else 0.0)
+    return replace(k, ausloeser=art, n=n, sekunden=sekunden)
+
+
+def kante_schritt(k: Kante, feld: str, schritt: int) -> Kante:
+    """Die Zahl eines Wegs einen Schritt weiter — „−“ und „+“ in der Leiste unter dem Bild.
+    ``feld``: ``"n"`` (Wiederholungen bzw. Skala ab), ``"sekunden"`` (bei „in einer Zeit“, in
+    Schritten von `SEKUNDEN_SCHRITT`) oder ``"bis"`` (Skala bis). Was nicht zum Auslöser
+    gehört, ändert nichts.
+
+    Wiederholungen und Sekunden bleiben über null (sonst gälte der Auslöser beim Laden nicht
+    mehr, `Kante.aus_dict`); eine Skala darf unter null (N72), „ab“ steigt aber nicht über
+    „bis“. **„bis“ offen** (``None``): der erste Schritt setzt es auf „ab“ — der kleinste
+    gültige Wert —, „−“ von dort öffnet es wieder.
+
+    >>> k = Kante("a", "b", WDH, 12)
+    >>> kante_schritt(k, "n", 1).n, kante_schritt(replace(k, n=1), "n", -1).n
+    (13, 1)
+    >>> z = Kante("a", "b", WDH_IN_ZEIT, 12, sekunden=60.0)
+    >>> kante_schritt(z, "sekunden", 1).sekunden, kante_schritt(z, "sekunden", -99).sekunden
+    (65.0, 5.0)
+    >>> s = Kante("a", "b", SKALA, 7)
+    >>> kante_schritt(s, "n", -1).n, kante_schritt(s, "bis", 1).bis, kante_schritt(s, "bis", -1).bis
+    (6, 7, 7)
+    >>> eng = replace(s, bis=7)
+    >>> kante_schritt(eng, "n", 1).n, kante_schritt(eng, "bis", 1).bis  # „ab“ nicht über „bis“
+    (7, 8)
+    >>> kante_schritt(eng, "bis", -1).bis is None  # unter „ab“: wieder offen
+    True
+    >>> kante_schritt(k, "bis", 1) == k, kante_schritt(Kante("a", "b"), "n", 1).n
+    (True, 0)
+    """
+    if feld == "n" and k.ausloeser in (WDH, WDH_IN_ZEIT):
+        return replace(k, n=max(1, k.n + schritt))
+    if feld == "n" and k.ausloeser == SKALA:
+        n = k.n + schritt
+        return replace(k, n=n if k.bis is None else min(n, k.bis))
+    if feld == "sekunden" and k.ausloeser == WDH_IN_ZEIT:
+        sekunden = k.sekunden + schritt * SEKUNDEN_SCHRITT
+        return replace(k, sekunden=max(SEKUNDEN_SCHRITT, sekunden))
+    if feld == "bis" and k.ausloeser == SKALA:
+        if k.bis is None:
+            return replace(k, bis=k.n)
+        bis = k.bis + schritt
+        return replace(k, bis=None if bis < k.n else bis)
+    return k
+
+
 # -- Pakete --------------------------------------------------------------------------------------
 
 
@@ -1702,9 +1908,12 @@ __all__ = [
     "AUSLOESER_TEXT",
     "ENDE",
     "FREI",
+    "NOCH_EINMAL",
+    "SEKUNDEN_SCHRITT",
     "SKALA",
     "START_FEHLT",
     "VIELE_WEGE",
+    "VOM_START",
     "WDH",
     "WDH_IN_ZEIT",
     "ZEIT",
@@ -1720,9 +1929,11 @@ __all__ = [
     "als_position",
     "aus_bedingungen",
     "aus_position",
+    "ausloeser_wechsel",
     "bedarf",
     "bedingung_aus_kante",
     "erreichbar",
+    "fehlende",
     "folgt_der_liste",
     "fortsetzung",
     "freie_lage",
@@ -1735,6 +1946,7 @@ __all__ = [
     "ist_linear",
     "kante_aus_bedingung",
     "kante_pruefen",
+    "kante_schritt",
     "kanten_pruefen",
     "kanten_zaehlen",
     "kette",
@@ -1751,8 +1963,11 @@ __all__ = [
     "pruefung",
     "regulaere",
     "sekunden_text",
+    "startet_nicht",
     "startplatz",
     "tore",
+    "unvollstaendig_text",
+    "verbinden",
     "von_selbst",
     "vorrat",
     "wahl_offen",

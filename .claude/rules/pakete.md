@@ -71,7 +71,11 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   Blöcke `plan_uebung` · `plan_einstellen` · `plan_weg`, dazu ein `test` mit `aus` („die
   gewählte“ — ohne Kursplan nur mit der Auswahl im selben Kapitel) oder mit `vorgabe` (der Test
   läuft mit der Uhr: Menge · Zeit · Skala steht fest, das andere wird gemessen, `core/kurstest.py`;
-  am Ende ein gewöhnlicher Eintrag, die Skala ist Selbstauskunft); **Bausteine brauchen eine feste
+  am Ende ein gewöhnlicher Eintrag, die Skala ist Selbstauskunft) oder **gestaltet** (Ben,
+  16.11.2026: `timer`, `takt`, `ziel` = vorgegebene Ausführung, `felder` = frei gewählte
+  Parameter, `wie_uebung` — Vorgabe und Überschreiben, `docs/plan_kurs_ablauf.md` §15; Timer und
+  Vorgabe „Zeit“ gelten nicht beide; der Takt führt und zählt nicht; **der Testwert ist eine
+  Variable des Kurses**, Migration 065 `course_variable`, gerätelokal); **Bausteine brauchen eine feste
   `id`** (sie ist die Marke der Planübung), Verweise zeigen nur auf Bausteine davor —
   `trainingsapp-paket pruefen` (`kursplan_pruefen`) meldet es; eine ältere App lehnt das Paket
   ab (`docs/uebungspakete.md` „Kursplan und Bausteine“). Paketmanager: Jede

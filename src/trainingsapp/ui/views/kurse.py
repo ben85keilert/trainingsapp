@@ -666,7 +666,8 @@ def kapitel_view(
             if stand_hier is not None
             else {}
         )
-        # Ein Test mit Vorgabe läuft mit der Uhr (Ben, 16.11.2026, `views/kurs_testlauf.py`): Die
+        # Ein Test, der läuft (`Block.laeuft`: mit Vorgabe oder gestaltet), läuft mit der Uhr
+        # (Ben, 16.11.2026, `views/kurs_testlauf.py`): Die
         # Karte zeigt aus dem Eintrag, was der Lauf neben dem Wert gemessen hat, und ihr Knopf
         # startet den Testlauf
         eintraege = (

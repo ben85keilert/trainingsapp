@@ -26,6 +26,17 @@ Skizze T5): Ohne · Menge · Zeit · Anstrengung (ab · höchstens · von–bis)
 Lauf, die anderen Größen misst er. Der Dialog zeigt dazu, was gemessen wird, lässt wählen, was
 ins Ziel kommt, und zeigt unten, wie es im Kapitel steht. Ohne Vorgabe bleibt er, wie er war.
 
+Der Test lässt sich **flexibel gestalten** (Ben, 16.11.2026: „Dinge mit Standardwerten
+versehen. Überschreiben ist möglich“, Skizze F1) — der Abschnitt **„So läuft der Test“** im
+selben Dialog: **Uhr** (Stoppuhr · Timer der Übung · eigener Timer), **Takt** (ohne · wie die
+Übung · eigener), **Ausführung** (ohne · wie die Übung · je Parameter vorgegeben oder frei) und
+der **Hinweis vor dem Start**. Jede Zeile steht auf ihrer Vorgabe, bis man sie stellt; ein Test,
+an dem niemand etwas stellt, bleibt, wie er ist. Der eigene Timer wird im Timer-Editor
+bearbeitet (`lauf_timer_blatt`), der Takt im Takt-Blatt, die Ausführung in
+`lauf_ausfuehrung_blatt` — Blätter über dem Dialog. Timer und Vorgabe „Zeit“ zusammen gibt es
+nicht. Was zur Wahl steht und was gilt, rechnet `core.kursbau.Laufwahl` und `Kurssicht`; was
+der Lauf daraus macht, `core/kurstest.py`.
+
 Die Karte **„So wächst der Plan“** (Ben, 16.11.2026, `docs/plan_kurs_ablauf.md` §14;
 `components/kursplan_bild.py`, gerechnet in `core/kursbild.py`) zeigt den Zielplan des Kurses
 als Ablaufbild — nur mit Kursplan. Im Kurs-Formular steht sie unter dem Kursplan, zum Ansehen,
@@ -54,22 +65,31 @@ import flet as ft
 from trainingsapp.core import links
 from trainingsapp.core.anpassung import Regel
 from trainingsapp.core.kursbau import (
+    AUSFUEHRUNG_WAHL,
+    EIGEN,
     OHNE,
     SKALA_FORMEN,
+    STANDARD,
+    TAKT_WAHL,
     TESTFELDER,
-    VORGABE_WAHL,
+    UHR_WAHL,
+    ZEIT_FAELLT_WEG,
+    ZEIT_UND_TIMER,
     Folge,
     Kurssicht,
+    Laufwahl,
     Vorgabenwahl,
     faktor_lesen,
     faktor_text,
     folgen_anwenden,
     kurs_kopie,
     neue_id,
+    timer_einbetten,
     vergebene_ids,
+    vorgabe_wahl,
     zielfeld,
 )
-from trainingsapp.core.kursbild import Weg, planbild
+from trainingsapp.core.kursbild import Planbild, Weg, planbild, weg_baustein
 from trainingsapp.core.kursbloecke import (
     ARTEN,
     AUSWAHL,
@@ -84,6 +104,7 @@ from trainingsapp.core.kursbloecke import (
     TEST,
     TEXT,
     ZEIT,
+    ZU_ENDE,
     Antwort,
     Block,
 )
@@ -103,13 +124,20 @@ from trainingsapp.core.kursplan import GRUNDLAGE
 from trainingsapp.core.models import Exercise, Media
 from trainingsapp.core.pakete import paketplan_aus
 from trainingsapp.core.plaene import WOCHENTAGE_KURZ, tage_text
-from trainingsapp.core.result_spec import basis_key
-from trainingsapp.ui.components.baustein_form import baustein_blatt
+from trainingsapp.core.result_spec import FieldSpec, ResultSpec, basis_key, ist_leer
+from trainingsapp.core.takt import Takt
+from trainingsapp.core.timer import TimerProfil
+from trainingsapp.ui.components.baustein_form import baustein_blatt, timer_editor_teil
+from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
-from trainingsapp.ui.components.karte import hinweis, karte, titel
+from trainingsapp.ui.components.karte import hinweis, info_knopf, karte, titel
 from trainingsapp.ui.components.kursplan_bild import kursplan_bild_karte
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.spec_form import SpecForm
+from trainingsapp.ui.components.takt_blatt import takt_blatt
+from trainingsapp.ui.components.timer_editor import timer_editor
+from trainingsapp.ui.components.timer_zeile import neuer_timer
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 
@@ -137,8 +165,9 @@ KEIN_KURSPLAN = (
     "bearbeiten“ → „Der Kurs baut einen Plan“."
 )
 #: Der Test-Dialog (Skizze T5): der Satz unter dem Feld des Tests — je nachdem, ob der Test
-#: eine Vorgabe hat und ob er nur den Wert liefert (Kurs mit Kursplan, ohne Kapitelplan: Was
-#: daraus wird, sagt ein Baustein) oder selbst zum Ziel im Kapitelplan wird
+#: **läuft** (mit Vorgabe oder gestaltet: ein Lauf mit der Uhr, `Block.laeuft`) und ob er nur
+#: den Wert liefert (Kurs mit Kursplan, ohne Kapitelplan: Was daraus wird, sagt ein Baustein)
+#: oder selbst zum Ziel im Kapitelplan wird
 TEST_HINWEIS: dict[tuple[bool, bool], str] = {
     (False, True): (
         "Der Test ist ein gewöhnlicher Eintrag der Übung. Was aus dem Wert wird, sagt ein "
@@ -148,16 +177,16 @@ TEST_HINWEIS: dict[tuple[bool, bool], str] = {
         "Der Test ist ein gewöhnlicher Eintrag der Übung. Der Wert wird ihr Ziel im Kapitelplan."
     ),
     (True, True): (
-        "Zur Wahl steht, was gemessen wird — und die Vorgabe selbst. Wie viel davon ins Ziel "
+        "Zur Wahl steht, was der Lauf misst oder vorgibt. Wie viel davon ins Ziel "
         "kommt („mal“), sagt der Baustein unter „Am Plan“, der sein Ziel aus dem Test nimmt."
     ),
     (True, False): (
-        "Zur Wahl steht, was gemessen wird — und die Vorgabe selbst. Der Wert, mal dem Faktor "
+        "Zur Wahl steht, was der Lauf misst oder vorgibt. Der Wert, mal dem Faktor "
         "daneben, wird das Ziel der Übung im Kapitelplan."
     ),
 }
-#: … und der Hinweis, wenn die Übungen einer Auswahl kein Feld gemeinsam haben — ohne Vorgabe
-#: zählt nur ein Eintrag mit diesem Feld, mit Vorgabe bringt der Lauf das Feld mit
+#: … und der Hinweis, wenn die Übungen einer Auswahl kein Feld gemeinsam haben — ohne Lauf
+#: zählt nur ein Eintrag mit diesem Feld, der Lauf bringt das Feld mit
 #: (`core.kurstest.eintrag`)
 KEIN_GEMEINSAMES: dict[bool, str] = {
     False: (
@@ -169,6 +198,34 @@ KEIN_GEMEINSAMES: dict[bool, str] = {
         "ein, auch wo die gewählte Übung es sonst nicht anbietet."
     ),
 }
+#: „So läuft der Test“ — die Erklärung hinter dem „i“ (Erklärtexte stehen nicht im Formular)
+LAUF_INFO = """Ohne Angabe läuft ein Test wie bisher: mit der **Stoppuhr**, ohne Takt, ohne
+Ausführung. Jede Zeile lässt sich überschreiben:
+
+- **Uhr** — die Stoppuhr, der **Timer der Übung** (wie sie gerade eingestellt ist) oder ein
+  **eigener Timer** nur für diesen Test. Mit einem Timer steht die Zeit fest: Die Vorgabe
+  „Zeit“ gibt es dann nicht, Menge und Anstrengung bleiben.
+- **Takt** — ohne, der Takt der Übung oder ein eigener.
+- **Ausführung** — Variante, Seite, Gewicht, Winkel, Strecke: je Parameter **vorgegeben**
+  (steht fest) oder **frei** (die Person wählt vor dem Start). „Wie die Übung“: Sie wählt frei
+  unter allen Parametern der Übung.
+- **Hinweis vor dem Start** — ein Satz, den die Person vor dem Test liest.
+
+Eine eigene Angabe im Test geht der Übung vor. Sobald Uhr, Takt oder Ausführung gestellt sind,
+wird der Test **mit der Uhr gemacht** — auch ohne Vorgabe."""
+#: Das Blatt „Ausführung im Test“ — die Erklärung hinter seinem „i“
+AUSFUEHRUNG_INFO = """Je Parameter der Übung:
+
+- **vorgegeben** — der Wert steht fest (Seite links, 10 kg).
+- **frei** — die Person wählt vor dem Start selbst.
+- **keines von beiden** — der Parameter gehört nicht zum Test.
+
+Was der Test selbst misst (Wiederholungen, Zeit, Anstrengung), steht nicht zur Wahl. Bei „der
+gewählten“ einer Auswahl lässt sich frei wählen, was irgendeine ihrer Übungen hat; vorgeben
+nur, was alle haben — und nie die Variante, die hat jede Übung für sich."""
+#: Die beiden Stellungen eines Parameters im Blatt „Ausführung im Test“
+VORGEGEBEN = "vorgegeben"
+FREI = "frei"
 
 
 def art_name(block: Block) -> str:
@@ -290,6 +347,285 @@ def folgen_scroll(folgen: Sequence[Folge]) -> ft.ScrollMode | None:
     Flet 1.0 so hoch, wie ihr Elternteil erlaubt — der Dialog würde bildschirmhoch, auch für
     drei Zeilen (Web-Foto, 16.11.2026; dieselbe Ursache wie in `components/blatt.py`)."""
     return ft.ScrollMode.AUTO if len(folgen) > 6 else None
+
+
+# ---------------------------------------------------------------------------
+# Der Test, flexibel gestaltet: die Blätter über dem Test-Dialog
+# ---------------------------------------------------------------------------
+
+
+def lauf_timer_blatt(
+    page: Any,
+    state: Any,
+    profil: TimerProfil,
+    *,
+    block_id: str,
+    uebernehmen: Callable[[dict[str, Any]], None],
+) -> ft.BottomSheet:
+    """Der **eigene Timer** eines Tests als Blatt über dem Test-Dialog — derselbe Timer-Editor
+    wie am Baustein „Übung dazu“ und in „Im Plan einstellen“ (`components/timer_editor.py`:
+    Zeiten · Klänge, Teile, Runden), hier mit dem Namen des Timers darüber: Die Vorschau des
+    Tests nennt ihn (`core.kursbau.zusatz_des_tests`).
+
+    ``profil`` ist der Ausgangspunkt und bleibt unberührt. „Übernehmen“ gibt den Timer so
+    zurück, wie ein Block ihn trägt — eingebettet, mit der ID ``kurs-<block>``
+    (`core.kursbau.timer_einbetten`) —, sobald das Blatt zu ist; „Abbrechen“ und Wegwischen
+    lassen alles, wie es war. Eine Ausführung je Abschnitt bietet der Editor hier nicht an:
+    Die Ausführung des Tests hat ihre eigene Zeile.
+    """
+    nachher = Nachher()
+    blatt: ft.BottomSheet
+    meldung = ft.Text("", size=12, color=ft.Colors.ERROR, visible=False)
+    start = TimerProfil.aus_dict(profil.als_dict()) or neuer_timer()
+    start.bibliothek = ""
+    editor = timer_editor(page, state, start)
+
+    def fertig(_e: Any = None) -> None:
+        name = " ".join(str(editor.name.value or "").split()) or "Timer"
+        neu = editor.bauen(f"kurs-{block_id}", name)
+        if isinstance(neu, str):  # eine Dauer fehlt
+            meldung.value, meldung.visible = neu, True
+            with contextlib.suppress(Exception):
+                meldung.update()
+            return
+        nachher.danach(lambda: uebernehmen(timer_einbetten(neu, block_id)))
+        schliessen(blatt)
+
+    blatt = ft.BottomSheet(
+        show_drag_handle=True,
+        scrollable=True,
+        on_dismiss=nachher.bei_schliessen,
+        data=("test_timer_blatt", block_id),
+        content=blatt_spalte(
+            [
+                ft.Text("Timer des Tests", size=20, weight=ft.FontWeight.W_500),
+                ft.Row(controls=[editor.name]),
+                timer_editor_teil(editor, "test_timer_editor"),
+                meldung,
+            ],
+            [
+                ft.Row(
+                    spacing=4,
+                    controls=[
+                        ft.Container(expand=True),
+                        ft.TextButton(
+                            "Abbrechen",
+                            on_click=lambda: schliessen(blatt),
+                            data="test_timer_abbrechen",
+                        ),
+                        ft.FilledButton(
+                            "Übernehmen",
+                            icon=ft.Icons.CHECK,
+                            on_click=fertig,
+                            data="test_timer_uebernehmen",
+                        ),
+                    ],
+                )
+            ],
+            geschaetzt=520,
+        ),
+    )
+    return blatt
+
+
+def lauf_ausfuehrung_blatt(
+    page: Any,
+    sicht: Kurssicht,
+    uebungen: Sequence[str],
+    wahl: Laufwahl,
+    *,
+    uebernehmen: Callable[[dict[str, Any], list[str]], None],
+) -> ft.BottomSheet:
+    """Die **Ausführung** eines Tests als Blatt über dem Test-Dialog (Ben, 16.11.2026: „Kann
+    vorgegeben sein; Varianten können vorgegeben sein, oder frei“): je Parameter eine Zeile
+    mit zwei Knöpfen — **vorgegeben** (darunter der Wert, in der Maske der Übung:
+    `components/spec_form.py`) oder **frei**; keiner gewählt: Der Parameter gehört nicht zum
+    Test. Welche Parameter zur Wahl stehen und welche sich vorgeben lassen, rechnet
+    `Kurssicht.ausfuehrung` (``uebungen``: die Übung des Tests — oder die der Auswahl).
+
+    ``wahl``: was gerade gilt (`Laufwahl.ziel`, `Laufwahl.felder`). Was davon das Angebot
+    nicht (mehr) kennt, bleibt als Zeile stehen, damit man es abwählen kann. „Übernehmen“ gibt
+    ``(vorgegeben, frei)`` zurück, sobald das Blatt zu ist. Die Felder halten Werte, nicht
+    Controls: Jeder Aufbau legt die Masken neu an.
+    """
+    angebot, vorgebbar = sicht.ausfuehrung(uebungen)
+    bekannte = {f.key for f in angebot}
+    fremde = [
+        sicht.feld(uebungen, k)
+        for k in dict.fromkeys((*wahl.ziel, *wahl.felder))
+        if k not in bekannte
+    ]
+    felder = [*angebot, *fremde]
+    stand: dict[str, str] = {
+        **dict.fromkeys(wahl.felder, FREI),
+        **dict.fromkeys(wahl.ziel, VORGEGEBEN),
+    }
+    werte: dict[str, Any] = dict(wahl.ziel)
+    masken: dict[str, SpecForm] = {}
+    nachher = Nachher()
+    blatt: ft.BottomSheet
+    zeilen = ft.Column(spacing=14, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+    meldung = ft.Text("", size=12, color=ft.Colors.ERROR, visible=False)
+
+    def merken() -> None:
+        """Was in den Masken steht, in ``werte`` — vor jedem Neuaufbau und vor dem Übernehmen."""
+        for key, maske in masken.items():
+            wert = maske.werte().get(key)
+            if ist_leer(wert):
+                werte.pop(key, None)
+            else:
+                werte[key] = wert
+
+    def schalter(key: str, art: str) -> Callable[..., None]:
+        def handler(_e: Any = None) -> None:
+            merken()
+            if stand.get(key) == art:
+                stand.pop(key)  # ein zweiter Tipp nimmt den Parameter aus dem Test
+            else:
+                stand[key] = art
+            zeichnen()
+            for c in (zeilen, meldung):
+                with contextlib.suppress(Exception):
+                    c.update()
+
+        return handler
+
+    def zeile(f: FieldSpec) -> ft.Control:
+        fest_geht = f.key in vorgebbar or f.key not in bekannte or stand.get(f.key) == VORGEGEBEN
+        kopf = ft.Row(
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Text(f.label, size=14, weight=ft.FontWeight.W_600, expand=True),
+                ft.Chip(
+                    label=ft.Text("vorgegeben"),
+                    selected=stand.get(f.key) == VORGEGEBEN,
+                    show_checkmark=False,
+                    disabled=not fest_geht,
+                    tooltip=None
+                    if fest_geht
+                    else "Geht nur, wenn alle Übungen der Auswahl den Parameter haben",
+                    on_select=schalter(f.key, VORGEGEBEN),
+                    data=("test_ausfuehrung", f.key, VORGEGEBEN),
+                ),
+                ft.Chip(
+                    label=ft.Text("frei"),
+                    selected=stand.get(f.key) == FREI,
+                    show_checkmark=False,
+                    on_select=schalter(f.key, FREI),
+                    data=("test_ausfuehrung", f.key, FREI),
+                ),
+            ],
+        )
+        if stand.get(f.key) != VORGEGEBEN:
+            return kopf
+        maske = SpecForm(
+            ResultSpec(fields=[replace(f, default=None, required=False)]),
+            {f.key: werte[f.key]} if f.key in werte else {},
+            page=page,
+            vorgaben=False,
+        )
+        masken[f.key] = maske
+        return ft.Column(
+            spacing=8,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            controls=[
+                kopf,
+                ft.Container(
+                    padding=ft.Padding.only(left=12),
+                    content=maske.control,
+                    data=("test_ausfuehrung_wert", f.key),
+                ),
+            ],
+        )
+
+    def zeichnen() -> None:
+        meldung.visible = False
+        masken.clear()
+        if not felder:
+            zeilen.controls = [
+                hinweis(
+                    "Diese Übung hat keine Parameter für die Ausführung — Variante, Seite, "
+                    "Gewicht, Winkel, Strecke."
+                    if uebungen
+                    else "Wähle zuerst die Übung des Tests — dann stehen ihre Parameter hier."
+                )
+            ]
+            return
+        zeilen.controls = [zeile(f) for f in felder]
+        if any(f.key not in vorgebbar for f in angebot):
+            zeilen.controls.append(
+                hinweis("Vorgeben lässt sich nur, was alle Übungen der Auswahl haben.")
+            )
+
+    def fertig(_e: Any = None) -> None:
+        merken()
+        ungueltig = [name for maske in masken.values() for name in maske.pruefen()]
+        ohne_wert = [
+            f.label for f in felder if stand.get(f.key) == VORGEGEBEN and f.key not in werte
+        ]
+        grund = (
+            "Ungültig: " + ", ".join(ungueltig)
+            if ungueltig
+            else f"„{ohne_wert[0]}“ ist vorgegeben, hat aber keinen Wert — trag einen ein oder "
+            "stell auf „frei“."
+            if ohne_wert
+            else None
+        )
+        if grund is not None:
+            meldung.value, meldung.visible = grund, True
+            with contextlib.suppress(Exception):
+                meldung.update()
+            return
+        ziel = {f.key: werte[f.key] for f in felder if stand.get(f.key) == VORGEGEBEN}
+        frei = [f.key for f in felder if stand.get(f.key) == FREI]
+        nachher.danach(lambda: uebernehmen(ziel, frei))
+        schliessen(blatt)
+
+    zeichnen()
+    blatt = ft.BottomSheet(
+        show_drag_handle=True,
+        scrollable=True,
+        on_dismiss=nachher.bei_schliessen,
+        data="test_ausfuehrung_blatt",
+        content=blatt_spalte(
+            [
+                ft.Row(
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Text(
+                            "Ausführung im Test", size=20, weight=ft.FontWeight.W_500, expand=True
+                        ),
+                        info_knopf(page, "Ausführung im Test", AUSFUEHRUNG_INFO),
+                    ],
+                ),
+                zeilen,
+                meldung,
+            ],
+            [
+                ft.Row(
+                    spacing=4,
+                    controls=[
+                        ft.Container(expand=True),
+                        ft.TextButton(
+                            "Abbrechen",
+                            on_click=lambda: schliessen(blatt),
+                            data="test_ausfuehrung_abbrechen",
+                        ),
+                        ft.FilledButton(
+                            "Übernehmen",
+                            icon=ft.Icons.CHECK,
+                            on_click=fertig,
+                            data="test_ausfuehrung_uebernehmen",
+                        ),
+                    ],
+                )
+            ],
+            geschaetzt=420,
+        ),
+    )
+    return blatt
 
 
 # ---------------------------------------------------------------------------
@@ -933,11 +1269,16 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             if block.art == MEDIUM
             else block.titel,
         )
+        # Der Satz unter der Aufforderung (`Block.text`) — am Test der „Hinweis vor dem Start“,
+        # die vierte Zeile unter „So läuft der Test“ (Skizze F1)
         text = ft.TextField(
-            label="Text (Markdown)" if block.art == TEXT else "Satz darunter",
+            label={TEXT: "Text (Markdown)", TEST: "Hinweis vor dem Start"}.get(
+                block.art, "Satz darunter"
+            ),
             value=block.text,
             multiline=True,
             min_lines=4 if block.art == TEXT else 1,
+            data="block_text",
         )
         adresse = ft.TextField(
             label="Adresse (https://…)",
@@ -961,14 +1302,15 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         # sagen die Bausteine „Am Plan“ (`docs/plan_kurs_ablauf.md` §11.2). Der Faktor des Tests
         # und „Hinter Planübung Nr.“ gehören zum Kapitelplan und stehen nur da, wo es einen gibt.
         nur_liefern = baut_plan and not plaene
-        # Das Feld des Tests (`Block.feld`): ohne Vorgabe „Was wird gemessen“, mit Vorgabe „Ins
-        # Ziel kommt“ — dasselbe Auswahlfeld, das Angebot rechnet `Kurssicht.zielfelder`
+        # Das Feld des Tests (`Block.feld`): „Was wird gemessen“ — läuft der Test mit der Uhr
+        # (mit Vorgabe oder gestaltet), „Ins Ziel kommt“; dasselbe Auswahlfeld, das Angebot
+        # rechnet `Kurssicht.zielfelder`
         feld = ft.Dropdown(label="Was wird gemessen", expand=True, data="test_feld")
         feld_hinweis = hinweis(KEIN_GEMEINSAMES[False])
         # Der Faktor des Tests gilt im **Kapitelplan** (`core.kursbloecke.vorlage_anwenden`); im
         # Kursplan nimmt die Sammelkarte den des Bausteins mit „Ziel aus dem Test“
-        # (`core.kursplan`). Ohne Vorgabe steht er wie bisher als „Ziel in % des Tests“ da, mit
-        # Vorgabe als „mal“ neben dem Feld (Skizze T5) — zwei Felder für eine Zahl, weil ein
+        # (`core.kursplan`). Ohne Lauf steht er wie bisher als „Ziel in % des Tests“ da, mit
+        # Lauf als „mal“ neben dem Feld (Skizze T5) — zwei Felder für eine Zahl, weil ein
         # Textfeld nicht den Platz wechseln darf (Flet: ein umgehängtes nimmt nichts mehr an)
         faktor = ft.TextField(
             label="Ziel in % des Tests",
@@ -984,12 +1326,26 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         )
         #: Der Test, wie er im Dialog steht: was unter „Vorgabe“ eingestellt ist (Werte, keine
         #: Controls) und das Feld, das **von Hand gewählt** oder gespeichert ist — eine
-        #: getroffene Wahl bleibt, solange sie zur Wahl steht (`core.kursbau.zielfeld`)
+        #: getroffene Wahl bleibt, solange sie zur Wahl steht (`core.kursbau.zielfeld`). Dazu
+        #: „So läuft der Test“ (``lauf``: Uhr, Takt, Ausführung — `core.kursbau.Laufwahl`) und
+        #: ob ein Timer gerade eine Vorgabe „Zeit“ abgelöst hat (``zeit_weg``: die Zeile dazu)
         test: dict[str, Any] = {
             "wahl": Vorgabenwahl.aus(block.vorgabe),
             "feld": "" if neu else block.feld,
+            "lauf": Laufwahl.aus(block),
+            "zeit_weg": False,
         }
         vorgabe_reihe = ft.Row(wrap=True, spacing=6, run_spacing=6)
+        zeit_weg = ft.Text(
+            "", size=12, color=ft.Colors.TERTIARY, visible=False, data="test_zeit_weg"
+        )
+        #: die drei Zeilen Uhr · Takt · Ausführung — sie entstehen mit jedem Zeichnen neu
+        lauf_spalte = ft.Column(
+            spacing=10,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            data="test_lauf",
+        )
         menge_feld = ft.TextField(
             label="Wiederholungen",
             value=test["wahl"].menge_text,
@@ -1059,13 +1415,26 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             test["wahl"] = wahl
             return wahl
 
+        def laeuft_jetzt() -> bool:
+            """Ist der Test, wie er im Dialog steht, ein **Lauf mit der Uhr** — mit Vorgabe
+            oder gestaltet (`Block.laeuft`)? Daran hängt, was der Dialog zeigt: „Ins Ziel
+            kommt“ statt „Was wird gemessen“, „Gemessen wird“, „mal“, die Vorschau."""
+            return test["wahl"].art != OHNE or test["lauf"].gestaltet
+
         def faktor_jetzt() -> float:
             """Der Faktor aus dem Feld, das gerade zu sehen ist — ohne Feld bleibt er."""
             if nur_liefern:
                 return block.faktor
-            if test["wahl"].art == OHNE:
+            if faktor.visible:
                 return faktor_lesen(str(faktor.value or ""), prozent=True)
             return faktor_lesen(str(mal.value or ""))
+
+        def uebung_jetzt() -> tuple[str, str]:
+            """Die Übung des Tests, wie sie im Auswahlfeld steht: ``(uebung, aus)`` — eine
+            feste Übung oder „die gewählte“ einer Auswahl, nie beides."""
+            gewaehlte = str(uebung.value or "")
+            aus = gewaehlte[4:] if gewaehlte.startswith("aus:") else ""
+            return ("" if aus else gewaehlte), aus
 
         def entwurf() -> Block:
             """Der Block, wie er jetzt im Dialog steht — „Übernehmen“ prüft ihn, die Vorschau
@@ -1080,12 +1449,11 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             if block.art == FRAGE:
                 neuer.antworten = antworten_lesen(str(antworten.value or ""))
             if block.art == TEST:
-                gewaehlte = str(uebung.value or "")
-                neuer.aus = gewaehlte[4:] if gewaehlte.startswith("aus:") else ""
-                neuer.uebung = "" if neuer.aus else gewaehlte  # nie beides
+                neuer.uebung, neuer.aus = uebung_jetzt()
                 neuer.feld = str(feld.value or "hold")
                 neuer.faktor = faktor_jetzt()
                 neuer.vorgabe = wahl_jetzt().vorgabe()
+                neuer = test["lauf"].in_block(neuer)  # Uhr, Takt, Ausführung
             if block.art == AUSWAHL:
                 neuer.uebungen = list(gewaehlt)
                 neuer.anzahl = max(1, int(zahl(anzahl, 1)))
@@ -1093,22 +1461,25 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             return neuer
 
         def felder_setzen() -> None:
-            """Das Angebot im Feld des Tests: ohne Vorgabe, was die Übung misst — bei „der
-            gewählten“, was alle Übungen der Auswahl haben; mit Vorgabe, was der Lauf vorgibt
-            oder misst (`Kurssicht.zielfelder`). Vorbelegt ist das erste — eine getroffene Wahl
-            bleibt (`zielfeld`); ohne Vorgabe gilt wie bisher auch das Feld eines neuen Blocks."""
+            """Das Angebot im Feld des Tests: ohne Lauf, was die Übung misst — bei „der
+            gewählten“, was alle Übungen der Auswahl haben; läuft der Test mit der Uhr (mit
+            Vorgabe oder gestaltet), was der Lauf vorgibt oder misst (`Kurssicht.zielfelder`).
+            Vorbelegt ist das erste — eine getroffene Wahl bleibt (`zielfeld`); ohne Lauf gilt
+            wie bisher auch das Feld eines neuen Blocks."""
             vorgabe = wahl_jetzt().vorlaeufig()
-            angebot, gemeinsam = sicht().zielfelder(gemessen(), vorgabe)
+            laeuft = laeuft_jetzt()
+            angebot, gemeinsam = sicht().zielfelder(gemessen(), vorgabe, laeuft=laeuft)
             feld.options = [ft.DropdownOption(key=f.key, text=f.label) for f in angebot]
-            feld.value = zielfeld(angebot, test["feld"], block.feld if vorgabe is None else "")
-            feld.label = "Was wird gemessen" if vorgabe is None else "Ins Ziel kommt"
-            feld_hinweis.value = KEIN_GEMEINSAMES[vorgabe is not None]
+            feld.value = zielfeld(angebot, test["feld"], "" if laeuft else block.feld)
+            feld.label = "Ins Ziel kommt" if laeuft else "Was wird gemessen"
+            feld_hinweis.value = KEIN_GEMEINSAMES[laeuft]
             feld_hinweis.visible = not gemeinsam
 
         def vorschau_zeichnen() -> None:
-            """„Gemessen wird“ und „So steht es im Kapitel“ — beides nur mit Vorgabe."""
+            """„Gemessen wird“ und „So steht es im Kapitel“ — beides nur, wenn der Test läuft
+            (mit Vorgabe oder gestaltet)."""
             wahl = wahl_jetzt()
-            mit = wahl.art != OHNE
+            mit = laeuft_jetzt()
             gemessen_teil.visible = vorschau_kasten.visible = mit
             if not mit:
                 return
@@ -1131,7 +1502,12 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 teile.append(hinweis(grund))
             else:
                 vorschau = sicht().test_vorschau(entwurf())
-                teile += [ft.Text(k, size=15, weight=ft.FontWeight.W_600) for k in vorschau.kopf]
+                # je Überschrift der Satz der Testkarte, wie der Test läuft — leer beim Test
+                # von bisher (`Kapitelvorschau.lauf`, `core.kurstest.lauf_satz`)
+                for n, k in enumerate(vorschau.kopf):
+                    teile.append(ft.Text(k, size=15, weight=ft.FontWeight.W_600))
+                    if n < len(vorschau.lauf) and vorschau.lauf[n]:
+                        teile.append(ft.Text(vorschau.lauf[n], size=13))
                 teile += [
                     ft.Text(
                         f"Sammelkarte{f' in „{wo}“' if wo else ''}: „{z.titel} — {z.unter}“",
@@ -1154,7 +1530,19 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             """Der Teil des Dialogs, der zum Test gehört, aus dem Stand in ``test`` — Knöpfe
             entstehen neu (wie im Blatt der Bausteine), Textfelder bleiben, wo sie sind."""
             wahl = wahl_jetzt()
-            mit = wahl.art != OHNE
+            lauf: Laufwahl = test["lauf"]
+            mit = laeuft_jetzt()
+            # Wechselt der Dialog zwischen „liest einen Eintrag“ und „läuft mit der Uhr“,
+            # wechselt auch das Feld des Faktors („Ziel in %“ ↔ „mal“): Er wandert mit — aus
+            # dem Feld, das zu sehen war, in beide
+            if test.get("laeuft") not in (None, mit):
+                wert_bisher = faktor_jetzt()
+                faktor.value = faktor_text(wert_bisher, prozent=True)
+                mal.value = faktor_text(wert_bisher)
+            test["laeuft"] = mit
+            mal.visible = mit
+            faktor.visible = not mit
+            # Mit einem Timer steht „Zeit“ nicht zur Wahl (`core.kursbau.vorgabe_wahl`)
             vorgabe_reihe.controls = [
                 ft.Chip(
                     label=ft.Text(name),
@@ -1165,8 +1553,14 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                     on_select=art_waehler(art),
                     data=("test_vorgabe", art),
                 )
-                for art, name in VORGABE_WAHL.items()
+                for art, name in vorgabe_wahl(lauf.mit_timer, wahl.art).items()
             ]
+            # … und eine Zeile sagt es, wenn ein Timer die Vorgabe „Zeit“ gerade abgelöst hat —
+            # oder wenn ein Test von früher beides trägt (er bleibt, bis jemand umstellt)
+            beides = lauf.mit_timer and wahl.art == ZEIT
+            zeit_weg.value = ZEIT_UND_TIMER if beides else ZEIT_FAELLT_WEG
+            zeit_weg.visible = beides or bool(test["zeit_weg"])
+            lauf_zeichnen()
             menge_zeile.visible = wahl.art == MENGE
             zeit_zeile.visible = wahl.art == ZEIT
             zeit_knopf.content = wahl.zeit_text
@@ -1217,10 +1611,201 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 for marke, wert in marken
             ]
             felder_setzen()
-            mal.visible = mit
-            faktor.visible = not mit
             test_hinweis.value = TEST_HINWEIS[(mit, nur_liefern)]
             vorschau_zeichnen()
+
+        # -- „So läuft der Test“: Uhr, Takt, Ausführung (Skizze F1) ---------------------------
+
+        def lauf_block() -> Block:
+            """Uhr, Takt und Ausführung an der Übung, die gerade gewählt ist — woraus die drei
+            Zeilen ihre Texte nehmen (`Kurssicht.uhr_text` und die beiden anderen)."""
+            fest, aus = uebung_jetzt()
+            return test["lauf"].in_block(Block(TEST, id=block.id, uebung=fest, aus=aus))
+
+        def lauf_zeile(
+            label: str,
+            wert: str,
+            namen: dict[str, str],
+            gewaehlt: Callable[[str], None],
+            daten: str,
+            unter: str,
+            stift: Callable[..., None],
+            stift_tipp: str,
+        ) -> ft.Control:
+            """Eine Zeile: das Auswahlfeld mit der Vorgabe, „wie die Übung“ und der eigenen
+            Angabe — bei einer eigenen daneben der Stift (sie noch einmal öffnen); darunter
+            klein, was gilt."""
+            wahl_feld = ft.Dropdown(
+                label=label,
+                value=wert,
+                options=[
+                    # gewählt steht die eigene Angabe ohne „…“ da
+                    ft.DropdownOption(key=k, text=n.removesuffix(" …") if k == wert else n)
+                    for k, n in namen.items()
+                ],
+                expand=True,
+                data=daten,
+            )
+            wahl_feld.on_select = lambda _e=None: gewaehlt(str(wahl_feld.value or STANDARD))
+            kopf_zeile = ft.Row(
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    wahl_feld,
+                    *(
+                        [
+                            ft.IconButton(
+                                ft.Icons.EDIT_OUTLINED,
+                                tooltip=stift_tipp,
+                                on_click=stift,
+                                data=f"{daten}_stift",
+                            )
+                        ]
+                        if wert == EIGEN
+                        else []
+                    ),
+                ],
+            )
+            if not unter:
+                return kopf_zeile
+            return ft.Column(
+                spacing=4,
+                tight=True,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                controls=[
+                    kopf_zeile,
+                    # unten etwas Luft: Die Beschriftung des nächsten Feldes ragt über seinen Rand
+                    ft.Container(
+                        padding=ft.Padding.only(left=12, right=4, bottom=6),
+                        content=ft.Text(unter, size=12, opacity=0.75, data=f"{daten}_text"),
+                    ),
+                ],
+            )
+
+        def lauf_zeichnen() -> None:
+            """Die drei Zeilen aus ``test["lauf"]`` — sie entstehen neu wie die Knöpfe der
+            Vorgabe; der „Hinweis vor dem Start“ darunter ist ein Textfeld und bleibt stehen."""
+            lauf: Laufwahl = test["lauf"]
+            jetzt, umfeld = lauf_block(), sicht()
+            lauf_spalte.controls = [
+                lauf_zeile(
+                    "Uhr",
+                    lauf.uhr,
+                    UHR_WAHL,
+                    uhr_gewaehlt,
+                    "test_uhr",
+                    umfeld.uhr_text(jetzt),
+                    timer_oeffnen,
+                    "Timer bearbeiten: Zeiten · Klänge",
+                ),
+                lauf_zeile(
+                    "Takt",
+                    lauf.takt_art,
+                    TAKT_WAHL,
+                    takt_gewaehlt,
+                    "test_takt",
+                    umfeld.takt_text(jetzt),
+                    takt_oeffnen,
+                    "Takt einstellen: Phasen, Tempo, Klang",
+                ),
+                lauf_zeile(
+                    "Ausführung",
+                    lauf.ausfuehrung,
+                    AUSFUEHRUNG_WAHL,
+                    ausfuehrung_gewaehlt,
+                    "test_ausfuehrung",
+                    umfeld.ausfuehrung_text(jetzt),
+                    ausfuehrung_oeffnen,
+                    "Ausführung einstellen: je Parameter vorgegeben oder frei",
+                ),
+            ]
+
+        def uhr_setzen(neu: Laufwahl) -> None:
+            """Die Zeile „Uhr“ gestellt. **Timer und Vorgabe „Zeit“ zusammen gibt es nicht:**
+            Läuft der Test jetzt mit einem Timer, wird eine gesetzte Vorgabe „Zeit“ zu „Ohne“,
+            und eine Zeile unter der Vorgabe sagt es; mit der Stoppuhr geht die Zeile wieder."""
+            wahl = wahl_jetzt()
+            test["lauf"] = neu
+            if neu.mit_timer and wahl.art == ZEIT:
+                test["wahl"], test["zeit_weg"] = wahl.ohne_zeit(), True
+            elif not neu.mit_timer:
+                test["zeit_weg"] = False
+
+        def timer_oeffnen(_e: Any = None) -> None:
+            """Der eigene Timer im Timer-Editor — ein Blatt über dem Dialog. Ausgangspunkt ist
+            der eigene Timer, sonst Belastung 30 s · Pause 15 s (wie am Baustein)."""
+            lauf: Laufwahl = test["lauf"]
+
+            def uebernommen(timer: dict[str, Any]) -> None:
+                uhr_setzen(test["lauf"].mit_uhr(EIGEN, timer))
+                test_neu()
+
+            page.show_dialog(
+                lauf_timer_blatt(
+                    page,
+                    state,
+                    (TimerProfil.aus_dict(dict(lauf.timer)) if lauf.timer else None)
+                    or neuer_timer(),
+                    block_id=block.id,
+                    uebernehmen=uebernommen,
+                )
+            )
+
+        def uhr_gewaehlt(art: str) -> None:
+            if art == EIGEN:
+                timer_oeffnen()  # die Wahl bleibt, bis das Blatt „Übernehmen“ meldet
+            else:
+                uhr_setzen(test["lauf"].mit_uhr(art))
+            test_neu()
+
+        def takt_oeffnen(_e: Any = None) -> None:
+            """Der eigene Takt im Takt-Blatt (`components/takt_blatt.py`) über dem Dialog —
+            Ausgangspunkt ist der eigene, sonst der Takt der Übung. „Kein Takt“ dort heißt
+            hier „Ohne“."""
+            lauf: Laufwahl = test["lauf"]
+
+            def uebernommen(neuer_takt: Takt | None) -> None:
+                test["lauf"] = test["lauf"].mit_takt(EIGEN, neuer_takt)
+                test_neu()
+
+            page.show_dialog(
+                takt_blatt(
+                    page,
+                    state,
+                    takt=lauf.takt or sicht().takt_vorgabe(gemessen()),
+                    titel="Takt · Test",
+                    in_den_plan=uebernommen,
+                    plan_ort="In diesem Test",
+                )
+            )
+
+        def takt_gewaehlt(art: str) -> None:
+            if art == EIGEN:
+                takt_oeffnen()
+            else:
+                test["lauf"] = test["lauf"].mit_takt(art)
+            test_neu()
+
+        def ausfuehrung_oeffnen(_e: Any = None) -> None:
+            """Die eigene Ausführung — je Parameter vorgegeben oder frei
+            (`lauf_ausfuehrung_blatt`), ein Blatt über dem Dialog."""
+
+            def uebernommen(ziel: dict[str, Any], frei: list[str]) -> None:
+                test["lauf"] = test["lauf"].mit_ausfuehrung(EIGEN, ziel, frei)
+                test_neu()
+
+            page.show_dialog(
+                lauf_ausfuehrung_blatt(
+                    page, sicht(), gemessen(), test["lauf"], uebernehmen=uebernommen
+                )
+            )
+
+        def ausfuehrung_gewaehlt(art: str) -> None:
+            if art == EIGEN:
+                ausfuehrung_oeffnen()
+            else:
+                test["lauf"] = test["lauf"].mit_ausfuehrung(art)
+            test_neu()
 
         def test_neu() -> None:
             test_zeichnen()
@@ -1235,10 +1820,9 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
 
         def art_waehler(art: str) -> Callable[..., None]:
             def handler(_e: Any = None) -> None:
-                # der Faktor wandert mit: aus dem Feld, das zu sehen war, in beide
-                wert = faktor_jetzt()
-                faktor.value, mal.value = faktor_text(wert, prozent=True), faktor_text(wert)
+                # (der Faktor wandert in `test_zeichnen` mit, wenn sein Feld wechselt)
                 test["wahl"] = wahl_jetzt().mit_art(art)
+                test["zeit_weg"] = False  # die Zeile hat gesagt, was sie zu sagen hatte
                 test_neu()
 
             return handler
@@ -1346,12 +1930,13 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 antworten,
                 hinweis("Die Frage erklärt — nichts wird gespeichert oder gezählt."),
             ],
-            # Der Test (Skizze T5): unter der Übung die Vorgabe, was der Lauf misst, was ins
-            # Ziel kommt und die Vorschau. Ohne Vorgabe bleibt, was es schon gab: „Was wird
-            # gemessen“ und — wo es einen Kapitelplan gibt — „Ziel in % des Tests“
+            # Der Test (Skizzen T5 und F1): unter der Übung die Vorgabe, dann „So läuft der
+            # Test“ (Uhr · Takt · Ausführung · Hinweis vor dem Start), was der Lauf misst, was
+            # ins Ziel kommt und die Vorschau. Ohne Vorgabe und ohne Gestaltung bleibt, was es
+            # schon gab: „Was wird gemessen“ und — wo es einen Kapitelplan gibt — „Ziel in %
+            # des Tests“
             TEST: [
                 kopf,
-                text,
                 ft.Row(controls=[uebung]),  # die Zeile streckt das Auswahlfeld auf die Breite
                 ft.Text(
                     "VORGABE — WANN DER TEST ENDET",
@@ -1360,9 +1945,25 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                     opacity=0.6,
                 ),
                 vorgabe_reihe,
+                zeit_weg,
                 menge_zeile,
                 zeit_zeile,
                 skala_teil,
+                ft.Row(
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Text(
+                            "SO LÄUFT DER TEST",
+                            size=11,
+                            weight=ft.FontWeight.BOLD,
+                            opacity=0.6,
+                            expand=True,
+                        ),
+                        info_knopf(page, "So läuft der Test", LAUF_INFO),
+                    ],
+                ),
+                lauf_spalte,
+                text,
                 gemessen_teil,
                 ft.Row(
                     spacing=8,
@@ -1659,16 +2260,108 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             block.von = von
             baustein_oeffnen(block, neu=True)
             return
+        melden(nicht_nennbar(marke))
+
+    def nicht_nennbar(marke: str, was: str = "Weg") -> str:
+        """Warum ein Baustein dieses Kapitels (``was``: „Weg“, „Baustein“) die Planübung
+        ``marke`` nicht nennen kann — erst ein späteres Kapitel bringt sie, oder kein Baustein
+        trägt sie."""
+        jetzt = sicht()
         woher = jetzt.bringt(marke)
         if woher is None:
-            melden("Ein Weg dieses Kapitels kann diese Übung nicht nennen.")
-            return
+            return f"Ein {was} dieses Kapitels kann diese Übung nicht nennen."
         nr, spaeter = woher
         name = f" „{spaeter.titel}“" if spaeter.titel else ""
-        melden(
-            f"{jetzt.marke_name(marke)} kommt erst mit Kapitel {nr}{name} in den Plan — ein Weg "
+        return (
+            f"{jetzt.marke_name(marke)} kommt erst mit Kapitel {nr}{name} in den Plan — ein {was} "
             "dieses Kapitels kann die Übung noch nicht nennen."
         )
+
+    def einstellen_an(marke: str) -> None:
+        """Im Bild, Menü einer Übung (gedrückt halten) → „Einstellen …“: das Blatt für einen
+        **neuen** Baustein „Einstellen“ dieses Kapitels an ihr (Ziel, Parameter, Timer, Takt) —
+        „An“ vorbelegt wie beim Weg (`Kurssicht.marke_fuer_weg`)."""
+        an = sicht().marke_fuer_weg(marke)
+        if not an:
+            melden(nicht_nennbar(marke, "Baustein"))
+            return
+        block = neuer_baustein(PLAN_EINSTELLEN)
+        block.an = an
+        baustein_oeffnen(block, neu=True)
+
+    def weg_gezogen(von: str, nach: str) -> None:
+        """Im Bild wurde der Punkt der Planübung ``von`` auf ``nach`` gezogen — eine andere
+        Planübung oder das Ende (Ben, 16.11.2026, Katalog P217: im Kurs-Editor dieselben
+        Gesten wie im Plan; auf die Frage, ob das Ziehen den Baustein nach kurzer Bestätigung
+        anlegt: „ja“). Nach der Bestätigung entsteht **in diesem Kapitel** ein Baustein „Weg“
+        (`core.kursbild.weg_baustein`) — ein freier Weg; Auslöser und Beschriftung stellt sein
+        Blatt ein (Tipp auf seinen Punkt oder seine Zeile). Bringt den Weg schon ein Baustein,
+        geht dessen Blatt auf; kann dieses Kapitel eine der beiden Übungen nicht nennen, sagt
+        es eine Zeile."""
+        daten = bild_spalte.data
+        if not daten:
+            return
+        bild: Planbild = daten[1]
+        if von == nach:
+            melden("„Noch einmal“ gibt es im Kurs nicht als Baustein — nur Wege zu einer anderen.")
+            return
+        schon = bild.wege.get((von, nach))
+        if schon is not None:
+            weg_oeffnen(schon)
+            return
+        roh = weg_baustein(bild, von, nach)
+        if roh is None:
+            melden("Ein Weg dieses Kapitels kann diese Übung nicht nennen.")
+            return
+        jetzt = sicht()
+        marke_von = jetzt.marke_fuer_weg(roh.von)
+        marke_zu = ZU_ENDE if roh.zu == ZU_ENDE else jetzt.marke_fuer_weg(roh.zu)
+        if not marke_von:
+            melden(nicht_nennbar(roh.von))
+            return
+        if not marke_zu:
+            melden(nicht_nennbar(roh.zu))
+            return
+        # benannt wie in der Liste der Bausteine — eine der Gewählten heißt „die gewählte“
+        name_von = jetzt.marke_name(marke_von)
+        name_zu = "Ende" if marke_zu == ZU_ENDE else jetzt.marke_name(marke_zu)
+        nachher = Nachher()
+        dialog: ft.AlertDialog
+
+        def anlegen(_e: Any = None) -> None:
+            block = neuer_baustein(PLAN_WEG)
+            block.von, block.zu = marke_von, marke_zu
+            bloecke.append(block)
+            listen_frisch()
+            nachher.danach(
+                lambda: melden(
+                    f"Weg „{name_von}“ – „{name_zu}“ angelegt — sein Punkt im Bild öffnet die "
+                    "Einstellungen."
+                )
+            )
+            schliessen(dialog)
+
+        dialog = ft.AlertDialog(
+            title=ft.Text(f"Neuer Baustein „Weg“ in Kapitel {nummer}"),
+            # der Pfeil als Symbol: „→“ fehlt mancher Schrift (im Browser ein Kästchen)
+            content=ft.Row(
+                tight=True,
+                wrap=True,
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Text(name_von, size=15, weight=ft.FontWeight.W_600),
+                    ft.Icon(ft.Icons.ARROW_FORWARD, size=18),
+                    ft.Text(name_zu, size=15, weight=ft.FontWeight.W_600),
+                ],
+            ),
+            actions=[
+                ft.TextButton("Abbrechen", on_click=lambda _e=None: schliessen(dialog)),
+                ft.FilledButton("Anlegen", on_click=anlegen, data="weg_anlegen"),
+            ],
+            on_dismiss=nachher.bei_schliessen,
+        )
+        page.show_dialog(dialog)
 
     def weg_oeffnen(weg: Weg) -> None:
         """Tipp auf den Punkt eines Wegs im Bild: Gehört er zu diesem Kapitel, geht das Blatt
@@ -1707,6 +2400,8 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             bis=bisher,
             weg_von=weg_von,
             weg_oeffnen=weg_oeffnen,
+            weg_ziehen=weg_gezogen,
+            einstellen=einstellen_an,
         )
         bild_spalte.controls = [handgriffe.control]
         # ``data`` geht nicht an den Client: Bild und Handgriffe für die Tests

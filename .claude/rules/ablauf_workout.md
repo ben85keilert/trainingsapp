@@ -70,7 +70,7 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   in Gassen zwischen den Spalten) und `devices/plan_ablauf.py`; `ui/` zeichnet (`components/ablaufbild.py`:
   Fläche einmal bauen, Inhalt tauschen, Lagen bleiben bis „Neu anordnen“, Eltern mittig;
   `views/ablauf.py`: Seite scrollt nicht, Palette = Übungen des Plans mit `Draggable.affinity`
-  senkrecht, Knöpfe unter dem Bild). Zeitleiste `plan/kante|frage|antwort`, `person/wdh`;
+  senkrecht; bedient wird **im Bild**, siehe unten „Im Bild bedienen“). Zeitleiste `plan/kante|frage|antwort`, `person/wdh`;
   Paket `plaene[].ablauf` mit Positionen. **Korrekturen 9.11.2026** (§8.9): „Aus dem Ablauf
   nehmen“ lässt die Planübung im Plan (aus dem Plan: Kachel gedrückt halten), jede Kante hat
   einen Punkt zum Antippen (Blatt auf diesem Weg), Warnungen `core.ablauf.warnungen` sichtbar
@@ -95,10 +95,20 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   `views/ablauf.ins_bild`), im Bild bleibt jede Planübung ein Knoten mit Nummer = Stelle in der
   Liste. **Eine Kachel bringt immer einen neuen Knoten** (Ben, 16.11.2026 abends: „einheitlich,
   neue Übung erstellen“) — hinter den gewählten (die Wahl geht auf den neuen: Kachel für Kachel
-  eine Kette), in einen Slot oder auf „Start“; ein Weg zwischen Knoten, die schon im Bild
-  stehen, entsteht nur über „Routing“. **Ein eindeutiger Weg hat einen Punkt:** Der Abzweig
-  steht nur ab zwei Wegen (`Geometrie.abzweige`; `austritte` für alle), sonst nur der Griff — er
-  öffnet im Reiter alle Wege der Übung (`on_abzweig`), ohne den Rückruf meldet er `on_kante`.
+  eine Kette), auf eine Übung im Bild gezogen oder auf „Start“. **Ein eindeutiger Weg hat einen
+  Punkt:** Der Abzweig steht nur ab zwei Wegen (`Geometrie.abzweige`; `austritte` für alle),
+  sonst nur der Griff. **Im Bild bedienen** (Ben, 16.11.2026 nachts, P217, §8.13 Punkt 6 —
+  „Menü“ · „Slot weglassen“ · „Ja. Hauptknoten wieder Blatt“): Jede Übung hat ihren **Punkt**
+  (`Geometrie.punkte`); ihn auf eine Übung ziehen = Weg, auf sich selbst = noch einmal, auf
+  „Ende“/„zurück“ (nur beim Ziehen sichtbar), von „Start“ auf eine Übung = Start
+  (`core.ablauf.verbinden`, `on_verbinden`). **Gedrückt halten = Menü an der Übung**
+  (`abbild.Menue`, eigene Karte in der Fläche — kein Flutter-Menü), nie verschieben. **Tipp auf
+  den Punkt eines Wegs = Leiste unter dem Bild** (`wege_form.weg_leiste`: Auslöser, Zahl,
+  Pflicht, „Mehr …“ = Blatt); **Tipp auf den Hauptknoten mit mehreren Wegen = Blatt** mit
+  allen. Kachel „Frage“ in der Leiste. **Slots, das Menü „Routing“ und die Knopfzeile gibt es
+  nicht mehr.** Alles Neue der Zeichnung ist nur an, wenn der Aufrufer den Rückruf gibt — der
+  Kurs-Editor nutzt dieselben (`components/kursplan_bild.py`: Ziehen = Baustein „Weg“ nach
+  Bestätigung, Menü = „Weg von hier“, „Weg zum Ende“, „Einstellen“).
   **Leeren heißt leer, den Start setzt die Person:** `Ablauf.ohne_start` (``{"an": true,
   "ohne_start": true}``) — fällt die Startübung weg (herausgenommen, gelöscht, „Lücke
   schließen“, beim Bereinigen nicht mehr da), **rückt nichts nach**: weder ihr Hauptweg noch
@@ -107,7 +117,14 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   Workout und sagt, dass der Plan korrigiert werden muss (`core.ablauf.START_FEHLT`,
   `ohne_start_text`, `PlanAblaufBaustein` lehnt ab; rote Karte im Reiter „Plan“ und über dem
   Bild, Knopf „Als Start“ am gewählten Knoten). Ein Workout, das der Liste folgt, beginnt
-  weiter bei ihrer ersten Übung.
+  weiter bei ihrer ersten Übung. **Ein unvollständiger Plan wird nicht durchgeführt** (Ben,
+  16.11.2026: „… bis das repariert ist. Sonst ist es möglich, dass ein Plan durcheinander
+  gerät“, §8.13 Punkt 5): Zeigt ein eigener Ablauf auf eine Planübung, die es gerade nicht
+  gibt (Papierkorb, Paket aus — `core.ablauf.fehlende`), oder fehlt der Start, gibt es weder
+  Starten noch Bereitstellen noch Fortsetzen (`core.ablauf.startet_nicht`,
+  `ui/plan_ablauf.bereitstellen`); kein Rückfall auf die erste sichtbare Planübung
+  (`startknoten`). Reparieren: zurückholen oder „… aus dem Plan nehmen“ an der roten Karte
+  (`views/ablauf.reparatur_knoepfe`).
 
 - **Neue Ereignisse der Zeitleiste** (Ben, 16.11.2026): Wer eines plant, sieht **vorher** in
   `core/einheit.py` nach — `ARTEN` und `DATEN_SCHLUESSEL` sind eine feste Liste, alles andere

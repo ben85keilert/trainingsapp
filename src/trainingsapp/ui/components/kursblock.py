@@ -13,7 +13,10 @@ Text, Medium, Frage, Test und Auswahl stehen untereinander auf der Seite des Kap
   7“), der Knopf heißt „Test starten“ bzw. „Nochmal“ und öffnet den Testlauf
   (`views/kurs_testlauf.py`, ``test_starten``), und nach dem Lauf steht neben dem Wert klein, was
   er sonst gemessen hat („in 1:12 · Anstrengung 7“, `core.kurstest.neben_text`). Ohne Vorgabe
-  bleibt die Karte, wie sie war.
+  bleibt die Karte, wie sie war — außer der Test ist **gestaltet** (Ben, 16.11.2026: „Der Test
+  muss flexibel gestaltet werden können“): Jeder Test mit `Block.laeuft` ist ein Lauf mit „Test
+  starten“, und die Karte sagt in einem Satz, wie er läuft — Timer, Takt, Ausführung
+  (`core.kurstest.lauf_satz`).
 - Eine **Auswahl** hält die gewählten Übungen, bis „Plan anlegen“ gedrückt ist — danach ist
   sie fest (der Plan lässt sich von Hand ändern). Beginnt der Kurs von vorn, wird neu gewählt;
   „Wie beim letzten Mal“ belegt die Wahl des früheren Durchlaufs vor (Ben, 16.11.2026).
@@ -61,7 +64,7 @@ from trainingsapp.ui.components.medienliste import medium_zeile
 
 #: Die Aufforderung eines Tests „der gewählten“ ohne eigenen Titel, solange keine oder mehr
 #: als eine Übung gewählt ist — mit genau einer steht ihr Name da („Käfer: was schaffst du?“)
-OHNE_TITEL = "Deine Auswahl: was schaffst du?"
+OHNE_TITEL = f"Deine Auswahl: {kurstest.OHNE_VORGABE}"
 
 
 def feld_von(uebung: Exercise | None, key: str) -> FieldSpec:
@@ -145,8 +148,9 @@ def kapitel_bloecke(
     Sammelkarte übernommen. Hat so ein Kapitel doch eigene Vorlagen, bleibt der Knopf für sie
     (Kapitelpläne neben dem Kursplan, `KursRepo.kapitel_erreichen`).
 
-    **Tests mit Vorgabe** (`Block.vorgabe`): ``test_starten(block, übung)`` gibt den Handler,
-    der den Testlauf startet und öffnet (`views.kurs_test.starter`) — ohne ihn führt der
+    **Tests, die als Lauf gemacht werden** (`Block.laeuft`: mit Vorgabe oder gestaltet):
+    ``test_starten(block, übung)`` gibt den Handler, der den Testlauf startet und öffnet
+    (`views.kurs_testlauf.starter` — ein gestalteter öffnet sich bereit) — ohne ihn führt der
     Knopf wie bisher zur Übung. ``eintraege``: je Test der jüngste Eintrag unter den
     Schlüsseln von ``werte`` (`KursRepo.testeintraege`) — daraus steht neben dem Wert, was der
     Lauf sonst gemessen hat. ``laufender_test``: (Block, Übung) des Testlaufs, der gerade
@@ -246,35 +250,54 @@ def kapitel_bloecke(
         )
         return spalte
 
-    def vorgabe_titel(block: Block, uid: str | None = None) -> str:
-        """Die Überschrift eines Tests mit Vorgabe ohne eigenen Titel: „Käfer: bis Anstrengung
-        7“ — ohne oder mit mehreren Übungen „Deine Auswahl: …“."""
-        assert block.vorgabe is not None
+    def eine(uebungen: Sequence[str]) -> Exercise | None:
+        """Die eine Übung, die der Test misst — ``None`` ohne oder mit mehreren: Was erst
+        die Übung sagt (ihr Timer, ihr Takt), steht dann allgemein da."""
+        return katalog.get(uebungen[0]) if len(uebungen) == 1 else None
+
+    def lauf_titel(block: Block, uid: str | None = None) -> str:
+        """Die Überschrift eines Tests, der als Lauf gemacht wird, ohne eigenen Titel: mit
+        Vorgabe „Käfer: bis Anstrengung 7“ — ohne oder mit mehreren Übungen „Deine Auswahl:
+        …“. Gilt keine Vorgabe (ein gestalteter Test ohne; eine Zeit neben einem Timer), die
+        Aufforderung wie beim Test ohne Lauf — eine Stelle mit der Vorschau im Kurs-Editor
+        (`core.kurstest.karten_ueberschrift`)."""
         uebung = katalog.get(uid) if uid is not None else None
         name = uebung.name if uebung is not None else "Übung fehlt" if uid else "Deine Auswahl"
-        skala = (
-            kurstest.skala_name(uebung.result_spec) if uebung is not None else kurstest.SKALA_NAME
-        )
-        return f"{name}: {kurstest.vorgabe_text(block.vorgabe, skala, satzanfang=False)}"
+        return kurstest.karten_ueberschrift(block, name, uebung)
 
-    def anleitung(block: Block, uebungen: Sequence[str]) -> ft.Control:
-        """Der Satz unter der Überschrift eines Tests mit Vorgabe: der eigene Text — sonst,
-        was zu tun ist und was die App misst (`core.kurstest.anleitung`)."""
-        assert block.vorgabe is not None
+    def anleitung(block: Block, uebungen: Sequence[str]) -> list[ft.Control]:
+        """Unter der Überschrift eines Tests, der als Lauf gemacht wird: der eigene Text —
+        sonst, was zu tun ist und was die App misst (`core.kurstest.anleitung`). Ein
+        gestalteter Test sagt darunter in einem Satz, wie er läuft: Timer, Takt, Ausführung
+        (`core.kurstest.lauf_satz`)."""
         da = [katalog[u] for u in uebungen if u in katalog]
+        uebung = eine(uebungen)
+        profil = kurstest.uhr_fuer(block, uebung)
         zaehlt_wdh = not da or any(kurstest.felder(block, u).wdh is not None for u in da)
-        return ft.Text(
-            block.text or kurstest.anleitung(block.vorgabe, zaehlt_wdh=zaehlt_wdh), size=13
+        text = block.text or kurstest.anleitung(
+            kurstest.vorgabe_fuer(block, profil), zaehlt_wdh=zaehlt_wdh, timer=profil
         )
+        wie = kurstest.lauf_satz(block, uebung)
+        return [
+            ft.Text(text, size=13),
+            *([ft.Text(wie, size=13, opacity=0.85, data=("test_wie", block.id))] if wie else []),
+        ]
 
     def neben(block: Block, uid: str) -> str:
-        """Was der Lauf neben dem Wert des Tests gemessen hat — „in 1:12 · Anstrengung 7“."""
+        """Was der Lauf neben dem Wert des Tests gemessen hat — „in 1:12 · Anstrengung 7“ —
+        und, bei einem gestalteten Test, wie er gemacht wurde („links · 10 kg“)."""
         eintrag = (eintraege or {}).get(wert_schluessel(block, uid))
         if eintrag is None:
             return ""
-        return kurstest.neben_text(
+        gemessen = kurstest.neben_text(
             block, kurstest.lauf_aus(block, eintrag.result, eintrag.spec_snapshot)
         )
+        wie = (
+            kurstest.ausfuehrung_aus(eintrag.result, eintrag.spec_snapshot)
+            if block.gestaltet
+            else ""
+        )
+        return " · ".join(t for t in (gemessen, wie) if t)
 
     def wann(block: Block, uid: str) -> str:
         """„Dein Test von heute.“ — an einem anderen Tag mit Datum."""
@@ -287,11 +310,12 @@ def kapitel_bloecke(
 
     def zur_uebung_knopf(block: Block, uid: str, getestet: bool) -> ft.Control | None:
         """„Zur Übung“ bzw. „Nochmal“ zu **dieser** Übung — ``None``, wo nur gelesen wird. Ein
-        Test mit Vorgabe startet stattdessen seinen Lauf: „Test starten“ bzw. „Nochmal“, und
-        „Zum Test“, solange er läuft oder auf sein Ergebnis wartet."""
+        Test, der als Lauf gemacht wird (`Block.laeuft`), startet stattdessen seinen Lauf: „Test
+        starten“ bzw. „Nochmal“, und „Zum Test“, solange er läuft oder auf sein Ergebnis
+        wartet."""
         if uid not in katalog or not offen or (angelegt and not kursplan):
             return None
-        if block.vorgabe is not None and test_starten is not None:
+        if block.laeuft and test_starten is not None:
             laeuft = laufender_test == (block.id, uid)
             return ft.FilledTonalButton(
                 "Zum Test" if laeuft else "Nochmal" if getestet else "Test starten",
@@ -315,11 +339,12 @@ def kapitel_bloecke(
         Gewählten einer Auswahl (Ben, 16.11.2026)."""
         gemessen = gemessene_uebungen(block, wirksam())
         teile: list[ft.Control] = [titel("Test")]
-        #: mit Vorgabe ist der Test ein Lauf mit der Uhr — die Karte nennt Übung und Vorgabe
-        mit_vorgabe = block.vorgabe is not None
+        #: mit Vorgabe oder gestaltet ist der Test ein Lauf mit der Uhr (`Block.laeuft`) — die
+        #: Karte nennt Übung und Vorgabe und sagt, wie er läuft
+        als_lauf = block.laeuft
         beschreibung: list[ft.Control] = (
-            [anleitung(block, gemessen)]
-            if mit_vorgabe
+            anleitung(block, gemessen)
+            if als_lauf
             else [ft.Text(block.text, size=13)]
             if block.text
             else []
@@ -352,7 +377,7 @@ def kapitel_bloecke(
             return [
                 *teile,
                 ft.Text(
-                    block.titel or (vorgabe_titel(block) if mit_vorgabe else OHNE_TITEL),
+                    block.titel or (lauf_titel(block) if als_lauf else OHNE_TITEL),
                     weight=ft.FontWeight.W_600,
                 ),
                 *beschreibung,
@@ -368,7 +393,7 @@ def kapitel_bloecke(
             teile.append(
                 ft.Text(
                     block.titel
-                    or (vorgabe_titel(block, uid) if mit_vorgabe else f"{name}: was schaffst du?"),
+                    or (lauf_titel(block, uid) if als_lauf else f"{name}: {kurstest.OHNE_VORGABE}"),
                     weight=ft.FontWeight.W_600,
                 )
             )
@@ -381,7 +406,7 @@ def kapitel_bloecke(
                     weight=ft.FontWeight.W_600,
                     data=("testwert", block.id, uid) if block.aus else "testwert",
                 )
-                daneben = neben(block, uid) if mit_vorgabe else ""
+                daneben = neben(block, uid) if als_lauf else ""
                 # T4: der Wert groß, daneben klein, was der Lauf sonst gemessen hat — bricht in
                 # die nächste Zeile, wenn es nicht nebeneinander passt
                 teile.append(
@@ -406,8 +431,8 @@ def kapitel_bloecke(
                     if daneben
                     else gross
                 )
-                # woher der Wert kommt: der Eintrag der Übung — mit Vorgabe „Dein Test von heute“
-                woher = wann(block, uid) if mit_vorgabe else f"Dein Eintrag bei „{name}“."
+                # woher der Wert kommt: der Eintrag der Übung — als Lauf „Dein Test von heute“
+                woher = wann(block, uid) if als_lauf else f"Dein Eintrag bei „{name}“."
                 teile.append(
                     hinweis(
                         # im Kursplan-Kurs rechnet der Baustein (eigener Faktor, vielleicht
@@ -422,7 +447,7 @@ def kapitel_bloecke(
                 teile.append(
                     hinweis(
                         "Noch kein Test, seit du dieses Kapitel öffnest."
-                        if mit_vorgabe
+                        if als_lauf
                         else f"Noch kein Eintrag bei „{name}“, seit du dieses Kapitel öffnest."
                     )
                 )
@@ -433,7 +458,7 @@ def kapitel_bloecke(
         # mehrere Gewählte: je Übung eine Zeile — Name, ihr Wert, ihr Knopf
         teile.append(
             ft.Text(
-                block.titel or (vorgabe_titel(block) if mit_vorgabe else OHNE_TITEL),
+                block.titel or (lauf_titel(block) if als_lauf else OHNE_TITEL),
                 weight=ft.FontWeight.W_600,
             )
         )
@@ -443,8 +468,8 @@ def kapitel_bloecke(
             feld = feld_von(uebung, block.feld)
             wert = werte.get(wert_schluessel(block, uid))
             oeffnen = zur_uebung_knopf(block, uid, wert is not None)
-            # mit Vorgabe: hinter dem Wert, was der Lauf sonst gemessen hat
-            daneben = neben(block, uid) if mit_vorgabe and wert is not None else ""
+            # als Lauf: hinter dem Wert, was er sonst gemessen hat
+            daneben = neben(block, uid) if als_lauf and wert is not None else ""
             # Kapitelplan: das Ziel in einer eigenen blassen Zeile — neben dem Knopf bräche
             # „30 Wdh. — im Plan das Ziel: 15 Wdh.“ mitten im Wert um (Web-Foto 16.11.2026)
             ziel_zeile: list[ft.Control] = (
@@ -476,7 +501,7 @@ def kapitel_bloecke(
                                     " · ".join(t for t in (menge_text(feld, wert), daneben) if t)
                                     if wert is not None
                                     else "noch kein Test"
-                                    if mit_vorgabe
+                                    if als_lauf
                                     else "noch kein Eintrag",
                                     size=13,
                                     opacity=1.0 if wert is not None else 0.7,
@@ -489,7 +514,7 @@ def kapitel_bloecke(
                     ],
                 )
             )
-        was = "Deine Tests" if mit_vorgabe else "Deine Einträge"
+        was = "Deine Tests" if als_lauf else "Deine Einträge"
         teile.append(
             hinweis(
                 f"{was}, seit du dieses Kapitel öffnest. Was daraus an deinem Plan "

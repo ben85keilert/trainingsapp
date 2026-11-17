@@ -1249,7 +1249,7 @@ def paket_export_view(
 ) -> ft.View:
     """Übungen wählen, Namen geben, als Datei weitergeben.
 
-    ``auswahl`` = ID eines installierten Pakets: dessen Übungen sind angehakt,
+    ``auswahl`` = ID eines installierten Pakets: dessen Übungen und Pläne sind angehakt,
     Name und Beschreibung übernommen. Ohne sind die eigenen Übungen angehakt.
     """
     vorlage = state.pakete.laden(auswahl) if auswahl else None
@@ -1266,7 +1266,13 @@ def paket_export_view(
     # Pläne des Profils (Ben, 28.10.2026: „Pläne ohne Kurse müssen mit importierbar sein“) —
     # ein Plan nimmt seine Übungen mit
     plaene = [p for p in state.plaene.alle(state.profil.id) if p.items and not p.kurs_kapitel_id]
-    gewaehlte_plaene: set[str] = set()
+    # Der Export eines installierten Pakets nimmt dessen Pläne mit, wie sie hier stehen (Ben,
+    # 17.11.2026, `docs/plan_rueckweg_handy.md` Stufe 6: „beides“ — am Handy ändern sich auch
+    # die Pläne des Pakets); sie reisen mit ihrem Paketschlüssel (`core.pakete.paketplan_aus`),
+    # so findet `trainingsapp-paket uebernehmen` sie in der TOML wieder
+    gewaehlte_plaene: set[str] = {
+        p.id for p in plaene if vorlage is not None and p.package_id == vorlage.id
+    }
     plan_haken: dict[str, ft.Checkbox] = {}
 
     name = ft.TextField(

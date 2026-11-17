@@ -652,3 +652,35 @@ def test_neues_profil_bekommt_die_paketplaene(state) -> None:
     assert [p.name for p in state.plaene.alle(state.profil.id)] == ["Morgen"]
     neu = state.profil_anlegen("Zweites")
     assert [p.name for p in state.plaene.alle(neu.id)] == ["Morgen"]
+
+
+def test_export_eines_pakets_nimmt_seine_plaene_mit(page, state, monkeypatch) -> None:
+    """Stufe 6 (Ben, 17.11.2026): Der Export eines installierten Pakets hakt dessen Pläne mit
+    an — sie reisen mit ihrem Paketschlüssel, so findet `uebernehmen` sie wieder."""
+    import asyncio
+
+    import trainingsapp.ui.views.pakete as modul
+    from trainingsapp.core.pakete import paket_lesen
+
+    gesendet: list[bytes] = []
+
+    async def weitergeben(_page, _name, daten, _mime):
+        gesendet.append(daten)
+
+    monkeypatch.setattr(modul, "weitergeben", weitergeben)
+    roh = {
+        "paket": {"name": "Qigong", "version": 3},
+        "exercises": [{"key": "baum", "name": "Baum"}],
+        "plaene": [{"key": "morgen", "name": "Morgen", "uebungen": [{"uebung": "baum"}]}],
+    }
+    inhalt = paket_lesen(roh)
+    state.pakete.importieren(inhalt, subject_id=state.profil.id)
+    (plan,) = state.plaene.des_pakets(inhalt.paket.id, state.profil.id)
+    state.plaene.wochentage_setzen(plan.id, [1, 3])
+    ansicht = paket_export_view(page, state, "/pakete", inhalt.paket.id)
+    knopf = next(c for v in ansicht.controls for c in alle(v) if isinstance(c, ft.FilledButton))
+    assert knopf.content == "Exportieren (1 Übung, 1 Plan)"
+    asyncio.run(knopf.on_click())
+    export = json.loads(gesendet[-1])
+    assert export["paket"]["id"] == inhalt.paket.id and export["paket"]["version"] == 3
+    assert export["plaene"][0]["key"] == "morgen" and export["plaene"][0]["wochentage"] == [1, 3]

@@ -92,6 +92,7 @@ from trainingsapp.core.pakete import (
     Paket,
     PaketFehler,
     Paketinhalt,
+    PaketPlan,
     dateiname,
     ergaenzung_ziel,
     noetige_version,
@@ -99,6 +100,9 @@ from trainingsapp.core.pakete import (
     paket_json,
     paket_lesen,
     paket_ziel,
+    paketplan_aus,
+    plan_abgleichen,
+    plan_stand,
     stand,
     stand_normieren,
 )
@@ -1514,6 +1518,12 @@ class Quelle:
     #: Die Datenbank der App — dort ist jede Paketübung aus der Datei gekommen; was der
     #: Datei fehlt, wurde am Laptop gestrichen und kommt nicht zurück
     aus_datenbank: bool = False
+    #: Die Pläne des Pakets (``plaene[]``, je Schlüssel) — aus einem Export (die App schreibt
+    #: Paketpläne mit ihrem Paketschlüssel, `core.pakete.paketplan_aus`) oder aus der Datenbank
+    paketplaene: list[PaketPlan] = field(default_factory=list)
+    #: Ihr Paketstand je Schlüssel (`core.pakete.plan_stand`) — aus der Datenbank
+    #: (`Plan.package_standard`); ``None`` = nicht dabei
+    plan_basis: dict[str, dict[str, Any]] | None = None
 
 
 def _exportiert(quelle: Path) -> datetime | None:
@@ -1547,11 +1557,22 @@ def _quelle_lesen(quelle: Path, paket_id: str, arbeit: Path) -> Quelle:
                 u for u in ExerciseRepo(con).alle(mit_archivierten=True) if u.package_id == paket_id
             ]
             plaene: dict[str, Plan] = {}
+            paketplaene: dict[str, PaketPlan] = {}
+            plan_basis: dict[str, dict[str, Any]] = {}
             for subject in SubjectRepo(con).alle():
                 for plan in PlanRepo(con).alle(subject.id):
                     # ein Plan aus einem früheren Durchlauf (Migration 063) ist keine Vorlage mehr
                     if plan.kurs_kapitel_id and plan.kurs_durchlauf_beendet is None:
                         plaene[plan.id] = plan
+                    # ein Plan des Pakets (`plaene[]`): je Schlüssel der erste, der vom
+                    # Paketstand abweicht — in einem anderen Profil kann er unverändert sein
+                    if plan.package_id == paket_id and plan.package_key:
+                        pp = paketplan_aus(plan)
+                        geaendert = plan.package_standard not in (None, plan_stand(pp))
+                        if pp.key not in paketplaene or geaendert:
+                            paketplaene[pp.key] = pp
+                            if plan.package_standard is not None:
+                                plan_basis[pp.key] = plan.package_standard
             try:
                 ergaenzt = frozenset(
                     str(r[0])
@@ -1570,11 +1591,24 @@ def _quelle_lesen(quelle: Path, paket_id: str, arbeit: Path) -> Quelle:
             }
         finally:
             con.close()
-        return Quelle(paket, uebungen, list(plaene.values()), ergaenzt, basis, aus_datenbank=True)
+        return Quelle(
+            paket,
+            uebungen,
+            list(plaene.values()),
+            ergaenzt,
+            basis,
+            aus_datenbank=True,
+            paketplaene=list(paketplaene.values()),
+            plan_basis=plan_basis,
+        )
     arbeit.mkdir(parents=True, exist_ok=True)
     inhalt = paket_oeffnen(quelle, quelle.stem, arbeit=arbeit)
     return Quelle(
-        inhalt.paket, inhalt.uebungen, exportiert=_exportiert(quelle), medien=inhalt.medien
+        inhalt.paket,
+        inhalt.uebungen,
+        exportiert=_exportiert(quelle),
+        medien=inhalt.medien,
+        paketplaene=list(inhalt.plaene),
     )
 
 
@@ -1600,11 +1634,11 @@ def _dateien_merken(roh: dict[str, Any], ordner: Path, arbeit: Path) -> dict[str
 
 def _basis_aus_git(
     datei: Path, version: int | None, bis: datetime | None, namen: Mapping[str, str], arbeit: Path
-) -> tuple[dict[str, dict[str, Any]], str] | None:
-    """Der Paketstand je Übung der Fassung ``version`` aus der Geschichte von ``datei`` — der
-    jüngste Commit mit dieser Version, der **vor dem Export** (``bis``) lag: Was danach
-    committet wurde, kann das Gerät nicht haben. ``(Stand je ID, woher)``; ``None`` ohne
-    git, ohne passenden Commit oder wenn er sich nicht lesen lässt."""
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], str] | None:
+    """Der Paketstand je Übung und je Plan der Fassung ``version`` aus der Geschichte von
+    ``datei`` — der jüngste Commit mit dieser Version, der **vor dem Export** (``bis``) lag:
+    Was danach committet wurde, kann das Gerät nicht haben. ``(Stand je Übungs-ID, Stand je
+    Planschlüssel, woher)``; ``None`` ohne git, ohne passenden Commit oder unlesbar."""
     if version is None:
         return None
     try:
@@ -1631,6 +1665,7 @@ def _basis_aus_git(
         datum = datetime.fromtimestamp(int(zeit), UTC)
         return (
             {u.id: stand(u) for u in inhalt.uebungen},
+            {p.key: plan_stand(p) for p in inhalt.plaene},
             f"Version {version_text(version)} aus Commit {commit[:7]} vom {datum:%d.%m.%Y}",
         )
     return None
@@ -1742,6 +1777,96 @@ def _uebungsblock(u: Exercise, key: str, medien: Callable[[Any], list[dict[str, 
     return block
 
 
+#: Was ein Paketplan im Abgleich hat — alles außer dem Schlüssel
+def _planfelder(*staende: Mapping[str, Any]) -> list[str]:
+    return sorted({f for s in staende for f in s} - {"key"})
+
+
+def _paketplaene_uebernehmen(
+    plaene: list[PaketPlan],
+    dokument: Any,
+    inhalt_datei: Paketinhalt,
+    plan_basis: Mapping[str, dict[str, Any]] | None,
+    ohne_basis: bool,
+    ids: Mapping[str, str],
+    datei: Path,
+    medien: Callable[[Any], list[dict[str, Any]]],
+) -> tuple[list[str], list[str], list[str]]:
+    """Paketpläne (``plaene[]``) der Quelle in die Datei — Stufe 6, Ben 17.11.2026 („beides“:
+    am Handy werden auch die Pläne des Pakets geändert). Zugeordnet über den Schlüssel; je
+    Feld und je Planübung in drei Wegen (`core.pakete.plan_abgleichen`, die Datei ist „die
+    Person“). Übungen im Plan schreibt es als ``key`` bzw. ``uebung`` + ``paket``. Ein Plan,
+    den die Basis nicht kennt, wird angehängt; einer, den die Basis kennt und der Datei
+    fehlt, wurde dort gestrichen. ``(Zeilen, Hinweise, ohne Basis)``."""
+    from trainingsapp.paket_einlesen import _toml_block, _Uebersetzung, nachbar_schluessel
+
+    zeilen: list[str] = []
+    hinweise: list[str] = []
+    ohne: list[str] = []
+    if not plaene:
+        return zeilen, hinweise, ohne
+    tomlkit = _tomlkit()
+    bloecke = list(dokument.get("plaene") or [])
+    if len(bloecke) != len(inhalt_datei.plaene):
+        return zeilen, [f"{datei.name}: Planblöcke passen nicht — Pläne nicht übernommen"], ohne
+    je_key = {p.key: (b, p) for b, p in zip(bloecke, inhalt_datei.plaene, strict=True)}
+    u = _Uebersetzung(nachbar_schluessel(datei))
+    u.uebungen = dict(ids)
+
+    def fuers_toml(feld: str, wert: Any) -> Any:
+        if feld != "uebungen":
+            return u.umschreiben(wert)
+        out = []
+        for e in u.umschreiben(wert) or []:
+            if isinstance(e, dict) and "medien" in e:
+                e = {**e, "medien": medien(e["medien"])}
+            out.append(e)
+        return out
+
+    for pp in plaene:
+        q = plan_stand(pp)
+        name = pp.vorlage.name
+        if pp.key in je_key:
+            block, alt = je_key[pp.key]
+            d = plan_stand(alt)
+            b = plan_basis.get(pp.key) if plan_basis is not None else None
+            if b is None and not ohne_basis:
+                if q != d:
+                    ohne.append(f"Plan „{name}“")
+                continue
+            if b is None:
+                neu = dict(q)
+            else:
+                neu = plan_abgleichen(b, d, q)
+                for f in _planfelder(b, d, q):
+                    bf, df, qf = b.get(f), d.get(f), q.get(f)
+                    if df != bf and qf != bf and qf != df:
+                        hinweise.append(
+                            f"Plan „{name}“: {f} — in der Datei und in der App geändert, "
+                            "die Datei bleibt"
+                        )
+            felder = [f for f in _planfelder(neu, d) if neu.get(f) != d.get(f)]
+            if not felder:
+                continue
+            for f in felder:
+                if neu.get(f) is None:
+                    block.pop(f, None)
+                else:
+                    block[f] = _toml_wert(fuers_toml(f, neu[f]))
+            zeilen.append(f"Plan „{name}“: " + ", ".join(felder))
+        elif plan_basis is not None and pp.key in plan_basis:
+            hinweise.append(f"Plan „{name}“: in der Datei gestrichen, bleibt weg")
+        elif plan_basis is None and not ohne_basis:
+            ohne.append(f"Plan „{name}“ (neu?)")
+        else:
+            roh = {f: fuers_toml(f, w) for f, w in pp.to_dict().items()}
+            if "plaene" not in dokument:
+                dokument["plaene"] = tomlkit.aot()
+            dokument["plaene"].append(_toml_block(roh))
+            zeilen.append(f"Neuer Plan „{name}“ (key „{pp.key}“)")
+    return zeilen, hinweise, ohne
+
+
 def _vorlage_aus_plan(plan: Plan) -> PlanVorlage:
     """Der Plan, wie ihn ein Kapitel anlegen würde — Ziel, Felder, Sensor-Karte und Takt nur,
     wo der Plan eigene hat (sonst folgt die Planübung der Übung, P79)."""
@@ -1828,13 +1953,14 @@ def uebernehmen(
         except (PaketFehler, OSError, ValueError, sqlite3.Error) as grund:
             return [], [str(grund)]
         basis: dict[str, dict[str, Any]] | None = inhalt_quelle.basis
+        plan_basis = inhalt_quelle.plan_basis
         woher = "Paketstand der Datenbank"
         if basis is None and inhalt_quelle.paket.id == inhalt_datei.paket.id:
             gefunden = _basis_aus_git(
                 datei, inhalt_quelle.paket.version, inhalt_quelle.exportiert, namen, arbeit / "b"
             )
             if gefunden is not None:
-                basis, woher = gefunden
+                basis, plan_basis, woher = gefunden
         dokument = tomlkit.parse(text)
         bloecke = list(dokument.get("exercises") or [])
         kurs_bloecke = list(dokument.get("kurse") or [])
@@ -1859,6 +1985,7 @@ def uebernehmen(
         neu_angelegt: list[str] = []
         gestrichen: list[str] = []
         fremd: list[str] = []
+        neue_ids: dict[str, str] = {}
         for u in inhalt_quelle.uebungen:
             if u.id not in je_id:
                 if u.id in nachbarn:
@@ -1874,6 +2001,7 @@ def uebernehmen(
                         dokument["exercises"] = tomlkit.aot()
                     dokument["exercises"].append(_uebungsblock(u, key, medien))
                     neu_angelegt.append(f"{u.name} (key „{key}“)")
+                    neue_ids[u.id] = key
                 continue
             block, alt = je_id[u.id]
             felder = list(FELDNAMEN)
@@ -1914,6 +2042,24 @@ def uebernehmen(
             for feld, wert in neu.items():
                 _feld_setzen(block, feld, medien(wert) if feld == "media" else wert, u)
             zeilen.append(f"{alt.name}: " + ", ".join(FELDNAMEN[feld] for feld in neu))
+        ids = {
+            u.id: str(block.get("key"))
+            for block, u in zip(bloecke, inhalt_datei.uebungen, strict=True)
+            if block.get("key")
+        } | neue_ids
+        p_zeilen, p_hinweise, p_ohne = _paketplaene_uebernehmen(
+            inhalt_quelle.paketplaene,
+            dokument,
+            inhalt_datei,
+            plan_basis,
+            ohne_basis,
+            ids,
+            datei,
+            medien,
+        )
+        zeilen += p_zeilen
+        hinweise += p_hinweise
+        ohne += p_ohne
     schluessel = {
         u.id: str(block.get("key") or "")
         for block, u in zip(bloecke, inhalt_datei.uebungen, strict=True)

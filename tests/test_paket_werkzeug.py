@@ -900,3 +900,75 @@ def test_verlinken_ersetzt_die_datei_durch_einen_link(tmp_path) -> None:
     assert pruefen(datei)[0] == []
     assert verlinken(datei, "medien/foto.png", url)[1], "nennt die Datei nicht mehr"
     assert verlinken(datei, "medien/foto.png", "http://x")[1], "nur https"
+
+
+QIGONG_MIT_PLAN = (
+    QIGONG
+    + """
+[[plaene]]
+key = "morgens"
+name = "Morgens"
+wochentage = [0, 2, 4]
+uebungen = [{ uebung = "baum" }]
+"""
+)
+
+
+def test_uebernehmen_paketplaene_aus_einem_export(tmp_path) -> None:
+    """Stufe 6 (Ben, 17.11.2026: „beides“ — auch Pläne des Pakets ändern sich am Handy): Ein
+    Export trägt die Pläne mit ihrem Paketschlüssel; je Feld und je Planübung in drei Wegen,
+    die Datei gewinnt; ein neuer Plan wird angehängt, Übungen darin als ``key``."""
+
+    def aendern(roh):
+        (plan,) = roh["plaene"]
+        plan["wochentage"] = [0, 1, 2, 3, 4]
+        plan["uebungen"].append({"uebung": roh["exercises"][1]["id"], "ziel": {"hold": 60}})
+        roh["plaene"].append(
+            {"key": "abends", "name": "Abends", "uebungen": [{"uebung": roh["exercises"][1]["id"]}]}
+        )
+
+    export, datei = _export(tmp_path, QIGONG_MIT_PLAN, aendern)
+    zeilen, fehler = uebernehmen(export, datei)
+    assert fehler == []
+    assert "Plan „Morgens“: uebungen, wochentage" in zeilen
+    assert "Neuer Plan „Abends“ (key „abends“)" in zeilen
+    text = datei.read_text("utf-8")
+    assert "wochentage = [0, 1, 2, 3, 4]" in text
+    assert '{uebung = "lotus", ziel = {hold = 60}}' in text and 'key = "abends"' in text
+    gelesen = paket_lesen(tomllib.loads(text))
+    assert [p.key for p in gelesen.plaene] == ["morgens", "abends"]
+    # Beide ändern den Namen: die Datei bleibt, die Zeile sagt es
+    _committen(datei)
+    datei.write_text(text.replace('name = "Morgens"', 'name = "Früh"'), encoding="utf-8")
+    roh = json.loads(export.read_text("utf-8"))
+    roh["plaene"][0]["name"] = "Morgenrunde"
+    export.write_text(json.dumps(roh, ensure_ascii=False), encoding="utf-8")
+    zeilen, fehler = uebernehmen(export, datei)
+    assert any(
+        "Plan „Morgenrunde“: name — in der Datei und in der App geändert" in z for z in zeilen
+    )
+    assert 'name = "Früh"' in datei.read_text("utf-8")
+
+
+def test_uebernehmen_paketplan_aus_der_datenbank(tmp_path) -> None:
+    from trainingsapp.core.models import Subject
+    from trainingsapp.data.db import oeffnen
+    from trainingsapp.data.pakete import PaketRepo
+    from trainingsapp.data.repositories import PlanRepo, SubjectRepo
+    from trainingsapp.data.seed import seed_inhalt
+
+    datei = tmp_path / "qigong.toml"
+    datei.write_text(QIGONG_MIT_PLAN, encoding="utf-8")
+    inhalt = seed_inhalt(datei)
+    db = tmp_path / "app.db"
+    con = oeffnen(db)
+    profil = Subject(name="Test")
+    SubjectRepo(con).speichern(profil)
+    PaketRepo(con).importieren(inhalt, subject_id=profil.id)
+    (plan,) = PlanRepo(con).des_pakets(inhalt.paket.id, profil.id)
+    PlanRepo(con).wochentage_setzen(plan.id, [5, 6])
+    con.close()
+    zeilen, fehler = uebernehmen(db, datei)
+    assert fehler == [] and "Plan „Morgens“: wochentage" in zeilen
+    assert "wochentage = [5, 6]" in datei.read_text("utf-8")
+    assert uebernehmen(db, datei)[0] == ["Keine Änderung"]

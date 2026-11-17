@@ -369,7 +369,7 @@ ist.“
 | 1 | Kursplan wächst (`plan = wachsend`, Marken, Spalte `plan.course_id`), Bausteine `plan_uebung`, `plan_einstellen`, `plan_weg`; Rest von B2 (Timer, Übergang … in `VorlageItem`/`PlanVorlage`); Sammelkarte „Das ändert sich an deinem Plan“; **Kurs-Editor** (`views/kurs_bearbeiten.py`: Baustein hinzufügen) und **Werkzeug** (`trainingsapp-paket pruefen`); neue Formatversion nur für Pakete, die das nutzen (Formatversion 6) | **gebaut 16.11.2026** — Bauplan §11, Abweichungen §11.8; Gerätetest T142; P211 und P212 entschieden (Ben: „Ja“), P212 noch zu bauen; Grenzen N171 |
 | 2 | Test im Fokus mit Vorgabe Menge · Zeit · Skala ab/bis/dazwischen (§3.3), „Als Ziel übernehmen“ | **gebaut 16.11.2026** — §13; Skizzen T1–T5; Gerätetest T143 |
 | 2a | **Der Testwert ist eine Variable des Kurses** (§15.1): Tabelle `course_variable` (Migration 065); der Lauf setzt sie, „Nochmal“ überschreibt, das abgeschlossene Kapitel hält den Wert eines Tests ohne Lauf fest; jeder Baustein danach kann sie verwenden (`ziel_aus`) | **gebaut 16.11.2026** — Ben: „Testwert wird als Variable gespeichert“ |
-| 2b | **Der Test, flexibel gestaltet** (§15.2): Uhr (Stoppuhr · Timer der Übung · eigener Timer), Takt, Ausführung (vorgegeben oder frei), Hinweis vor dem Start — jede Einstellung mit Vorgabe, „wie die Übung“ oder eigener Angabe | **gebaut 16.11.2026** — §15.2–15.5; Skizzen F1–F4; Gerätetest T143. Nicht gebaut: der Satz der Sammelkarte mit Ausführung |
+| 2b | **Der Test, flexibel gestaltet** (§15.2): Uhr (Stoppuhr · Timer der Übung · eigener Timer), Takt, Ausführung (vorgegeben oder frei), Hinweis vor dem Start — jede Einstellung mit Vorgabe, „wie die Übung“ oder eigener Angabe | **gebaut 16./17.11.2026** — §15.2–15.5; Skizzen F1–F4; Gerätetest T143 |
 | 3 | Antworten speichern, Folgen (`zeige`, `baustein`), `zeigen_wenn`; Tabelle `course_answer`; Editor (Liste mit „Wenn …“) = **K1**; im laufenden Kurs nur der eigene Weg (§6 „Zwei Sichten“) | Frage 3: **ja** |
 | 4 | Kursbild lesend **im Kurs-Editor** = **K2** (Knoten-Darsteller aus `ablaufbild` herauslösen) | Frage 5: **ja**; Stufe 3 |
 | 5 | Kursbild zeichnen = **K3**, gemeinsame Graph-Schicht, Kapitel-Auslöser „Tor offen“ | Entscheidung nach Stufe 4 |
@@ -989,8 +989,12 @@ verwenden.
   Zahl?“) mit − / +; „Eintragen“ bestätigt. Zählt der Sensor, gilt der wie bisher.
 - **Ausführung:** Was vor dem Start gewählt ist, steht im Lauf unter der Vorgabe, im Ergebnis
   und im Eintrag; die Testkarte nennt sie danach neben dem Wert.
-- **Nicht gebaut:** der Satz der Sammelkarte mit Ausführung („… 23 Wdh. auf Knien mit 10 kg“,
-  Skizze F4 unten) — die Rechnung des Kursplans bekommt nur den Wert, nicht den Eintrag.
+- **Die Sammelkarte nennt, wie der Test gemacht wurde** (Skizze F4 unten, gebaut
+  17.11.2026): „Ziel für Käfer: 18 Wiederholungen — 80 % von deinem Test (22 Wdh. bis
+  Anstrengung 7 · links · 10 kg)“. Die Ausführung kommt aus dem Eintrag des Tests
+  (`KursRepo._test_ausfuehrung`, `core.kurstest.ausfuehrung_aus`) und geht als ``zusatz`` in
+  die Rechnung (`core.kursplan.aenderungen`, `anwenden`); ins Ziel der Planübung kommt weiter
+  nur die Zahl.
 
 ### 15.4 Der Editor (`core/kursbau.py`, `ui/views/kurs_bearbeiten.py`; Skizze F1)
 

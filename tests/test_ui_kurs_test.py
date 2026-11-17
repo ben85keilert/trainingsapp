@@ -30,7 +30,7 @@ from trainingsapp.core.kursbloecke import (  # noqa: E402
     Vorgabe,
 )
 from trainingsapp.core.kurse import Kapitel, Kurs  # noqa: E402
-from trainingsapp.core.models import Exercise  # noqa: E402
+from trainingsapp.core.models import Exercise, lokaler_tag  # noqa: E402
 from trainingsapp.core.result_spec import ResultSpec, vorrat_feld  # noqa: E402
 from trainingsapp.core.takt import VORLAGEN  # noqa: E402
 from trainingsapp.core.timer import Abschnitt, TimerProfil, stoppuhr  # noqa: E402
@@ -65,6 +65,10 @@ async def umgebung(tmp_path, monkeypatch):
     monkeypatch.setenv("TRAININGSAPP_DATA_DIR", str(tmp_path))
     state = AppState.starten(tmp_path / "app.db")
     state.neu_zeichnen = lambda: None
+    # „Heute“ der App ist der Tag der Attrappen-Uhr: Sie wird beim Laden der Tests gestellt
+    # (`attrappen.UTC0`, heute 10:00) — läuft die Sitzung über Mitternacht, läge sie sonst am
+    # Vortag, und kein Eintrag wäre „von heute“ (Katalog N177: 15 rote Tests, 17.11.2026)
+    monkeypatch.setattr(AppState, "heute", staticmethod(lambda: lokaler_tag(UTC0)))
     uhr = Uhr()
     monkeypatch.setattr(einheit_ui, "Einheitslauf", partial(Einheitslauf, jetzt_utc=uhr.utc))
     gurt = Gurt(uhr)
@@ -183,6 +187,11 @@ def _kapitel(u, kurs, kapitel) -> ft.View:
 
 def _ansicht(u, kurs, kapitel, block, uebung) -> ft.View:
     return kurs_test_view(u.seite, u.state, kurs, kapitel, block, uebung)
+
+
+def _laeufe(state, uebung):
+    """„Läufe heute“ am Tag der Attrappen-Uhr — nicht am echten Heute (Katalog N177)."""
+    return uebung_lauf.laeufe_heute(state, uebung.id, lokaler_tag(UTC0))
 
 
 def _eintraege(state, uebung):
@@ -423,7 +432,7 @@ async def test_menge_von_hand_ein_eintrag_mit_zeit_und_skala(umgebung) -> None:
     assert eintrag.started_at == UTC0 and eintrag.ended_at == UTC0 + timedelta(seconds=65)
     assert [f.key for f in eintrag.spec_snapshot.fields] == ["reps", "duration", "scale"]
     assert state.kurse.testwerte(kapitel, state.profil.id, SEIT) == {"test": 30.0}
-    (lauf,) = uebung_lauf.laeufe_heute(state, kaefer.id)
+    (lauf,) = _laeufe(state, kaefer)
     assert lauf.eintrag_id == eintrag.id and lauf.eingetragen == {"uhr"}
     assert not lauf.abgebrochen and not lauf.nachtragbar and not lauf.offen
     assert lauf.werte == [65] and [z.sekunden for z in lauf.zeiten] == [65.0]
@@ -533,7 +542,7 @@ async def test_verwerfen_traegt_nichts_ein(umgebung) -> None:
     await _bis_vorbei(u)
     assert not _eintraege(state, kaefer)
     assert state.kurse.testwerte(kapitel, state.profil.id, SEIT) == {}
-    (lauf,) = uebung_lauf.laeufe_heute(state, kaefer.id)
+    (lauf,) = _laeufe(state, kaefer)
     assert lauf.abgebrochen and lauf.eintrag_id is None and not lauf.offen
     assert lauf.nachtragbar and [z.sekunden for z in lauf.zeiten] == [50.0]
     assert "Noch kein Test, seit du dieses Kapitel öffnest." in _texte(_kapitel(u, kurs, kapitel))
@@ -563,7 +572,7 @@ async def test_kreuz_im_lauf_bricht_ab_und_nochmal_ist_bereit(umgebung) -> None:
     assert state.kurs_test.phase == LAEUFT and state.einheit.laeuft
     assert _hat(_ansicht(u, kurs, kapitel, block, kaefer), "test_fertig")
     assert not _eintraege(state, kaefer)
-    assert [x.abgebrochen for x in uebung_lauf.laeufe_heute(state, kaefer.id)][1:] == [True, True]
+    assert [x.abgebrochen for x in _laeufe(state, kaefer)][1:] == [True, True]
 
 
 async def test_laeuft_schon_etwas_anderes_startet_der_test_nicht(umgebung) -> None:
@@ -720,7 +729,7 @@ async def test_zaehlt_der_sensor_endet_die_menge_von_selbst(umgebung) -> None:
     await _bis_vorbei(u)
     (eintrag,) = _eintraege(state, kaefer)
     assert eintrag.result["reps"] == [gezaehlt] and eintrag.result["duration"] > 0
-    (lauf,) = uebung_lauf.laeufe_heute(state, kaefer.id)
+    (lauf,) = _laeufe(state, kaefer)
     assert lauf.eingetragen == {"uhr", "zaehlen"} and not lauf.nachtragbar
 
 
@@ -946,7 +955,7 @@ async def test_timer_mit_abschnitten_endet_von_selbst_und_traegt_einmal_ein(umge
     assert eintrag.result == {"reps": [14], "duration": 40}
     assert eintrag.started_at == UTC0 and eintrag.ended_at == UTC0 + timedelta(seconds=60)
     assert state.kurse.testwerte(kapitel, state.profil.id, SEIT) == {"test": 14.0}
-    (lauf,) = uebung_lauf.laeufe_heute(state, kaefer.id)
+    (lauf,) = _laeufe(state, kaefer)
     assert lauf.eintrag_id == eintrag.id and lauf.eingetragen == {"uhr"}
     assert not lauf.abgebrochen and not lauf.nachtragbar and not lauf.offen
     assert [(z.name, z.sekunden) for z in lauf.zeiten] == [
@@ -980,7 +989,7 @@ async def test_timer_durch_und_verworfen_traegt_nichts_ein(umgebung) -> None:
     await _bis_vorbei(u)
     assert not _eintraege(state, kaefer)
     assert state.kurse.testwerte(kapitel, state.profil.id, SEIT) == {}
-    (lauf,) = uebung_lauf.laeufe_heute(state, kaefer.id)
+    (lauf,) = _laeufe(state, kaefer)
     assert lauf.abgebrochen and lauf.eintrag_id is None and not lauf.offen and lauf.nachtragbar
     # … und vor dem Ende des Timers: „Vorher aufgehört …“ nimmt die Zeit bis dahin, ✕ bricht ab
     await _oeffnen_und_starten(u, kurs, kapitel, block, kaefer)
@@ -994,7 +1003,7 @@ async def test_timer_durch_und_verworfen_traegt_nichts_ein(umgebung) -> None:
     await klick(_daten(ergebnis, "test_abbrechen"))
     await _bis_vorbei(u)
     assert not _eintraege(state, kaefer)
-    assert [x.abgebrochen for x in uebung_lauf.laeufe_heute(state, kaefer.id)] == [True, True]
+    assert [x.abgebrochen for x in _laeufe(state, kaefer)] == [True, True]
 
 
 async def test_takt_fuehrt_zaehlt_nicht_und_schlaegt_seine_runden_vor(umgebung) -> None:

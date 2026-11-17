@@ -288,6 +288,7 @@ def aenderungen(
     feld_von: Feldsuche | None = None,
     *,
     bezug: Sequence[Block] = (),
+    zusatz: Mapping[str, str] | None = None,
 ) -> list[Aenderung]:
     """Die Zeilen „Das ändert sich an deinem Plan“ zu den Bausteinen **eines** Kapitels.
 
@@ -356,7 +357,7 @@ möglich | neu
 Plan. | anker_fehlt
     b6 | Eine Einstellung entfällt | Die Übung ist noch nicht in deinem Plan. | entfaellt
     """
-    lauf = _Lauf(plan, bloecke, werte, wahl, kurs_stand, namen, feld_von, bezug)
+    lauf = _Lauf(plan, bloecke, werte, wahl, kurs_stand, namen, feld_von, bezug, zusatz)
     # Zur Vorschau gilt jede neue Zeile als gewählt: Ein Baustein darf sich auf die Planübung
     # eines Bausteins davor beziehen, auch wenn beide noch nicht übernommen sind
     lauf.gehen(lambda zeile: zeile.stand in (NEU, ANKER_FEHLT))
@@ -376,6 +377,7 @@ def anwenden(
     *,
     bezug: Sequence[Block] = (),
     lassen: Collection[str] = (),
+    zusatz: Mapping[str, str] | None = None,
 ) -> tuple[Plan, KursStand]:
     """Wendet die gewählten Zeilen an — und nur sie. ``gewaehlt`` sind ihre IDs
     (`Aenderung.id`); eine Zeile, in der der Plan abweicht, gilt nur, wenn ihre ID auch in
@@ -433,7 +435,7 @@ def anwenden(
     >>> [z.stand for z in aenderungen(neu, drei, {}, {}, stand3, {"p": "Planke"})]
     ['uebernommen']
     """
-    lauf = _Lauf(plan, bloecke, werte, wahl, kurs_stand, namen, feld_von, bezug)
+    lauf = _Lauf(plan, bloecke, werte, wahl, kurs_stand, namen, feld_von, bezug, zusatz)
     bleibt = set(lassen)
     ja, auch = set(gewaehlt), set(trotz) - bleibt
     lauf.gehen(
@@ -496,6 +498,7 @@ class _Lauf:
         namen: Mapping[str, str] | None,
         feld_von: Feldsuche | None,
         bezug: Sequence[Block],
+        zusatz: Mapping[str, str] | None = None,
     ) -> None:
         self.plan = copy.deepcopy(plan)
         self.stand: KursStand = {
@@ -508,6 +511,9 @@ class _Lauf:
         self.wahl = wahl
         self.namen = namen
         self.feld_von = feld_von
+        #: Schlüssel eines Tests (`wert_schluessel`) → wie er gemacht wurde („links · 10 kg“,
+        #: `core.kurstest.ausfuehrung_aus`) — steht in der Herkunft eines Ziels aus dem Test
+        self.zusatz = zusatz or {}
         alle = (*bezug, *bloecke)
         self.tests = {b.id: b for b in alle if b.art == TEST}
         #: Block-ID → die feste Übung eines ``plan_uebung`` (für den Namen einer Marke)
@@ -805,7 +811,14 @@ class _Lauf:
         # (Den Timer „wie die Übung“ kennt die Rechnung nicht; der Editor lässt die
         # Kombination mit „Zeit“ nicht zu.)
         galt = vorgabe_fuer(test, uhr_fuer(test))
-        woher = herkunft(b.faktor, _kurzwert(feld, wert), galt, test.feld, self._skala_name(uebung))
+        woher = herkunft(
+            b.faktor,
+            _kurzwert(feld, wert),
+            galt,
+            test.feld,
+            self._skala_name(uebung),
+            self.zusatz.get(wert_schluessel(test, uebung), ""),
+        )
         self._wert(
             zid=zid,
             b=b,

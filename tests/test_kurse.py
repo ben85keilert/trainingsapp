@@ -1287,3 +1287,45 @@ def test_gestalteter_test_uebersteht_speichern_und_laden(con, profil) -> None:
     assert (wieder.ziel, wieder.felder) == ({"side": "links"}, ["weight"])
     assert wieder.wie_uebung == [WIE_TAKT, WIE_PARAMETER]
     assert wieder.to_dict() == test.to_dict()
+
+
+def test_sammelkarte_nennt_wie_der_test_gemacht_wurde(con, profil) -> None:
+    """Skizze F4 (Ben, 16.11.2026: „Mach das“): Wurde der Test mit einer Ausführung gemacht —
+    vorgegeben oder vor dem Start gewählt —, steht sie in der Herkunft des Ziels: 22
+    Wiederholungen **links mit 10 kg** sind etwas anderes als 22 ohne. Gelesen wird sie aus dem
+    Eintrag des Tests (`KursRepo._test_ausfuehrung`, `core.kurstest.ausfuehrung_aus`)."""
+    from trainingsapp.core.kurstest import eintrag
+
+    repo, sitzungen, uebungen = KursRepo(con), SessionRepo(con), ExerciseRepo(con)
+    kurs, ids = rumpf_kurs(con)
+    test = next(b for b in kurs.kapitel[1].bloecke if b.art == TEST)
+    test.vorgabe = Vorgabe(SKALA, 7)
+    test.ziel = {"side": "links"}  # vorgegeben
+    test.felder = ["weight"]  # wählt die Person
+    next(b for b in kurs.kapitel[1].bloecke if b.id == "dazu").faktor = 0.8
+    repo.speichern(kurs)
+    kurs = repo.laden(kurs.id)
+    assert kurs is not None
+    eins, zwei, _drei = kurs.kapitel
+    test = next(b for b in zwei.bloecke if b.art == TEST)
+    repo.starten(kurs, profil.id)
+    repo.plan_uebernehmen(
+        kurs, eins, profil.id, {z.id for z in repo.plan_aenderungen(kurs, eins, profil.id)}
+    )
+    repo.kapitel_abschliessen(kurs, eins, profil.id)
+
+    kaefer = uebungen.laden(ids["kaefer"])
+    assert kaefer is not None
+    mit_feldern, werte = eintrag(
+        test, kaefer, wdh=22, sekunden=72.0, skala=7, ausfuehrung={"side": "links", "weight": 10}
+    )
+    session = sitzungen.session_fuer(profil.id, None, datetime.now(UTC).astimezone().date())
+    geschrieben = sitzungen.eintrag_anlegen(session, mit_feldern, werte)
+    repo.variable_setzen(kurs.id, profil.id, "test", 22.0, geschrieben.id)
+
+    wahl = {"wahl": [ids["kaefer"]]}
+    zeilen = repo.plan_aenderungen(kurs, zwei, profil.id, wahl)
+    ziel = next(z for z in zeilen if z.titel.startswith("Ziel für Käfer"))
+    assert ziel.unter == "80 % von deinem Test (22 Wdh. bis Anstrengung 7 · links · 10 kg)"
+    # ein Test ohne Ausführung bleibt, wie er war (`test_testlauf_mit_vorgabe_…`)
+    assert repo._test_ausfuehrung(kurs, profil.id) == {"test": "links · 10 kg"}

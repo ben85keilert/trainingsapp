@@ -1103,9 +1103,18 @@ def anhang(v: Vorgabe, feld: str, skala: str = SKALA_NAME) -> str:
     return f"bei {skala} {v.n}–{v.bis}"
 
 
-def herkunft(faktor: float, wert_text: str, v: Vorgabe | None, feld: str, skala: str = "") -> str:
+def herkunft(
+    faktor: float,
+    wert_text: str,
+    v: Vorgabe | None,
+    feld: str,
+    skala: str = "",
+    ausfuehrung: str = "",
+) -> str:
     """Woher ein Ziel aus dem Test kommt — die **Regel des Kurses**, ohne Wertung: „aus deinem
     Test“, mit Faktor „80 % von deinem Test (…)“, mit Vorgabe der gemessene Wert dazu.
+    ``ausfuehrung``: wie der Test gemacht wurde (`ausfuehrung_aus`) — steht dahinter, damit
+    der Wert nicht ohne sie gelesen wird (22 Wiederholungen **mit 10 kg**; Skizze F4).
 
     >>> herkunft(1.0, "48 s", None, "hold")
     'aus deinem Test'
@@ -1113,12 +1122,17 @@ def herkunft(faktor: float, wert_text: str, v: Vorgabe | None, feld: str, skala:
     '80 % von deinem Test (22 Wdh. bis Anstrengung 7)'
     >>> herkunft(1.0, "30 Wdh.", Vorgabe(MENGE, 30), "reps"), herkunft(0.8, "48 s", None, "hold")
     ('aus deinem Test (30 Wdh.)', '80 % von deinem Test (48 s)')
+    >>> herkunft(0.8, "22 Wdh.", Vorgabe(SKALA, 7), "reps", ausfuehrung="links · 10 kg")
+    '80 % von deinem Test (22 Wdh. bis Anstrengung 7 · links · 10 kg)'
+    >>> herkunft(1.0, "48 s", None, "hold", ausfuehrung="links")
+    'aus deinem Test (48 s · links)'
     """
     anteil = "aus deinem Test" if faktor == 1.0 else f"{round(faktor * 100)} % von deinem Test"
-    if v is None and faktor == 1.0:
+    if v is None and faktor == 1.0 and not ausfuehrung:
         return anteil
     dazu = anhang(v, feld, skala or SKALA_NAME) if v is not None else ""
-    return f"{anteil} ({' '.join(t for t in (wert_text, dazu) if t)})"
+    kern = " ".join(t for t in (wert_text, dazu) if t)
+    return f"{anteil} ({' · '.join(t for t in (kern, ausfuehrung) if t)})"
 
 
 # -- Der Lauf auf der Teilnehmer-Seite: Anzeige, Ende, Ergebnis (Stufe 2, 16.11.2026) ---------

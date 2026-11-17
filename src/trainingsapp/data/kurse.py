@@ -78,6 +78,7 @@ from ..core.kursplan import (
     grundstand,
     wahl_im_plan,
 )
+from ..core.kurstest import ausfuehrung_aus
 from ..core.models import Plan, SessionEntry, jetzt, lokaler_tag, new_id
 from ..core.pakete import PaketPlan, paketplan_aus, plan_abgleichen, plan_stand
 from ..core.result_spec import FieldSpec, FieldType
@@ -758,6 +759,21 @@ class KursRepo:
         namen = {uid: u.name for uid, u in katalog.items()}
         return werte, _wahl_zusammen(bloecke, plan, wahl), namen, feld_von, bloecke
 
+    def _test_ausfuehrung(self, kurs: Kurs, subject_id: str) -> dict[str, str]:
+        """Je Test (`wert_schluessel`), wie er gemacht wurde — die Ausführung aus seinem
+        Eintrag („links · 10 kg“, `core.kurstest.ausfuehrung_aus`), für die Herkunft eines
+        Ziels in der Sammelkarte (Skizze F4). Nur Tests mit einer Ausführung stehen darin."""
+        staende = self.staende(subject_id, kurs.id)
+        texte: dict[str, str] = {}
+        for kapitel in kurs.kapitel:
+            erreicht = staende.get(kapitel.id)
+            if erreicht is None:
+                continue
+            for name, eintrag in self.testeintraege(kapitel, subject_id, erreicht.erreicht).items():
+                if text := ausfuehrung_aus(eintrag.result, eintrag.spec_snapshot):
+                    texte[name] = text
+        return texte
+
     def plan_aenderungen(
         self,
         kurs: Kurs,
@@ -789,7 +805,15 @@ class KursRepo:
             kurs, subject_id, plan, wahl
         )
         return aenderungen(
-            plan, kapitel.bloecke, werte, gewaehlt, stand, namen, feld_von, bezug=bloecke
+            plan,
+            kapitel.bloecke,
+            werte,
+            gewaehlt,
+            stand,
+            namen,
+            feld_von,
+            bezug=bloecke,
+            zusatz=self._test_ausfuehrung(kurs, subject_id),
         )
 
     def plan_uebernehmen(
@@ -834,6 +858,7 @@ class KursRepo:
                 feld_von,
                 bezug=bloecke,
                 lassen=lassen,
+                zusatz=self._test_ausfuehrung(kurs, subject_id),
             )
             if neu != plan:
                 plaene.speichern(neu)

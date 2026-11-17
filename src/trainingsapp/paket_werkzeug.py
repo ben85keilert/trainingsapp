@@ -93,6 +93,7 @@ from trainingsapp.core.pakete import (
     PaketFehler,
     Paketinhalt,
     PaketPlan,
+    Voraussetzung,
     dateiname,
     ergaenzung_ziel,
     kurs_stand,
@@ -449,6 +450,15 @@ def pruefen(
     f_verw, h_verw = verweise_pruefen(datei, roh, inhalt)
     fehler.extend(f_verw)
     hinweise.extend(h_verw)
+    if not f_verw and (braucht := voraussetzungen(datei, inhalt)):
+        hinweise.append(
+            "braucht "
+            + ", ".join(
+                f"„{v.name}“" + (f" ab {version_text(v.version)}" if v.version else "")
+                for v in braucht
+            )
+            + " — steht beim Bauen im Kopf, die App lädt es beim Import nach"
+        )
     if any(nutzt_kursplan(k) for k in inhalt.kurse):
         hinweise.append(
             "Formatversion 6 (Kursplan) — eine App, die sie nicht kennt, lehnt das Paket ab "
@@ -1256,7 +1266,7 @@ def privat_bauen(datei: Path, ziel: Path, basis_url: str = "") -> tuple[Path, st
     fuer = " ".join(str((roh.get("privat") or {}).get("fuer") or "").split())
     zugang = _zugang(datei)
     with tempfile.TemporaryDirectory() as arbeit:
-        klar = bauen(datei, Path(arbeit), fuer=fuer)
+        klar = bauen(datei, Path(arbeit), fuer=fuer, basis_url=basis_url, privat=True)
         ordner = ziel / "p" / zugang["ordner"]
         ordner.mkdir(parents=True, exist_ok=True)
         pfad = ordner / ("paket" + klar.suffix)
@@ -1288,14 +1298,79 @@ def privat_bauen(datei: Path, ziel: Path, basis_url: str = "") -> tuple[Path, st
     return pfad, karte
 
 
-def bauen(datei: Path, ziel: Path, *, fuer: str = "") -> Path:
+def voraussetzungen(
+    datei: Path, inhalt: Paketinhalt, basis_url: str = "", privat: bool = False
+) -> list[Voraussetzung]:
+    """V3 (`docs/plan_paketverweise.md`, Ben 17.11.2026): die Pakete neben ``datei``, auf deren
+    Übungen ``inhalt`` verweist — in Plänen, Kursen, Bedingungen, Blöcken und Ergänzungen. Je
+    Paket die Version, die daneben steht (die kleinste, von der sicher ist, dass sie die
+    Schlüssel hat), und die Paketdatei, aus der die App es laden kann: ``<basis_url>/<datei>``
+    für ein öffentliches Paket; für ein privates nur, wenn auch dieses privat ist (sonst stünde
+    der geheime Ordner offen im Paket) — den Code nie, nach ihm fragt die App (P220)."""
+    if datei.suffix != ".toml":
+        return []
+    try:
+        roh = tomllib.loads(datei.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    namen = nachbar_namen(datei)
+    eigene = {u.id for u in inhalt.uebungen}
+    keys = {
+        str(e.get("key")).strip(): None
+        for e in roh.get("exercises") or []
+        if isinstance(e, dict) and e.get("key")
+    }
+    verwiesen: set[str] = set()
+    for _, uebung, paket in _uebungsverweise(roh):
+        if uebung.startswith("$") or (not paket and uebung in keys):
+            continue
+        verwiesen.add(ergaenzung_ziel(uebung, paket, namen) if paket else uebung.lower())
+    verwiesen |= {e.uebung_id for e in inhalt.ergaenzungen}
+    verwiesen -= eigene
+    if not verwiesen:
+        return []
+    out: list[Voraussetzung] = []
+    for anderes in sorted(datei.parent.glob("*.toml")):
+        if anderes.resolve() == datei.resolve():
+            continue
+        try:
+            fremd = seed_inhalt(anderes)
+            fremd_roh = tomllib.loads(anderes.read_text(encoding="utf-8"))
+        except (PaketFehler, OSError, ValueError):
+            continue
+        if not verwiesen & {u.id for u in fremd.uebungen}:
+            continue
+        mit_dateien = _nennt_dateien(fremd_roh)
+        quelle = ""
+        if basis_url and "privat" not in fremd_roh:
+            endung = "zip" if mit_dateien else "json"
+            quelle = f"{basis_url.rstrip('/')}/{dateiname(fremd.paket, endung)}"
+        elif basis_url and privat:
+            zugang = anderes.with_name(anderes.stem + ZUGANG_ENDUNG)
+            try:
+                ordner = str(json.loads(zugang.read_text("utf-8")).get("ordner") or "")
+            except (OSError, ValueError, AttributeError):
+                ordner = ""
+            if ordner:
+                endung = "zip" if mit_dateien else "json"
+                quelle = f"{basis_url.rstrip('/')}/p/{ordner}/paket.{endung}"
+        out.append(Voraussetzung(fremd.paket.id, fremd.paket.name, fremd.paket.version, quelle))
+    return out
+
+
+def bauen(
+    datei: Path, ziel: Path, *, fuer: str = "", basis_url: str = "", privat: bool = False
+) -> Path:
     """Schreibt die Paketdatei nach ``ziel`` und gibt den Pfad zurück — JSON, oder eine ZIP
     (Formatversion 4), wenn die TOML Dateien nennt (``datei = "…"``, U3): jede bereinigt
-    (`core/bereinigen.py`), benannt nach ihrer Prüfsumme. Wirft `PaketFehler`."""
+    (`core/bereinigen.py`), benannt nach ihrer Prüfsumme. Verweist das Paket auf Übungen
+    anderer Pakete daneben, steht im Kopf, welche es braucht (`voraussetzungen`; mit
+    ``basis_url`` auch wo). Wirft `PaketFehler`."""
     ziel.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as arbeit:
         if datei.suffix == ".toml":
             inhalt: Paketinhalt = toml_oeffnen(datei, Path(arbeit))
+            inhalt.paket.braucht = voraussetzungen(datei, inhalt, basis_url, privat)
         else:
             inhalt = paket_oeffnen(datei)
         if fuer:  # privates Paket (U7): für wen — die App zeigt es
@@ -2556,7 +2631,7 @@ def main(argv: list[str] | None = None) -> int:
                             " (Link und Code stehen nur dort, nicht in dieser Ausgabe)"
                         )
                 else:
-                    print(bauen(datei, args.ziel))
+                    print(bauen(datei, args.ziel, basis_url=args.basis_url))
             except PaketFehler as bau_fehler:
                 print(f"{datei}: nicht gebaut — {bau_fehler}")
                 return 1

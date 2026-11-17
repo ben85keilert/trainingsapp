@@ -46,10 +46,18 @@ ORT_PAKETE = "Einstellungen → Pakete"
 
 
 async def link_importieren(
-    page: Any, state: AppState, url: str, *, laden: Any = None, code: str | None = None
+    page: Any,
+    state: AppState,
+    url: str,
+    *,
+    laden: Any = None,
+    code: str | None = None,
+    herkunft: bool = True,
+    danach: Callable[[], Awaitable[None]] | None = None,
 ) -> None:
     """Den Link laden und je nach Inhalt fragen — Fehler als Meldung. Ein privates Paket (U7)
-    fragt erst nach seinem Code."""
+    fragt erst nach seinem Code. ``herkunft``: die Adresse am Paket hinterlegen (Updates von
+    dort); ``danach``: was nach dem Import läuft (V6: das Paket, das dieses brauchte)."""
     from trainingsapp.ui.views.pakete import import_rueckfrage
 
     url = url.strip()
@@ -69,7 +77,9 @@ async def link_importieren(
     except ZugangNoetig:
 
         async def nochmal(eingegeben: str) -> None:
-            await link_importieren(page, state, url, laden=laden, code=eingegeben)
+            await link_importieren(
+                page, state, url, laden=laden, code=eingegeben, herkunft=herkunft, danach=danach
+            )
 
         page.show_dialog(code_dialog(page, nochmal))
         return
@@ -79,8 +89,11 @@ async def link_importieren(
     if art == "paket":
         eintrag, inhalt = daten
 
-        def danach() -> None:
-            state.pakete.quelle_setzen(eintrag.id, url, DATEI)
+        def nach_import() -> None:
+            if herkunft:
+                state.pakete.quelle_setzen(eintrag.id, url, DATEI)
+            if danach is not None:
+                page.run_task(danach)
 
         page.show_dialog(
             import_rueckfrage(
@@ -88,12 +101,15 @@ async def link_importieren(
                 state,
                 inhalt,
                 state.pakete.vorschau(inhalt, state.profil.id),
-                danach,
+                nach_import,
                 quelle=url,
                 zusatz=(
                     f"Die Adresse wird am Paket hinterlegt ({ORT_PAKETE} → „{inhalt.paket.name}“); "
                     "beim Start fragt die App dort nach einer neueren Version."
-                ),
+                )
+                if herkunft
+                else "",
+                erneut=functools.partial(link_importieren, page, state, url, laden=laden),
             )
         )
         return

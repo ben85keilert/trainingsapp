@@ -1028,3 +1028,40 @@ def test_kurs_kopie_kehrt_in_ihren_kurs_zurueck(tmp_path) -> None:
     zeilen, fehler = uebernehmen(export, datei)
     assert any("Kurs „Einstieg“: in der Datei und in der Kopie geändert" in z for z in zeilen)
     assert "Am Laptop." in datei.read_text("utf-8")
+
+
+def test_bauen_schreibt_was_das_paket_braucht(tmp_path) -> None:
+    """V3 (Ben, 17.11.2026): Verweist ein Paket auf Übungen anderer Pakete daneben, steht im
+    Kopf, welche es braucht — ab welcher Version und wo die App sie findet; die Adresse eines
+    privaten Pakets nur in einem privaten (der Code nie)."""
+    from trainingsapp.paket_werkzeug import privat_bauen
+
+    (tmp_path / "standard.toml").write_text(SEED_DATEI.read_text("utf-8"), encoding="utf-8")
+    (tmp_path / "qigong.toml").write_text(
+        QIGONG_MIT_ID + '\n[privat]\nfuer = ""\n', encoding="utf-8"
+    )
+    (tmp_path / "qigong.zugang.json").write_text(
+        json.dumps({"ordner": "geheim123", "code": "ABCDEFGH"}), encoding="utf-8"
+    )
+    datei = tmp_path / "fuer_a.toml"
+    datei.write_text(INDIVIDUELL, encoding="utf-8")
+    basis = "https://example.invalid/pakete"
+    gebaut = json.loads(bauen(datei, tmp_path / "dist", basis_url=basis).read_text("utf-8"))
+    braucht = {v["name"]: v for v in gebaut["paket"]["braucht"]}
+    assert braucht["Standard"]["id"] == GRUNDAUSSTATTUNG
+    assert braucht["Standard"]["quelle"] == f"{basis}/uebungspaket_Standard.json"
+    from trainingsapp.data.seed import seed_inhalt
+
+    assert braucht["Standard"]["version"] == seed_inhalt(SEED_DATEI).paket.version
+    assert "quelle" not in braucht["Qigong Basis"], "ein öffentliches Paket verrät keinen Ordner"
+    assert "ABCDEFGH" not in json.dumps(gebaut)
+    # Privat verweist auf privat: die Adresse ja, der Code nie
+    datei.write_text(INDIVIDUELL.replace("[paket]", '[privat]\nfuer = "A."\n\n[paket]'), "utf-8")
+    pfad, _ = privat_bauen(datei, tmp_path / "dist2", basis)
+    from trainingsapp.core.paketdatei import paket_oeffnen
+
+    zugang = json.loads((tmp_path / "fuer_a.zugang.json").read_text("utf-8"))
+    kopf = paket_oeffnen(pfad, code=zugang["code"]).paket
+    qigong = next(v for v in kopf.braucht if v.name == "Qigong Basis")
+    assert qigong.quelle == f"{basis}/p/geheim123/paket.json"
+    assert "ABCDEFGH" not in pfad.read_bytes().decode("latin-1")

@@ -34,7 +34,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import sqlite3
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Awaitable, Callable, Collection, Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -55,6 +55,7 @@ from trainingsapp.core.pakete import (
     PaketFehler,
     Paketinhalt,
     PaketPlan,
+    Voraussetzung,
     dateiname,
     name_pruefen,
     paket_id,
@@ -225,13 +226,20 @@ def import_rueckfrage(
     danach: Callable[[], None] | None = None,
     quelle: str | None = None,
     zusatz: str = "",
+    erneut: Callable[[], Awaitable[None]] | None = None,
 ) -> ft.AlertDialog:
     """Die Rückfrage vor dem Schreiben: was der Import tut — auch für „Wieder installieren“
     und für Pakete aus einer Quelle (``quelle`` = ihre Adresse, ``None`` = Datei; ``danach``
     läuft nach dem Schreiben, etwa Quelle merken; ``zusatz``: ein Satz dazu, etwa wo die
     Adresse hinterlegt wird). Pläne des Pakets landen im aktiven Profil. Ist der Dialog zu —
     importiert oder abgebrochen —, verschwinden die Arbeitsdateien des Inhalts (Klartext eines
-    privaten Pakets, geladenes großes Paket: `Paketinhalt.raeumen`)."""
+    privaten Pakets, geladenes großes Paket: `Paketinhalt.raeumen`).
+
+    Braucht das Paket andere (``paket.braucht``, V3/V6, Ben 17.11.2026) und fehlen sie hier
+    oder sind zu alt, nennt die Rückfrage sie und bietet an, sie **zuerst** zu laden — dann
+    entstehen die Pläne mit allen Übungen, Wege und Bedingungen bleiben ganz. ``erneut``: wie
+    dieses Paket danach noch einmal kommt (ein Link lädt es neu); ohne sagt eine Meldung,
+    dass es jetzt dran ist."""
     wieder = vorschau.entfernt is not None
     nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (`components/dialoge.py`)
     nachher.danach(inhalt.raeumen)
@@ -308,6 +316,26 @@ def import_rueckfrage(
     warnung = None if wieder else fremde_identitaet(inhalt.paket, vorschau.installiert, quelle)
     if warnung:
         zeilen.append(ft.Text(warnung, weight=ft.FontWeight.W_600, color=ft.Colors.ERROR))
+    for v, da in vorschau.fehlt:
+        ab = f" ab {version_text(v.version)}" if v.version else ""
+        hier = "nicht installiert" if da is None else f"hier {version_text(da)}"
+        zeilen.append(
+            ft.Text(
+                f"Braucht „{v.name}“{ab} — {hier}. Ohne fallen seine Übungen aus Plänen "
+                "und Kursen.",
+                weight=ft.FontWeight.W_600,
+                data="braucht",
+            )
+        )
+        if v.quelle:
+            zeilen.append(
+                ft.TextButton(
+                    f"Erst „{v.name}“ laden",
+                    icon=ft.Icons.DOWNLOAD,
+                    on_click=_voraussetzung_laden(page, state, inhalt, v, da is None, erneut),
+                    data="voraussetzung",
+                )
+            )
     if vorschau.anzahl(Status.GEAENDERT, Status.ZURUECK):
         zeilen.append(hinweis("Einträge im Verlauf bleiben, wie sie sind."))
     # Ein Paket nur mit Ergänzungen (U5) schreibt keine eigene Übung — es gibt trotzdem etwas
@@ -329,6 +357,36 @@ def import_rueckfrage(
         if etwas
         else [ft.TextButton("OK", on_click=lambda: page.pop_dialog())],
     )
+
+
+def _voraussetzung_laden(
+    page: ft.Page,
+    state: AppState,
+    inhalt: Paketinhalt,
+    v: Voraussetzung,
+    neu: bool,
+    wieder: Callable[[], Awaitable[None]] | None,
+) -> Callable[..., None]:
+    """„Erst … laden“ (V6): diese Rückfrage schließen, die Voraussetzung über ihren Link laden
+    — ein privates Paket fragt dort nach seinem Code (P220) —, danach das Paket noch einmal.
+    Ein schon installiertes (zu altes) Paket behält seine Herkunft."""
+
+    def handler(_e: Any = None) -> None:
+        from trainingsapp.ui.components.paket_link import link_importieren
+
+        page.pop_dialog()
+
+        async def danach() -> None:
+            if wieder is not None:
+                await wieder()
+            else:
+                page.show_dialog(
+                    ft.SnackBar(ft.Text(f"Jetzt „{inhalt.paket.name}“ noch einmal importieren."))
+                )
+
+        page.run_task(link_importieren, page, state, v.quelle, herkunft=neu, danach=danach)
+
+    return handler
 
 
 def plan_geaendert(plan: Plan) -> bool:

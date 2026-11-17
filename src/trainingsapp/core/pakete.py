@@ -115,6 +115,55 @@ class PaketFehler(ValueError):
     """Die Datei ist kein lesbares Übungspaket — der Text sagt, warum."""
 
 
+@dataclass(slots=True, frozen=True)
+class Voraussetzung:
+    """Ein Paket, auf dessen Übungen dieses verweist (V3, `docs/plan_paketverweise.md`, Ben
+    17.11.2026: „Paket sollte in den Referenzen erwähnt sein … wenn eine Übung fehlt, wird diese
+    nachgeladen“) — ``paket.braucht`` im Kopf: ID, Name zum Anzeigen, die kleinste Version, die
+    die Verweise brauchen, und die Paketdatei, aus der die App es laden kann (leer = unbekannt).
+    Das Werkzeug schreibt es beim Bauen (`paket_werkzeug.voraussetzungen`); keine neue
+    Formatversion — eine ältere App übergeht das Feld."""
+
+    id: str
+    name: str
+    version: int | None = None
+    quelle: str = ""
+
+    def als_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"id": self.id, "name": self.name}
+        if self.version is not None:
+            d["version"] = self.version
+        if self.quelle:
+            d["quelle"] = self.quelle
+        return d
+
+
+def voraussetzungen_lesen(roh: Any) -> list[Voraussetzung]:
+    """``paket.braucht`` — Unbrauchbares fällt weg, eine Quelle nur als https.
+
+    >>> [v.name for v in voraussetzungen_lesen([{"id": "a", "name": "A", "version": 3},
+    ...     {"name": "ohne ID"}, "x", {"id": "b", "name": "B", "quelle": "http://x"}])]
+    ['A', 'B']
+    >>> voraussetzungen_lesen([{"id": "b", "name": "B", "quelle": "http://x"}])[0].quelle
+    ''
+    """
+    out: list[Voraussetzung] = []
+    for e in roh if isinstance(roh, list) else []:
+        if not isinstance(e, dict) or not isinstance(e.get("id"), str) or not e["id"].strip():
+            continue
+        version = version_zahl(e.get("version")) if e.get("version") is not None else None
+        quelle = str(e.get("quelle") or "")
+        out.append(
+            Voraussetzung(
+                id=e["id"].strip(),
+                name=" ".join(str(e.get("name") or e["id"]).split())[:80],
+                version=version,
+                quelle=quelle if quelle.startswith("https://") else "",
+            )
+        )
+    return out
+
+
 @dataclass(slots=True)
 class Paket:
     """Kopf einer Paketdatei bzw. ein installiertes Paket (Tabelle ``package``)."""
@@ -152,6 +201,8 @@ class Paket:
     fuer: str = ""
     #: Der Code eines privaten Pakets (U7, Migration 050) — ``None`` = öffentlich
     zugangscode: str | None = None
+    #: Pakete, auf deren Übungen dieses verweist (V3) — nur aus der Datei, nicht gespeichert
+    braucht: list[Voraussetzung] = field(default_factory=list)
 
     @property
     def privat(self) -> bool:
@@ -571,6 +622,7 @@ def paket_lesen(
         version=pversion,
         neuigkeiten=str(kopf.get("neuigkeiten") or "").strip(),
         fuer=" ".join(str(kopf.get("fuer") or "").split())[:80],
+        braucht=voraussetzungen_lesen(kopf.get("braucht")),
     )
 
     uebungen: list[Exercise] = []
@@ -1684,6 +1736,8 @@ def paket_bauen(
         kopf["neuigkeiten"] = paket.neuigkeiten
     if paket.fuer:  # privates Paket (U7): für wen
         kopf["fuer"] = paket.fuer
+    if paket.braucht:
+        kopf["braucht"] = [v.als_dict() for v in paket.braucht]
     roh: dict[str, Any] = {
         "format": FORMAT,
         "version": noetige_version(uebungen, kurse or [], plaene or [], ergaenzungen or []),

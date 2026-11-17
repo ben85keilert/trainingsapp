@@ -684,3 +684,57 @@ def test_export_eines_pakets_nimmt_seine_plaene_mit(page, state, monkeypatch) ->
     export = json.loads(gesendet[-1])
     assert export["paket"]["id"] == inhalt.paket.id and export["paket"]["version"] == 3
     assert export["plaene"][0]["key"] == "morgen" and export["plaene"][0]["wochentage"] == [1, 3]
+
+
+def test_import_nennt_fehlende_voraussetzungen_und_laedt_sie_zuerst(
+    page, state, monkeypatch
+) -> None:
+    """V3/V6 (Ben, 17.11.2026: „wenn eine Übung fehlt, wird diese nachgeladen“): Die Rückfrage
+    nennt, was das Paket braucht und hier fehlt, und bietet „Erst … laden“ an — der Knopf lädt
+    über den Link (ein privates Paket fragt dort nach dem Code) und danach dieses Paket."""
+    from trainingsapp.core.pakete import paket_lesen
+    from trainingsapp.ui.components import paket_link
+    from trainingsapp.ui.views.pakete import import_rueckfrage
+
+    roh = {
+        "paket": {
+            "name": "Für A.",
+            "version": 10000,
+            "braucht": [
+                {
+                    "id": "fehlt-1",
+                    "name": "Qigong Basis",
+                    "quelle": "https://x.invalid/p/a/paket.json",
+                },
+                {"id": GRUNDAUSSTATTUNG, "name": "Standard", "version": 999999},
+                {"id": GRUNDAUSSTATTUNG + "-x", "name": "Ohne Adresse"},
+            ],
+        },
+        "exercises": [{"key": "kranich", "name": "Kranich"}],
+    }
+    inhalt = paket_lesen(roh)
+    vorschau = state.pakete.vorschau(inhalt, state.profil.id)
+    assert [(v.name, da is None) for v, da in vorschau.fehlt] == [
+        ("Qigong Basis", True),
+        ("Standard", False),
+        ("Ohne Adresse", True),
+    ]
+    geladen: list[tuple] = []
+
+    async def link_importieren(_page, _state, url, **kw):
+        geladen.append((url, kw["herkunft"]))
+        await kw["danach"]()
+
+    monkeypatch.setattr(paket_link, "link_importieren", link_importieren)
+    gemeldet: list = []
+    page.pop_dialog = lambda: None
+    page.show_dialog = gemeldet.append
+    page.run_task = lambda f, *a, **kw: __import__("asyncio").run(f(*a, **kw))
+    dialog = import_rueckfrage(page, state, inhalt, vorschau)
+    gefunden = [c for c in alle(dialog.content)]
+    assert sum(1 for c in gefunden if getattr(c, "data", None) == "braucht") == 3
+    (knopf,) = [c for c in gefunden if getattr(c, "data", None) == "voraussetzung"]
+    assert knopf.content == "Erst „Qigong Basis“ laden"
+    klick(knopf)
+    assert geladen == [("https://x.invalid/p/a/paket.json", True)]
+    assert "noch einmal importieren" in gemeldet[-1].content.value

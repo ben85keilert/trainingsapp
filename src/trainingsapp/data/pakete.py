@@ -83,6 +83,7 @@ from ..core.pakete import (
     PaketFehler,
     Paketinhalt,
     PaketPlan,
+    Voraussetzung,
     aus_stand,
     ausdauer_urfassungen,
     kurs_aus_stand,
@@ -189,6 +190,10 @@ class Vorschau:
     #: Eigene Übungen, die mit diesem Import zum Paket gehören — nur „Gehen“, „Laufen“,
     #: „Radfahren“ in „Standard“ (`core.pakete.ausdauer_urfassungen`)
     uebernommen: list[str] = field(default_factory=list)
+    #: Pakete, die das Paket braucht (``paket.braucht``, V3) und die hier fehlen oder zu alt
+    #: sind — mit der installierten Version (``None`` = nicht da). Ohne sie fallen ihre
+    #: Übungen aus Plänen und Kursen; die Rückfrage bietet an, sie zuerst zu laden (V6)
+    fehlt: list[tuple[Voraussetzung, int | None]] = field(default_factory=list)
 
     def anzahl(self, *stati: Status) -> int:
         return sum(1 for s in self.status.values() if s in stati)
@@ -815,7 +820,22 @@ class PaketRepo:
         vorschau = self._planen(inhalt, aktualisieren=True, subject_id=subject_id)[0]
         self._medien_planen(inhalt, vorschau)
         self._ergaenzungen_zaehlen(inhalt, vorschau)
+        vorschau.fehlt = self.fehlende_voraussetzungen(inhalt.paket)
         return vorschau
+
+    def fehlende_voraussetzungen(self, paket: Paket) -> list[tuple[Voraussetzung, int | None]]:
+        """Was von ``paket.braucht`` (V3) hier fehlt, entfernt oder deaktiviert ist oder zu alt
+        — je Voraussetzung die installierte Version (``None`` = keine)."""
+        fehlt: list[tuple[Voraussetzung, int | None]] = []
+        for v in paket.braucht:
+            if v.id == paket.id:
+                continue
+            da = self.laden(v.id)
+            if da is None or not da.aktiv:
+                fehlt.append((v, None))
+            elif v.version is not None and (da.version or 0) < v.version:
+                fehlt.append((v, da.version))
+        return fehlt
 
     # -- Ergänzungen (U5, Migration 049, `core/ergaenzungen.py`) ----------------------------
 

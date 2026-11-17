@@ -7,8 +7,10 @@ exportiert, wird die Grundübung mitgenommen mit einem Verweis, dass sie von Sta
 Anlass: Kurse, die die App erklären, sollen in ein eigenes Paket und brauchen Übungen aus
 „Standard“.
 
-**Stand 17.11.2026: V1 und V2 gebaut** (`core.pakete.verweise_aufloesen`, `trainingsapp-paket
-pruefen` → `verweise_pruefen`); V3–V6 nicht. Dieses Papier hält fest, was heute gilt, schlägt einen
+**Stand 17.11.2026: V1, V2, V3 und V6 gebaut** (`core.pakete.verweise_aufloesen`, `trainingsapp-paket
+pruefen` → `verweise_pruefen`, `paket.braucht` aus `paket_werkzeug.voraussetzungen`, Rückfrage beim
+Import mit „Erst … laden“); V4 (Fehlendes sichtbar, von selbst nachholen, wenn das Paket später
+kommt) und V5 (Export eigener Pakete schreibt `braucht`) nicht. Dieses Papier hält fest, was heute gilt, schlägt einen
 Grundsatz und Stufen vor und sammelt die Fragen, die Ben entscheidet.
 
 ---

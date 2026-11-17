@@ -2389,7 +2389,10 @@ def test_kopie_nimmt_die_grundlage_aus_dem_paket_als_vorlage() -> None:
     paketplan = PaketPlan("basis", PlanVorlage("Basis", items=[VorlageItem("a"), VorlageItem("b")]))
     gespeichert: list[Kurs] = []
     state = SimpleNamespace(
-        pakete=SimpleNamespace(paketplaene=lambda paket_id: [paketplan] if paket_id == "p" else []),
+        pakete=SimpleNamespace(
+            paketplaene=lambda paket_id: [paketplan] if paket_id == "p" else [],
+            laden=lambda paket_id: None,  # die Version des Pakets (Herkunft der Kopie, Stufe 6)
+        ),
         kurse=SimpleNamespace(speichern=gespeichert.append, laden=lambda _id: None),
     )
     kurs = Kurs(

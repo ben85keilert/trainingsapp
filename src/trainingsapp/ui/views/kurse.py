@@ -80,6 +80,7 @@ from trainingsapp.ui.components.links import oeffnen as link_oeffnen
 from trainingsapp.ui.components.linkvideo import alle_laden, videolinks
 from trainingsapp.ui.components.medienliste import medium_zeile
 from trainingsapp.ui.components.scroll import scroll_merken
+from trainingsapp.ui.components.wartet import im_kapitel as wartet_im_kapitel
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views import kurs_testlauf
 from trainingsapp.ui.views.katalog import trainieren_knopf
@@ -887,6 +888,10 @@ def kapitel_view(
                 *[medium_zeile(page, state, m, browser=browser) for m in medien],
             )
         )
+
+    # V4: Übungen eines anderen Pakets, das hier fehlt — woher sie kämen, „… laden“
+    if (wartet := wartet_im_kapitel(page, state, kurs, kapitel)) is not None:
+        bloecke.append(wartet)
 
     if kapitel.plaene:
         plaene: list[Plan] = state.kurse.kapitel_plaene(kapitel.id, profil)

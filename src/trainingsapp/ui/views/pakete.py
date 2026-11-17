@@ -279,6 +279,7 @@ def import_rueckfrage(
                 (ergebnis.anzahl(Status.GEAENDERT), "aktualisiert"),
                 (len(ergebnis.entfallen), "nicht mehr im Paket"),
                 (ergebnis.anzahl_plaene(Status.NEU, Status.GEAENDERT), "Pläne"),
+                (ergebnis.nachgetragen, "Pläne vervollständigt"),  # V4
             )
             if n
         ]
@@ -321,8 +322,8 @@ def import_rueckfrage(
         hier = "nicht installiert" if da is None else f"hier {version_text(da)}"
         zeilen.append(
             ft.Text(
-                f"Braucht „{v.name}“{ab} — {hier}. Ohne fallen seine Übungen aus Plänen "
-                "und Kursen.",
+                f"Braucht „{v.name}“{ab} — {hier}. Bis es kommt, warten seine Übungen in "
+                "Plänen und Kursen; dann trägt die App sie nach.",
                 weight=ft.FontWeight.W_600,
                 data="braucht",
             )

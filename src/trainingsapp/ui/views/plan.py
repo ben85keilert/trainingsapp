@@ -158,6 +158,7 @@ from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uhr import UhrTeile, laufende, uhr_teile, zaehlt_symbol
 from trainingsapp.ui.components.uhr_blatt import uhr_blatt
 from trainingsapp.ui.components.varianten import Variantenwahl, varianten_blatt, zeilenbreite
+from trainingsapp.ui.components.wartet import im_plan as wartet_im_plan
 from trainingsapp.ui.components.werte import wert_leiste
 from trainingsapp.ui.components.zaehlen import laeuft_hier, zaehl_zeile
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
@@ -2636,7 +2637,8 @@ def plan_view(
                         ]
                     ),
                 ],
-            )
+            ),
+            *wartet_im_plan(page, state, plan),  # V4: was auf sein Paket wartet
         ]
 
     def workout_hinweis() -> ft.Control:

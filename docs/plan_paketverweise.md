@@ -69,25 +69,31 @@ einem **privaten** Paket auf, trüge eine Kopie dessen Inhalt offen hinaus.
 | V3 | **Voraussetzung im Paketkopf:** `braucht = [{ paket = "Standard", version = 5 }]` — das Werkzeug trägt die Pakete aus den Verweisen selbst ein, die Mindestversion setzt der Autor. Der Import zeigt in der Rückfrage, was fehlt oder zu alt ist | neues Feld im Kopf — Frage F2 |
 | V4 | **Sichtbar in der App:** Kapitel und Plan nennen fehlende Übungen mit dem Paket, aus dem sie kämen, statt sie still wegzulassen; kommt das Paket, holt „Fehlendes zurückholen“ sie nach (oder die App von selbst — Frage F3) | — |
 | V5 | **Export eigener Pakete** schreibt `braucht` aus den fremden Übungen und ihrer installierten Version | wie V3 |
+| V6 | **Fehlendes nachladen** (Ben, 17.11.2026, F4): `braucht` nennt Paket, Mindestversion und Quelle (das Werkzeug trägt die Adresse des Index ein). Der Import löst es auf, **bevor** er Pläne baut: Fehlt ein Paket oder ist es zu alt, sucht die App es in ihren Quellen (Index-Eintrag mit Paket-ID, `core/paketquelle.py`) oder unter der genannten Quelle, nennt es in derselben Rückfrage und spielt es zuerst ein — so bleiben Pfade (`dann`, `sonst`, Kanten des Ablaufs) ganz. Geht das gerade nicht (ohne Netz, Web-Fassung), wartet die Planübung, das Kapitel zeigt „wartet auf Paket …“ statt zu sperren, und kommt das Paket, vervollständigt die App die Pläne von selbst. Ein fehlendes **privates** Paket braucht seinen Code: Die App fragt beim Import danach (Ben, 17.11.2026, P220 a) | wie V3 |
 
 Reihenfolge: V1 und V2 zuerst — sie brauchen keine Formatänderung und machen ein
-Tutorial-Paket in der TOML erst schreibbar. Dann V4, V3, V5.
+Tutorial-Paket in der TOML erst schreibbar. Dann V3, V6, V4, V5 (Ben, 17.11.2026: nachladen
+statt freischalten; Anlass `docs/plan_rueckweg_handy.md`, Zweck B).
 
-## 4. Fragen an Ben
+## 4. Fragen an Ben — F1–F4 beantwortet am 17.11.2026
 
 - **F1 — Grundsatz:** Verweis statt Kopie, Abweichungen an der Planübung, Erweiterung nur für
-  echte Zusätze (§ 2) — so?
+  echte Zusätze (§ 2) — so? **Ben, 17.11.2026: ok.**
 - **F2 — `braucht` und ältere Apps:** Ohne neue Formatversion überlesen ältere Apps das Feld
   und verhalten sich wie heute (fehlende Übungen fallen still weg). Mit Formatversion 6 lehnen
   sie das Paket ab („neuer als diese App“). Vorschlag: nicht heben — das Feld ändert nicht, was
-  die Datei bedeutet.
+  die Datei bedeutet. **Ben, 17.11.2026: ok.**
 - **F3 — Fehlt eine Voraussetzung beim Import:** ablehnen, oder warnen und einspielen?
   Vorschlag: warnen und einspielen (Ergänzungen warten heute schon); offen ist, ob Kapitelpläne
   sich von selbst vervollständigen, wenn das Paket kommt, oder nur über „Fehlendes
-  zurückholen“.
+  zurückholen“. **Ben, 17.11.2026: ok** — und von selbst (aus der Antwort zu F4).
 - **F4 — Bedingung auf eine fehlende Übung** bei Freischaltung „streng“: Das Kapitel bleibt
   sonst für immer gesperrt. Ausweg „Trotzdem freischalten“ nur in diesem Fall, oder das
   Werkzeug verbietet Bedingungen auf Übungen anderer Pakete?
+  **Ben, 17.11.2026:** „Paket sollte in den Referenzen erwähnt sein. Kann man dafür sorgen,
+  dass die Pfadverfolgung funktioniert und wenn eine Übung fehlt, wird diese nachgeladen?“ →
+  Verweis mit Paket (V1), `pruefen` folgt jedem Verweis bis in die Datei des Pakets (V2),
+  Nachladen vor dem Bau der Pläne (V6); kein „Trotzdem freischalten“.
 - **F5 — Tutorial-Paket:** mitgeliefert wie „Standard“ (zweite Datei in `data/seed/`, auch für
   die Web-Fassung) oder aus der Quelle („Neu in den Quellen“)? Zieht der Kurs „HRV-Messung
   verstehen“ um, braucht er seine heutige ID ausdrücklich in der TOML (`id = "…"`) — sonst

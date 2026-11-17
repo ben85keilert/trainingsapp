@@ -179,6 +179,7 @@ from trainingsapp.ui.views.papierkorb import archiv_view, papierkorb_view
 from trainingsapp.ui.views.plan import einzel_plan, plan_view
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
+from trainingsapp.ui.views.plan_medien import plan_medien_view
 from trainingsapp.ui.views.plan_uhren import plan_uhren_view
 from trainingsapp.ui.views.profile import profile_view
 from trainingsapp.ui.views.tag import tag_view
@@ -757,6 +758,8 @@ def main(page: ft.Page, browserspeicher: Browserspeicher | None = None) -> None:
             uebungsseite_im_plan(plan, basis, f"{basis}/ziel/{info[0].id}", info)
         elif rest[:1] == ["uhren"]:  # der Uhrenplan (K3, `docs/plan_uhren.md` §4.6)
             ablegen(lambda: plan_uhren_view(page, state, plan, basis))
+        elif rest[:1] == ["medien"]:  # die Übersicht „Medien“ (`docs/plan_medien_reiter.md` §3)
+            ablegen(lambda: plan_medien_view(page, state, plan, basis))
         elif rest[:1] == ["ablauf"]:  # der Reiter „Ablauf“ (G3, `docs/plan_verzweigungen.md` §8)
             ablegen(lambda: ablauf_view(page, state, plan, basis))
             # „+“ im Ablauf (Ben, 9.11.2026): Hinzufügen liegt darüber — Zurück und „Fertig“

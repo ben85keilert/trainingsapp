@@ -547,4 +547,5 @@ selbst — gelesen, nicht nachgestellt; Verhalten von Kursen ändert sich nur na
 Tests: `tests/test_ui_workout.py`
 (`test_workout_zeigt_neues_material_von_selbst_und_haelt_die_uhr`). Web-Fotos am 17.11.2026:
 Blatt beim Start, Uhr „angehalten“ bei 0:40, nach „Schließen“ läuft sie; zweiter Schritt mit
-Material ohne „von selbst“ — nur das Buch-Symbol. Gerätetest **T146**.
+Material ohne „von selbst“ — nur das Buch-Symbol. Gerätetest **T147** (bis 17.11.2026 als T146
+geführt — die Nummer trug zugleich ein Gerätetest des Rückwegs vom Handy).

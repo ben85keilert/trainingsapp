@@ -219,7 +219,9 @@ def test_reiter_und_schalter_bringen_den_ablauf(umgebung) -> None:
         for x in _alle(editor)
         if isinstance(x, ft.Container) and isinstance(x.data, tuple) and x.data[:1] == ("reiter",)
     ]
-    assert reiter == [("reiter", ""), ("reiter", "uhren")]
+    # Plan · Uhren · Medien (Ben, 17.11.2026, `docs/plan_medien_reiter.md` §3) — „Ablauf“
+    # erst mit „Workout“
+    assert reiter == [("reiter", ""), ("reiter", "uhren"), ("reiter", "medien")]
     assert ablauf_zusammenfassung(plan).startswith("Liste")
     # Nummern an den Übungen der Liste (Frage 5)
     texte = _texte(editor)

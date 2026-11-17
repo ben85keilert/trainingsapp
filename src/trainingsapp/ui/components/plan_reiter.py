@@ -1,12 +1,16 @@
-"""Die Reiter des Plan-Editors — Plan · Uhren · Ablauf (Ben, 8.11.2026, Skizze E1).
+"""Die Reiter des Plan-Editors — Plan · Uhren · Medien · Ablauf (Ben, 8.11.2026, Skizze E1;
+„Medien“ seit 17.11.2026, `docs/plan_medien_reiter.md` §3).
 
 Der Plan-Editor („Plan“: Name, Tage, Liste der Übungen, der Schalter „Liste |
-Workout“), der Uhrenplan (K3) und der Reiter „Ablauf“ (G3) sind eigene Ansichten unter seiner
-Route — alle drei zeigen oben dieselbe Reiterzeile, ein Tipp wechselt (Ben, 8.11.2026: „setze
-automatisch zwei Reiter Plan – Uhren“). „Ablauf“ erscheint erst mit „Workout“.
+Workout“), der Uhrenplan (K3), die Übersicht „Medien“ (`views/plan_medien.py`) und der Reiter
+„Ablauf“ (G3) sind eigene Ansichten unter seiner Route — alle zeigen oben dieselbe Reiterzeile,
+ein Tipp wechselt (Ben, 8.11.2026: „setze automatisch zwei Reiter Plan – Uhren“). „Ablauf“
+erscheint erst mit „Workout“.
 
-Die Zeile ist in **drei gleich breite Plätze** über die ganze Breite geteilt (Ben, 10.11.2026);
-der dritte bleibt leer, solange es keinen Ablauf gibt — so springt nichts, wenn er dazukommt.
+Die Zeile ist in **gleich breite Plätze** über die ganze Breite geteilt (Ben, 10.11.2026); der
+letzte („Ablauf“) bleibt leer, solange es keinen Ablauf gibt — so springt nichts, wenn er
+dazukommt. „Medien“ steht davor, weil es ihn in jedem Plan gibt (Ben, 17.11.2026: Reihenfolge
+Plan · Uhren · Medien · Ablauf).
 Der Wechsel ist ein Wechsel der Ansicht, soll aber nicht so aussehen: `ohne_uebergang` stellt
 Flutters Seitenübergang für diesen einen Wechsel ab („von unten raus … stört“).
 """
@@ -20,7 +24,12 @@ from typing import Any
 
 import flet as ft
 
-REITER: tuple[tuple[str, str], ...] = (("", "Plan"), ("uhren", "Uhren"), ("ablauf", "Ablauf"))
+REITER: tuple[tuple[str, str], ...] = (
+    ("", "Plan"),
+    ("uhren", "Uhren"),
+    ("medien", "Medien"),
+    ("ablauf", "Ablauf"),
+)
 
 #: So lange bleibt der Seitenübergang abgestellt — länger als Flutters Übergang (300 ms)
 OHNE_UEBERGANG_S = 0.6
@@ -62,8 +71,8 @@ def plan_reiter(
     ablauf_an: bool,
     nach_wechsel: Callable[[], Any] | None = None,
 ) -> ft.Control:
-    """Die Zeile; ``basis`` ist die Bearbeiten-Route, ``aktiv`` ``""``, ``"uhren"`` oder
-    ``"ablauf"``."""
+    """Die Zeile; ``basis`` ist die Bearbeiten-Route, ``aktiv`` ``""``, ``"uhren"``,
+    ``"medien"`` oder ``"ablauf"``."""
 
     def wechsler(ziel: str) -> Callable[[Any], Any]:
         async def handler(_e: Any = None) -> None:

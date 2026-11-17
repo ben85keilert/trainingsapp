@@ -540,6 +540,22 @@ Kommt der Plan aus einem Paket, bekommt eine Planübung, die du nicht geändert 
 nächsten Update die neue Fassung; deine eigene bleibt.
 """
 
+PLAN_MEDIEN_MD = """\
+**Medien** zeigt alles, was es zu diesem Plan zu sehen gibt — nach **Herkunft**:
+
+- **Aus den Übungen** — was eine Übung überall mitbringt: ihre Beschreibung (im „i“), Links
+  und Dateien (beim Üben hinter dem Buch-Symbol), das Bild der Bewegung (im Fokus).
+- **Aus diesem Plan** — was nur hier gilt: die Anweisungen und Stücke der Planübungen.
+- **Im Workout** — der Inhalt an einem Weg; er geht auf, wenn der Weg frei ist.
+- **Aus dem Kurs** — Texte und Medien der Kapitel, die du schon erreicht hast.
+
+Unter jedem Stück steht in Farbe, **wo** es angeboten wird. Tippen öffnet es; der Stift führt
+dorthin, wo man es ändert. Hier selbst ändert sich nichts.
+
+**Groß** heißt: Das Stück braucht deutlich mehr Platz, als es auf Handy oder Tablet braucht —
+ein Video mehr als etwa 8 MB je Minute, ein Bild mehr als 900 Pixel an der kürzeren Seite.
+"""
+
 GPS_MD = """\
 **Was das einschaltet.** Mit GPS steht die Übung unter „Messung“, Reiter „GPS“, zur Wahl.
 Ein Training dort wird bei dieser Übung eingetragen: Strecke und Zeit, soweit die Übung
@@ -675,6 +691,7 @@ __all__ = [
     "GPS_MD",
     "NOTATION_MD",
     "PLANWERT_MD",
+    "PLAN_MEDIEN_MD",
     "TAKT_MD",
     "THEMEN",
     "TIMER_EDITOR_MD",

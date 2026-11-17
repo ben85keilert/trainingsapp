@@ -270,6 +270,9 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   Auswahl rechnen aus Einträgen und Wahl, nie aus Messwerten. **Ein Vorschlag ändert einen Plan
   nur auf Tipp** und ist abschaltbar (`core/anpassung.py`).
 
+- **Reiter „Medien“ im Plan** (Ben, 17.11.2026, Vertrag `docs/plan_medien_reiter.md`): Übersicht
+  **nach Herkunft**, je Stück „wo angeboten“; nur ansehen und hinführen — geändert wird an den
+  zwei Orten, im Ablauf und im Kurs. Rechnung `core/medien_uebersicht.py`, Köpfe `core/videoinfo.py`.
 - **Übungen kommen über Pakete** (Ben, 14.10.2026; Verträge `docs/uebungspakete.md`,
   `docs/plan_paketinhalte.md`; Einzelheiten in `.claude/rules/pakete.md`). Der Katalog ist das
   Paket „Standard“ (`data/seed/standard.toml`). Ein Import aktualisiert nur Übungen desselben

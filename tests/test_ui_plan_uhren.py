@@ -113,7 +113,9 @@ def test_zeile_im_plan_editor_und_zusammenfassung(umgebung) -> None:
         for x in _alle(editor)
         if isinstance(x, ft.Container) and isinstance(x.data, tuple) and x.data[:1] == ("reiter",)
     ]
-    assert reiter == [("reiter", ""), ("reiter", "uhren")]
+    # Plan · Uhren · Medien (Ben, 17.11.2026, `docs/plan_medien_reiter.md` §3) — „Ablauf“
+    # erst mit „Workout“
+    assert reiter == [("reiter", ""), ("reiter", "uhren"), ("reiter", "medien")]
     assert "Workout und Ablauf" not in [t.upper() for t in _texte(editor)]
 
 

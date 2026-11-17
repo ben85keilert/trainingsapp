@@ -21,8 +21,9 @@ Ben, 17.11.2026, in mehreren Schritten:
   anschauen kann und neu erstellen, falls es doch zu unscharf ist.“ — dann: „Finde gute
   Lösungen und arbeite das selbständig aus.“
 
-**Stand:** Stufe 0 gebaut (17.11.2026). Stufen 1–3: im Bau auf dem Zweig `medien-reiter`
-(eigener Worktree, `CLAUDE.md` „Große Änderungen im eigenen Worktree“). Skizzen:
+**Stand:** Stufe 0 gebaut (17.11.2026), Stufe 1 gebaut (17.11.2026, Gerätetest T148). Stufen 2–3:
+im Bau auf dem Zweig `worktree-medien-reiter` (eigener Worktree, `CLAUDE.md` „Große Änderungen im
+eigenen Worktree“). Skizzen:
 <https://claude.ai/artifact/CvfAkLSzXyQfip8BMftrWD>. Katalog **P225**.
 
 **Bens Antworten, 17.11.2026 abends** (Fragen aus §6):
@@ -113,8 +114,8 @@ angeboten wird**:
 |---|---|---|---|
 | **Aus den Übungen** | Beschreibung, Links und Dateien, Bild der Bewegung (eigen: „nur auf diesem Gerät“, mitgeliefert: „in der App“) | „im „i“ bei 1 · Kniebeuge“, „bei 1 und 4 · Kniebeuge“, „im Fokus bei 1 · Kniebeuge“ | „Übung bearbeiten“, Reiter Medien (Beschreibung: Übung; Animation: Uhr) |
 | **Aus diesem Plan** | Beschreibung des Plans; Anweisungen und Stücke der Planübungen, mit „ersetzt „…““ | „bei 2 · Katze-Kuh“ | „Im Plan einstellen“, Reiter Medien |
-| **Im Workout** | Inhalt an einem Weg (Text, Link), den das Workout setzte | „am Weg 1 · Kniebeuge → 3 · Planke“ | Reiter „Ablauf“ |
-| **Aus dem Kurs „…“** | Text- und Medienblöcke der **erreichten** Kapitel (Ben, e); Wege, deren Inhalt ein Weg-Baustein mitbrachte | „im Kapitel 2 · Hüfte“, „am Weg … · aus Kapitel 2“ | das Kapitel |
+| **Im Workout** | Inhalt an einem Weg (Text, Link), den das Workout setzte | „am Weg von 1 · Kniebeuge zu 3 · Planke“ | Reiter „Ablauf“ |
+| **Aus dem Kurs „…“** | Text- und Medienblöcke der **erreichten** Kapitel (Ben, e); Wege, deren Inhalt ein Weg-Baustein mitbrachte | „im Kapitel 2 · Hüfte“, „am Weg von … zu … · aus Kapitel 2“ | das Kapitel |
 
 - **Ein Weg gehört dorthin, woher sein Inhalt kommt:** Steht am Weg genau der Inhalt, den ein
   Weg-Baustein eines erreichten Kapitels zwischen diesen Planübungen setzt, gehört er zum Kurs;
@@ -137,6 +138,15 @@ angeboten wird**:
   · nur Ton). Bildmaße: `core.bewegungsbild.png_masse` (JPEG, PNG).
 - **Geladene Videos hinter Links** (Stufe 7 des Rückwegs, Migration 068) zeigen ihre Größe mit
   „auf dem Gerät“; sie zählen nicht zu den Dateien des Pakets.
+
+- **Der Weg in Worten** („am Weg von … zu …“, „… zum Ende“): Der Pfeil fehlt manchen Schriften
+  — im kopflosen Browser stand ein Kästchen, die Web-Fassung lädt ohne CDN keine Ersatzschrift.
+- **Ein Weg mit Text und Link** öffnet ein Blatt mit dem Text und „Öffnen“ für den Link; ein
+  Stück nur mit Link öffnet ihn direkt; Text (auch die Abschnitte einer Anweisung) im Blatt.
+
+**Gebaut 17.11.2026.** Web-Fotos (412 × 860): die vier Reiter passen, auch bei einer Liste; die
+Gruppen mit grünem „wo“, „84 MB · groß“ am Video (1080p · 30 fps · 2:10), Kopfzeile „9 Stücke ·
+2 Dateien · 85 MB“, das Blatt eines Wegs mit „Öffnen“. Gerätetest **T148**.
 
 **Bau:** `core/medien_uebersicht.py` (Rechnung, flet-frei, Doctests), `core/videoinfo.py`,
 `views/plan_medien.py` (holt Kurs und Kapitel, misst Dateien aus, zeichnet),
@@ -258,8 +268,9 @@ und arbeite das selbständig aus“), zum Nachprüfen:
 - Stufe 0: `tests/test_ui_editor_reiter.py`, `tests/test_ui_material_rollen.py`,
   `tests/test_ui_workout.py` (Wortlaut „Medien“).
 - Stufe 1: Doctests in `core/videoinfo.py` und `core/medien_uebersicht.py`,
-  `tests/test_videoinfo.py` (künstliche Köpfe; CI hat kein ffmpeg), `tests/test_medien_uebersicht.py`,
-  `tests/test_ui_plan_medien.py`, Web-Fotos der vier Reiter und der Übersicht.
+  `tests/test_videoinfo.py` (künstliche Köpfe aus `tests/mp4_bau.py`; die CI hat kein ffmpeg),
+  `tests/test_medien_uebersicht.py`, `tests/test_ui_plan_medien.py`; die Reiterzeile in
+  `tests/test_ui_plan_uhren.py` und `tests/test_ui_ablauf_editor.py`; Web-Fotos.
 - Stufe 3: Schema und Schätzung als Doctests; ffmpeg-Lauf als Test, der ohne ffmpeg
   übersprungen wird; „Datei ersetzen“ und „Original wieder nehmen“ als Test; der Umwandler am
   Handy ist **Gerätetest** (Android; iPhone, sobald es den Build gibt).

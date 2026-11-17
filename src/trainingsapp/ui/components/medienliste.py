@@ -146,4 +146,26 @@ def medium_zeile(
     )
 
 
-__all__ = ["SYMBOLE", "medium_zeile"]
+def oeffner(
+    page: Any,
+    state: Any,
+    medium: Media,
+    *,
+    browser: Any = None,
+    uebergeben: Callable[[Callable[[], Awaitable[None]]], None] | None = None,
+    beim_oeffnen: Callable[[], None] | None = None,
+) -> Callable[..., Any] | None:
+    """Was ein Tipp auf die Zeile zu ``medium`` tut — ohne die Zeile: für Ansichten, die ein
+    Stück in eigener Gestalt zeigen (die Übersicht im Reiter „Medien“ des Plans,
+    `views/plan_medien.py`). ``None``, wenn die Zeile nichts tut (Paketdatei fehlt). Es ist der
+    Handler von `medium_zeile` selbst, damit beide nie auseinanderlaufen."""
+    zeile = medium_zeile(
+        page, state, medium, browser=browser, uebergeben=uebergeben, beim_oeffnen=beim_oeffnen
+    )
+    if getattr(zeile, "disabled", False):
+        return None
+    handler = getattr(zeile, "on_click", None)
+    return handler if callable(handler) else None
+
+
+__all__ = ["SYMBOLE", "medium_zeile", "oeffner"]

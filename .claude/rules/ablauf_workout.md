@@ -51,8 +51,8 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   `plan_als_plan` zurück), die Liste gibt es nur von Hand.
 
 - **Gezeichneter Ablauf** (Ben, 8.11.2026, Vertrag `docs/plan_verzweigungen.md` §8, Stand
-  §8.8; Migration 044, Datenschritt 6): Der Plan-Editor hat die Reiter **Plan · Uhren**, mit
-  „Workout“ dazu **„Ablauf“**. **Zweige A–D, dann/sonst/Wege sind veraltet** (P108) —
+  §8.8; Migration 044, Datenschritt 6): Der Plan-Editor hat die Reiter **Plan · Uhren · Medien**
+  (Medien seit 17.11.2026, `docs/plan_medien_reiter.md`), mit „Workout“ dazu **„Ablauf“**. **Zweige A–D, dann/sonst/Wege sind veraltet** (P108) —
   Altbestand wird zum Ablauf; die Karte „Weiter, wenn …“ je Planübung gibt es nicht mehr.
   `core/ablauf.py`: `Ablauf(an, start, kanten, fragen)`, `plan.ablauf_json`; **Knoten** sind
   Planübungen (Nummer = Stelle in der Liste, `nummern`; `beiname`) und **Fragen**, **Kanten**

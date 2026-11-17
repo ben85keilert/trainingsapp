@@ -111,7 +111,7 @@ def test_gruppen_nach_herkunft_mit_wo() -> None:
     assert all(z.ziel.art == ZIEL_UEBUNG for z in gruppen[AUS_UEBUNG])
     plan_zeilen = [(z.titel, z.unter, z.wo, z.ziel.art) for z in gruppen[AUS_PLAN]]
     assert plan_zeilen == [
-        ("Beschreibung des Plans", "Text", "wird beim Üben noch nicht gezeigt", "plan"),
+        ("Beschreibung des Plans", "Text", "am Plan · vor dem Start", "plan"),
         ("Im Plan · Für dich", "Text · 2 Abschnitte", "bei 2 · Katze-Kuh", ZIEL_PLANUEBUNG),
         (
             "An der Stufe",
@@ -245,3 +245,19 @@ def test_mitgelieferte_animation_und_leerer_plan() -> None:
     )
     leer = uebersicht(Plan(items=[PlanItem(id="b", exercise_id="x")]), {"x": Exercise(id="x")})
     assert leer.gruppen == () and leer.kopf() == "Noch keine Medien"
+
+
+def test_medien_des_plans_selbst() -> None:
+    """Stufe 2: Stücke des Plans stehen unter „Aus diesem Plan“, angeboten „am Plan · vor dem
+    Start“; der Stift ändert sie hier (Ziel „plan“ mit ihrer Adresse)."""
+    plan, uebungen = _plan()
+    plan.media = [
+        Media(uri="https://x.org/einstimmung", title="Einstimmung", zeigen=True),
+        Media(kind=MediaKind.IMAGE, source=MediaSource.LOCAL, uri="Bewegung/x.gif"),
+    ]
+    zeilen = _gruppen(uebersicht(plan, uebungen))[AUS_PLAN]
+    assert [(z.titel, z.wo, z.ziel.art, z.ziel.id) for z in zeilen[:2]] == [
+        ("Beschreibung des Plans", "am Plan · vor dem Start", "plan", ""),
+        ("Einstimmung", "am Plan · vor dem Start", "plan", "https://x.org/einstimmung"),
+    ]
+    assert zeilen[1].unter == "Link · Erklärung · zeigt sich beim ersten Mal"

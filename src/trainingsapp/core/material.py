@@ -16,11 +16,11 @@ Dieses Modul kennt kein flet.
 from __future__ import annotations
 
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final
 
 from .beschreibung import Abschnitt, abschnitte
-from .models import BEGLEITUNG, Exercise, Media, MediaKind, MediaSource, PlanItem
+from .models import BEGLEITUNG, Exercise, Media, MediaKind, MediaSource, Plan, PlanItem
 
 VIDEO: Final = "video"
 PDF: Final = "pdf"
@@ -160,4 +160,39 @@ def material_von(uebung: Exercise | None, item: PlanItem | None) -> Material:
     return Material(teile, tuple(medien), tuple(ersetzt))
 
 
-__all__ = ["BILD", "LINK", "NAMEN", "PDF", "TON", "VIDEO", "Material", "art", "material_von"]
+def plan_material(plan: Plan) -> Material:
+    """Was es zum **Plan selbst** zu sehen gibt (Ben, 17.11.2026, `docs/plan_medien_reiter.md`
+    §4): seine Beschreibung in Abschnitten und seine Stücke — dieselbe Adresse nur einmal, nie
+    lokale, nie eine Begleitung (es läuft keine Übung daneben).
+
+    >>> p = Plan(description="## So läuft es\\nDreimal die Woche",
+    ...          media=[Media(uri="https://x.org/a", zeigen=True), Media(uri="https://x.org/a")])
+    >>> m = plan_material(p)
+    >>> [a.name for a in m.abschnitte], [x.uri for x in m.medien], m.kurztext()
+    (['So läuft es'], ['https://x.org/a'], 'Text · Video')
+    >>> plan_material(Plan()).leer
+    True
+    """
+    teile = tuple(a for a in abschnitte(plan.description) if not a.leer)
+    medien: list[Media] = []
+    schon: set[str] = set()
+    for m in plan.media:
+        if not m.uri or m.source == MediaSource.LOCAL or m.uri in schon:
+            continue
+        schon.add(m.uri)
+        medien.append(replace(m, rolle="") if m.rolle == BEGLEITUNG else m)
+    return Material(teile, tuple(medien))
+
+
+__all__ = [
+    "BILD",
+    "LINK",
+    "NAMEN",
+    "PDF",
+    "TON",
+    "VIDEO",
+    "Material",
+    "art",
+    "material_von",
+    "plan_material",
+]

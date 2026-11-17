@@ -375,3 +375,34 @@ def test_info_ansicht_zeigt_uhr_und_timer(umgebung) -> None:
     browser = SimpleNamespace(launch_url=None)
     texte = _texte(uebung_detail(Seite(), state, uebung, browser))
     assert "UHR" in texte and "Zählt als" in texte and "Haltezeit je Satz" in texte
+
+
+async def test_erstes_play_im_plan_zeigt_erst_die_medien_des_plans(umgebung) -> None:
+    """Ben, 17.11.2026 (`docs/plan_medien_reiter.md` §4, b): Medien des Plans „von selbst“ nur
+    vor dem Start — das erste ▶ einer Übung im Plan öffnet ihr Blatt, das nächste startet."""
+    from trainingsapp.core.models import Media
+
+    state, _, _ = umgebung
+    uebung = _wandsitz(state)
+    plan = Plan(
+        name="Rumpf",
+        subject_id=state.profil.id,
+        items=[PlanItem(exercise_id=uebung.id)],
+        media=[Media(uri="https://x.org/einstimmung", title="Einstimmung", zeigen=True)],
+    )
+    state.plaene.speichern(plan)
+    plan = state.plaene.laden(plan.id)
+    seite = Seite()
+    ansicht = plan_view(seite, state, plan)
+    assert any(getattr(x, "data", None) == "plan_medien" for x in ansicht.appbar.actions)
+    _symbol(ansicht, ft.Icons.PLAY_ARROW, "starten").on_click()
+    assert seite.dialoge and "Neu zum Plan" in _texte(seite.dialoge[-1])
+    assert state.einheit is None or not state.einheit.laeuft or state.einheit.timer is None
+    _symbol(ansicht, ft.Icons.PLAY_ARROW, "starten").on_click()
+    e = state.einheit
+    assert e is not None and e.laeuft and e.timer is not None
+    # Takt und Laufleiste der Einheit enden nicht von selbst — nicht hängen lassen
+    offen = [a for a in seite.aufgaben if not a.done()]
+    for a in offen:
+        a.cancel()
+    await asyncio.gather(*offen, return_exceptions=True)

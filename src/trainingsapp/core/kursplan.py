@@ -226,6 +226,7 @@ def grundplan(
             item.kurs_marke = f"{GRUNDLAGE}{n}"
     if paketplan is not None:
         plan.description = paketplan.beschreibung
+        plan.media = list(paketplan.medien)
         plan.timer = copy.deepcopy(paketplan.timer) if paketplan.timer else None
         plan.weiter_automatisch = paketplan.weiter_automatisch
         plan.pause_ohne_timer = paketplan.pause_ohne_timer

@@ -18,19 +18,26 @@ from __future__ import annotations
 
 import functools
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import flet as ft
 
 from trainingsapp.core import videoinfo
+from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.beschreibung import abschnitte
 from trainingsapp.core.bewegungsbild import png_masse
+from trainingsapp.core.links import erlaubt as link_erlaubt
 from trainingsapp.core.medien_uebersicht import (
     ANIMATION,
+    AUS_PLAN,
+    AUS_UEBUNG,
+    PLAN_HINWEIS,
     TEXTART,
     ZIEL_ABLAUF,
     ZIEL_KURS,
+    ZIEL_PLAN,
     ZIEL_PLANUEBUNG,
     ZIEL_UEBUNG,
     Dateiinfo,
@@ -41,6 +48,7 @@ from trainingsapp.core.medien_uebersicht import (
 )
 from trainingsapp.core.models import Exercise, Media, MediaSource, Plan
 from trainingsapp.core.paketmedien import groesse_text, ist_paketmedium
+from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components import editor_reiter as er
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import schliessen
@@ -159,9 +167,219 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
             er.merken(state, ziel, reiter)
         page.run_task(page.push_route, ziel)
 
+    def frisch() -> Plan:
+        return state.plaene.laden(plan.id) or p
+
+    def melden(text: str) -> None:
+        """Erst nach dem Schließen eines Blatts — keine SnackBar über einem Dialog."""
+        page.show_dialog(ft.SnackBar(ft.Text(text)))
+
+    # -- Der Plan selbst (Stufe 2): Beschreibung und Stücke, gespeichert beim Schließen -----
+
+    def beschreibung_blatt() -> None:
+        alt = frisch().description
+        feld = ft.TextField(
+            label="Beschreibung des Plans",
+            value=alt,
+            multiline=True,
+            min_lines=4,
+            max_lines=12,
+            hint_text="## So läuft es\nDreimal die Woche, ein Tag Pause …",
+            data="plan_beschreibung",
+        )
+
+        async def geschlossen(_e: Any = None) -> None:
+            text = (feld.value or "").strip()
+            if text != alt.strip():
+                state.plaene.beschreibung_setzen(plan.id, text)
+                state.neu_zeichnen()
+
+        blatt: ft.BottomSheet = ft.BottomSheet(
+            scrollable=True,
+            on_dismiss=geschlossen,
+            content=blatt_spalte(
+                [
+                    ft.Text("Beschreibung des Plans", size=18, weight=ft.FontWeight.W_600),
+                    ft.Text(
+                        "Steht mit den Medien des Plans am Kopf des Plans und vor dem Start "
+                        "des Workouts. Abschnitte mit „## Name“.",
+                        size=12,
+                        opacity=0.7,
+                    ),
+                    feld,
+                ],
+                [
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.END,
+                        controls=[
+                            ft.TextButton("Fertig", on_click=lambda _e=None: schliessen(blatt))
+                        ],
+                    )
+                ],
+            ),
+        )
+        page.show_dialog(blatt)
+
+    def medium_blatt(uri: str | None) -> None:
+        """Ein Stück des Plans ändern (``uri``) oder einen Link dazu (``None``)."""
+        alt = next((m for m in frisch().media if m.uri == uri), None) if uri else None
+        datei = alt is not None and ist_paketmedium(alt)
+        titel = ft.TextField(label="Titel", value=alt.title if alt else "", data="plan_titel")
+        adresse = ft.TextField(
+            label="Adresse (https://…)",
+            value=alt.uri if alt else "",
+            keyboard_type=ft.KeyboardType.URL,
+            visible=not datei,
+            data="plan_adresse",
+        )
+        zeigen = ft.Switch(
+            label="Vor dem Start beim ersten Mal zeigen",
+            value=bool(alt and alt.zeigen),
+            data="plan_zeigen",
+        )
+        stand = {"weg": False}
+
+        def herausnehmen(_e: Any = None) -> None:
+            stand["weg"] = True
+            schliessen(blatt)
+
+        async def geschlossen(_e: Any = None) -> None:
+            medien = list(frisch().media)
+            if stand["weg"]:
+                neu = [m for m in medien if m.uri != uri]
+            else:
+                ziel = alt.uri if datei and alt is not None else (adresse.value or "").strip()
+                if not ziel:
+                    return  # nichts eingetragen
+                if not datei and not link_erlaubt(ziel):
+                    melden(f"Nur https-Adressen: {ziel}")
+                    return
+                name = (titel.value or "").strip()
+                stueck = (
+                    replace(alt, uri=ziel, title=name, zeigen=bool(zeigen.value), rolle="")
+                    if alt is not None
+                    else Media(uri=ziel, title=name, zeigen=bool(zeigen.value))
+                )
+                if alt is not None:
+                    neu = [stueck if m.uri == uri else m for m in medien]
+                elif all(m.uri != ziel for m in medien):
+                    neu = [*medien, stueck]
+                else:
+                    neu = medien
+            if neu != medien:
+                state.plaene.medien_setzen(plan.id, neu)
+                state.neu_zeichnen()
+
+        knoepfe: list[ft.Control] = []
+        if alt is not None:
+            knoepfe.append(
+                ft.TextButton(
+                    "Herausnehmen",
+                    icon=ft.Icons.DELETE_OUTLINE,
+                    style=ft.ButtonStyle(color=ft.Colors.ERROR),
+                    on_click=herausnehmen,
+                    data="plan_herausnehmen",
+                )
+            )
+        knoepfe.append(ft.TextButton("Fertig", on_click=lambda _e=None: schliessen(blatt)))
+        groesse = dateiinfo(state, alt) if datei and alt is not None else None
+        blatt: ft.BottomSheet = ft.BottomSheet(
+            scrollable=True,
+            on_dismiss=geschlossen,
+            content=blatt_spalte(
+                [
+                    ft.Text(
+                        "Datei am Plan" if datei else ("Link am Plan" if alt else "Link zum Plan"),
+                        size=18,
+                        weight=ft.FontWeight.W_600,
+                    ),
+                    *(
+                        [ft.Text(f"Datei · {groesse_text(groesse.bytes)}", size=12, opacity=0.7)]
+                        if groesse is not None
+                        else []
+                    ),
+                    titel,
+                    adresse,
+                    zeigen,
+                    ft.Text(
+                        "Am Kopf des Plans und vor dem Start des Workouts hinter dem "
+                        "Buch-Symbol; „von selbst“ geht es vor dem ersten Start auf, bis es "
+                        "abgehakt ist.",
+                        size=12,
+                        opacity=0.7,
+                    ),
+                ],
+                [ft.Row(alignment=ft.MainAxisAlignment.END, controls=knoepfe)],
+            ),
+        )
+        page.show_dialog(blatt)
+
+    async def datei_dazu() -> None:
+        """Eine Datei vom Gerät an den Plan: bereinigt in die Ablage (wie „Datei fürs Paket“)."""
+        pfad = await paketdatei.datei_waehlen(page)
+        if pfad is None:
+            return
+        try:
+            name = await paketdatei.ablegen(state, pfad, pfad.suffix)
+        except (NichtBereinigbar, OSError) as fehler:
+            melden(f"Nicht übernommen: {fehler}")
+            return
+        medien = list(frisch().media)
+        if all(m.uri != name for m in medien):
+            state.plaene.medien_setzen(plan.id, [*medien, paketdatei.medium_fuer(name, pfad.stem)])
+        state.neu_zeichnen()
+
+    def dazu_zeile() -> ft.Control:
+        """Unter „Aus diesem Plan“: Beschreibung und Stücke des Plans selbst."""
+        knoepfe: list[ft.Control] = []
+        if not frisch().description.strip():
+            knoepfe.append(
+                ft.TextButton(
+                    "Beschreibung …",
+                    icon=ft.Icons.NOTES,
+                    on_click=lambda _e=None: beschreibung_blatt(),
+                    data="plan_beschreibung_dazu",
+                )
+            )
+        knoepfe.append(
+            ft.PopupMenuButton(
+                content=ft.Row(
+                    tight=True,
+                    spacing=6,
+                    controls=[
+                        ft.Icon(ft.Icons.ADD, size=18, color=ft.Colors.PRIMARY),
+                        ft.Text("Medium zum Plan", color=ft.Colors.PRIMARY),
+                    ],
+                ),
+                tooltip="Ein Link oder eine Datei für den ganzen Plan",
+                items=[
+                    ft.PopupMenuItem(
+                        content="Link …",
+                        icon=ft.Icons.ADD_LINK,
+                        on_click=lambda _e=None: medium_blatt(None),
+                    ),
+                    ft.PopupMenuItem(
+                        content="Datei wählen …",
+                        icon=ft.Icons.FOLDER_OPEN_OUTLINED,
+                        on_click=lambda _e=None: page.run_task(datei_dazu),
+                    ),
+                ],
+                data="plan_medium_dazu",
+            )
+        )
+        return ft.Container(
+            padding=ft.Padding.only(left=4, top=2, bottom=2),
+            content=ft.Row(wrap=True, spacing=4, controls=knoepfe),
+        )
+
     def aendern(z: Zeile) -> Any:
-        """Der Stift: dorthin, wo man das Stück ändert — ``None``, wo es keinen Ort gibt."""
+        """Der Stift: dorthin, wo man das Stück ändert — ``None``, wo es keinen Ort gibt. Der
+        Plan selbst wird hier geändert (Stufe 2)."""
         ziel = z.ziel
+        if ziel.art == ZIEL_PLAN:
+            if z.art == TEXTART:
+                return lambda _e=None: beschreibung_blatt()
+            return lambda _e=None, uri=ziel.id: medium_blatt(uri)
         if ziel.art == ZIEL_UEBUNG and ziel.id:
             reiter = {TEXTART: er.UEBUNG, ANIMATION: er.UHR}.get(z.art, er.MATERIAL)
             return lambda _e=None: gehe_zu(f"/uebung/{ziel.id}/bearbeiten", reiter)
@@ -306,6 +524,9 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
         )
 
     def gruppe(g: Gruppe) -> list[ft.Control]:
+        zeilen = [zeile(z) for z in g.zeilen]
+        if g.herkunft == AUS_PLAN:
+            zeilen.append(dazu_zeile())
         return [
             ft.Container(
                 padding=ft.Padding.only(left=4, top=6),
@@ -318,8 +539,14 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
                     ],
                 ),
             ),
-            karte(*(zeile(z) for z in g.zeilen), padding=4, abstand=0),
+            karte(*zeilen, padding=4, abstand=0),
         ]
+
+    # „Aus diesem Plan“ steht immer da — dort kommen Beschreibung und Medien des Plans dazu
+    gruppen = list(ue.gruppen)
+    if all(g.herkunft != AUS_PLAN for g in gruppen):
+        stelle = 1 if gruppen and gruppen[0].herkunft == AUS_UEBUNG else 0
+        gruppen.insert(stelle, Gruppe(AUS_PLAN, "AUS DIESEM PLAN", PLAN_HINWEIS, ()))
 
     kopf = ft.Row(
         spacing=8,
@@ -335,18 +562,18 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
                 opacity=0.65,
             )
         )
-    for g in ue.gruppen:
-        inhalt.extend(gruppe(g))
     if not ue.gruppen:
         inhalt.append(
             ft.Text(
                 "Keine Übung dieses Plans bringt Medien mit, und im Plan steht keine Anweisung. "
                 "Links, Dateien und Anweisungen kommen in „Übung bearbeiten“ (gilt überall) oder "
-                "in „Im Plan einstellen“ (gilt nur hier) dazu.",
+                "in „Im Plan einstellen“ (gilt nur hier) dazu — und unten zum Plan selbst.",
                 size=13,
                 opacity=0.75,
             )
         )
+    for g in gruppen:
+        inhalt.extend(gruppe(g))
     return ft.View(
         route=hier,
         appbar=ft.AppBar(

@@ -1,0 +1,12 @@
+-- Medien am Plan selbst (Ben, 17.11.2026, docs/plan_medien_reiter.md §4, P225 Stufe 2: „eine
+-- Übersicht über die Bilder/Videos/Texte/Animationen … dem Plan zugehörig“, b: „ja“).
+--
+-- `plan.media_json`: Stücke des Plans — JSON-Liste wie `plan_item.media_json`
+--   (`core.models.Media.als_dict`: kind, source, uri, title, license, rolle, zeigen, ersetzt).
+--   NULL = keine. Gezeigt am Kopf des Plans und im Start-Bild des Workouts; „von selbst“ nur
+--   vor dem ersten Start. Reist im Paket als `plaene[].medien`.
+--
+-- Fällt der Plan weg (endgültig gelöscht), bleibt die Zeile als Grabstein mit ihrem
+-- `media_json` stehen — die Ablage räumt die Dateien darum nicht weg (Ben, d: „ok“, sie gehen
+-- in die private Ablage zurück; zeigen kann sie erst die private Ablage, plan_medienrollen M3).
+ALTER TABLE plan ADD COLUMN media_json TEXT;

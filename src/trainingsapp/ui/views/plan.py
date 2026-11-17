@@ -144,7 +144,7 @@ from trainingsapp.ui.components.dialoge import Nachher, obersten_schliessen, sch
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import ohne_auto_update, sicher
 from trainingsapp.ui.components.linkvideo import alle_laden, videolinks
-from trainingsapp.ui.components.material import material_blatt, material_knopf
+from trainingsapp.ui.components.material import material_blatt, material_knopf, plan_knopf
 from trainingsapp.ui.components.modus_wahl import LISTE, modus_wahl
 from trainingsapp.ui.components.neu_laden import herkunft, neu_laden_blatt
 from trainingsapp.ui.components.plan_reiter import plan_reiter
@@ -2932,7 +2932,8 @@ def plan_view(
         # Videos hinter Links im ganzen Plan (Stufe 7, Ben 17.11.2026: „Kurse/Pläne sollen als
         # Ganzes gedownloadet werden können“) — Planübungen und ihre Übungen
         videos = videolinks(
-            [m for i in plan.items for m in i.media]
+            list(plan.media)  # die Medien des Plans selbst (Migration 069)
+            + [m for i in plan.items for m in i.media]
             + [m for i in plan.items if (u := katalog.get(i.exercise_id)) for m in u.media]
         )
         if videos and not bearbeiten:
@@ -2945,6 +2946,10 @@ def plan_view(
                     data="videos_laden",
                 ),
             )
+        # Medien des Plans selbst, dezent am Kopf (Ben, 17.11.2026, `docs/plan_medien_reiter.md`
+        # §4) — nur beim Üben; bearbeitet wird im Reiter „Medien“
+        if not bearbeiten and (knopf := plan_knopf(page, state, plan)) is not None:
+            aktionen.insert(0, knopf)
 
     ansicht = ft.View(
         route=route,

@@ -361,6 +361,10 @@ def uhr_teile(
             # Blatt, die Uhr startet beim nächsten ▶
             from trainingsapp.ui.components import material
 
+            # Erst der Plan (Ben, 17.11.2026, `docs/plan_medien_reiter.md` §4: „von selbst nur
+            # vor dem Start“), dann die Übung — je ein ▶
+            if plan is not None and material.plan_neu_zeigen(page, state, plan):
+                return
             if material.neu_zeigen(page, state, uebung, item):
                 return
             # „Zuletzt gestartet“ nur, wenn es **nicht** die eingestellte Uhr ist: Wer die

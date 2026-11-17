@@ -213,7 +213,11 @@ def workout_view(
             _log.exception("Material des Workout-Schritts nicht gezeigt")
 
     def starten(fort: ab.Fortsetzung | None = None) -> None:
-        """Los — ``fort``: dort weiter, wo das Workout heute vorzeitig endete (P166)."""
+        """Los — ``fort``: dort weiter, wo das Workout heute vorzeitig endete (P166). Hat der
+        Plan selbst eine Erklärung, die sich beim ersten Mal zeigt, kommt erst ihr Blatt; der
+        nächste Tipp startet (Ben, 17.11.2026, `docs/plan_medien_reiter.md` §4)."""
+        if material.plan_neu_zeigen(page, state, plan):
+            return
         extra = {"erste": fort.bei, "vorher": fort.vorher or None} if fort is not None else {}
         try:
             plan_ablauf.starten(page, state, plan, **optionen(), **extra)
@@ -1838,6 +1842,12 @@ def workout_view(
         appbar=ft.AppBar(
             title=ft.Text(f"{plan.name} · Workout"),
             actions=[
+                # Medien des Plans selbst — nur vor dem Lauf (Ben, 17.11.2026, §4)
+                *(
+                    [k]
+                    if not im_lauf and (k := material.plan_knopf(page, state, plan)) is not None
+                    else []
+                ),
                 *([] if im_lauf else [timer_knopf(page, state, "workout")]),
                 info_knopf(page, "Workout", WORKOUT_MD),
             ],

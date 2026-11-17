@@ -83,6 +83,13 @@ ZIEL_ABLAUF: Final = "ablauf"
 #: das Kapitel eines Kurses (``id``: der Kurs, ``kapitel``)
 ZIEL_KURS: Final = "kurs"
 
+#: Wo Beschreibung und Medien des Plans selbst angeboten werden (Stufe 2)
+AM_PLAN: Final = "am Plan · vor dem Start"
+#: Der Satz unter „Aus diesem Plan“
+PLAN_HINWEIS: Final = (
+    "Gilt nur hier — die Planübungen ändert „Im Plan einstellen“, den Plan selbst der Stift hier."
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Ziel:
@@ -395,6 +402,8 @@ def _aus_uebungen(bau: _Bau) -> list[Zeile]:
 
 
 def _aus_plan(bau: _Bau) -> list[Zeile]:
+    """Der Plan selbst (Beschreibung, Medien — Stufe 2, gezeigt am Kopf des Plans und im
+    Start-Bild), dann je Planübung Anweisungen und Stücke."""
     zeilen: list[Zeile] = []
     plan_teile = [a for a in abschnitte(bau.plan.description) if not a.leer]
     if plan_teile:
@@ -402,12 +411,15 @@ def _aus_plan(bau: _Bau) -> list[Zeile]:
             Zeile(
                 art=TEXTART,
                 titel="Beschreibung des Plans",
-                unter="Text",
-                wo="wird beim Üben noch nicht gezeigt",
+                unter="Text" if len(plan_teile) == 1 else f"Text · {len(plan_teile)} Abschnitte",
+                wo=AM_PLAN,
                 ziel=Ziel(ZIEL_PLAN),
                 text=bau.plan.description,
             )
         )
+    for m in bau.plan.media:
+        if m.uri and m.source != MediaSource.LOCAL:
+            zeilen.append(bau.medium_zeile(m, AM_PLAN, Ziel(ZIEL_PLAN, m.uri)))
     for item in bau.plan.items:
         u = bau.uebungen.get(item.exercise_id)
         ziel = Ziel(ZIEL_PLANUEBUNG, item.id)
@@ -551,14 +563,7 @@ def uebersicht(
             )
         )
     if zeilen := _aus_plan(bau):
-        gruppen.append(
-            Gruppe(
-                AUS_PLAN,
-                "AUS DIESEM PLAN",
-                "Gilt nur hier — geändert in „Im Plan einstellen“.",
-                tuple(zeilen),
-            )
-        )
+        gruppen.append(Gruppe(AUS_PLAN, "AUS DIESEM PLAN", PLAN_HINWEIS, tuple(zeilen)))
     kurs_wege: dict[str, list[Zeile]] = {}
     workout: list[Zeile] = []
     if plan.ablauf.an:
@@ -605,11 +610,13 @@ def uebersicht(
 
 
 __all__ = [
+    "AM_PLAN",
     "ANIMATION",
     "AUS_KURS",
     "AUS_PLAN",
     "AUS_UEBUNG",
     "IM_WORKOUT",
+    "PLAN_HINWEIS",
     "SPIELRAUM",
     "TEXTART",
     "ZIEL_ABLAUF",

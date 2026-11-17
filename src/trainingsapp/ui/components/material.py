@@ -25,8 +25,8 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.material import Material, material_von
-from trainingsapp.core.models import Exercise, Media, PlanItem
+from trainingsapp.core.material import Material, material_von, plan_material
+from trainingsapp.core.models import Exercise, Media, Plan, PlanItem
 from trainingsapp.data.material import MaterialRepo
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.blatt import blatt_spalte
@@ -257,4 +257,137 @@ def material_blatt(
     return blatt
 
 
-__all__ = ["gesehen", "gesehen_setzen", "material_blatt", "material_knopf", "neu_zeigen"]
+# -- Medien des Plans selbst (Ben, 17.11.2026, `docs/plan_medien_reiter.md` §4) ---------------
+
+
+def plan_neu_zeigen(page: Any, state: Any, plan: Plan) -> bool:
+    """**Vor dem ersten Start** (erstes ▶ einer Übung, „Workout starten“): Hat der Plan eine
+    Erklärung, die sich beim ersten Mal von selbst zeigt und noch nicht abgehakt ist, geht das
+    Blatt auf — ``True``, gestartet wird erst beim nächsten Tipp (wie bei der Übung, P200). Nie
+    beim Aufbau einer Ansicht (Geister-Dialog), nie im Lauf."""
+    m = plan_material(plan)
+    schon = _angeboten(state)
+    neu = [x for x in m.neu(gesehen(state)) if x.uri not in schon]
+    if not neu:
+        return False
+    schon.update(x.uri for x in neu)
+    page.show_dialog(plan_blatt(page, state, plan, m, neu=tuple(neu)))
+    return True
+
+
+def plan_knopf(page: Any, state: Any, plan: Plan) -> ft.Control | None:
+    """Das Buch-Symbol am Kopf des Plans und im Start-Bild des Workouts — dezent, gefüllt und in
+    der Akzentfarbe, solange etwas neu ist. ``None``, wenn der Plan selbst nichts hat."""
+    m = plan_material(plan)
+    if m.leer:
+        return None
+    neu = bool(m.neu(gesehen(state)))
+    hilfe = f"Medien zum Plan: {m.kurztext()}"
+    return ft.IconButton(
+        ft.Icons.MENU_BOOK if neu else ft.Icons.MENU_BOOK_OUTLINED,
+        icon_color=ft.Colors.PRIMARY if neu else None,
+        tooltip=f"Neu — {hilfe}" if neu else hilfe,
+        on_click=lambda _e=None: page.show_dialog(plan_blatt(page, state, plan, m)),
+        data="plan_medien",
+    )
+
+
+def plan_blatt(
+    page: Any, state: Any, plan: Plan, m: Material | None = None, *, neu: tuple[Media, ...] = ()
+) -> ft.BottomSheet:
+    """Das Blatt mit der Beschreibung und den Stücken des Plans — ohne Uhr (es läuft noch
+    nichts). Eine Erklärung hakt sich beim Öffnen ab wie beim Üben; eine Paketdatei geht erst
+    auf, wenn das Blatt zu ist (Dialoge über einem Neuaufbau verwaisen)."""
+    m = m if m is not None else plan_material(plan)
+    nachher = Nachher()
+
+    def uebergeben(gehen: Callable[[], Awaitable[None]]) -> None:
+        nachher.danach(gehen)
+        schliessen(blatt)
+
+    inhalt: list[ft.Control] = [
+        ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Icon(ft.Icons.MENU_BOOK_OUTLINED),
+                ft.Text(
+                    "Neu zum Plan" if neu else "Medien zum Plan",
+                    size=18,
+                    weight=ft.FontWeight.W_600,
+                    expand=True,
+                ),
+                ft.Text(plan.name, size=13, opacity=0.7),
+            ],
+        )
+    ]
+    for a in m.abschnitte:
+        if a.name:
+            inhalt.append(ft.Text(a.name, size=13, weight=ft.FontWeight.W_600, opacity=0.8))
+        if a.text:
+            inhalt.append(ft.Text(a.text, selectable=True))
+    abgehakt = gesehen(state)
+
+    def stueck(x: Media) -> ft.Control:
+        haken = ft.Checkbox(
+            value=x.uri in abgehakt,
+            tooltip="Gesehen — zeigt sich nicht mehr von selbst",
+            data=("gesehen", x.uri),
+        )
+
+        def umstellen(e: ft.Event[ft.Checkbox]) -> None:
+            gesehen_setzen(state, x.uri, bool(e.control.value))
+
+        def geoeffnet() -> None:
+            gesehen_setzen(state, x.uri, True)
+            haken.value = True
+            with contextlib.suppress(Exception):
+                haken.update()
+
+        haken.on_change = umstellen
+        return ft.Row(
+            spacing=0,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Container(
+                    expand=True,
+                    content=medium_zeile(
+                        page, state, x, uebergeben=uebergeben, beim_oeffnen=geoeffnet
+                    ),
+                ),
+                haken,
+            ],
+        )
+
+    vorn = [x for x in m.medien if x in neu]
+    inhalt.extend(stueck(x) for x in vorn)
+    inhalt.extend(stueck(x) for x in m.medien if x not in neu)
+
+    blatt: ft.BottomSheet = ft.BottomSheet(
+        scrollable=True,
+        on_dismiss=nachher.bei_schliessen,
+        content=blatt_spalte(
+            inhalt,
+            [
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.END,
+                    controls=[
+                        ft.TextButton("Schließen", on_click=lambda _e=None: schliessen(blatt))
+                    ],
+                )
+            ],
+        ),
+    )
+    return blatt
+
+
+__all__ = [
+    "gesehen",
+    "gesehen_setzen",
+    "material_blatt",
+    "material_knopf",
+    "neu_zeigen",
+    "plan_blatt",
+    "plan_knopf",
+    "plan_neu_zeigen",
+]

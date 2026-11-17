@@ -322,6 +322,9 @@ def medienlisten(roh: Mapping[str, Any]) -> Iterator[list[Any]]:
 
     def aus_plaenen(plaene: Any) -> Iterator[list[Any]]:
         for pl in plaene if isinstance(plaene, list) else []:
+            # die Medien des Plans selbst (Migration 069, `docs/plan_medien_reiter.md` §4)
+            if isinstance(pl, dict) and isinstance(pl.get("medien"), list):
+                yield pl["medien"]
             for pe in (pl.get("uebungen") if isinstance(pl, dict) else None) or []:
                 if isinstance(pe, dict) and isinstance(pe.get("medien"), list):
                     yield pe["medien"]
@@ -525,6 +528,7 @@ def export_schreiben(
         def plan_neu(pp: PaketPlan) -> PaketPlan:
             return replace(
                 pp,
+                medien=medien_umbenennen(pp.medien, umbenennung),
                 vorlage=replace(
                     pp.vorlage,
                     items=[

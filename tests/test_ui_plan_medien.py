@@ -189,3 +189,66 @@ def test_weg_mit_text_und_link_zeigt_den_text_und_einen_knopf(page, state) -> No
     assert "Lockerer" in _texte(blatt)
     knopf = _daten(blatt, ("medien_link", TECHNIK))
     assert isinstance(knopf, ft.TextButton) and knopf.on_click is not None
+
+
+def test_plan_selbst_link_dazu_aendern_herausnehmen(page, state) -> None:
+    """Stufe 2: Beschreibung und Stücke des Plans selbst — im Blatt, gespeichert beim Schließen."""
+    _u, plan = _plan(state)
+    basis = f"/plaene/{plan.id}"
+    ansicht = plan_medien_view(page, state, plan, basis)
+    menue = _daten(ansicht, "plan_medium_dazu")
+    menue.items[0].on_click(None)  # „Link …“
+    blatt = page.dialoge[-1]
+    _daten(blatt, "plan_titel").value = "Einstimmung"
+    _daten(blatt, "plan_adresse").value = "https://x.org/einstimmung"
+    _daten(blatt, "plan_zeigen").value = True
+    asyncio.run(blatt.on_dismiss(None))
+    (m,) = state.plaene.laden(plan.id).media
+    assert (m.uri, m.title, m.zeigen) == ("https://x.org/einstimmung", "Einstimmung", True)
+    # Eine Adresse, die die App nicht öffnen darf, kommt nicht dazu — die Meldung erst danach
+    _daten(plan_medien_view(page, state, plan, basis), "plan_medium_dazu").items[0].on_click(None)
+    blatt = page.dialoge[-1]
+    _daten(blatt, "plan_adresse").value = "http://x.org/unsicher"
+    asyncio.run(blatt.on_dismiss(None))
+    assert isinstance(page.dialoge[-1], ft.SnackBar) and len(state.plaene.laden(plan.id).media) == 1
+    # Ändern und herausnehmen über den Stift der Zeile
+    ansicht = plan_medien_view(page, state, plan, basis)
+    assert "am Plan · vor dem Start" in _texte(ansicht)
+    _daten(ansicht, ("medien_aendern", "Einstimmung")).on_click(None)
+    blatt = page.dialoge[-1]
+    _daten(blatt, "plan_herausnehmen").on_click(None)
+    asyncio.run(blatt.on_dismiss(None))
+    assert state.plaene.laden(plan.id).media == []
+    # Die Beschreibung
+    ansicht = plan_medien_view(page, state, plan, basis)
+    _daten(ansicht, "plan_beschreibung_dazu").on_click(None)
+    blatt = page.dialoge[-1]
+    _daten(blatt, "plan_beschreibung").value = "## So läuft es\nDreimal die Woche"
+    asyncio.run(blatt.on_dismiss(None))
+    assert state.plaene.laden(plan.id).description == "## So läuft es\nDreimal die Woche"
+
+
+def test_medien_des_plans_vor_dem_ersten_start(page, state) -> None:
+    """Das Blatt geht vor dem ersten Start auf (einmal je Sitzung, bis abgehakt); der Knopf am
+    Kopf ist da, solange der Plan etwas hat."""
+    from trainingsapp.ui.components import material
+
+    _u, plan = _plan(state)
+    assert material.plan_knopf(page, state, plan) is None
+    assert material.plan_neu_zeigen(page, state, plan) is False
+    state.plaene.medien_setzen(
+        plan.id, [Media(uri="https://x.org/einstimmung", title="Einstimmung", zeigen=True)]
+    )
+    plan = state.plaene.laden(plan.id)
+    knopf = material.plan_knopf(page, state, plan)
+    assert knopf is not None and knopf.tooltip.startswith("Neu — Medien zum Plan")
+    assert material.plan_neu_zeigen(page, state, plan) is True
+    blatt = page.dialoge[-1]
+    assert "Neu zum Plan" in _texte(blatt) and "Beine" in _texte(blatt)
+    # einmal je Sitzung — der nächste Tipp startet
+    assert material.plan_neu_zeigen(page, state, plan) is False
+    haken = _daten(blatt, ("gesehen", "https://x.org/einstimmung"))
+    haken.on_change(SimpleNamespace(control=SimpleNamespace(value=True)))
+    state.material_angeboten = set()  # neue Sitzung: abgehakt kommt nicht wieder
+    assert material.plan_neu_zeigen(page, state, plan) is False
+    assert material.plan_knopf(page, state, plan).icon == ft.Icons.MENU_BOOK_OUTLINED

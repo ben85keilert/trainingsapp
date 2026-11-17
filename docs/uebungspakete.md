@@ -460,7 +460,13 @@ Kapitel-Vorlage (seit 8.11.2026 auch **`bedingung` je Planübung**, `docs/plan_w
 zweig = "A"…"D", dann, sonst, wege = [{ ziel, text }] }` — `dann`, `sonst` und `wege[].ziel` als
 **Position** `"#n"` der Planübung im Plan (auch die eigene: Schleife), der Import übersetzt sie
 in IDs; `skala` ist eine Selbsteinschätzung ab `n`; P97), dazu `timer` (Plan-Timer),
-`weiter_automatisch` (seit Migration 043 = Übergang **hart**), `pause_ohne_timer`.
+`weiter_automatisch` (seit Migration 043 = Übergang **hart**), `pause_ohne_timer` und — seit
+17.11.2026 (`docs/plan_medien_reiter.md` §4, Migration 069) — **`medien` am Plan selbst**: eine
+Liste wie `media` eines Kapitels (`{ uri, title, kind, source, license, zeigen }`, auch
+Paketdateien), gezeigt am Kopf des Plans und im Start-Bild des Workouts, `zeigen` = vor dem
+ersten Start von selbst. Eine Begleitung gibt es am Plan nicht — `rolle = "begleitung"` liest
+die App als Erklärung. Im Drei-Wege-Abgleich ein Feld (hat die Person die Liste geändert,
+bleibt ihre). Ältere Apps übergehen das Feld (keine neue Formatversion).
 
 **Übungen anderer Pakete** (V1, Ben 17.11.2026, `docs/plan_paketverweise.md`): `uebung =
 "kniebeuge", paket = "Standard"` — an jeder Planübung, auch in Kapitelplänen und im

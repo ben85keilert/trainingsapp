@@ -636,6 +636,17 @@ def _tabelle_lesen(text: str | None) -> dict[str, Any] | None:
     return wert if isinstance(wert, dict) else None
 
 
+def _medien_json(medien: list[Media]) -> str | None:
+    """Medien als JSON wie im Paket — ``None`` ohne (Plan und Planübung, Migration 046/069).
+
+    >>> _medien_json([]) is None, _medien_json([Media(uri="https://x.org/v")])[:9]
+    (True, '[{"kind":')
+    """
+    if not medien:
+        return None
+    return json.dumps([m.als_dict() for m in medien], ensure_ascii=False)
+
+
 def _json_lesen(text: str | None, vorgabe: Any) -> Any:
     """Eine JSON-Spalte — Kaputtes oder ein anderer Typ als die Vorgabe wird zur Vorgabe.
 
@@ -1060,8 +1071,8 @@ class PlanRepo:
                                   active, weekdays_json, course_chapter_id, timer_json,
                                   auto_next, pause_no_timer, package_id, package_key,
                                   package_standard_json, workout, uebergang_hart, takt_json,
-                                  ablauf_json, anpassung_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  ablauf_json, anpassung_json, media_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
@@ -1081,6 +1092,7 @@ class PlanRepo:
                     takt_json = excluded.takt_json,
                     ablauf_json = excluded.ablauf_json,
                     anpassung_json = excluded.anpassung_json,
+                    media_json = excluded.media_json,
                     revision = revision + 1
                 """,
                 (
@@ -1106,6 +1118,7 @@ class PlanRepo:
                     _takt_json(plan.takt) if plan.takt is not None else None,
                     ablauf_json,
                     json.dumps(plan.anpassung, ensure_ascii=False) if plan.anpassung else None,
+                    _medien_json(plan.media),
                 ),
             )
             # Versteckte bleiben stehen: Übungen im Papierkorb und aus deaktivierten
@@ -1360,6 +1373,19 @@ class PlanRepo:
                 "UPDATE plan SET weekdays_json = ? WHERE id = ?", (json.dumps(tage), plan_id)
             )
             self._beruehrt(plan_id)
+
+    def medien_setzen(self, plan_id: str, medien: list[Media]) -> None:
+        """Nur die Medien des Plans (Migration 069, Reiter „Medien“) — der Rest bleibt, wie er
+        ist; ein Paketplan gilt danach als von der Person geändert (Drei-Wege-Abgleich)."""
+        self.con.execute(
+            "UPDATE plan SET media_json = ? WHERE id = ?", (_medien_json(medien), plan_id)
+        )
+        self._beruehrt(plan_id)
+
+    def beschreibung_setzen(self, plan_id: str, text: str) -> None:
+        """Nur die Beschreibung des Plans (Abschnitte, Reiter „Medien“)."""
+        self.con.execute("UPDATE plan SET description = ? WHERE id = ?", (text.strip(), plan_id))
+        self._beruehrt(plan_id)
 
     def loeschen(self, plan_id: str) -> None:
         """In den Papierkorb: Sitzungen zeigen weiter auf den Plan, er taucht nur nicht auf."""
@@ -1671,9 +1697,7 @@ class PlanRepo:
                 (
                     item.beiname.strip(),
                     item.description.strip(),
-                    json.dumps([m.als_dict() for m in item.media], ensure_ascii=False)
-                    if item.media
-                    else None,
+                    _medien_json(item.media),
                     item.id,
                 ),
             )
@@ -1810,6 +1834,7 @@ class PlanRepo:
             if r["course_run_ended_at"]
             else None,
             kurs_id=r["course_id"],
+            media=[m for roh in _json_lesen(r["media_json"], []) if (m := medium_aus_dict(roh))],
             timer=_timer_lesen(self.con, r["timer_json"], {}, bibliothek) or None,
             weiter_automatisch=bool(r["auto_next"]),
             pause_ohne_timer=bool(r["pause_no_timer"]),

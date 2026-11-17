@@ -1916,6 +1916,7 @@ def _plan_aus_paketplan(
         id=plan_id(paket_id, pp.key, subject_id),
         name=pp.vorlage.name,
         description=pp.beschreibung,
+        media=list(pp.medien),
         subject_id=subject_id,
         wochentage=list(pp.vorlage.wochentage),
         anpassung=dict(pp.vorlage.anpassung) if pp.vorlage.anpassung else None,

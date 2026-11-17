@@ -545,7 +545,10 @@ PLAN_MEDIEN_MD = """\
 
 - **Aus den Übungen** — was eine Übung überall mitbringt: ihre Beschreibung (im „i“), Links
   und Dateien (beim Üben hinter dem Buch-Symbol), das Bild der Bewegung (im Fokus).
-- **Aus diesem Plan** — was nur hier gilt: die Anweisungen und Stücke der Planübungen.
+- **Aus diesem Plan** — was nur hier gilt: die Anweisungen und Stücke der Planübungen und, was
+  am Plan selbst steht: eine Beschreibung, Links und Dateien. Die kommen hier dazu („Medium zum
+  Plan“) und stehen beim Üben hinter dem Buch-Symbol am Kopf des Plans und vor dem Start des
+  Workouts; „Vor dem Start beim ersten Mal zeigen“ öffnet sie beim ersten Start von selbst.
 - **Im Workout** — der Inhalt an einem Weg; er geht auf, wenn der Weg frei ist.
 - **Aus dem Kurs** — Texte und Medien der Kapitel, die du schon erreicht hast.
 

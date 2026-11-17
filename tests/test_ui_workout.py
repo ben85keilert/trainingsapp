@@ -371,3 +371,28 @@ def test_workout_plan_schalter_und_als_plan(tmp_path, monkeypatch) -> None:
         assert plan.id not in state.plan_als_plan
     finally:
         state.schliessen()
+
+
+async def test_workout_start_zeigt_erst_die_medien_des_plans(umgebung) -> None:
+    """Ben, 17.11.2026 (`docs/plan_medien_reiter.md` §4, b): Medien des Plans „von selbst“ nur
+    vor dem Start — „Workout starten“ öffnet erst ihr Blatt, der nächste Tipp startet. Der
+    Knopf steht im Start-Bild, im Lauf nicht."""
+    state, _uhr, _gurt = umgebung
+    plan = _plan(state)
+    state.plaene.medien_setzen(plan.id, [Media(uri=TECHNIK, title="Einstimmung", zeigen=True)])
+    plan = state.plaene.laden(plan.id)
+    route = f"/plan/{plan.id}/workout"
+    seite = Seite()
+    seite.route = route
+    ansicht = workout_view(seite, state, plan, route=route)
+    assert any(getattr(x, "data", None) == "plan_medien" for x in ansicht.appbar.actions)
+    _knopf(ansicht, "Workout starten").on_click()
+    (blatt,) = _blaetter(seite)
+    assert "Neu zum Plan" in _texte(blatt)
+    assert plan_ablauf.laufender(state, plan.id) is None
+    _knopf(ansicht, "Workout starten").on_click()
+    await ruhe()
+    assert plan_ablauf.laufender(state, plan.id) is not None
+    laufend = workout_view(seite, state, plan, route=route)
+    assert not any(getattr(x, "data", None) == "plan_medien" for x in laufend.appbar.actions)
+    await _aufraeumen(seite)

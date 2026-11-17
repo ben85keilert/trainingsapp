@@ -31,6 +31,9 @@ _ABFRAGEN: Final = (
     "SELECT uri FROM exercise_media WHERE uri LIKE 'medien/%'",
     "SELECT package_standard_json FROM exercise WHERE package_standard_json LIKE '%medien/%'",
     "SELECT media_json FROM plan_item WHERE media_json LIKE '%medien/%'",
+    # die Medien des Plans selbst (Migration 069) — auch eines endgültig gelöschten: seine Zeile
+    # bleibt als Grabstein, die Dateien bleiben privat auf dem Gerät (P225 d)
+    "SELECT media_json FROM plan WHERE media_json LIKE '%medien/%'",
     "SELECT package_standard_json FROM plan WHERE package_standard_json LIKE '%medien/%'",
     "SELECT plans_json FROM package WHERE plans_json LIKE '%medien/%'",
     "SELECT package_standard_json FROM course WHERE package_standard_json LIKE '%medien/%'",
@@ -48,6 +51,7 @@ _LINK_ABFRAGEN: Final = (
     "SELECT 1 FROM exercise WHERE instr(package_standard_json, ?1) LIMIT 1",
     "SELECT 1 FROM exercise_addon WHERE instr(data_json, ?1) LIMIT 1",
     "SELECT 1 FROM plan_item WHERE instr(media_json, ?1) LIMIT 1",
+    "SELECT 1 FROM plan WHERE instr(media_json, ?1) LIMIT 1",
     "SELECT 1 FROM plan WHERE instr(package_standard_json, ?1) LIMIT 1",
     "SELECT 1 FROM package WHERE instr(plans_json, ?1) LIMIT 1",
     "SELECT 1 FROM course WHERE instr(package_standard_json, ?1) LIMIT 1",

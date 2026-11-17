@@ -21,9 +21,10 @@ Ben, 17.11.2026, in mehreren Schritten:
   anschauen kann und neu erstellen, falls es doch zu unscharf ist.“ — dann: „Finde gute
   Lösungen und arbeite das selbständig aus.“
 
-**Stand:** Stufe 0 gebaut (17.11.2026), Stufe 1 gebaut (17.11.2026, Gerätetest T148). Stufen 2–3:
-im Bau auf dem Zweig `worktree-medien-reiter` (eigener Worktree, `CLAUDE.md` „Große Änderungen im
-eigenen Worktree“). Skizzen:
+**Stand:** Stufe 0 gebaut (17.11.2026), Stufe 1 gebaut (17.11.2026, Gerätetest T148), Stufe 2
+gebaut (18.11.2026, Gerätetest T149). Stufe 3: im Bau. Gebaut auf dem Zweig
+`worktree-medien-reiter` (eigener Worktree, `CLAUDE.md` „Große Änderungen im eigenen
+Worktree“). Skizzen:
 <https://claude.ai/artifact/CvfAkLSzXyQfip8BMftrWD>. Katalog **P225**.
 
 **Bens Antworten, 17.11.2026 abends** (Fragen aus §6):
@@ -160,19 +161,28 @@ Browser.
 Der Plan bekommt eigene Stücke (Links, Dateien) und seine Beschreibung wird sichtbar: „So läuft
 das Workout“, ein Übersichtsblatt als PDF, ein Video zur Einstimmung.
 
-- **Daten:** `plan.media_json` (nächste freie Migration — vor dem Zusammenführen gegen `main`
-  prüfen), `Plan.media`; im Paket das Feld `medien` am Plan, wie es die Planübung hat. Ob das
-  eine neue Formatversion braucht (heute 7), entscheidet sich am Vertrag
-  (`docs/uebungspakete.md`, `core.pakete.noetige_version`) — beim Bau nachzulesen.
-- **Eintragen:** im Reiter „Medien“, Gruppe „Aus diesem Plan“: „Medium zum Plan“ (Link, Datei
-  wählen, Foto, Video, Fotoauswahl — dieselben Wege wie in den Editoren), je Stück Titel und
-  „vor dem Start beim ersten Mal zeigen“. Eine Begleitung gibt es am Plan nicht (es läuft keine
-  Übung, neben der sie laufen könnte). Das ist dann doch ein Ort zum Einstellen, aber für etwas,
-  das es sonst nirgends gibt.
-- **Zeigen** (Ben, b: „ja“): ein dezenter Knopf „Medien“ (Buch-Symbol) **am Kopf des Plans** und
-  **im Start-Bild des Workouts** — nur, wenn der Plan eine Beschreibung oder Stücke hat. „Beim
-  ersten Mal von selbst“ geht das Blatt **vor dem Start** auf (beim Öffnen des Plans bzw. des
-  Start-Bilds), **nie im Lauf**, einmal je Sitzung, bis es abgehakt ist — wie bei der Übung.
+- **Daten:** `plan.media_json` (Migration 069), `Plan.media`; schmale Setzer
+  `PlanRepo.medien_setzen` und `beschreibung_setzen` (der Rest des Plans bleibt). Im Paket das
+  Feld `plaene[].medien` wie die Medien eines Kapitels (`medien_to_list`/`medien_from_list`) —
+  **keine neue Formatversion**: Ältere Apps übergehen es, wie bei den Medien der Planübung
+  (`docs/uebungspakete.md`). Im Drei-Wege-Abgleich ein Feld (`PLANFELDER`). Mit dem Paket reisen
+  die Dateien (`paketmedien_in`, `medienlisten`, Umbenennen beim Export); ein Kursplan übernimmt
+  sie aus seinem Grundplan.
+- **Eintragen:** im Reiter „Medien“, Gruppe „Aus diesem Plan“ — sie steht immer da: „Beschreibung
+  …“ und „Medium zum Plan“ (**Link …**, **Datei wählen …**), je Stück im Blatt Titel, Adresse,
+  „Vor dem Start beim ersten Mal zeigen“ und „Herausnehmen“; gespeichert beim Schließen. Eine
+  Begleitung gibt es am Plan nicht (es läuft keine Übung daneben) — aus dem Paket wird sie zur
+  Erklärung. **Noch nicht:** Foto, Video und Fotoauswahl direkt an den Plan (das Ziel der Kamera
+  kennt nur Übung und Planübung, `core.anhaenge.Ziel`) — über „Datei wählen …“ geht es.
+- **Zeigen** (Ben, b: „ja“): ein dezenter Knopf (Buch-Symbol) **am Kopf des Plans** und **im
+  Start-Bild des Workouts** — nur, wenn der Plan eine Beschreibung oder Stücke hat; gefüllt und
+  in der Akzentfarbe, solange etwas neu ist (`components/material.plan_knopf`). **„Beim ersten Mal
+  von selbst“ geht das Blatt beim ersten Start auf** — beim ersten ▶ einer Übung des Plans bzw.
+  bei „Workout starten“; der nächste Tipp startet (`plan_neu_zeigen`, wie bei der Übung).
+  **Abweichung vom ersten Entwurf** („beim Öffnen des Plans“): Ein Blatt, das beim Aufbau einer
+  Ansicht aufgeht, bleibt in Flet als Geist stehen (`components/dialoge.py`) — der erste Start
+  ist derselbe Moment „vor dem Start“, nur sicher. **Nie im Lauf**, einmal je Sitzung, bis es
+  abgehakt ist.
 - **Fällt der Plan weg** (Ben, d: „ok“): Seine Dateien gehen nicht verloren. Ein endgültig
   gelöschter Plan bleibt als Grabstein stehen (`PlanRepo.endgueltig_loeschen`), seine
   `media_json` mit ihm — die Ablage räumt Dateien, die er nennt, nicht weg. Sie sind damit
@@ -180,6 +190,12 @@ das Workout“, ein Übersichtsblatt als PDF, ein Video zur Einstimmung.
   kann sie erst die private Ablage (`plan_medienrollen.md` Stufe M3).
 - **Paket:** Drei-Wege-Abgleich wie bei den Medien einer Planübung; jede Datei ohne
   Ortsangaben (`core/bereinigen.py`).
+
+**Gebaut 18.11.2026.** Tests: `tests/test_plan_medien_daten.py` (speichern, Setzer, Ablage auch
+nach dem endgültigen Löschen, ZIP hin und zurück, Abgleich), `tests/test_ui_plan_medien.py`
+(Link dazu, falsche Adresse, Herausnehmen, Beschreibung; Blatt vor dem ersten Start, Knopf),
+`tests/test_ui_uhr.py` (erstes ▶ im Plan), `tests/test_ui_workout.py` („Workout starten“, Knopf
+nur vor dem Lauf). Gerätetest **T149**.
 
 ## 5. Stufe 3 — Verkleinern: grobes Schema, Größe vorher, Original bleibt
 

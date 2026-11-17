@@ -47,7 +47,7 @@ import math
 import re
 import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
@@ -227,11 +227,22 @@ class PaketPlan:
     timer: dict[str, Any] | None = None
     weiter_automatisch: bool = False
     pause_ohne_timer: bool = True
+    #: Medien des Plans selbst (Ben, 17.11.2026, `docs/plan_medien_reiter.md` §4) — wie die
+    #: eines Kapitels; ältere Apps übergehen das Feld (keine neue Formatversion)
+    medien: list[Media] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        """Wie im Paket.
+
+        >>> p = PaketPlan("k", PlanVorlage("Knie"), medien=[Media(uri="https://x.org/v")])
+        >>> PaketPlan.from_dict(p.to_dict()).medien[0].uri
+        'https://x.org/v'
+        """
         d: dict[str, Any] = {"key": self.key, **self.vorlage.to_dict()}
         if self.beschreibung:
             d["beschreibung"] = self.beschreibung
+        if self.medien:
+            d["medien"] = medien_to_list(self.medien)
         if self.timer:
             d["timer"] = dict(self.timer)
         if self.weiter_automatisch:
@@ -258,6 +269,8 @@ class PaketPlan:
             timer=dict(timer) if isinstance(timer, Mapping) and timer else None,
             weiter_automatisch=bool(roh.get("weiter_automatisch", False)),
             pause_ohne_timer=bool(roh.get("pause_ohne_timer", True)),
+            # Eine Begleitung gibt es am Plan nicht (es läuft keine Übung daneben)
+            medien=[replace(m, rolle="") for m in medien_from_list(roh.get("medien"))],
         )
 
 
@@ -335,6 +348,9 @@ PLANFELDER: tuple[str, ...] = (
     "weiter_automatisch",
     "pause_ohne_timer",
     "ablauf",
+    # die Medien des Plans selbst (Migration 069) — als Ganzes: Hat die Person die Liste
+    # geändert, bleibt ihre
+    "medien",
 )
 
 
@@ -432,6 +448,7 @@ def paketplan_aus(plan: Plan, key: str | None = None) -> PaketPlan:
         timer=ohne_verweise(dict(plan.timer)) if plan.timer else None,
         weiter_automatisch=plan.weiter_automatisch,
         pause_ohne_timer=plan.pause_ohne_timer,
+        medien=[m for m in plan.media if m.uri and m.source != MediaSource.LOCAL],
     )
 
 
@@ -1585,7 +1602,9 @@ def paketmedien_in(
     >>> [n[-8:] for n in paketmedien_in([], [k])]
     ['aaaa.mp4']
     """
+    plaene = list(plaene)
     medien: list[Media] = [m for u in uebungen for m in u.media]
+    medien.extend(m for p in plaene for m in p.medien)  # die Medien der Pläne selbst
     vorlagen: list[PlanVorlage] = [p.vorlage for p in plaene]
     for k in kurse:
         if k.kursplan is not None and k.kursplan.vorlage is not None:

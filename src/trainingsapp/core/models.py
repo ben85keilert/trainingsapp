@@ -553,7 +553,12 @@ class PlanItem:
 class Plan:
     id: str = field(default_factory=new_id)
     name: str = ""
+    #: Beschreibung in Abschnitten (`core/beschreibung.py`) — gezeigt mit den Medien des Plans
     description: str = ""
+    #: Medien des Plans selbst (Migration 069, Ben 17.11.2026, `docs/plan_medien_reiter.md` §4):
+    #: Links und Paketdateien, gezeigt am Kopf des Plans und im Start-Bild des Workouts — „von
+    #: selbst“ nur vor dem ersten Start. Keine Begleitung (es läuft keine Übung daneben)
+    media: list[Media] = field(default_factory=list)
     subject_id: str | None = None
     created_at: datetime = field(default_factory=jetzt)
     items: list[PlanItem] = field(default_factory=list)

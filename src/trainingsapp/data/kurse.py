@@ -40,8 +40,10 @@ from typing import Any
 from ..core import kursvorschau
 from ..core.kursbloecke import (
     AUSWAHL,
+    HAND,
     TEST,
     Block,
+    Planwert,
     bloecke_lesen,
     vorlage_anwenden,
     wert_im_test,
@@ -373,7 +375,8 @@ class KursRepo:
         """„Plan anlegen“ in einem Kapitel mit Test oder Auswahl (Ben, 12.11.2026): die
         Vorlagen mit den Testwerten als Ziel und den gewählten Übungen
         (`core.kursbloecke.vorlage_anwenden`). Gibt es die Pläne schon, bleiben sie — wer neu
-        wählen will, beginnt den Kurs von vorn oder ändert den Plan von Hand."""
+        wählen will, beginnt den Kurs von vorn oder ändert den Plan von Hand. Hat die Person
+        den **Wert für den Plan** gewählt (`planwert_setzen`), ist er das Ziel."""
         vorhanden = self.kapitel_plaene(kapitel.id, subject_id)
         if vorhanden:
             return vorhanden
@@ -389,7 +392,10 @@ class KursRepo:
             )
 
         with transaktion(self.con):
-            for vorlage in vorlage_anwenden(kapitel.plaene, kapitel.bloecke, werte, wahl, je_satz):
+            gewaehlt = self.planwerte(kapitel.kurs_id, subject_id, werte)
+            for vorlage in vorlage_anwenden(
+                kapitel.plaene, kapitel.bloecke, werte, wahl, je_satz, gewaehlt
+            ):
                 plan = plan_aus_vorlage(vorlage, kapitel, subject_id, da)
                 if plan.items:
                     plaene.speichern(plan)
@@ -412,8 +418,11 @@ class KursRepo:
                 continue
             for uebung in self._zu_messen(kapitel, block):
                 name = wert_schluessel(block, uebung)
-                if name in gespeichert:  # die Variable geht vor (Migration 065)
-                    ergebnis[name] = gespeichert[name].wert
+                fest = gespeichert.get(name)
+                # die Variable geht vor (Migration 065) — außer sie hält nur die Wahl des
+                # Werts für den Plan und der Testwert schwebt noch (Migration 066)
+                if fest is not None and not fest.schwebt:
+                    ergebnis[name] = fest.wert
                     continue
                 eintrag = eintraege.get(name)
                 wert = wert_im_test(eintrag.result, block.feld) if eintrag is not None else None
@@ -426,31 +435,128 @@ class KursRepo:
     def variablen(self, kurs_id: str, subject_id: str) -> dict[str, Kursvariable]:
         """Was die Tests dieses Kurses für das Profil hinterlassen haben — nach Namen."""
         zeilen = self.con.execute(
-            "SELECT name, value, entry_id, set_at FROM course_variable "
-            "WHERE subject_id = ? AND course_id = ?",
+            "SELECT name, value, entry_id, set_at, wie, plan_value, anteil, plan_set_at, floating "
+            "FROM course_variable WHERE subject_id = ? AND course_id = ?",
             (subject_id, kurs_id),
         ).fetchall()
         return {
             r["name"]: Kursvariable(
-                r["name"], float(r["value"]), r["entry_id"], datetime.fromisoformat(r["set_at"])
+                r["name"],
+                float(r["value"]),
+                r["entry_id"],
+                datetime.fromisoformat(r["set_at"]),
+                wie=r["wie"] or "",
+                hand=float(r["plan_value"]) if r["plan_value"] is not None else None,
+                anteil=float(r["anteil"]) if r["anteil"] is not None else None,
+                wahl_stempel=r["plan_set_at"] or "",
+                schwebt=bool(r["floating"]),
             )
             for r in zeilen
         }
 
     def variable_setzen(
-        self, kurs_id: str, subject_id: str, name: str, wert: float, eintrag_id: str | None = None
+        self,
+        kurs_id: str,
+        subject_id: str,
+        name: str,
+        wert: float,
+        eintrag_id: str | None = None,
+        *,
+        wahl_bleibt: bool = False,
     ) -> None:
         """Ein Test hinterlässt seinen Wert (Ben, 16.11.2026: „Testwert wird als Variable
         gespeichert“) — überschreibt, was unter dem Namen stand („Nochmal“). ``wert``: der Wert
-        im Feld des Tests, ohne Faktor."""
+        im Feld des Tests, ohne Faktor.
+
+        Die Wahl des **Werts für den Plan** (Migration 066) fällt dabei auf die Vorgabe
+        zurück: Ein neuer Test bringt die Karte gleich wieder mit. ``wahl_bleibt``: Der Wert
+        wird nur festgehalten (Abschluss des Kapitels) — die Wahl bleibt."""
+        feste = "value = excluded.value, entry_id = excluded.entry_id, set_at = excluded.set_at"
+        wahl = ", wie = '', plan_value = NULL, anteil = NULL, plan_set_at = NULL"
         with transaktion(self.con):
             self.con.execute(
                 "INSERT INTO course_variable "
                 "(subject_id, course_id, name, value, entry_id, set_at) "
                 "VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(subject_id, course_id, name) DO UPDATE SET "
-                "value = excluded.value, entry_id = excluded.entry_id, set_at = excluded.set_at",
+                + feste
+                + ", floating = 0"
+                + ("" if wahl_bleibt else wahl),
                 (subject_id, kurs_id, name, float(wert), eintrag_id, jetzt().isoformat()),
+            )
+
+    # -- Wert für den Plan (Migration 066, W3; `docs/plan_kurs_ablauf.md` §17) ------------
+
+    def planwerte(
+        self, kurs_id: str | None, subject_id: str, werte: Mapping[str, float]
+    ) -> dict[str, Planwert]:
+        """Je Test (`wert_schluessel`) der **Wert für den Plan**, den die Person gewählt hat
+        — nur Tests mit einer Wahl. ``werte``: die Testwerte, wie sie jetzt gelten
+        (`testwerte`): „ganz“ und „Anteil“ folgen ihnen, „von Hand“ bleibt die Zahl der
+        Person (`Kursvariable.planwert`)."""
+        if not kurs_id:
+            return {}
+        ergebnis: dict[str, Planwert] = {}
+        for name, variable in self.variablen(kurs_id, subject_id).items():
+            gewaehlt = variable.planwert(werte.get(name))
+            if gewaehlt is not None:
+                ergebnis[name] = gewaehlt
+        return ergebnis
+
+    def planwert_setzen(
+        self,
+        kurs_id: str,
+        subject_id: str,
+        name: str,
+        gewaehlt: Planwert,
+        *,
+        test_wert: float,
+        eintrag_id: str | None = None,
+    ) -> None:
+        """Die Person wählt, wie der Wert des Tests ``name`` in den Plan geht (Ben, 17.11.2026:
+        „ganz genommen – prozentual abgeändert – manuell eingegeben“). Am Plan ändert das
+        nichts: Das Ziel kommt über „Plan anlegen“ bzw. die Sammelkarte, auf Tipp.
+
+        Hat der Test noch keine Variable (ein Test ohne Lauf, Kapitel nicht abgeschlossen),
+        entsteht sie hier **schwebend**: Sie hält nur die Wahl, der Testwert bleibt der
+        jüngste Eintrag der Übung. ``test_wert``/``eintrag_id``: was beim Wählen galt."""
+        stempel = jetzt().isoformat()
+        hand = float(gewaehlt.wert) if gewaehlt.wie == HAND else None
+        with transaktion(self.con):
+            self.con.execute(
+                "INSERT INTO course_variable (subject_id, course_id, name, value, entry_id, "
+                "set_at, wie, plan_value, anteil, plan_set_at, floating) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) "
+                "ON CONFLICT(subject_id, course_id, name) DO UPDATE SET "
+                "wie = excluded.wie, plan_value = excluded.plan_value, "
+                "anteil = excluded.anteil, plan_set_at = excluded.plan_set_at",
+                (
+                    subject_id,
+                    kurs_id,
+                    name,
+                    float(test_wert),
+                    eintrag_id,
+                    stempel,
+                    gewaehlt.wie,
+                    hand,
+                    gewaehlt.anteil,
+                    stempel,
+                ),
+            )
+
+    def planwert_loeschen(self, kurs_id: str, subject_id: str, name: str) -> None:
+        """Zurück zur Vorgabe des Kurses: Die Wahl ist weg, er rechnet wieder wie bisher. Eine
+        schwebende Zeile hielt nur die Wahl — sie verschwindet ganz."""
+        with transaktion(self.con):
+            self.con.execute(
+                "DELETE FROM course_variable WHERE subject_id = ? AND course_id = ? "
+                "AND name = ? AND floating = 1",
+                (subject_id, kurs_id, name),
+            )
+            self.con.execute(
+                "UPDATE course_variable SET wie = '', plan_value = NULL, anteil = NULL, "
+                "plan_set_at = NULL WHERE subject_id = ? AND course_id = ? AND name = ?",
+                (subject_id, kurs_id, name),
             )
 
     def _variablen_festhalten(self, kapitel: Kapitel, subject_id: str, seit: datetime) -> None:
@@ -462,10 +568,17 @@ class KursRepo:
         schon = self.variablen(kapitel.kurs_id, subject_id)
         eintraege = self.testeintraege(kapitel, subject_id, seit)
         for name, wert in self.testwerte(kapitel, subject_id, seit).items():
-            if name not in schon:
+            # auch eine schwebende Zeile (sie hielt nur die Wahl des Werts für den Plan): Der
+            # Wert steht jetzt fest, die Wahl bleibt
+            if name not in schon or schon[name].schwebt:
                 eintrag = eintraege.get(name)
                 self.variable_setzen(
-                    kapitel.kurs_id, subject_id, name, wert, eintrag.id if eintrag else None
+                    kapitel.kurs_id,
+                    subject_id,
+                    name,
+                    wert,
+                    eintrag.id if eintrag else None,
+                    wahl_bleibt=True,
                 )
 
     def testeintraege(
@@ -483,7 +596,7 @@ class KursRepo:
                 continue
             for uebung in self._zu_messen(kapitel, block):
                 name = wert_schluessel(block, uebung)
-                if name in gespeichert:
+                if name in gespeichert and not gespeichert[name].schwebt:
                     # Der Eintrag der Variable — nie ein späterer der Übung (P214 a). Gibt es
                     # ihn nicht mehr, bleibt nur der Wert
                     eintrag_id = gespeichert[name].eintrag_id
@@ -814,6 +927,7 @@ class KursRepo:
             feld_von,
             bezug=bloecke,
             zusatz=self._test_ausfuehrung(kurs, subject_id),
+            planwerte=self.planwerte(kurs.id, subject_id, werte),
         )
 
     def plan_uebernehmen(
@@ -859,6 +973,7 @@ class KursRepo:
                 bezug=bloecke,
                 lassen=lassen,
                 zusatz=self._test_ausfuehrung(kurs, subject_id),
+                planwerte=self.planwerte(kurs.id, subject_id, werte),
             )
             if neu != plan:
                 plaene.speichern(neu)
@@ -899,7 +1014,17 @@ class KursRepo:
             kurs, subject_id, plan, wahl
         )
         stelle = next(n for n, kapitel in enumerate(kurs.kapitel) if kapitel.id == dran.id)
-        return kursvorschau.kommt_noch(kurs, plan, stand, gewaehlt, werte, stelle, namen, feld_von)
+        return kursvorschau.kommt_noch(
+            kurs,
+            plan,
+            stand,
+            gewaehlt,
+            werte,
+            stelle,
+            namen,
+            feld_von,
+            self.planwerte(kurs.id, subject_id, werte),
+        )
 
     # -- Kapitelplan neu laden (U2, `docs/plan_paketinhalte.md` §9) ---------------------
 

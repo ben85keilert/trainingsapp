@@ -124,7 +124,17 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   Starten noch Bereitstellen noch Fortsetzen (`core.ablauf.startet_nicht`,
   `ui/plan_ablauf.bereitstellen`); kein Rückfall auf die erste sichtbare Planübung
   (`startknoten`). Reparieren: zurückholen oder „… aus dem Plan nehmen“ an der roten Karte
-  (`views/ablauf.reparatur_knoepfe`).
+  (`views/ablauf.reparatur_knoepfe`). **Die Frage** (Ben, 17.11.2026, §8.13 Punkt 7): Der
+  Punkt eines Knotens liegt bei ihm — ist sein einer Weg ein Rückweg, am Austritt, nie am
+  fernen Griff (`Geometrie.punkte`). Wege einer Frage fragen „Bei welcher Antwort?“ (Bereich
+  der Skala · jede andere; Vorgabe `core.ablauf.antwort_bereich`), ohne „Pflicht“. **Eine
+  Frage kann beides — je Weg** (Ben: „von selbst weiter + Weg vorschlagen“,
+  `Kante.vorschlagen`, Schalter „nur vorschlagen“): Trifft die Antwort einen solchen Weg, geht
+  nichts von selbst — er steht betont mit der Regel des Plans („Bei 7–10 schlägt der Plan
+  vor:“, `core.ablauf.vorschlag_text` — nennt die Regel, deutet die Zahl nie), die Person
+  tippt; ohne den Vermerk wird der Weg sofort gegangen, kein Plan von früher ändert sich. In
+  der Weg-Leiste steht „Entfernen“ ausgeschrieben (Ben: „mach aus x --> entfernen“), im Blatt
+  der Papierkorb.
 
 - **Neue Ereignisse der Zeitleiste** (Ben, 16.11.2026): Wer eines plant, sieht **vorher** in
   `core/einheit.py` nach — `ARTEN` und `DATEN_SCHLUESSEL` sind eine feste Liste, alles andere

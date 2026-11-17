@@ -478,6 +478,12 @@ nach (ohne `start` und ohne diesen Vermerk gilt wie bisher die erste Planübung)
 Ablauf reist als `ablauf = { an = true, ohne_start = true }` und kommt leer an; eine App vor
 dieser Fassung kennt den Schlüssel nicht und liest `{ an = true }` — das Workout folgt dort der
 Liste. Kein neuer Stand der Formatversion.
+**`kanten[].vorschlagen = true`** (Ben, 17.11.2026, `docs/plan_verzweigungen.md` §8.13 Punkt 7)
+— nur an einem Weg **aus einer Frage**: Trifft die Antwort ihn, geht es nicht von selbst
+weiter; er steht als Vorschlag des Plans da (mit seinem `text`), die Person tippt. Ohne den
+Schlüssel wird der Weg sofort gegangen, wie bisher — eine Frage kann Wege beider Art haben.
+Eine App vor dieser Fassung kennt den Schlüssel nicht und geht den Weg sofort. Kein neuer
+Stand der Formatversion.
 
 **Anweisungen je Planübung** (U2, Ben 9.11.2026, `docs/plan_paketinhalte.md` §9, F6) — in
 `plaene[].uebungen[]` und in Kurskapiteln: `beschreibung` (ein Text mit `## Name`-Zeilen wie die

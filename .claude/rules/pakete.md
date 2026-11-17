@@ -75,7 +75,9 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   16.11.2026: `timer`, `takt`, `ziel` = vorgegebene Ausführung, `felder` = frei gewählte
   Parameter, `wie_uebung` — Vorgabe und Überschreiben, `docs/plan_kurs_ablauf.md` §15; Timer und
   Vorgabe „Zeit“ gelten nicht beide; der Takt führt und zählt nicht; **der Testwert ist eine
-  Variable des Kurses**, Migration 065 `course_variable`, gerätelokal); **Bausteine brauchen eine feste
+  Variable des Kurses**, Migration 065 `course_variable`, gerätelokal; der **Wert für den
+  Plan** — ganz · Anteil · von Hand — gehört der Person, Migration 066,
+  `docs/plan_kurs_ablauf.md` §17); **Bausteine brauchen eine feste
   `id`** (sie ist die Marke der Planübung), Verweise zeigen nur auf Bausteine davor —
   `trainingsapp-paket pruefen` (`kursplan_pruefen`) meldet es; eine ältere App lehnt das Paket
   ab (`docs/uebungspakete.md` „Kursplan und Bausteine“). Paketmanager: Jede

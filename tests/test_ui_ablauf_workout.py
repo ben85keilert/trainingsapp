@@ -239,6 +239,92 @@ async def test_frage_im_workout_und_pflicht_wartet(umgebung) -> None:
     assert antworten and antworten[-1].daten["wert"] == 3
 
 
+async def test_frage_geht_von_selbst_weiter_oder_schlaegt_nur_vor(umgebung) -> None:
+    """Ben, 17.11.2026: „mit der Skala Empfehlungen aussprechen — Übung lieber beenden → Ende,
+    oder den Weg zu einer Übung weiterlaufen lassen“ · „Frage soll beides können“. Je Weg:
+    0–6 geht von selbst zurück zur Planke; 7–10 schlägt das Ende nur vor — der Weg steht
+    zuerst und betont, darüber die Regel des Plans, ohne Deutung der Zahl; der andere folgt
+    unter „Oder“ (weich wählbar, hart gesperrt). Vor der Antwort ist keiner wählbar."""
+    state, uhr, gurt = umgebung
+    w = _uebung(state, "Planke", None)
+    plan = Plan(name="Schleife", subject_id=state.profil.id)
+    plan.items = [PlanItem(exercise_id=w.id)]
+    (iw,) = (i.id for i in plan.items)
+    frage = Frage(text="Wie ist die Belastung?")
+    plan.ablauf = Ablauf(
+        True,
+        iw,
+        (
+            Kante(iw, frage.id),
+            Kante(frage.id, iw, ab.SKALA, 0, 6, text="Noch eine Runde"),
+            Kante(frage.id, ab.ENDE, ab.SKALA, 7, text="Für heute reicht es", vorschlagen=True),
+        ),
+        (frage,),
+    )
+    state.plaene.speichern(plan)
+    plan = state.plaene.laden(plan.id)
+    seite = Seite()
+    route = f"/plan/{plan.id}/workout"
+    _knoepfe(workout_view(seite, state, plan, route=route))["Workout starten"].on_click()
+    teil = plan_ablauf.laufender(state, plan.id)[1]
+
+    async def zur_frage() -> None:
+        await _sekunden(state, uhr, gurt, 3)
+        _knoepfe(workout_view(seite, state, plan, route=route))["Fertig"].on_click()
+        await _sekunden(state, uhr, gurt, 1)
+        assert teil.schritt.frage == frage
+
+    def wege(bild) -> list[tuple[str, str, bool, bool]]:
+        """Die Wege in der Reihenfolge am Bildschirm: Ziel, „vorschlag“, betont, gesperrt."""
+        return [
+            (x.data[1], x.data[2], isinstance(x, ft.FilledButton), bool(x.disabled))
+            for x in _alle(bild)
+            if isinstance(x, ft.FilledButton | ft.FilledTonalButton)
+            and isinstance(x.data, tuple)
+            and x.data[:1] == ("weg",)
+        ]
+
+    def antwort(bild, wert: int) -> None:
+        next(
+            c for c in _alle(bild) if isinstance(c, ft.Chip) and c.data == ("skala", wert)
+        ).on_select()
+
+    await zur_frage()
+    # Vor der Antwort: kein Weg wählbar, kein Satz
+    vorher = workout_view(seite, state, plan, route=route)
+    assert wege(vorher) == [(iw, "", False, True), (ab.ENDE, "", False, True)]
+    assert not [t for t in _texte(vorher) if "schlägt der Plan vor" in t]
+    # Antwort 3: der Weg „0–6“ geht von selbst — zurück zur Planke, zweiter Durchlauf
+    antwort(vorher, 3)
+    await _sekunden(state, uhr, gurt, 1)
+    assert teil.schritt.frage is None and teil.schritt.name == "Planke" and teil.durchlauf == 2
+    await zur_frage()
+    # Antwort 8: nichts geht von selbst — der Weg zum Ende steht zuerst, als Vorschlag
+    antwort(workout_view(seite, state, plan, route=route), 8)
+    await _sekunden(state, uhr, gurt, 2)
+    assert teil.schritt.frage == frage and teil.skala_wert == 8 and teil.empfiehlt
+    weich = workout_view(seite, state, plan, route=route)
+    texte = _texte(weich)
+    assert "Bei 7–10 schlägt der Plan vor:" in texte and "Oder:" in texte
+    assert texte.index("Bei 7–10 schlägt der Plan vor:") < texte.index("Oder:")
+    assert wege(weich) == [(ab.ENDE, "vorschlag", True, False), (iw, "", False, False)]
+    assert "Workout beenden — Für heute reicht es" in _knoepfe(weich)
+    gewaehlt = [c.data[1] for c in _alle(weich) if isinstance(c, ft.Chip) and c.selected]
+    assert gewaehlt == [8]  # die Antwort bleibt sichtbar
+    # Hart: der andere Weg ist nicht erfüllt — gesperrt; der Vorschlag bleibt zu tippen
+    teil.uebergang_setzen("hart")
+    await _sekunden(state, uhr, gurt, 1)
+    assert teil.schritt.frage == frage  # auch hart geht ein Vorschlag nicht von selbst
+    hart = workout_view(seite, state, plan, route=route)
+    assert wege(hart) == [(ab.ENDE, "vorschlag", True, False), (iw, "", False, True)]
+    # Der Vorschlag getippt: das Workout endet — die Antwort steht in der Zeitleiste
+    _knoepfe(hart)["Workout beenden — Für heute reicht es"].on_click()
+    await _sekunden(state, uhr, gurt, 1)
+    antworten = [x for x in state.einheit.ereignisse if (x.quelle, x.art) == ("plan", "antwort")]
+    assert [x.daten["wert"] for x in antworten] == [3, 8]
+    assert "Workout fertig" in _texte(workout_view(seite, state, plan, route=route))
+
+
 def test_ablaufbild_zeichnet_knoten_etiketten_und_nebel(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("TRAININGSAPP_DATA_DIR", str(tmp_path))
     state = AppState.starten(tmp_path / "app.db")

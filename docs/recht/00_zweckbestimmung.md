@@ -111,6 +111,18 @@ darunter fällt, ist nicht entschieden — bis dahin gehört er dort ausgeschalt
 für **Pulsbereiche aus Messdaten** bleiben, was oben steht: nicht erlaubt in Edition A (ein
 Vorschlag aus den Fitness-Zonen ja, nie eine Grenze aus Alter oder Messwerten).
 
+**Vorschlag an einer Frage im Workout** (Ben, 17.11.2026, `core.ablauf.Kante.vorschlagen`,
+`docs/plan_verzweigungen.md` §8.13 Punkt 7): Eine Frage im Ablauf („Wie ist die Belastung?“,
+Skala 0–10) kann einen Weg **vorschlagen** statt ihn von selbst zu gehen — je Weg einstellbar,
+„Bei 7–10 schlägt der Plan vor: Workout beenden — Für heute reicht es“. Dieselben Bedingungen
+wie oben:
+Grundlage ist nur die **Selbstauskunft**; die App nennt die Regel (den Bereich) und deutet die
+Zahl nicht; der Text am Weg stammt von der Person, die den Plan gebaut hat; genommen wird ein
+Weg nur auf Tipp, im weichen Übergang auch ein anderer. Der Weg, den die Frage von selbst geht
+(seit 8.11.2026, die Vorgabe), bleibt daneben bestehen — er steuert den Ablauf des Workouts
+nach derselben Selbstauskunft, ohne Tipp. *Nicht anwaltlich geprüft; gehört mit dem „Vorschlag nach der
+Belastung“ in die fachanwaltliche Prüfung.*
+
 **Empfehlungen aus Messwerten** (Ben, 16.11.2026 — **Absicht, nicht gebaut, nicht
 freigegeben**): „Messwerte können aber Empfehlungen geben und Training anpassen, aber niemals
 harte Vorgabe. Rechtliche Überprüfung nochmal, ob das passt.“ Das geht über die Liste „Nicht

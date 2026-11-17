@@ -434,8 +434,15 @@ dann in der Palette, bis du sie einsetzt.
 - **Tipp auf eine Übung im Bild** wählt sie — die nächste Kachel kommt hinter sie.
 - **Tipp auf den Punkt eines Wegs** zeigt seine **Leiste** unter dem Bild: *wann* es
   weitergeht (frei, Zeit ab, Wiederholungen, in einer Zeit, Skala), die Zahl dazu mit − und +,
-  **Pflicht**; ✕ entfernt den Weg. Jede Änderung gilt sofort. **„Mehr …“** öffnet das Blatt
-  mit Ziel, Beschriftung („Rücken tut weh“), anbieten oder von selbst und Inhalt.
+  **Pflicht**; **„Entfernen“** nimmt den Weg heraus. Jede Änderung gilt sofort. **„Mehr …“**
+  öffnet das Blatt mit Ziel, Beschriftung („Rücken tut weh“), anbieten oder von selbst und
+  Inhalt.
+- **Die Wege einer Frage** fragen statt „wann“: **Bei welcher Antwort?** — ein **Bereich**
+  der Skala (ab · bis) oder **jede andere**. Darunter steht, was der Plan bei dieser Antwort
+  sagt (Tipp = Blatt). Mit **„nur vorschlagen“** geht die Antwort den Weg nicht von selbst:
+  Im Workout steht er als Vorschlag des Plans da, und du tippst ihn oder einen anderen. Ohne
+  den Schalter geht es von selbst weiter — eine Frage kann beides, etwa „0–6“ läuft weiter,
+  „7–10“ schlägt „Für heute reicht es“ vor.
 - **Gedrückt halten** auf einer Übung öffnet ihr **Menü**: Übung einstellen, Beiname, nur
   ihren Weg zeigen („Alles zeigen“ holt den Rest zurück), Als Start, **Aus dem Ablauf nehmen**
   (Lücke schließen oder die Reihe danach mitnehmen — die Übung bleibt im Plan und in der
@@ -585,6 +592,30 @@ zusammen, egal in welcher Stellung.
 """
 
 
+#: Die Karte „Wert für den Plan“ nach einem Test im Kurs (Ben, 17.11.2026, W3,
+#: `components/planwert.py`)
+PLANWERT_MD = """\
+Nach einem Test sagst du, **mit welcher Zahl dein Plan weitergeht**.
+
+**Ganz** nimmt den Wert deines Tests. **Anteil** nimmt einen Teil davon — in Prozent, mit −
+und + oder getippt; daneben steht die Zahl, die herauskommt. **Von Hand** nimmt die Zahl, die
+du nennst.
+
+**Vorgewählt** ist, was der Kurs vorsieht. Ein Kurs kann einen Anteil vorsehen: Der Test
+fragt, was du schaffst — im Plan soll sich die Übung wiederholen lassen.
+
+**Dein Eintrag bleibt.** Der Test steht bei der Übung und unter Heute, wie du ihn gemacht
+hast. Du änderst nur die Zahl, mit der der Kurs weiterrechnet.
+
+**Am Plan ändert sich nichts von selbst.** Das Ziel kommt erst mit „Übernehmen“ in der Karte
+„Das ändert sich an deinem Plan“ hinein — oder mit „Plan anlegen“. Steht schon ein Ziel im
+Plan, bietet die Karte das neue an; hast du es im Plan selbst geändert, fragt sie. Einen Plan,
+der mit „Plan anlegen“ entstanden ist, änderst du im Plan selbst.
+
+**Ein neuer Testlauf** („Nochmal“) setzt die Wahl zurück auf das, was der Kurs vorsieht.
+"""
+
+
 def hilfe_dialog(thema: str = "notation") -> ft.AlertDialog:
     titel, text, _ = THEMEN[thema]
     return text_dialog(titel, text)
@@ -626,6 +657,7 @@ __all__ = [
     "BESCHLEUNIGUNG_MD",
     "GPS_MD",
     "NOTATION_MD",
+    "PLANWERT_MD",
     "TAKT_MD",
     "THEMEN",
     "TIMER_EDITOR_MD",

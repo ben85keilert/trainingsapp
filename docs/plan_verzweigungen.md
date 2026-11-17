@@ -747,6 +747,54 @@ Ben, drei Punkte zum Reiter „Ablauf“ — alle gebaut:
      von „Start“ sitzt eng; fällt ein Punkt auf die Titelleiste, bleiben „Ende/zurück“ bis zum
      nächsten Tipp stehen.
 
+7. **Die Frage: Schleife, Ende und Vorschlag** (Ben, 17.11.2026, am Bildschirmfoto eines Plans
+   „Planke → drei Übungen → Frage → zurück zur Planke“; Katalog P218) — „Nach der Frage ist es
+   nicht möglich, ein Ende zu setzen“ · „Die Frage gibt auch nur eine Skala her, ich brauche
+   die Möglichkeit, mit der Skala Empfehlungen auszusprechen: Übung lieber beenden → Ende, oder
+   den Weg zu einer Übung weiterlaufen zu lassen. Prüfe das einmal“ · auf die Rückfrage:
+   „Frage soll beides können, von selbst weiter + Weg vorschlagen“:
+   - **Befund, nachgestellt** (Web-Fotos bei 412 px, eigene Testdaten): (a) War der einzige
+     Weg eines Knotens ein **Rückweg**, lag sein Punkt am Griff dieses Wegs — weit weg in der
+     Gasse; unter der Frage stand nichts zum Ziehen. (b) Ein Weg aus einer Frage bot dieselben
+     fünf Auslöser wie der einer Übung (Zeit, Wiederholungen …), dazu „Pflicht“ und „Von
+     selbst“ — nichts davon gilt an einer Frage. (c) Im Workout **ging die Antwort sofort den
+     Weg, den sie traf**: Bei 8 war das Workout ohne ein Wort zu Ende; die Beschriftung des
+     Wegs („Für heute reicht es“) sah man nie.
+   - **Der Punkt steht beim Knoten:** Ist der eine Weg ein Rückweg, ist der Punkt der
+     Austritt unter dem Knoten (`Geometrie.punkte`; der Griff gehört nur dem Weg). Von dort
+     auf „Ende“ gezogen ist der zweite Weg da.
+   - **Die Wege einer Frage** (Leiste unter dem Bild und Blatt, `components/wege_form.py`):
+     „Bei welcher Antwort?“ — **Bereich** der Skala (ab · bis mit − und +) oder **jede
+     andere** (der freie Weg: gilt, wenn kein Bereich die Antwort trifft). Vorgabe beim
+     Wählen von „Bereich“: das Stück der Skala, das die anderen Wege der Frage frei lassen —
+     der erste das obere (0–10: 7–10), der zweite den Rest (0–6;
+     `core.ablauf.antwort_bereich`). Darunter die **Beschriftung** — was der Plan bei dieser
+     Antwort sagt; in der Leiste zu sehen, ein Tipp öffnet das Blatt. Kein „Pflicht“, kein
+     „Anbieten | Von selbst“.
+   - **Eine Frage kann beides — je Weg** (`Kante.vorschlagen`; in der Leiste der Schalter
+     „nur vorschlagen“ an der Stelle von „Pflicht“, im Blatt „Nach dieser Antwort: Von selbst
+     weiter | Nur vorschlagen“): **Von selbst weiter** — die Vorgabe, wie bisher: Trifft die
+     Antwort den Weg, wird er gleich gegangen; kein Plan von früher ändert sich. **Nur
+     vorschlagen** — trifft die Antwort diesen Weg, geht nichts von selbst (auch hart nicht,
+     auch nicht mit „von selbst“ am Weg): Er steht zuerst und betont, darüber die Regel des
+     Plans — „Bei 7–10 schlägt der Plan vor:“ —, die anderen Wege unter „Oder:“. Weich darf
+     jeder genommen werden, hart nur ein erfüllter. So läuft „0–6“ von selbst weiter zur
+     Planke, „7–10“ schlägt „lieber beenden“ vor. Die Antwort lässt sich ändern, solange ein
+     Vorschlag steht. In der Zeitleiste steht wie bisher `plan/antwort` mit dem Wert, sobald
+     ein Weg genommen ist (`PlanAblaufBaustein.antworten`, `empfiehlt`; `core.ablauf.empfohlen`,
+     `vorschlag_text`; `views/workout.kanten_knoepfe`). Im Bild trägt der Weg „· Vorschlag“
+     im Etikett (`Kante.kurztext`). An der Frage selbst steht keine Wahl dazu.
+   - **Recht:** Grundlage ist die Selbstauskunft; der Satz nennt die Regel des Plans und
+     deutet die Zahl nicht, der Text am Weg stammt von der Person, die den Plan baut; getippt
+     wird immer (`docs/recht/00_zweckbestimmung.md`, „Vorschlag nach der Belastung“).
+   - **Entfernen statt ✕** (Ben: „mach aus x --> entfernen“): In der Weg-Leiste steht
+     „Entfernen“ ausgeschrieben neben „Mehr …“, im Blatt ein Papierkorb — ein ✕ liest sich wie
+     „schließen“.
+   - **Pakete:** `kanten[].vorschlagen = true` reist mit; eine ältere App kennt den Schlüssel
+     nicht und geht den Weg sofort (`docs/uebungspakete.md`).
+   - **Unverändert:** Trifft keine Regel die Antwort, bleibt die Person bei der Frage, bis
+     die Antwort passt.
+
 **Offen / nur am Gerät:** Ziehen mit dem Finger in den leeren Platz und auf „Start“ (im
 Browser mit der Maus geprüft), Treffen des einen Punkts mit dem Finger, „2×“ neben dem Rand der
 Kachel bei großer Schrift — zu T98.

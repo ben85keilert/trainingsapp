@@ -171,14 +171,11 @@ def stufen_zeile(
         spacing=4,
         tight=True,
         controls=[
-            ft.Row(
-                spacing=6,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.Text(titel, size=12, opacity=0.8, expand=True),
-                    ft.Text(hinweis, size=11, opacity=0.55),
-                ],
-            ),
+            # Titel über dem Hinweis: Nebeneinander nahm der lange Hinweis die ganze Breite,
+            # der Titel brach Buchstabe für Buchstabe um (Web-Foto „Workout fertig“ bei 412 px,
+            # 17.11.2026)
+            ft.Text(titel, size=12, opacity=0.8),
+            ft.Text(hinweis, size=11, opacity=0.55),
             ft.Row(spacing=4, wrap=True, controls=list(knoepfe.values())),
         ],
     )

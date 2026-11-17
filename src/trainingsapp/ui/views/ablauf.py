@@ -1211,6 +1211,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                     entfernen=lambda: weg_entfernen(k),
                     mehr=lambda: wege_blatt(k.von, fokus=k.nach, allein=True),
                     ohne_timer=ohne,
+                    ablauf=p.ablauf,
                 )
             ]
         knoten = gewaehlt()
@@ -1478,10 +1479,11 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                 [
                     ft.Text("Frage", size=18, weight=ft.FontWeight.W_600),
                     ft.Text(
-                        "Ein Entscheidungsknoten fragt nach einer Skala und verzweigt nach dem "
-                        "Wert — die Wege von ihm tragen die Bereiche (0–6, 7–10): Zieh den "
-                        "Punkt unter der Frage auf die Übungen und stell an jedem Weg „Skala“ "
-                        "ein.",
+                        "Die Frage fragt nach einer Skala; ihre Wege gelten je für einen "
+                        "Bereich (0–6, 7–10). Zieh den Punkt unter der Frage auf eine Übung "
+                        "oder auf „Ende“ und stell am Weg ein: den Bereich, was der Plan bei "
+                        "dieser Antwort sagt — und ob es von selbst weitergeht oder der Weg "
+                        "nur vorgeschlagen wird. Eine Frage kann beides.",
                         size=12,
                         opacity=0.7,
                     ),
@@ -1497,7 +1499,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                         ],
                     )
                 ],
-                geschaetzt=300,
+                geschaetzt=320,
             ),
         )
         with contextlib.suppress(Exception):

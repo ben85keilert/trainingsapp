@@ -901,19 +901,24 @@ def zeichnung(
         )
 
     if on_verbinden is not None:
-        einzige = {w.kante.von: w.kante for w in g.wege if w.kante.von not in g.abzweige}
+        einzige = {w.kante.von: w for w in g.wege if w.kante.von not in g.abzweige}
         for knoten_id, (x, y) in g.punkte.items():
             ist_frage = ablauf.frage(knoten_id) is not None
             # antippen wie das, was dort schon steht: der Abzweig (alle Wege) oder der eine
             # Griff (dieser Weg) — ohne Weg die Wege der Übung („+ Weg“)
             tippen: Callable[[Any], Any] | None = None
             ring: ft.Control | None = None
-            if knoten_id in einzige:
-                tippen, _ = kante_tippen(einzige[knoten_id])
+            # Der Punkt liegt auf dem Griff des einen Wegs — oder, bei einem Rückweg, für
+            # sich unter dem Knoten (`Geometrie.punkte`): dort ist er ein Ring wie ohne Weg
+            einziger = einzige.get(knoten_id)
+            am_griff = einziger is not None and einziger.griff == (x, y)
+            if einziger is not None and am_griff:
+                tippen, _ = kante_tippen(einziger.kante)
             elif on_abzweig is not None:
                 tippen = lambda _e, kk=knoten_id: on_abzweig(kk)  # noqa: E731
-            if knoten_id not in g.abzweige and knoten_id not in einzige:
-                # ohne Weg: ein kleiner, hohler Punkt unter der Übung (Ben, 16.11.2026)
+            if knoten_id not in g.abzweige and not am_griff:
+                # ohne Weg — oder mit einem Rückweg, dessen Griff woanders liegt: ein kleiner,
+                # hohler Punkt unter der Übung (Ben, 16.11.2026; 17.11.2026)
                 ring = ft.Container(
                     width=PUNKT,
                     height=PUNKT,

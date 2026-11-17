@@ -39,7 +39,7 @@ from . import ablauf as ab
 from . import links
 from .anpassung import Regel
 from .bedingung import Bedingung as Weiterbedingung
-from .kursbloecke import AUSWAHL, Block, braucht_eingabe
+from .kursbloecke import AUSWAHL, Block, Planwert, braucht_eingabe, planwert
 from .models import (
     Exercise,
     HrvRecording,
@@ -567,10 +567,48 @@ class Kursvariable:
     Kurs/Planbau“). ``name``: der Schlüssel des Tests (`core.kursbloecke.wert_schluessel`)."""
 
     name: str
+    #: der **gemessene** Wert im Feld des Tests, ohne Faktor
     wert: float
     #: der Eintrag des Testlaufs — ``None``, wenn es ihn nicht mehr gibt
     eintrag_id: str | None = None
     gesetzt: datetime | None = None
+    #: **Wert für den Plan** (Migration 066, W3; Ben 17.11.2026): wie die Person den Wert
+    #: nimmt — leer: die Vorgabe des Kurses, er rechnet wie bisher; sonst
+    #: `core.kursbloecke.GANZ` · `ANTEIL` · `HAND`
+    wie: str = ""
+    #: bei „von Hand“ die Zahl der Person; bei „Anteil“ der Anteil am Testwert
+    hand: float | None = None
+    anteil: float | None = None
+    #: wann die Wahl getroffen wurde — der Stempel der Zeile in der Sammelkarte
+    wahl_stempel: str = ""
+    #: Die Zeile hält nur die Wahl: Der Wert des Tests **schwebt** noch — er ist weiter der
+    #: jüngste Eintrag der Übung (ein Test ohne Lauf, dessen Kapitel nicht abgeschlossen
+    #: ist). ``wert`` ist dann, was beim Wählen galt
+    schwebt: bool = False
+
+    def planwert(self, test_wert: float | None = None) -> Planwert | None:
+        """Die Wahl als `Planwert` — gegen ``test_wert`` gerechnet (Vorgabe: der Wert der
+        Variable; schwebt er, der jüngste des Tests): „ganz“ und „Anteil“ folgen dem Test,
+        „von Hand“ bleibt die Zahl der Person. ``None`` ohne Wahl.
+
+        >>> Kursvariable("t", 22.0).planwert() is None
+        True
+        >>> Kursvariable("t", 22.0, wie="anteil", anteil=0.9, wahl_stempel="s").planwert()
+        Planwert(wie='anteil', wert=20, anteil=0.9, stempel='s')
+        >>> Kursvariable("t", 22.0, wie="hand", hand=18.0).planwert(30.0).wert
+        18
+        >>> Kursvariable("t", 22.0, wie="ganz", schwebt=True).planwert(30.0).wert
+        30
+        """
+        if not self.wie:
+            return None
+        return planwert(
+            self.wie,
+            self.wert if test_wert is None else test_wert,
+            anteil=self.anteil if self.anteil is not None else 1.0,
+            hand=self.hand,
+            stempel=self.wahl_stempel,
+        )
 
 
 @dataclass(slots=True)

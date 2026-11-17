@@ -91,6 +91,11 @@ class Kante:
     inhalt: Inhalt = field(default_factory=Inhalt)
     #: Sekunden (``wdh_in_zeit``)
     sekunden: float = 0.0
+    #: nur an einem Weg **aus einer Frage** (Ben, 17.11.2026: „Frage soll beides können, von
+    #: selbst weiter + Weg vorschlagen“): Trifft die Antwort diesen Weg, geht es nicht von
+    #: selbst weiter — er steht als Vorschlag des Plans da, die Person tippt. Aus (die
+    #: Vorgabe): Die Antwort geht ihn sofort, wie bisher. Je Weg — eine Frage kann beides.
+    vorschlagen: bool = False
 
     @property
     def zum_ende(self) -> bool:
@@ -139,6 +144,8 @@ class Kante:
             teile.append(self.text)
         if self.pflicht:
             teile.append("Pflicht")
+        if self.vorschlagen:
+            teile.append("Vorschlag")
         return " · ".join(teile)
 
     def als_dict(self) -> dict[str, Any]:
@@ -151,7 +158,7 @@ class Kante:
             d["sekunden"] = self.sekunden
         if self.ausloeser == SKALA and self.bis is not None:
             d["bis"] = self.bis
-        for k in ("pflicht", "ausfuehren", "wiederholen"):
+        for k in ("pflicht", "ausfuehren", "wiederholen", "vorschlagen"):
             if getattr(self, k):
                 d[k] = True
         if self.text:
@@ -172,6 +179,11 @@ class Kante:
         'frei'
         >>> Kante.aus_dict({"von": "a"}) is None, Kante.aus_dict("x") is None
         (True, True)
+        >>> v = Kante("f", ENDE, SKALA, 7, text="Für heute reicht es", vorschlagen=True)
+        >>> v.als_dict()["vorschlagen"], Kante.aus_dict(v.als_dict()) == v, v.kurztext()
+        (True, True, 'Skala ≥ 7 · Für heute reicht es · Vorschlag')
+        >>> "vorschlagen" in Kante("f", ENDE).als_dict()  # die Vorgabe steht nicht im Speicher
+        False
         """
         if not isinstance(roh, Mapping) or not roh.get("von") or not roh.get("nach"):
             return None
@@ -206,12 +218,19 @@ class Kante:
             str(roh.get("text") or "").strip(),
             inhalt,
             sekunden if ausloeser == WDH_IN_ZEIT else 0.0,
+            bool(roh.get("vorschlagen")),
         )
 
 
 @dataclass(frozen=True, slots=True)
 class Frage:
-    """Ein Entscheidungsknoten (P115): fragt nach einer Skala und verzweigt nach dem Wert."""
+    """Ein Entscheidungsknoten (P115): fragt nach einer Skala und verzweigt nach dem Wert.
+
+    **Eine Frage kann beides** (Ben, 17.11.2026: „ich brauche die Möglichkeit, mit der Skala
+    Empfehlungen auszusprechen — Übung lieber beenden → Ende, oder den Weg zu einer Übung
+    weiterlaufen zu lassen“ · „Frage soll beides können, von selbst weiter + Weg vorschlagen“):
+    Ob die Antwort einen Weg von selbst geht oder ihn nur vorschlägt, steht **am Weg**
+    (`Kante.vorschlagen`) — 0–6 läuft weiter, 7–10 schlägt „lieber beenden“ vor."""
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     text: str = "Wie fühlt es sich an?"
@@ -1724,6 +1743,87 @@ def ausloeser_wechsel(k: Kante, art: str) -> Kante:
     return replace(k, ausloeser=art, n=n, sekunden=sekunden)
 
 
+def antwort_bereich(ablauf: Ablauf, k: Kante) -> Kante:
+    """Der Weg ``k`` **aus einer Frage** bekommt „Skala“ mit dem Bereich, den die anderen Wege
+    der Frage noch frei lassen (Ben, 16.11.2026: „Dinge mit Standardwerten versehen“) — der
+    erste Weg das obere Stück der Skala (0–10: ab 7), der zweite den Rest darunter (0–6). Ist
+    die Skala schon verteilt, gilt die Vorgabe von `ausloeser_wechsel`. Keine Frage: wie dort.
+
+    >>> f = Frage("f")
+    >>> a = Ablauf(True, "x", (Kante("x", "f"), Kante("f", "p"), Kante("f", ENDE)), (f,))
+    >>> erster = antwort_bereich(a, a.kanten[1])
+    >>> erster.ausloeser, erster.n, erster.bis
+    ('skala', 7, None)
+    >>> a = replace(a, kanten=(a.kanten[0], erster, a.kanten[2]))
+    >>> zweiter = antwort_bereich(a, a.kanten[2])
+    >>> zweiter.n, zweiter.bis  # der Rest darunter
+    (0, 6)
+    >>> eng = Ablauf(True, "x", (Kante("f", "p"),), (Frage("f", min=1, max=5),))
+    >>> antwort_bereich(eng, eng.kanten[0]).n  # das obere Stück einer Skala 1–5
+    4
+    >>> antwort_bereich(a, a.kanten[0]).n  # von einer Übung: wie `ausloeser_wechsel`
+    7
+    """
+    neu = ausloeser_wechsel(k, SKALA)
+    frage = ablauf.frage(k.von)
+    if frage is None:
+        return neu
+    belegt: set[int] = set()
+    for andere in ablauf.kanten:
+        if andere.von != k.von or andere.nach == k.nach or andere.ausloeser != SKALA:
+            continue
+        oben = frage.max if andere.bis is None else andere.bis
+        belegt.update(range(andere.n, oben + 1))
+    frei = [v for v in range(frage.min, frage.max + 1) if v not in belegt]
+    if not belegt:
+        return replace(neu, n=frage.min + round((frage.max - frage.min) * 0.7), bis=None)
+    if not frei:
+        return neu
+    # das erste zusammenhängende Stück, das noch frei ist
+    ende = frei[0]
+    while ende + 1 in frei:
+        ende += 1
+    return replace(neu, n=frei[0], bis=None if ende == frage.max else ende)
+
+
+def empfohlen(staende: Sequence[KanteStand]) -> KanteStand | None:
+    """Der **Vorschlag** an einer Frage: der Weg, den die Antwort trifft (`regulaere` — der
+    erste, dessen Bereich sie trifft, sonst der erste freie), wenn er nur vorschlägt
+    (`Kante.vorschlagen`). ``None``: Die Antwort trifft keinen Weg — oder einen, den die Frage
+    von selbst geht.
+
+    >>> ks = [Kante("f", "p", SKALA, 0, 6), Kante("f", ENDE, SKALA, 7, vorschlagen=True)]
+    >>> st = lambda s: kanten_pruefen(ks, zeit_ab=False, wdh=None, skala=s)
+    >>> empfohlen(st(8)).kante.nach == ENDE  # 7–10: der Plan schlägt nur vor
+    True
+    >>> empfohlen(st(3)) is None, regulaere(st(3)).kante.nach  # 0–6: geht von selbst
+    (True, 'p')
+    >>> empfohlen(st(None)) is None  # ohne Antwort kein Vorschlag
+    True
+    """
+    stand = regulaere(staende)
+    return stand if stand is not None and stand.kante.vorschlagen else None
+
+
+def vorschlag_text(k: Kante, frage: Frage) -> str:
+    """Der Satz über einem Vorschlag an einer Frage — er **nennt die Regel des Plans** und
+    deutet die Zahl nicht (`docs/recht/00_zweckbestimmung.md`, „Vorschlag nach der Belastung“:
+    Grundlage ist die Selbstauskunft, die Regel hat die Autorin des Plans geschrieben).
+
+    >>> f = Frage("f")
+    >>> vorschlag_text(Kante("f", ENDE, SKALA, 7, vorschlagen=True), f)
+    'Bei 7–10 schlägt der Plan vor:'
+    >>> vorschlag_text(Kante("f", "p", SKALA, 0, 6, vorschlagen=True), f)
+    'Bei 0–6 schlägt der Plan vor:'
+    >>> vorschlag_text(Kante("f", "x", vorschlagen=True), f)  # der freie Weg: jede andere
+    'Der Plan schlägt vor:'
+    """
+    if k.ausloeser != SKALA:
+        return "Der Plan schlägt vor:"
+    oben = frage.max if k.bis is None else k.bis
+    return f"Bei {k.n}–{oben} schlägt der Plan vor:"
+
+
 def kante_schritt(k: Kante, feld: str, schritt: int) -> Kante:
     """Die Zahl eines Wegs einen Schritt weiter — „−“ und „+“ in der Leiste unter dem Bild.
     ``feld``: ``"n"`` (Wiederholungen bzw. Skala ab), ``"sekunden"`` (bei „in einer Zeit“, in
@@ -1927,11 +2027,13 @@ __all__ = [
     "Vorrat",
     "ablauf_pruefen",
     "als_position",
+    "antwort_bereich",
     "aus_bedingungen",
     "aus_position",
     "ausloeser_wechsel",
     "bedarf",
     "bedingung_aus_kante",
+    "empfohlen",
     "erreichbar",
     "fehlende",
     "folgt_der_liste",
@@ -1970,6 +2072,7 @@ __all__ = [
     "verbinden",
     "von_selbst",
     "vorrat",
+    "vorschlag_text",
     "wahl_offen",
     "warnungen",
     "weg_durch",

@@ -45,6 +45,21 @@ AUSLOESER_KURZ: dict[str, str] = {
     ab.WDH_IN_ZEIT: "in Zeit",
     ab.SKALA: "Skala",
 }
+#: Die Wege **einer Frage** (Ben, 17.11.2026): Sie verzweigt nach der Antwort — Zeit und
+#: Wiederholungen gibt es dort nicht. Ein Weg gilt für einen Bereich der Skala oder für jede
+#: Antwort, die kein anderer Weg trifft.
+ANTWORT_KURZ: dict[str, str] = {ab.SKALA: "Bereich", ab.FREI: "jede andere"}
+ANTWORT_TEXT: dict[str, str] = {ab.SKALA: "Bereich der Skala", ab.FREI: "Jede andere Antwort"}
+BEI_ANTWORT = "Bei welcher Antwort?"
+#: Hinweis im Feld der Beschriftung eines Wegs aus einer Frage — der Satz, den der Plan sagt
+ANTWORT_HINWEIS = "Für heute reicht es"
+#: Je Weg einer Frage (Ben, 17.11.2026: „Frage soll beides können, von selbst weiter + Weg
+#: vorschlagen“): Trifft die Antwort ihn, geht es von selbst weiter — oder er steht nur als
+#: Vorschlag da, und die Person tippt (`Kante.vorschlagen`)
+VORSCHLAGEN_TIPP = (
+    "An: Trifft die Antwort diesen Weg, schlägt der Plan ihn nur vor — du tippst ihn oder einen "
+    "anderen. Aus: Es geht von selbst weiter."
+)
 
 
 def wege_karte(
@@ -180,8 +195,9 @@ def wege_karte(
                         expand=True,
                     ),
                     ft.IconButton(
-                        ft.Icons.CLOSE,
-                        icon_size=16,
+                        ft.Icons.DELETE_OUTLINE,
+                        icon_size=18,
+                        icon_color=ft.Colors.ERROR,
                         tooltip="Diesen Weg hierher entfernen",
                         on_click=weg_entfernen(i),
                     ),
@@ -283,7 +299,9 @@ def wege_karte(
                 )
             )
             continue
-        karte = _weg(i, k, n, ziele, aendern, weg_entfernen, zum_hauptweg, zahl, offen, ohne_timer)
+        karte = _weg(
+            i, k, n, ziele, aendern, weg_entfernen, zum_hauptweg, zahl, offen, ohne_timer, a
+        )
         if gewaehlt and isinstance(karte, ft.Container):
             karte.border = ft.Border.all(2, ft.Colors.PRIMARY)
             karte.data = ("weg_gewaehlt", k.nach)
@@ -354,10 +372,20 @@ def _marke(n: int) -> ft.Control:
     )
 
 
-def _wechseln(aendern: Callable[..., None], i: int, k: Kante, art: str) -> None:
-    """Der Weg ``i`` bekommt den Auslöser ``art`` — mit der Zahl, die dann gilt."""
-    neu = ab.ausloeser_wechsel(k, art)
-    aendern(i, zeichnen=True, ausloeser=neu.ausloeser, n=neu.n, sekunden=neu.sekunden)
+def _wechseln(
+    aendern: Callable[..., None], i: int, k: Kante, art: str, ablauf: Ablauf | None = None
+) -> None:
+    """Der Weg ``i`` bekommt den Auslöser ``art`` — mit der Zahl, die dann gilt. Ein Weg aus
+    einer Frage bekommt bei „Bereich“ das Stück der Skala, das noch frei ist
+    (`core.ablauf.antwort_bereich`)."""
+    neu = _gewechselt(k, art, ablauf)
+    aendern(i, zeichnen=True, ausloeser=neu.ausloeser, n=neu.n, bis=neu.bis, sekunden=neu.sekunden)
+
+
+def _gewechselt(k: Kante, art: str, ablauf: Ablauf | None) -> Kante:
+    if ablauf is not None and art == ab.SKALA and ablauf.frage(k.von) is not None:
+        return ab.antwort_bereich(ablauf, k)
+    return ab.ausloeser_wechsel(k, art)
 
 
 def ziel_name(k: Kante, namen: Mapping[str, str]) -> str:
@@ -381,12 +409,20 @@ def weg_leiste(
     entfernen: Callable[[], Any],
     mehr: Callable[[], Any],
     ohne_timer: bool = False,
+    ablauf: Ablauf | None = None,
 ) -> ft.Control:
     """Ein Weg als **Leiste unter dem Bild** (Reiter „Ablauf“, Ben 16.11.2026): das Wichtigste
     ohne Blatt. ``nummer``: seine Stelle unter den Wegen seiner Übung (0 = Hauptweg);
     ``aendern(kante)`` nimmt den geänderten Weg — der Ort speichert sofort und zeichnet neu;
     ``entfernen()`` nimmt ihn heraus, ``mehr()`` öffnet das Blatt mit nur diesem Weg.
-    ``ohne_timer``: die Übung hat keinen Timer (Hinweis zu „Zeit ab“)."""
+    ``ohne_timer``: die Übung hat keinen Timer (Hinweis zu „Zeit ab“).
+
+    ``ablauf``: Kommt der Weg **aus einer Frage**, fragt die Leiste „Bei welcher Antwort?“ —
+    ein Bereich der Skala oder jede andere —, hat an der Stelle von „Pflicht“ den Schalter
+    **„nur vorschlagen“** (`Kante.vorschlagen`: aus = die Antwort geht den Weg von selbst) und
+    zeigt die Beschriftung (was der Plan bei dieser Antwort sagt; Tipp = Blatt). Zeit und
+    Wiederholungen gibt es dort nicht (Ben, 17.11.2026)."""
+    frage = ablauf.frage(k.von) if ablauf is not None else None
 
     def stufe(feld: str, text: str, vor: str = "") -> ft.Control:
         """Eine Zahl mit − und + — wie weit es geht, sagt `core.ablauf.kante_schritt`."""
@@ -429,7 +465,8 @@ def weg_leiste(
         zahlen.append(stufe("sekunden", ab.sekunden_text(k.sekunden), "in"))
     if k.ausloeser == ab.SKALA:
         zahlen.append(stufe("n", str(k.n), "ab"))
-        zahlen.append(stufe("bis", "offen" if k.bis is None else str(k.bis), "bis"))
+        offen_bis = "offen" if frage is None else str(frage.max)
+        zahlen.append(stufe("bis", offen_bis if k.bis is None else str(k.bis), "bis"))
     pflicht = ft.Row(
         tight=True,
         spacing=6,
@@ -441,6 +478,20 @@ def weg_leiste(
                 tooltip="Andere Wege erst, wenn dieser erfüllt ist",
                 on_change=lambda e: aendern(replace(k, pflicht=bool(e.control.value))),
                 data="pflicht",
+            ),
+        ],
+    )
+    vorschlagen = ft.Row(
+        tight=True,
+        spacing=6,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[
+            ft.Text("nur vorschlagen", size=13),
+            ft.Switch(
+                value=k.vorschlagen,
+                tooltip=VORSCHLAGEN_TIPP,
+                on_change=lambda e: aendern(replace(k, vorschlagen=bool(e.control.value))),
+                data="vorschlagen",
             ),
         ],
     )
@@ -470,16 +521,6 @@ def weg_leiste(
                     overflow=ft.TextOverflow.ELLIPSIS,
                     data="weg_nach",
                 ),
-                ft.IconButton(
-                    ft.Icons.CLOSE,
-                    icon_size=18,
-                    width=36,
-                    height=36,
-                    padding=0,
-                    tooltip="Weg entfernen",
-                    on_click=lambda _e: entfernen(),
-                    data="weg_entfernen",
-                ),
             ],
         ),
         # „Pflicht“ steht neben dem Titel — so kostet der Schalter keine eigene Zeile, und das
@@ -488,11 +529,16 @@ def weg_leiste(
             spacing=6,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
-                ft.Container(content=_zeilentitel("Wann geht es weiter?"), expand=True),
-                pflicht,
+                ft.Container(
+                    content=_zeilentitel(
+                        BEI_ANTWORT if frage is not None else "Wann geht es weiter?"
+                    ),
+                    expand=True,
+                ),
+                vorschlagen if frage is not None else pflicht,
             ],
         ),
-        # alle fünf in einer Zeile; reicht die Breite nicht, lässt sie sich schieben
+        # alle in einer Zeile; reicht die Breite nicht, lässt sie sich schieben
         ft.Row(
             spacing=6,
             scroll=ft.ScrollMode.AUTO,
@@ -504,11 +550,11 @@ def weg_leiste(
                     selected_color=ft.Colors.PRIMARY_CONTAINER,
                     visual_density=ft.VisualDensity.COMPACT,
                     label_padding=ft.Padding.symmetric(horizontal=2),
-                    tooltip=ab.AUSLOESER_TEXT[art],
-                    on_select=lambda _e, art=art: aendern(ab.ausloeser_wechsel(k, art)),
+                    tooltip=(ANTWORT_TEXT if frage is not None else ab.AUSLOESER_TEXT)[art],
+                    on_select=lambda _e, art=art: aendern(_gewechselt(k, art, ablauf)),
                     data=("ausloeser", art),
                 )
-                for art, text in AUSLOESER_KURZ.items()
+                for art, text in (ANTWORT_KURZ if frage is not None else AUSLOESER_KURZ).items()
             ],
         ),
     ]
@@ -530,12 +576,69 @@ def weg_leiste(
                 color=ft.Colors.TERTIARY,
             )
         )
+    if frage is not None:
+        # Was der Plan bei dieser Antwort sagt — die Beschriftung des Wegs, hier zu sehen und
+        # mit einem Tipp im Blatt zu ändern (ein Textfeld unter dem Bild verschwände hinter
+        # der Tastatur)
+        zeilen.append(
+            ft.Container(
+                padding=ft.Padding.symmetric(horizontal=4, vertical=4),
+                border_radius=8,
+                ink=True,
+                on_click=lambda _e: mehr(),
+                tooltip="Beschriftung im Blatt ändern",
+                data="weg_text",
+                content=ft.Row(
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Icon(ft.Icons.CHAT_BUBBLE_OUTLINE, size=16, opacity=0.75),
+                        ft.Text(
+                            f"„{k.text}“" if k.text else "Was sagt der Plan bei dieser Antwort? …",
+                            size=13,
+                            opacity=1.0 if k.text else 0.7,
+                            italic=not k.text,
+                            expand=True,
+                            max_lines=2,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.Icon(ft.Icons.EDIT_OUTLINED, size=16, opacity=0.6),
+                    ],
+                ),
+            )
+        )
     zeilen.append(
-        ft.TextButton(
-            "Mehr … (Ziel, Beschriftung, von selbst, Inhalt)",
-            style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=4, vertical=0)),
-            on_click=lambda _e: mehr(),
-            data="weg_mehr",
+        ft.Row(
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Container(
+                    expand=True,
+                    alignment=ft.Alignment.CENTER_LEFT,
+                    content=ft.TextButton(
+                        "Mehr … (Ziel, Beschriftung, Inhalt)",
+                        tooltip="Ziel, Beschriftung, anbieten oder von selbst, Inhalt",
+                        style=ft.ButtonStyle(
+                            padding=ft.Padding.symmetric(horizontal=4, vertical=0)
+                        ),
+                        on_click=lambda _e: mehr(),
+                        data="weg_mehr",
+                    ),
+                ),
+                # ausgeschrieben statt ✕ (Ben, 17.11.2026: „mach aus x --> entfernen“) — ein
+                # ✕ liest sich wie „Leiste schließen“
+                ft.TextButton(
+                    "Entfernen",
+                    icon=ft.Icons.DELETE_OUTLINE,
+                    tooltip="Diesen Weg entfernen",
+                    style=ft.ButtonStyle(
+                        color=ft.Colors.ERROR,
+                        padding=ft.Padding.symmetric(horizontal=6, vertical=0),
+                    ),
+                    on_click=lambda _e: entfernen(),
+                    data="weg_entfernen",
+                ),
+            ],
         )
     )
     return ft.Container(
@@ -558,9 +661,16 @@ def _weg(
     zahl: Callable[..., Callable[[ft.Event[ft.TextField]], None]],
     offen: dict[str, Any],
     ohne_timer: bool,
+    ablauf: Ablauf | None = None,
 ) -> ft.Control:
-    """Ein Weg als Karte — Ziel, wann, anbieten/ausführen, Pflicht, Danach, Beschriftung."""
+    """Ein Weg als Karte — Ziel, wann, anbieten/ausführen, Pflicht, Danach, Beschriftung.
+    Kommt er **aus einer Frage** (``ablauf`` kennt sie), fragt die Karte, bei welcher Antwort
+    er gilt — ein Bereich der Skala oder jede andere — und was danach geschieht: von selbst
+    weiter oder nur vorschlagen (`Kante.vorschlagen`). Zeit, Wiederholungen und „Pflicht“ gibt
+    es dort nicht."""
     ziel = next((str(o.text) for o in ziele if o.key == k.nach), "?")
+    frage = ablauf.frage(k.von) if ablauf is not None else None
+    arten = ANTWORT_TEXT if frage is not None else ab.AUSLOESER_TEXT
     kopf = ft.Row(
         spacing=6,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -590,8 +700,14 @@ def _weg(
                 if n > 0
                 else []
             ),
+            # der Papierkorb statt ✕ — ein ✕ liest sich wie „schließen“ (Ben, 17.11.2026)
             ft.IconButton(
-                ft.Icons.CLOSE, icon_size=18, tooltip="Weg entfernen", on_click=weg_entfernen(i)
+                ft.Icons.DELETE_OUTLINE,
+                icon_size=18,
+                icon_color=ft.Colors.ERROR,
+                tooltip="Weg entfernen",
+                on_click=weg_entfernen(i),
+                data="weg_entfernen",
             ),
         ],
     )
@@ -604,7 +720,7 @@ def _weg(
             options=ziele,
             on_select=lambda e: aendern(i, zeichnen=True, nach=str(e.control.value or ENDE)),
         ),
-        _zeilentitel("Wann geht es weiter?"),
+        _zeilentitel(BEI_ANTWORT if frage is not None else "Wann geht es weiter?"),
         ft.Row(
             wrap=True,
             spacing=6,
@@ -618,16 +734,19 @@ def _weg(
                     show_checkmark=True,
                     selected_color=ft.Colors.PRIMARY_CONTAINER,
                     # welche Zahl dann gilt, sagt `core.ablauf.ausloeser_wechsel` (N72)
-                    on_select=lambda _e, art=art: _wechseln(aendern, i, k, art),
+                    on_select=lambda _e, art=art: _wechseln(aendern, i, k, art, ablauf),
+                    data=("ausloeser", art),
                 )
-                for art, text in ab.AUSLOESER_TEXT.items()
+                for art, text in arten.items()
             ],
         ),
     ]
     if k.ausloeser in (ab.WDH, ab.WDH_IN_ZEIT, ab.SKALA):
         felder: list[ft.Control] = [
             ft.TextField(
-                label="Skala ab" if k.ausloeser == ab.SKALA else "Wiederholungen",
+                label=("Antwort ab" if frage is not None else "Skala ab")
+                if k.ausloeser == ab.SKALA
+                else "Wiederholungen",
                 value=str(k.n),
                 dense=True,
                 width=130,
@@ -669,7 +788,7 @@ def _weg(
                 color=ft.Colors.TERTIARY,
             )
         )
-    if k.ausloeser != ab.FREI:
+    if k.ausloeser != ab.FREI and frage is None:
         zeilen.append(
             ft.SegmentedButton(
                 selected=["ausfuehren" if k.ausfuehren else "anbieten"],
@@ -683,13 +802,32 @@ def _weg(
                 ),
             )
         )
-    zeilen.append(
-        ft.Switch(
-            label="Pflicht — andere Wege erst, wenn erfüllt",
-            value=k.pflicht,
-            on_change=lambda e: aendern(i, zeichnen=True, pflicht=bool(e.control.value)),
+    if frage is None:
+        zeilen.append(
+            ft.Switch(
+                label="Pflicht — andere Wege erst, wenn erfüllt",
+                value=k.pflicht,
+                on_change=lambda e: aendern(i, zeichnen=True, pflicht=bool(e.control.value)),
+            )
         )
-    )
+    else:
+        zeilen += [
+            _zeilentitel("Nach dieser Antwort"),
+            ft.SegmentedButton(
+                selected=["vorschlagen" if k.vorschlagen else "selbst"],
+                show_selected_icon=False,
+                segments=[
+                    ft.Segment(value="selbst", label=ft.Text("Von selbst weiter")),
+                    ft.Segment(value="vorschlagen", label=ft.Text("Nur vorschlagen")),
+                ],
+                on_change=lambda e: aendern(
+                    i,
+                    zeichnen=True,
+                    vorschlagen=bool(e.control.selected) and e.control.selected[0] == "vorschlagen",
+                ),
+                data="weg_vorschlagen",
+            ),
+        ]
     if k.zurueck:
         zeilen.append(
             ft.SegmentedButton(
@@ -707,10 +845,13 @@ def _weg(
         )
     zeilen.append(
         ft.TextField(
-            label="Beschriftung — wann ist dieser Weg gemeint?",
+            label="Beschriftung — was sagt der Plan bei dieser Antwort?"
+            if frage is not None
+            else "Beschriftung — wann ist dieser Weg gemeint?",
             value=k.text,
-            hint_text="Rücken tut weh",
+            hint_text=ANTWORT_HINWEIS if frage is not None else "Rücken tut weh",
             dense=True,
+            data="weg_text",
             on_blur=lambda e: aendern(i, text=(e.control.value or "").strip()),
             on_submit=lambda e: aendern(i, text=(e.control.value or "").strip()),
         )
@@ -753,4 +894,4 @@ def _weg(
     )
 
 
-__all__ = ["AUSLOESER_KURZ", "weg_leiste", "wege_karte", "ziel_name"]
+__all__ = ["ANTWORT_KURZ", "AUSLOESER_KURZ", "weg_leiste", "wege_karte", "ziel_name"]

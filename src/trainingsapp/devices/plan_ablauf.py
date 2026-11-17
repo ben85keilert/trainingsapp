@@ -29,7 +29,8 @@ erste freie) — ist keine gangbar (Pflicht nicht erfüllt, Skala nicht gewählt
 Pause auf die Wahl; die Kanten stehen in der Ansicht als Knöpfe (`kante_gehen`). ``◀ zurück``
 führt dorthin, wo man herkam (`verlauf`): zur unterbrochenen Übung noch einmal oder zu deren
 nächster Kante. **Fragen** (Entscheidungsknoten) sind Schritte ohne Übung: ``plan/frage``,
-die Antwort (`antworten`) ``plan/antwort``, dann die passende Kante von selbst. Jede genommene
+die Antwort (`antworten`) ``plan/antwort``, dann die passende Kante von selbst — außer der
+Weg **schlägt nur vor** (`Kante.vorschlagen`): dann tippt die Person. Jede genommene
 Kante steht als ``plan/kante`` in der Zeitleiste (Auswertung). Ohne Ablauf ändert sich nichts.
 
 **Bei der Übung bleiben** (Ben, 8.11.2026 abends): Ist die Uhr eines Schritts ab (Timer durch
@@ -412,14 +413,26 @@ class PlanAblaufBaustein:
     def _regulaere_kante(self) -> ab.KanteStand | None:
         return ab.regulaere(self.kanten_stand())
 
+    @property
+    def empfiehlt(self) -> bool:
+        """Der laufende Knoten ist eine Frage, und ihre Antwort trifft einen Weg, der **nur
+        vorschlägt** (`Kante.vorschlagen`) — es geht erst weiter, wenn die Person tippt."""
+        if self.ablauf is None or not self.schritte or self.schritt.frage is None:
+            return False
+        return self.skala_wert is not None and ab.empfohlen(self.kanten_stand()) is not None
+
     def antworten(self, wert: float) -> None:
         """Die Selbsteinschätzung im Schritt (Skala-Kante oder Frage). Bei einer Frage geht
         es danach von selbst die passende Kante; eine Kante mit ``ausfuehren`` ebenso, sobald
-        der Timer ab ist (`takt`)."""
+        der Timer ab ist (`takt`). **Ein Weg, der nur vorschlägt** (`Kante.vorschlagen`, Ben
+        17.11.2026), wird nie von selbst gegangen: Trifft die Antwort ihn, steht er als
+        Vorschlag da (`core.ablauf.empfohlen`), genommen wird er mit `kante_gehen`."""
         self.skala_wert = wert
         if self._t0 is None or self.phase == FERTIG:
             return
         if self.ablauf is not None and self.schritt.frage is not None:
+            if self.empfiehlt:
+                return
             stand = self._regulaere_kante()
             if stand is not None:
                 self.kante_gehen(stand.kante)
@@ -463,6 +476,8 @@ class PlanAblaufBaustein:
         if timer_laeuft and not self.weiter_automatisch:
             return
         if self.wahl_noetig:  # mehrere gleichwertige Wege: die Person wählt (Ben, 9.11.2026)
+            return
+        if self.empfiehlt:  # der getroffene Weg ist ein Vorschlag: die Person tippt
             return
         for st in self.kanten_stand():
             if st.gangbar and st.kante.ausfuehren and st.kante.ausloeser != ab.FREI:

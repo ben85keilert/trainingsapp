@@ -571,7 +571,7 @@ def test_weg_leiste_unter_dem_bild_stellt_den_weg_ein(umgebung) -> None:
     """Ben, 16.11.2026: „möglichst ohne die Blätter schon viel machen“ — ein Tipp auf den Punkt
     eines Wegs zeigt unter dem Bild seine Leiste: Marke, von → nach, die Auslöser als Chips,
     die Zahl mit − und +, Pflicht; jede Änderung speichert sofort. „Mehr …“ öffnet das Blatt
-    mit nur diesem Weg, ✕ entfernt ihn."""
+    mit nur diesem Weg, „Entfernen“ nimmt ihn heraus."""
     state, plan = umgebung
     basis = f"/plan/{plan.id}/bearbeiten"
     iw, ik, ip, id_ = (it.id for it in plan.items)
@@ -657,7 +657,7 @@ def test_weg_leiste_unter_dem_bild_stellt_den_weg_ein(umgebung) -> None:
     _klick(blatt.on_dismiss, None)
     assert state.plaene.laden(plan.id).ablauf.von(ik) == [Kante(ik, id_, text="locker")]
     assert _leiste(ansicht) is not None  # der Weg bleibt gewählt
-    # ✕ entfernt den Weg — die Leiste geht zu, eine Meldung sagt es
+    # „Entfernen“ nimmt den Weg heraus — die Leiste geht zu, eine Meldung sagt es
     _klick(_in_leiste(ansicht, "weg_entfernen").on_click, None)
     assert state.plaene.laden(plan.id).ablauf.von(ik) == []
     assert _leiste(ansicht) is None
@@ -666,6 +666,99 @@ def test_weg_leiste_unter_dem_bild_stellt_den_weg_ein(umgebung) -> None:
     _klick(_mit_daten(ansicht, "kante", iw, ip).on_click, None)
     _gesten(ansicht, ip).on_tap(None)
     assert _leiste(ansicht) is None and state.ablauf_wahl[plan.id] == ip
+
+
+def test_schleife_ueber_eine_frage_ende_und_was_der_plan_sagt(umgebung) -> None:
+    """Ben, 17.11.2026, am Bildschirmfoto: Planke → drei Übungen → Frage → zurück zur Planke.
+    „Nach der Frage ist es nicht möglich, ein Ende zu setzen“ — der einzige Weg der Frage war
+    ein Rückweg, ihr Punkt lag weit weg an dessen Griff. Jetzt steht er unter der Frage: von
+    dort auf „Ende“ gezogen ist der zweite Weg da. Die Leiste eines Wegs aus einer Frage fragt
+    „Bei welcher Antwort?“ (Bereich der Skala · jede andere), zeigt, was der Plan dazu sagt,
+    und hat den Schalter „nur vorschlagen“ — je Weg: „Frage soll beides können, von selbst
+    weiter + Weg vorschlagen“."""
+    state, plan = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    iw, ik, ip, id_ = (it.id for it in plan.items)
+    frage = ab.Frage(text="Wie ist die Belastung?")
+    wege = (*(Kante(ip, x) for x in (iw, ik, id_)), *(Kante(x, frage.id) for x in (iw, ik, id_)))
+    eigen = ab.Ablauf(True, ip, (*wege, Kante(frage.id, ip)), (frage,))
+    state.plaene.ablauf_setzen(plan.id, eigen)
+    plan = state.plaene.laden(plan.id)
+    seite = _Seite()
+    ansicht = ablauf_view(seite, state, plan, basis)
+    # Der Punkt der Frage steht unter ihr — nicht am Griff ihres Rückwegs in der Gasse
+    knoten, punkt = _knoten(ansicht, frage.id), _mit_daten(ansicht, "punkt", frage.id)
+    mitte_x = knoten.left + knoten.width / 2
+    assert abs(punkt.left + abbild.GRIFF / 2 - mitte_x) < 1
+    assert 0 < punkt.top - knoten.top < 2 * abbild.FRAGE_H
+    griff = _mit_daten(ansicht, "kante", frage.id, ip)
+    assert abs(griff.left - punkt.left) > KNOTEN  # der Griff des Rückwegs liegt woanders
+    # Vom Punkt auf „Ende“: der zweite Weg — er ist gewählt, seine Leiste steht da
+    _ziehen(ansicht, frage.id, ab.ENDE)
+    a = state.plaene.laden(plan.id).ablauf
+    assert [k.nach for k in a.von(frage.id)] == [ip, ab.ENDE]
+    namen = {i: i for i in (iw, ik, ip, id_)}
+    assert ab.warnungen(eigen, list(namen), namen)  # vorher: kein Weg hinaus
+    assert not ab.warnungen(a, list(namen), namen)  # jetzt gibt es einen
+    leiste = _leiste(ansicht)
+    assert leiste is not None
+    texte = _texte(leiste)
+    assert texte[:3] == ["Weg 2", "? · Wie ist die Belastung?", "Ende"]
+    assert "Bei welcher Antwort?" in texte and "Pflicht" not in texte
+    assert "nur vorschlagen" in texte and not _in_leiste(ansicht, "vorschlagen").value
+    chips = {x.data[1]: x for x in _alle(leiste) if isinstance(x, ft.Chip)}
+    assert list(chips) == [ab.SKALA, ab.FREI]
+    assert [x.label.value for x in chips.values()] == ["Bereich", "jede andere"]
+    # „Bereich“: der erste Weg mit Bereich bekommt das obere Stück der Skala …
+    _klick(chips[ab.SKALA].on_select, None)
+    weg = state.plaene.laden(plan.id).ablauf.von(frage.id)[1]
+    assert (weg.ausloeser, weg.n, weg.bis) == (ab.SKALA, 7, None)
+    assert [_in_leiste(ansicht, ("zahl", f)).value for f in ("n", "bis")] == ["7", "10"]
+    # „nur vorschlagen“ an diesem Weg: 7–10 schlägt das Ende vor — das Etikett sagt es
+    schalter = _in_leiste(ansicht, "vorschlagen")
+    schalter.value = True
+    _klick(schalter.on_change, SimpleNamespace(control=schalter))
+    weg = state.plaene.laden(plan.id).ablauf.von(frage.id)[1]
+    assert weg.vorschlagen and weg.kurztext() == "Skala ≥ 7 · Vorschlag"
+    assert _in_leiste(ansicht, "vorschlagen").value
+    # … der andere den Rest darunter
+    _klick(_mit_daten(ansicht, "kante", frage.id, ip).on_click, None)
+    assert _texte(_leiste(ansicht))[:3] == ["Hauptweg", "? · Wie ist die Belastung?", "3 · Planke"]
+    _klick(_in_leiste(ansicht, ("ausloeser", ab.SKALA)).on_select, None)
+    weg = state.plaene.laden(plan.id).ablauf.von(frage.id)[0]
+    assert (weg.ausloeser, weg.n, weg.bis) == (ab.SKALA, 0, 6)
+    # … und geht von selbst weiter (die Vorgabe): Die Frage kann beides
+    assert not weg.vorschlagen and not _in_leiste(ansicht, "vorschlagen").value
+    # Was der Plan bei dieser Antwort sagt: die Zeile öffnet das Blatt mit nur diesem Weg —
+    # ohne „Pflicht“ und ohne „Anbieten | Von selbst“; dafür „Nach dieser Antwort“
+    zeile = _in_leiste(ansicht, "weg_text")
+    assert "Was sagt der Plan bei dieser Antwort? …" in _texte(zeile)
+    _klick(zeile.on_click, None)
+    blatt = seite.dialoge[-1]
+    assert isinstance(blatt, ft.BottomSheet) and "Bei welcher Antwort?" in _texte(blatt)
+    assert not [x for x in _alle(blatt) if isinstance(x, ft.Switch)]
+    (wahl,) = [x for x in _alle(blatt) if isinstance(x, ft.SegmentedButton)]
+    assert wahl.data == "weg_vorschlagen" and wahl.selected == ["selbst"]
+    assert "Nach dieser Antwort" in _texte(blatt)
+    assert [x.label.value for x in _alle(blatt) if isinstance(x, ft.Chip)] == [
+        "Bereich der Skala",
+        "Jede andere Antwort",
+    ]
+    feld = next(x for x in _alle(blatt) if isinstance(x, ft.TextField) and x.data == "weg_text")
+    assert str(feld.label).startswith("Beschriftung — was sagt der Plan")
+    feld.value = "Noch eine Runde"
+    feld.on_blur(SimpleNamespace(control=feld))
+    _klick(blatt.on_dismiss, None)
+    assert state.plaene.laden(plan.id).ablauf.von(frage.id)[0].text == "Noch eine Runde"
+    assert "„Noch eine Runde“" in _texte(_in_leiste(ansicht, "weg_text"))
+    # „Entfernen“ steht ausgeschrieben da (Ben: „mach aus x --> entfernen“)
+    entfernen = _in_leiste(ansicht, "weg_entfernen")
+    assert isinstance(entfernen, ft.TextButton) and entfernen.content == "Entfernen"
+    # Im Blatt der Frage steht nur noch die Frage — die Wahl gehört an den Weg
+    _menue(ansicht, frage.id, "Frage ändern …")
+    blatt = seite.dialoge[-1]
+    assert not [x for x in _alle(blatt) if isinstance(x, ft.SegmentedButton)]
+    assert any("Eine Frage kann beides." in x for x in _texte(blatt))
 
 
 def test_ohne_rueckrufe_ist_das_bild_wie_bisher(umgebung) -> None:

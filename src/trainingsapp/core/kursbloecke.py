@@ -90,6 +90,40 @@ SKALA_MAX: Final = 10
 WIE_UHR, WIE_TAKT, WIE_PARAMETER = "uhr", "takt", "parameter"
 WIE_UEBUNG: Final[tuple[str, ...]] = (WIE_UHR, WIE_TAKT, WIE_PARAMETER)
 
+#: **Wert für den Plan** (Ben, 17.11.2026, W3): wie die Person den Wert eines Tests nimmt —
+#: ganz, zu einem Anteil oder als Zahl von Hand (`Planwert`)
+GANZ: Final = "ganz"
+ANTEIL: Final = "anteil"
+HAND: Final = "hand"
+WIE_WERT: Final[dict[str, str]] = {GANZ: "Ganz", ANTEIL: "Anteil", HAND: "Von Hand"}
+#: Der Anteil geht in Schritten von 5 % — in den Grenzen des Faktors im Paket (0,1 bis 3)
+ANTEIL_SCHRITT: Final = 0.05
+ANTEIL_MIN: Final = 0.1
+ANTEIL_MAX: Final = 3.0
+
+
+@dataclass(frozen=True, slots=True)
+class Planwert:
+    """Der **Wert für den Plan** — die Wahl der Person nach einem Test (Ben, 17.11.2026: „Wert
+    wird genommen und kann ganz genommen werden – prozentual abgeändert – manuell
+    eingegeben“; `docs/plan_kurs_ablauf.md` §17).
+
+    Ohne Wahl rechnet der Kurs wie bisher (Testwert × Faktor). **Mit Wahl ist ``wert`` das
+    Ziel** — überall, wo der Kurs sonst aus diesem Test rechnet (`ziel_im_plan`). Der Eintrag
+    des Tests bleibt, wie er ist; an den Plan kommt die Zahl nur über „Plan anlegen“ bzw. die
+    Sammelkarte, auf Tipp. Die App deutet nichts: Sie nimmt die Zahl, die die Person nennt.
+    """
+
+    #: `GANZ` · `ANTEIL` · `HAND`
+    wie: str
+    #: das Ziel, in der Einheit des Testfelds — ganze Einheiten, mindestens 1
+    wert: float
+    #: nur `ANTEIL`: der Anteil am Testwert (0,9 = 90 %)
+    anteil: float | None = None
+    #: wann gewählt — unterscheidet zwei Wahlen in der Sammelkarte (`core.kursplan`): Eine
+    #: neue Wahl wird wieder angeboten, auch wenn das Ziel aus dem Test schon übernommen war
+    stempel: str = ""
+
 
 @dataclass(frozen=True, slots=True)
 class Vorgabe:
@@ -673,6 +707,129 @@ def ziel_aus_test(block: Block, wert: float) -> int:
     return max(1, round(wert * block.faktor))
 
 
+def anteil_runden(anteil: float) -> float:
+    """Ein Anteil auf ganze Prozent, in den Grenzen des Faktors (`ANTEIL_MIN` bis `ANTEIL_MAX`).
+
+    >>> anteil_runden(0.8049), anteil_runden(0.01), anteil_runden(9)
+    (0.8, 0.1, 3.0)
+    """
+    return min(max(round(float(anteil), 2), ANTEIL_MIN), ANTEIL_MAX)
+
+
+def anteil_schritt(anteil: float, richtung: int) -> float:
+    """Der nächste Anteil mit − oder +: auf das 5-%-Raster, in den Grenzen.
+
+    >>> anteil_schritt(0.8, 1), anteil_schritt(0.8, -1), anteil_schritt(0.82, 1)
+    (0.85, 0.75, 0.85)
+    >>> anteil_schritt(0.82, -1), anteil_schritt(0.1, -1), anteil_schritt(3.0, 1)
+    (0.8, 0.1, 3.0)
+    """
+    stufe = anteil_runden(anteil) / ANTEIL_SCHRITT
+    naechste = math.floor(stufe + 1e-9) + 1 if richtung > 0 else math.ceil(stufe - 1e-9) - 1
+    return anteil_runden(naechste * ANTEIL_SCHRITT)
+
+
+def anteil_vorgabe(test: Block, bloecke: Iterable[Block]) -> float:
+    """Der Anteil, mit dem **der Kurs** den Wert dieses Tests nimmt — die Vorgabe der Karte
+    „Wert für den Plan“: der Faktor des ersten Bausteins, der sein Ziel aus dem Test nimmt
+    (Kursplan), sonst der Faktor des Tests selbst (Kapitelplan). ``bloecke``: alle Blöcke des
+    Kurses, in seiner Reihenfolge.
+
+    >>> t = Block(TEST, id="t", uebung="k", faktor=0.8)
+    >>> anteil_vorgabe(t, [t])
+    0.8
+    >>> b = Block(PLAN_UEBUNG, id="b", uebung="k", ziel_aus="t", faktor=0.9)
+    >>> anteil_vorgabe(t, [t, b, Block(PLAN_EINSTELLEN, id="c", an="b", ziel_aus="t")])
+    0.9
+    """
+    for b in bloecke:
+        if b.art in BAUSTEINE and b.ziel_aus == test.id:
+            return b.faktor
+    return test.faktor
+
+
+def wert_wird_ziel(test: Block, bloecke: Iterable[Block], vorlagen: bool) -> bool:
+    """Wird aus dem Wert dieses Tests ein Ziel im Plan? Ja, wenn ein Baustein sein Ziel aus
+    ihm nimmt (Kursplan) oder das Kapitel Plan-Vorlagen hat (``vorlagen``: Kapitelplan).
+    Sonst hinterlässt der Test nur seinen Wert — die Karte „Wert für den Plan“ entfällt.
+
+    >>> t = Block(TEST, id="t", uebung="k")
+    >>> wert_wird_ziel(t, [t], False), wert_wird_ziel(t, [t], True)
+    (False, True)
+    >>> wert_wird_ziel(t, [t, Block(PLAN_UEBUNG, id="b", uebung="k", ziel_aus="t")], False)
+    True
+    """
+    return vorlagen or any(b.art in BAUSTEINE and b.ziel_aus == test.id for b in bloecke)
+
+
+def planwert(
+    wie: str,
+    test_wert: float,
+    *,
+    anteil: float = 1.0,
+    hand: float | None = None,
+    stempel: str = "",
+) -> Planwert:
+    """Die Wahl der Person als `Planwert`: **ganz** der Testwert, ein **Anteil** davon oder die
+    Zahl **von Hand** — auf ganze Einheiten, mindestens 1 (wie `ziel_aus_test`).
+
+    >>> planwert(GANZ, 22).wert, planwert(ANTEIL, 22, anteil=0.8).wert
+    (22, 18)
+    >>> planwert(HAND, 22, hand=20).wert, planwert(HAND, 22).wert  # ohne Zahl: der Testwert
+    (20, 22)
+    >>> planwert(ANTEIL, 22, anteil=0.8)
+    Planwert(wie='anteil', wert=18, anteil=0.8, stempel='')
+    >>> planwert("sonstwas", 22).wie
+    'ganz'
+    """
+    if wie == ANTEIL:
+        p = anteil_runden(anteil)
+        return Planwert(ANTEIL, max(1, round(test_wert * p)), p, stempel)
+    if wie == HAND:
+        zahl = hand if hand is not None and hand > 0 else test_wert
+        return Planwert(HAND, max(1, round(zahl)), None, stempel)
+    return Planwert(GANZ, max(1, round(test_wert)), None, stempel)
+
+
+def planwert_vorgabe(test_wert: float, anteil: float) -> Planwert:
+    """Was der Kurs ohne Wahl der Person nimmt — als `Planwert`, um es vorzuwählen: ein
+    Anteil, wenn der Kurs mindert (oder mehrt), sonst ganz.
+
+    >>> planwert_vorgabe(22, 0.8), planwert_vorgabe(22, 1.0).wie
+    (Planwert(wie='anteil', wert=18, anteil=0.8, stempel=''), 'ganz')
+    """
+    return planwert(ANTEIL if anteil_runden(anteil) != 1.0 else GANZ, test_wert, anteil=anteil)
+
+
+def ist_vorgabe(gewaehlt: Planwert, test_wert: float, anteil: float) -> bool:
+    """Ist die Wahl dasselbe wie die Vorgabe des Kurses? Dann ist nichts zu merken — der
+    Kurs rechnet wie bisher. „Von Hand“ ist nie die Vorgabe, auch mit derselben Zahl: Die
+    Person hat sie genannt.
+
+    >>> ist_vorgabe(planwert(ANTEIL, 22, anteil=0.8), 22, 0.8)
+    True
+    >>> ist_vorgabe(planwert(GANZ, 22), 22, 0.8), ist_vorgabe(planwert(HAND, 22, hand=18), 22, 0.8)
+    (False, False)
+    """
+    vor = planwert_vorgabe(test_wert, anteil)
+    return gewaehlt.wie != HAND and (gewaehlt.wie, gewaehlt.anteil) == (vor.wie, vor.anteil)
+
+
+def ziel_im_plan(block: Block, wert: float, gewaehlt: Planwert | None = None) -> int:
+    """Das Ziel im Plan aus einem Test: ohne Wahl der Person wie bisher (`ziel_aus_test`:
+    Testwert × Faktor von ``block``) — **mit Wahl ihr Wert**, statt zu rechnen.
+
+    >>> b = Block(TEST, uebung="u", faktor=0.8)
+    >>> ziel_im_plan(b, 22), ziel_im_plan(b, 22, planwert(HAND, 22, hand=20))
+    (18, 20)
+    >>> ziel_im_plan(b, 22, planwert(GANZ, 22))
+    22
+    """
+    if gewaehlt is None:
+        return ziel_aus_test(block, wert)
+    return max(1, round(gewaehlt.wert))
+
+
 def fertig(
     bloecke: Iterable[Block], werte: Mapping[str, float], wahl: Mapping[str, Sequence[str]]
 ) -> bool:
@@ -705,12 +862,15 @@ def vorlage_anwenden(
     werte: Mapping[str, float],
     wahl: Mapping[str, Sequence[str]],
     je_satz: Callable[[str, str], bool] | None = None,
+    planwerte: Mapping[str, Planwert] | None = None,
 ) -> list[Any]:
     """Die Plan-Vorlagen des Kapitels (`core.kurse.PlanVorlage`) mit Testwerten und Auswahl.
 
     - ``test``: Jede Planübung dieser Übung im gemeinten Plan bekommt das Ziel im Feld des
       Tests (das übrige Ziel bleibt). ``je_satz(uebung, feld)``: das Feld hält je Satz einen
-      Wert (Satzliste) — dann steht das Ziel als ein Satz ``[48]``.
+      Wert (Satzliste) — dann steht das Ziel als ein Satz ``[48]``. ``planwerte``: je Test
+      (`wert_schluessel`) der **Wert für den Plan**, den die Person gewählt hat — er ist das
+      Ziel, statt Testwert × Faktor (`ziel_im_plan`).
     - ``auswahl``: Die Gewählten kommen hinter die Stelle ``nach`` (0 = ans Ende). Ab zwei
       Gewählten und ohne gezeichneten Ablauf der Vorlage werden sie gleichwertige **Wege**:
       Die Planübung davor führt zu jeder von ihnen, jede führt zur nächsten danach. Hat die
@@ -734,8 +894,19 @@ def vorlage_anwenden(
     >>> (neu,) = vorlage_anwenden([v], b, {"t:k": 30, "t:s": 12}, {"a": ["k"]})
     >>> [(i.exercise_id, i.target) for i in neu.items]
     [('planke', {}), ('dehnen', {}), ('k', {'reps': 30})]
+
+    Hat die Person den Wert für den Plan gewählt, gilt er — nicht Testwert × Faktor:
+
+    >>> b = [Block(TEST, id="t", uebung="planke", faktor=0.8)]
+    >>> [v2.items[0].target for v2 in vorlage_anwenden([v], b, {"t": 50}, {})]
+    [{'hold': 40}]
+    >>> hand = {"t": planwert(HAND, 50, hand=45)}
+    >>> [v2.items[0].target for v2 in vorlage_anwenden([v], b, {"t": 50}, {}, planwerte=hand)]
+    [{'hold': 45}]
     """
     from .kurse import VorlageItem  # hier, weil `core.kurse` dieses Modul lädt
+
+    gesetzt = planwerte or {}
 
     ergebnis = [replace(v, items=[replace(i) for i in v.items]) for v in vorlagen]
     if not ergebnis:
@@ -749,7 +920,7 @@ def vorlage_anwenden(
         if block.art == TEST and not block.aus and block.id in werte:
             for item in gemeint(block).items:
                 if item.exercise_id == block.uebung:
-                    ziel = ziel_aus_test(block, werte[block.id])
+                    ziel = ziel_im_plan(block, werte[block.id], gesetzt.get(block.id))
                     liste = je_satz is not None and je_satz(block.uebung, block.feld)
                     item.target = {**item.target, block.feld: [ziel] if liste else ziel}
         if block.art == AUSWAHL:
@@ -771,10 +942,11 @@ def vorlage_anwenden(
         if block.art != TEST or not block.aus:
             continue
         for uebung in gemessene_uebungen(block, wahl):
-            wert = werte.get(wert_schluessel(block, uebung))
+            schluessel = wert_schluessel(block, uebung)
+            wert = werte.get(schluessel)
             if wert is None:
                 continue
-            ziel = ziel_aus_test(block, wert)
+            ziel = ziel_im_plan(block, wert, gesetzt.get(schluessel))
             liste = je_satz is not None and je_satz(uebung, block.feld)
             for item in gemeint(block).items:
                 if item.exercise_id == uebung:
@@ -801,10 +973,16 @@ def _wege(anzahl: int, stelle: int, wege: int) -> dict[str, Any]:
 
 
 __all__ = [
+    "ANTEIL",
+    "ANTEIL_MAX",
+    "ANTEIL_MIN",
+    "ANTEIL_SCHRITT",
     "ARTEN",
     "AUSWAHL",
     "BAUSTEINE",
     "FRAGE",
+    "GANZ",
+    "HAND",
     "HART",
     "MEDIUM",
     "MENGE",
@@ -821,18 +999,28 @@ __all__ = [
     "WIE_TAKT",
     "WIE_UEBUNG",
     "WIE_UHR",
+    "WIE_WERT",
     "ZEIT",
     "ZU_ENDE",
     "Antwort",
     "Block",
+    "Planwert",
     "Vorgabe",
+    "anteil_runden",
+    "anteil_schritt",
+    "anteil_vorgabe",
     "bloecke_lesen",
     "bloecke_von",
     "braucht_eingabe",
     "fertig",
     "gemessene_uebungen",
+    "ist_vorgabe",
+    "planwert",
+    "planwert_vorgabe",
     "vorlage_anwenden",
     "wert_im_test",
     "wert_schluessel",
+    "wert_wird_ziel",
     "ziel_aus_test",
+    "ziel_im_plan",
 ]

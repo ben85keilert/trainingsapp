@@ -198,6 +198,80 @@ def test_frage_verzweigt_nach_dem_wert_und_ende_ueber_kante() -> None:
     assert teil.phase == FERTIG and ("plan", "ende") in _paare(ereignisse)
 
 
+def test_frage_kann_beides_von_selbst_weiter_und_nur_vorschlagen() -> None:
+    """Ben, 17.11.2026: „mit der Skala Empfehlungen aussprechen — Übung lieber beenden → Ende,
+    oder den Weg zu einer Übung weiterlaufen lassen“ · „Frage soll beides können, von selbst
+    weiter + Weg vorschlagen“. Je Weg (`Kante.vorschlagen`): 0–6 geht von selbst zurück zur
+    Übung, 7–10 schlägt das Ende nur vor — genommen wird, was die Person tippt, und die Antwort
+    steht mit ihrem Wert in der Zeitleiste."""
+    frage = Frage("f", "Wie ist die Belastung?")
+    a = Ablauf(
+        True,
+        "w",
+        (
+            Kante("w", "f", ab.ZEIT),
+            Kante("f", "w", ab.SKALA, 0, 6, text="Noch eine Runde"),
+            # auch „von selbst“ am Weg ändert nichts: Ein Vorschlag wird getippt
+            Kante(
+                "f",
+                ab.ENDE,
+                ab.SKALA,
+                7,
+                text="Für heute reicht es",
+                ausfuehren=True,
+                vorschlagen=True,
+            ),
+        ),
+        (frage,),
+    )
+
+    def bis_zur_frage(teil, uhr) -> None:
+        _lauf(teil, uhr, 10)
+        if teil.schritt.frage is None:  # weich: die Zeit ist ab, der Weg zur Frage wird getippt
+            teil.kante_gehen(teil.kanten_stand()[0].kante)
+            teil.takt(uhr[0])
+        assert teil.schritt.frage is frage
+
+    for uebergang in (HART, WEICH):
+        teil, uhr = _baustein(a, uebergang, frage=frage)
+        bis_zur_frage(teil, uhr)
+        assert not teil.empfiehlt  # ohne Antwort kein Vorschlag
+        # 3: der Weg „0–6“ geht von selbst — zurück zur Übung, zweiter Durchlauf
+        teil.antworten(3)
+        teil.takt(uhr[0])
+        assert teil.schritt.item_id == "w" and teil.durchlauf == 2
+        bis_zur_frage(teil, uhr)
+        # 8: der Weg „7–10“ schlägt nur vor — nichts geht von selbst, auch nicht mit der Zeit
+        teil.antworten(8)
+        _lauf(teil, uhr, 5)
+        assert teil.schritt.frage is frage and teil.phase != FERTIG and teil.empfiehlt
+        vorschlag = ab.empfohlen(teil.kanten_stand())
+        assert vorschlag is not None and vorschlag.kante.zum_ende
+        assert ab.vorschlag_text(vorschlag.kante, frage) == "Bei 7–10 schlägt der Plan vor:"
+        teil.kante_gehen(vorschlag.kante)
+        ereignisse = teil.takt(uhr[0])
+        antwort = next(e for e in ereignisse if (e.quelle, e.art) == ("plan", "antwort"))
+        assert antwort.daten["wert"] == 8
+        assert teil.phase == FERTIG and ("plan", "ende") in _paare(ereignisse)
+
+
+def test_frage_ohne_den_vermerk_verzweigt_wie_bisher() -> None:
+    """Die Vorgabe bleibt: Ein Weg aus einem Plan von früher (ohne ``vorschlagen``) wird mit
+    der Antwort sofort gegangen — und so wird er auch gespeichert."""
+    frage = Frage("f", "Wie ist die Belastung?")
+    ende = Kante("f", ab.ENDE, ab.SKALA, 7)
+    assert "vorschlagen" not in ende.als_dict() and Kante.aus_dict(ende.als_dict()) == ende
+    a = Ablauf(
+        True, "w", (Kante("w", "f", ab.ZEIT), Kante("f", "w", ab.SKALA, 0, 6), ende), (frage,)
+    )
+    teil, uhr = _baustein(a, HART, frage=frage)
+    _lauf(teil, uhr, 10)
+    assert teil.schritt.frage is frage
+    teil.antworten(8)
+    teil.takt(uhr[0])
+    assert teil.phase == FERTIG and not teil.empfiehlt
+
+
 def test_ohne_an_bleibt_die_planfolge() -> None:
     a = Ablauf(False, "p", (Kante("p", "w"),))
     teil, _uhr = _baustein(a)

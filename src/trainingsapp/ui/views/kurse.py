@@ -35,7 +35,15 @@ from datetime import datetime
 import flet as ft
 
 from trainingsapp.core.kapiteltext import bilder_zu_links
-from trainingsapp.core.kursbloecke import BAUSTEINE, Block
+from trainingsapp.core.kursbloecke import (
+    BAUSTEINE,
+    TEST,
+    Block,
+    Planwert,
+    anteil_vorgabe,
+    wert_schluessel,
+    wert_wird_ziel,
+)
 from trainingsapp.core.kurse import (
     AKTUELL,
     FERTIG,
@@ -679,6 +687,39 @@ def kapitel_view(
         def test_starten(block: Block, uid: str) -> Callable[..., Awaitable[None]]:
             return kurs_testlauf.starter(page, state, kurs, kapitel, block, katalog[uid])
 
+        # Wert für den Plan (W3, Ben 17.11.2026, `components/planwert.py`): Die Person sagt
+        # nach dem Test, wie sein Wert in den Plan geht — ganz, ein Anteil, von Hand. Die
+        # Testkarte zeigt die Wahl und lässt sie ändern; was daraus am Plan wird, steht wie
+        # immer in der Sammelkarte bzw. kommt mit „Plan anlegen“ — nichts ändert sich ohne Tipp
+        kurs_bloecke = [b for k in kurs.kapitel for b in k.bloecke]
+        planwerte = state.kurse.planwerte(kurs.id, profil, werte) if stand_hier is not None else {}
+        ziel_tests = {
+            b.id
+            for b in kapitel.bloecke
+            if b.art == TEST and wert_wird_ziel(b, kurs_bloecke, bool(kapitel.plaene))
+        }
+
+        def wert_waehlen(block: Block, uid: str, gewaehlt: Planwert | None) -> None:
+            name = wert_schluessel(block, uid)
+            if gewaehlt is None:
+                state.kurse.planwert_loeschen(kurs.id, profil, name)
+                melden("Wert für den Plan: wie der Kurs ihn vorsieht")
+            elif name in werte:
+                eintrag = eintraege.get(name)
+                state.kurse.planwert_setzen(
+                    kurs.id,
+                    profil,
+                    name,
+                    gewaehlt,
+                    test_wert=werte[name],
+                    eintrag_id=eintrag.id if eintrag is not None else None,
+                )
+                melden("Wert für den Plan geändert")
+            state.neu_zeichnen()
+
+        def anteil_von(block: Block) -> float:
+            return anteil_vorgabe(block, kurs_bloecke)
+
         # Die offene Wahl einer Auswahl bleibt für die Sitzung (Ben, 16.11.2026, P212): Wer
         # zum Test in die Übung geht und zurückkommt, muss nicht neu wählen. Der Stempel
         # sagt, wofür sie gilt — dieser Stand des Kurses, dieser Durchlauf: Nach „Von vorn“
@@ -727,6 +768,10 @@ def kapitel_view(
                 test_starten=test_starten,
                 eintraege=eintraege,
                 laufender_test=kurs_testlauf.laeuft_fuer(state),
+                planwerte=planwerte,
+                ziel_tests=ziel_tests,
+                anteil_von=anteil_von,
+                wert_waehlen=wert_waehlen,
             )
             bloecke.extend(gezeichnet.controls)
         else:
@@ -782,6 +827,10 @@ def kapitel_view(
                 test_starten=test_starten,
                 eintraege=eintraege,
                 laufender_test=kurs_testlauf.laeuft_fuer(state),
+                planwerte=planwerte,
+                ziel_tests=ziel_tests,
+                anteil_von=anteil_von,
+                wert_waehlen=wert_waehlen,
             )
             bloecke.extend(gezeichnet.controls)
             if stand_hier is not None and any(b.art in BAUSTEINE for b in kapitel.bloecke):

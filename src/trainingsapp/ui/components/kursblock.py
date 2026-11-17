@@ -17,6 +17,11 @@ Text, Medium, Frage, Test und Auswahl stehen untereinander auf der Seite des Kap
   muss flexibel gestaltet werden können“): Jeder Test mit `Block.laeuft` ist ein Lauf mit „Test
   starten“, und die Karte sagt in einem Satz, wie er läuft — Timer, Takt, Ausführung
   (`core.kurstest.lauf_satz`).
+  **Wert für den Plan** (Ben, 17.11.2026, W3): Wird aus dem Wert ein Ziel im Plan, steht
+  neben „Nochmal“ **„Wert ändern“** — die Karte `components/planwert.py` klappt in der
+  Testkarte auf (ganz · Anteil · von Hand), „Übernehmen“ meldet die Wahl an die Ansicht
+  (``wert_waehlen``). Eine getroffene Wahl steht unter dem Wert („Für den Plan: 20 Wdh. — von
+  Hand“).
 - Eine **Auswahl** hält die gewählten Übungen, bis „Plan anlegen“ gedrückt ist — danach ist
   sie fest (der Plan lässt sich von Hand ändern). Beginnt der Kurs von vorn, wird neu gewählt;
   „Wie beim letzten Mal“ belegt die Wahl des früheren Durchlaufs vor (Ben, 16.11.2026).
@@ -37,7 +42,7 @@ Die Rechnung steht in `core/kursbloecke.py`; hier wird nur gezeichnet.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -51,16 +56,19 @@ from trainingsapp.core.kursbloecke import (
     TEST,
     TEXT,
     Block,
+    Planwert,
     fertig,
     gemessene_uebungen,
+    ist_vorgabe,
     wert_schluessel,
-    ziel_aus_test,
+    ziel_im_plan,
 )
 from trainingsapp.core.models import Exercise, SessionEntry, lokaler_tag
 from trainingsapp.core.result_spec import FieldSpec, basis_key, vorrat_feld
 from trainingsapp.core.tagesbilanz import menge_text
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.medienliste import medium_zeile
+from trainingsapp.ui.components.planwert import planwert_karte
 
 #: Die Aufforderung eines Tests „der gewählten“ ohne eigenen Titel, solange keine oder mehr
 #: als eine Übung gewählt ist — mit genau einer steht ihr Name da („Käfer: was schaffst du?“)
@@ -120,6 +128,10 @@ def kapitel_bloecke(
     test_starten: Callable[[Block, str], Callable[..., Any]] | None = None,
     eintraege: Mapping[str, SessionEntry] | None = None,
     laufender_test: tuple[str, str] | None = None,
+    planwerte: Mapping[str, Planwert] | None = None,
+    ziel_tests: Collection[str] = (),
+    anteil_von: Callable[[Block], float] | None = None,
+    wert_waehlen: Callable[[Block, str, Planwert | None], Any] | None = None,
 ) -> KapitelBloecke:
     """Die Controls zu ``bloecke``. ``werte``: je Test-Block der Wert aus dem Eintrag
     (`KursRepo.testwerte` — bei einem Test „der gewählten“ je Übung der Auswahl einer);
@@ -154,7 +166,16 @@ def kapitel_bloecke(
     Knopf wie bisher zur Übung. ``eintraege``: je Test der jüngste Eintrag unter den
     Schlüsseln von ``werte`` (`KursRepo.testeintraege`) — daraus steht neben dem Wert, was der
     Lauf sonst gemessen hat. ``laufender_test``: (Block, Übung) des Testlaufs, der gerade
-    läuft oder auf sein Ergebnis wartet — dort heißt der Knopf „Zum Test“."""
+    läuft oder auf sein Ergebnis wartet — dort heißt der Knopf „Zum Test“.
+
+    **Wert für den Plan** (W3, Ben 17.11.2026): ``planwerte`` — je Test, unter den Schlüsseln
+    von ``werte``, die Wahl der Person (`KursRepo.planwerte`); ``ziel_tests`` — die IDs der
+    Tests, aus deren Wert ein Ziel im Plan wird (`core.kursbloecke.wert_wird_ziel`): Nur sie
+    bieten „Wert ändern“; ``anteil_von(block)`` — der Anteil, mit dem der Kurs rechnet (die
+    Vorgabe der Karte, `core.kursbloecke.anteil_vorgabe`; ohne: der Faktor des Tests);
+    ``wert_waehlen(block, übung, wahl)`` — „Übernehmen“: die Ansicht merkt die Wahl
+    (``None``: zurück zur Vorgabe des Kurses) und zeichnet neu. Ohne ``wert_waehlen`` gibt es
+    „Wert ändern“ nicht."""
     ergebnis = KapitelBloecke(controls=[])
     wahl = ergebnis.wahl
     #: je Auswahl-Block, was schon im Kursplan steht (nur Übungen dieser Auswahl)
@@ -190,6 +211,10 @@ def kapitel_bloecke(
             wahl[b.id].extend(mitgebracht[-frei_je[b.id] :])
     #: Tests mit ``aus`` zeichnen sich neu, wenn sich die Wahl ändert
     testkarten: list[Callable[[], None]] = []
+    #: die Tests, deren Karte „Wert für den Plan“ gerade offen ist (`wert_schluessel`) — und
+    #: wie jede Testkarte sich neu zeichnet (Block-ID → Funktion)
+    wert_offen: set[str] = set()
+    test_zeichnen: dict[str, Callable[[], None]] = {}
     knopf = ft.FilledButton(
         "Plan anlegen",
         icon=ft.Icons.PLAYLIST_ADD_CHECK,
@@ -333,6 +358,87 @@ def kapitel_bloecke(
             data=("test_oeffnen", block.id, uid) if block.aus else ("test_oeffnen", block.id),
         )
 
+    def darf_wert(block: Block, uid: str) -> bool:
+        """Gibt es hier „Wert ändern“? Nur im offenen Kapitel, an einem Test, aus dessen Wert
+        ein Ziel wird — und im Kapitelplan nur, solange der Plan nicht angelegt ist (danach
+        steht das Ziel im Plan und wird dort geändert)."""
+        return (
+            wert_waehlen is not None
+            and offen
+            and block.id in ziel_tests
+            and uid in katalog
+            and not (angelegt and not kursplan)
+        )
+
+    def wert_umschalten(block: Block, uid: str) -> Callable[..., None]:
+        def handler(_e: Any = None) -> None:
+            wert_offen.symmetric_difference_update({wert_schluessel(block, uid)})
+            if (zeichnen := test_zeichnen.get(block.id)) is not None:
+                zeichnen()
+
+        return handler
+
+    def wert_knopf(block: Block, uid: str, *, klein: bool = False) -> ft.Control:
+        """„Wert ändern“ — öffnet und schließt die Karte „Wert für den Plan“ in der Testkarte."""
+        marke = ("wert_aendern", block.id, uid) if block.aus else ("wert_aendern", block.id)
+        if klein:  # in der Zeile je Übung ist kein Platz für zwei Textknöpfe
+            return ft.IconButton(
+                ft.Icons.TUNE,
+                tooltip="Wert für den Plan ändern",
+                on_click=wert_umschalten(block, uid),
+                data=marke,
+            )
+        return ft.TextButton(
+            "Wert ändern", icon=ft.Icons.TUNE, on_click=wert_umschalten(block, uid), data=marke
+        )
+
+    def wert_karte(block: Block, uid: str, wert: float) -> ft.Control:
+        """Die offene Karte „Wert für den Plan“ zu einem Test: vorgewählt die Wahl der Person,
+        sonst die Vorgabe des Kurses; „Übernehmen“ meldet sie der Ansicht."""
+        schluessel = wert_schluessel(block, uid)
+        anteil = anteil_von(block) if anteil_von is not None else block.faktor
+
+        def uebernehmen(_e: Any = None) -> Any:
+            wahl = gezeichnete.wahl()
+            wert_offen.discard(schluessel)
+            if wert_waehlen is None or wahl is None:
+                return None
+            # dasselbe wie die Vorgabe des Kurses: nichts zu merken — er rechnet wie bisher
+            return wert_waehlen(block, uid, None if ist_vorgabe(wahl, wert, anteil) else wahl)
+
+        gezeichnete = planwert_karte(
+            page,
+            feld=feld_von(katalog.get(uid), block.feld),
+            test_wert=wert,
+            vorgabe=anteil,
+            gewaehlt=(planwerte or {}).get(schluessel),
+            schluessel=schluessel,
+            knoepfe=[
+                ft.TextButton(
+                    "Abbrechen",
+                    on_click=wert_umschalten(block, uid),
+                    data=("planwert_abbrechen", schluessel),
+                ),
+                ft.FilledButton(
+                    "Übernehmen", on_click=uebernehmen, data=("planwert_uebernehmen", schluessel)
+                ),
+            ],
+        )
+        return gezeichnete.control
+
+    def fuer_den_plan(block: Block, uid: str, feld: FieldSpec) -> ft.Control | None:
+        """„Für den Plan: 20 Wdh. — von Hand“ unter dem Wert des Tests, wenn die Person
+        gewählt hat — ``None`` mit der Vorgabe des Kurses."""
+        gewaehlt = (planwerte or {}).get(wert_schluessel(block, uid))
+        if gewaehlt is None:
+            return None
+        return ft.Text(
+            f"Für den Plan: {menge_text(feld, gewaehlt.wert)} — {kurstest.wahl_text(gewaehlt)}",
+            size=14,
+            weight=ft.FontWeight.W_600,
+            data=("planwert", block.id, uid) if block.aus else ("planwert", block.id),
+        )
+
     def test_inhalt(block: Block) -> list[ft.Control]:
         """Was in der Testkarte steht. Welche Übungen der Test misst und wo ihr Wert steht,
         sagen `gemessene_uebungen` und `wert_schluessel`: die feste — oder, mit ``aus``, die
@@ -431,6 +537,10 @@ def kapitel_bloecke(
                     if daneben
                     else gross
                 )
+                # Hat die Person den Wert für den Plan gewählt, steht er unter dem Testwert
+                gewaehlt = (planwerte or {}).get(wert_schluessel(block, uid))
+                if (zeile := fuer_den_plan(block, uid, feld)) is not None:
+                    teile.append(zeile)
                 # woher der Wert kommt: der Eintrag der Übung — als Lauf „Dein Test von heute“
                 woher = wann(block, uid) if als_lauf else f"Dein Eintrag bei „{name}“."
                 teile.append(
@@ -440,7 +550,7 @@ def kapitel_bloecke(
                         f"{woher} Was daraus an deinem Plan wird, steht unten."
                         if kursplan
                         else f"{woher} Im Plan wird daraus das Ziel: "
-                        f"{satzende(menge_text(feld, ziel_aus_test(block, wert)))}"
+                        f"{satzende(menge_text(feld, ziel_im_plan(block, wert, gewaehlt)))}"
                     )
                 )
             else:
@@ -451,8 +561,15 @@ def kapitel_bloecke(
                         else f"Noch kein Eintrag bei „{name}“, seit du dieses Kapitel öffnest."
                     )
                 )
+            knoepfe: list[ft.Control] = []
             if (oeffnen := zur_uebung_knopf(block, uid, wert is not None)) is not None:
-                teile.append(ft.Row(controls=[oeffnen]))
+                knoepfe.append(oeffnen)
+            if wert is not None and darf_wert(block, uid):
+                knoepfe.append(wert_knopf(block, uid))
+            if knoepfe:
+                teile.append(ft.Row(wrap=True, spacing=8, run_spacing=4, controls=knoepfe))
+            if wert is not None and wert_schluessel(block, uid) in wert_offen:
+                teile.append(wert_karte(block, uid, wert))
             return teile
 
         # mehrere Gewählte: je Übung eine Zeile — Name, ihr Wert, ihr Knopf
@@ -472,17 +589,25 @@ def kapitel_bloecke(
             daneben = neben(block, uid) if als_lauf and wert is not None else ""
             # Kapitelplan: das Ziel in einer eigenen blassen Zeile — neben dem Knopf bräche
             # „30 Wdh. — im Plan das Ziel: 15 Wdh.“ mitten im Wert um (Web-Foto 16.11.2026)
+            gewaehlt = (planwerte or {}).get(wert_schluessel(block, uid))
+            ziel = ziel_im_plan(block, wert, gewaehlt) if wert is not None else 0
             ziel_zeile: list[ft.Control] = (
-                [
-                    ft.Text(
-                        f"im Plan das Ziel: {menge_text(feld, ziel_aus_test(block, wert))}",
-                        size=12,
-                        opacity=0.7,
-                    )
-                ]
+                [ft.Text(f"im Plan das Ziel: {menge_text(feld, ziel)}", size=12, opacity=0.7)]
                 if wert is not None and not kursplan
                 else []
             )
+            # Kursplan: die Wahl der Person unter dem Wert (im Kapitelplan sagt es das Ziel)
+            if kursplan and wert is not None and gewaehlt is not None:
+                ziel_zeile = [
+                    ft.Text(
+                        f"für den Plan: {menge_text(feld, gewaehlt.wert)} — "
+                        f"{kurstest.wahl_text(gewaehlt)}",
+                        size=12,
+                        opacity=0.85,
+                        data=("planwert", block.id, uid),
+                    )
+                ]
+            aendern = wert is not None and darf_wert(block, uid)
             teile.append(
                 ft.Row(
                     spacing=10,
@@ -510,10 +635,13 @@ def kapitel_bloecke(
                                 *ziel_zeile,
                             ],
                         ),
+                        *([wert_knopf(block, uid, klein=True)] if aendern else []),
                         *([oeffnen] if oeffnen is not None else []),
                     ],
                 )
             )
+            if wert is not None and wert_schluessel(block, uid) in wert_offen:
+                teile.append(wert_karte(block, uid, wert))
         was = "Deine Tests" if als_lauf else "Deine Einträge"
         teile.append(
             hinweis(
@@ -526,9 +654,8 @@ def kapitel_bloecke(
         return teile
 
     def test(block: Block) -> ft.Control:
-        if not block.aus:
-            return karte(*test_inhalt(block))
-        # „die gewählte“: Die Karte folgt der Wahl — ihr Inhalt wird getauscht
+        # Der Inhalt der Karte wird getauscht: „die gewählte“ folgt der Wahl, und „Wert
+        # ändern“ klappt die Karte „Wert für den Plan“ auf und zu
         spalte = ft.Column(
             spacing=12, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH
         )
@@ -539,7 +666,9 @@ def kapitel_bloecke(
                 spalte.update()
 
         spalte.controls = test_inhalt(block)
-        testkarten.append(zeichnen)
+        test_zeichnen[block.id] = zeichnen
+        if block.aus:
+            testkarten.append(zeichnen)
         return karte(spalte)
 
     def auswahl(block: Block) -> ft.Control:

@@ -142,7 +142,8 @@ class Geometrie:
     x_min: float
     #: **der Punkt** je gezeichnetem Knoten — an ihm beginnen seine Wege, an ihm zieht man
     #: einen neuen (Ben, 16.11.2026): bei mehreren Wegen der Abzweig, bei genau einem dessen
-    #: Griff, ohne gezeichneten Weg die Stelle knapp unter der Beschriftung
+    #: Griff — außer der eine Weg ist ein Rückweg (sein Griff läge weit weg): dann der Austritt
+    #: unter dem Knoten —, ohne gezeichneten Weg die Stelle knapp unter der Beschriftung
     punkte: dict[str, Punkt]
 
 
@@ -189,10 +190,22 @@ def geometrie(
     True
     >>> sorted(g.abzweige)  # „p“ hat zwei Wege: Abzweig und Griffe; „k“ einen: nur den Griff
     ['p']
-    >>> weg_k = next(w for w in g.wege if w.kante.von == "k")
-    >>> g.punkte["p"] == g.abzweige["p"], g.punkte["k"] == weg_k.griff  # je Knoten ein Punkt
-    (True, True)
+    >>> g.punkte["p"] == g.abzweige["p"]  # je Knoten ein Punkt: hier der Abzweig
+    True
     >>> g.punkte["r"][1] - g.mitten["r"][1] == KNOTEN / 2 + NAME_H + AUSTRITT  # ohne Weg
+    True
+
+    Der eine Weg von „k“ ist ein **Rückweg** — sein Griff liegt in der Gasse, weit weg. Der
+    Punkt von „k“ bleibt darum unter „k“ (sein Austritt), der Griff gehört nur dem Weg:
+
+    >>> weg_k = next(w for w in g.wege if w.kante.von == "k")
+    >>> g.punkte["k"] == g.austritte["k"], g.punkte["k"] == weg_k.griff
+    (True, False)
+
+    Ein einzelner Weg **abwärts** dagegen: Punkt und Griff sind dasselbe.
+
+    >>> g = geometrie(Ablauf(True, "p", (Kante("p", "k"),)), {"p": Lage(0, 0), "k": Lage(0, 1)})
+    >>> g.punkte["p"] == g.wege[0].griff
     True
     """
     text_h = dict(beschriftung or {})
@@ -363,10 +376,14 @@ def geometrie(
     anzahl = Counter(w.kante.von for w in wege)
     abzweige = {kn: p for kn, p in austritte.items() if anzahl[kn] >= 2}
     # Der Punkt je Knoten: der Abzweig, der Griff des einen Wegs — oder, ohne gezeichneten Weg,
-    # die Stelle, an der der Austritt läge
-    griffe = {w.kante.von: w.griff for w in wege if anzahl[w.kante.von] == 1}
+    # die Stelle, an der der Austritt läge. Ist der eine Weg ein **Rückweg**, liegt sein Griff
+    # weit weg in der Gasse: Dann ist der Punkt des Knotens sein Austritt, direkt unter ihm
+    # (Ben, 17.11.2026, am Foto: „Nach der Frage ist es nicht möglich ein Ende zu setzen“ —
+    # unter der Frage stand nichts zum Ziehen)
+    griffe = {w.kante.von: w.griff for w in wege if anzahl[w.kante.von] == 1 and w.art != RUECK}
     punkte = {
-        kn: abzweige.get(kn) or griffe.get(kn) or (mitten[kn][0], unter(kn)[1]) for kn in mitten
+        kn: abzweige.get(kn) or griffe.get(kn) or austritte.get(kn) or (mitten[kn][0], unter(kn)[1])
+        for kn in mitten
     }
     return Geometrie(
         mitten, austritte, abzweige, staemme, tuple(wege), breite, hoehe, x_min, punkte

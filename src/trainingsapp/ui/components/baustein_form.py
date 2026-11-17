@@ -469,6 +469,15 @@ def baustein_blatt(
         teile: list[ft.Control] = [
             wahl("Ziel", wert, optionen, setzen, "baustein_ziel", daneben=daneben)
         ]
+        if zustand["ziel"] == TEST:
+            # „mal“ ist eine Vorgabe (W3, Ben 17.11.2026): Nach dem Test steht sie auf der
+            # Karte „Wert für den Plan“ — die Person kann sie ändern
+            teile.append(
+                hinweis(
+                    "„mal“ ist die Vorgabe: Nach dem Test sieht die Person, was der Plan "
+                    "nimmt, und kann es ändern — ganz, Anteil oder von Hand."
+                )
+            )
         if zustand["ziel"] == FEST:
             spec = jetzt().ziel_spec(ziel_uebungen())
             if spec.fields:

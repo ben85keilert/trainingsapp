@@ -58,8 +58,9 @@ from .kursbloecke import (
     WEICH,
     ZU_ENDE,
     Block,
+    Planwert,
     wert_schluessel,
-    ziel_aus_test,
+    ziel_im_plan,
 )
 from .kurse import Kapitel, Kurs, Kursplan, PlanVorlage, plan_aus_vorlage
 from .kurstest import SKALA_NAME, herkunft, skala_name, uhr_fuer, vorgabe_fuer
@@ -289,6 +290,7 @@ def aenderungen(
     *,
     bezug: Sequence[Block] = (),
     zusatz: Mapping[str, str] | None = None,
+    planwerte: Mapping[str, Planwert] | None = None,
 ) -> list[Aenderung]:
     """Die Zeilen „Das ändert sich an deinem Plan“ zu den Bausteinen **eines** Kapitels.
 
@@ -304,6 +306,9 @@ def aenderungen(
             einem Test je Satz steht. Ohne: der Feldvorrat.
         bezug: Blöcke anderer Kapitel, auf die sich Bausteine beziehen dürfen (der Test zu
             ``ziel_aus``; die feste Übung einer Marke, wenn sie im Plan fehlt).
+        zusatz: je Test (`wert_schluessel`), wie er gemacht wurde — für die Herkunft.
+        planwerte: je Test (`wert_schluessel`) der **Wert für den Plan**, den die Person
+            gewählt hat (W3, Ben 17.11.2026) — er ist das Ziel, statt Testwert × Faktor.
 
     Ein ``plan_uebung`` ergibt eine Zeile „… kommt dazu“ und je Angabe (Ziel, Parameter,
     Timer, Takt) eine eigene — jede lässt sich einzeln abwählen:
@@ -356,8 +361,32 @@ möglich | neu
     b5 | Brücke kommt ans Ende | Die Übung, hinter die es gehört, ist noch nicht in deinem \
 Plan. | anker_fehlt
     b6 | Eine Einstellung entfällt | Die Übung ist noch nicht in deinem Plan. | entfaellt
+
+    **Der Wert für den Plan** (``planwerte``): Hat die Person nach dem Test gewählt, ist ihr
+    Wert das Ziel — statt Testwert × Faktor. Die Zeile bekommt eine eigene ID (mit dem Stempel
+    der Wahl): Sie wird **wieder angeboten**, auch wenn das Ziel aus dem Test schon übernommen
+    war; ohne Wahl bleibt ein übernommenes Ziel übernommen.
+
+    >>> fuenf = [Block(TEST, id="t", uebung="k", feld="reps"),
+    ...          Block(PLAN_UEBUNG, id="b7", uebung="k", ziel_aus="t", faktor=0.8)]
+    >>> zeigen(aenderungen(Plan(), fuenf, {"t": 22}, {}, {}, namen))
+    b7 | Käfer kommt dazu | ans Ende | neu
+    b7#ziel | Ziel für Käfer: 18 Wiederholungen | 80 % von deinem Test (22 Wdh.) | neu
+    >>> mit18, stand18 = anwenden(Plan(), fuenf, {"t": 22}, {}, {"b7", "b7#ziel"}, (), {})
+    >>> from trainingsapp.core.kursbloecke import HAND, planwert
+    >>> hand = {"t": planwert(HAND, 22, hand=20, stempel="s1")}
+    >>> zeigen(aenderungen(mit18, fuenf, {"t": 22}, {}, stand18, namen, planwerte=hand))
+    b7 | Käfer kommt dazu | steht in deinem Plan | uebernommen
+    b7#ziel@s1 | Ziel für Käfer: 20 Wiederholungen | dein Wert von Hand (20 Wdh.) — Test: \
+22 Wdh. | neu
+    >>> mit20, stand20 = anwenden(mit18, fuenf, {"t": 22}, {}, {"b7#ziel@s1"}, (), stand18,
+    ...                           planwerte=hand)
+    >>> mit20.items[0].target, stand20["b7"]["erledigt"]
+    ({'reps': [20]}, ['b7#ziel', 'b7#ziel@s1'])
+    >>> [z.stand for z in aenderungen(mit20, fuenf, {"t": 25}, {}, stand20, namen)]  # neuer Test
+    ['uebernommen', 'uebernommen']
     """
-    lauf = _Lauf(plan, bloecke, werte, wahl, kurs_stand, namen, feld_von, bezug, zusatz)
+    lauf = _Lauf(plan, bloecke, werte, wahl, kurs_stand, namen, feld_von, bezug, zusatz, planwerte)
     # Zur Vorschau gilt jede neue Zeile als gewählt: Ein Baustein darf sich auf die Planübung
     # eines Bausteins davor beziehen, auch wenn beide noch nicht übernommen sind
     lauf.gehen(lambda zeile: zeile.stand in (NEU, ANKER_FEHLT))
@@ -378,12 +407,14 @@ def anwenden(
     bezug: Sequence[Block] = (),
     lassen: Collection[str] = (),
     zusatz: Mapping[str, str] | None = None,
+    planwerte: Mapping[str, Planwert] | None = None,
 ) -> tuple[Plan, KursStand]:
     """Wendet die gewählten Zeilen an — und nur sie. ``gewaehlt`` sind ihre IDs
     (`Aenderung.id`); eine Zeile, in der der Plan abweicht, gilt nur, wenn ihre ID auch in
     ``trotz`` steht („Vorschlag übernehmen“). Zurück kommen der neue Plan — eine Kopie, die
     Eingabe bleibt, wie sie ist — und der fortgeschriebene Kurs-Stand. ``namen``, ``feld_von``
-    und ``bezug`` wie bei `aenderungen` (``namen=None``: jede Übung gilt als vorhanden).
+    ``bezug``, ``zusatz`` und ``planwerte`` wie bei `aenderungen` (``namen=None``: jede Übung
+    gilt als vorhanden).
 
     ``lassen`` sind die Zeilen, in denen der Plan abweicht und die Person **ihren Wert
     lässt**: Sie werden im Kurs-Stand als erledigt vermerkt, ohne den Plan zu ändern — sonst
@@ -435,7 +466,7 @@ def anwenden(
     >>> [z.stand for z in aenderungen(neu, drei, {}, {}, stand3, {"p": "Planke"})]
     ['uebernommen']
     """
-    lauf = _Lauf(plan, bloecke, werte, wahl, kurs_stand, namen, feld_von, bezug, zusatz)
+    lauf = _Lauf(plan, bloecke, werte, wahl, kurs_stand, namen, feld_von, bezug, zusatz, planwerte)
     bleibt = set(lassen)
     ja, auch = set(gewaehlt), set(trotz) - bleibt
     lauf.gehen(
@@ -499,6 +530,7 @@ class _Lauf:
         feld_von: Feldsuche | None,
         bezug: Sequence[Block],
         zusatz: Mapping[str, str] | None = None,
+        planwerte: Mapping[str, Planwert] | None = None,
     ) -> None:
         self.plan = copy.deepcopy(plan)
         self.stand: KursStand = {
@@ -514,6 +546,9 @@ class _Lauf:
         #: Schlüssel eines Tests (`wert_schluessel`) → wie er gemacht wurde („links · 10 kg“,
         #: `core.kurstest.ausfuehrung_aus`) — steht in der Herkunft eines Ziels aus dem Test
         self.zusatz = zusatz or {}
+        #: Schlüssel eines Tests → der Wert für den Plan, den die Person gewählt hat (W3) —
+        #: er ist das Ziel, statt Testwert × Faktor (`_ziel_aus_test`)
+        self.planwerte = planwerte or {}
         alle = (*bezug, *bloecke)
         self.tests = {b.id: b for b in alle if b.art == TEST}
         #: Block-ID → die feste Übung eines ``plan_uebung`` (für den Namen einer Marke)
@@ -783,12 +818,27 @@ class _Lauf:
     ) -> None:
         """Das Ziel aus einem Test: sein Wert × Faktor des Bausteins, im Feld des Tests — das
         übrige Ziel der Planübung bleibt. Ist die Zeile einmal übernommen, bleibt sie es: Der
-        „jüngste Eintrag“ des Tests ändert sich mit jedem Training."""
+        „jüngste Eintrag“ des Tests ändert sich mit jedem Training.
+
+        **Mit dem Wert für den Plan** (W3, Ben 17.11.2026: `planwerte`) ist die Wahl der
+        Person das Ziel, statt zu rechnen — und die Zeile eine **eigene** (ihre ID trägt den
+        Stempel der Wahl): Eine neue Wahl wird wieder angeboten, auch wenn das Ziel aus dem
+        Test schon übernommen war. Nichts ändert sich ohne Tipp; steht im Plan inzwischen ein
+        eigener Wert, fragt die Zeile wie jede andere (`_wert`: „weicht ab“)."""
         name = self._name(uebung)
         test = self.tests.get(b.ziel_aus)
         # ein Test, der „die gewählte“ misst, hat je Übung einen Wert — der dieser Planübung zählt
-        wert = self.werte.get(wert_schluessel(test, uebung)) if test is not None else None
-        if item is not None and zid in self._erledigt(marke):
+        schluessel = wert_schluessel(test, uebung) if test is not None else ""
+        wert = self.werte.get(schluessel) if test is not None else None
+        gewaehlt = self.planwerte.get(schluessel) if wert is not None else None
+        erledigt = self._erledigt(marke)
+        if gewaehlt is not None:
+            zid = f"{zid}@{gewaehlt.stempel}"
+            schon = zid in erledigt
+        else:
+            # ohne Wahl: übernommen ist übernommen — auch, wenn es zuletzt eine Wahl war
+            schon = any(z == zid or z.startswith(f"{zid}@") for z in erledigt)
+        if item is not None and schon:
             nur = (test.feld,) if test is not None else ()
             text = self._ziel_text(uebung, item.target or {}, nur)
             titel = f"Ziel für {name}: {text}"
@@ -798,7 +848,7 @@ class _Lauf:
             unter = "aus deinem Test — mach ihn zuerst"
             self._zeile(Aenderung(zid, b.id, ZIEL, f"Ziel für {name}", unter, OFFEN))
             return
-        zahl = ziel_aus_test(b, wert)
+        zahl = ziel_im_plan(b, wert, gewaehlt)
         feld = self._feld(uebung, test.feld)
         je_satz = feld.type == FieldType.SET_LIST
         bisher = dict(item.target) if item is not None and item.target else {}
@@ -817,7 +867,9 @@ class _Lauf:
             galt,
             test.feld,
             self._skala_name(uebung),
-            self.zusatz.get(wert_schluessel(test, uebung), ""),
+            self.zusatz.get(schluessel, ""),
+            gewaehlt=gewaehlt,
+            gewaehlt_text=_kurzwert(feld, gewaehlt.wert) if gewaehlt is not None else "",
         )
         self._wert(
             zid=zid,

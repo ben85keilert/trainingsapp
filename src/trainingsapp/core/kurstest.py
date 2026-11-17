@@ -48,6 +48,8 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
 from .kursbloecke import (
+    ANTEIL,
+    HAND,
     MENGE,
     SKALA,
     SKALA_MAX,
@@ -56,6 +58,7 @@ from .kursbloecke import (
     WIE_UHR,
     ZEIT,
     Block,
+    Planwert,
     Vorgabe,
     wert_im_test,
 )
@@ -69,6 +72,7 @@ from .result_spec import (
     ist_leer,
     vorrat_feld,
 )
+from .tagesbilanz import menge_text
 from .takt import Takt, rate_text, takt_waehlen
 from .takt import dauer_text as takt_dauer
 from .timer import TimerProfil, TimerStand, dauer_text, stoppuhr
@@ -80,6 +84,7 @@ from .uebung_timer import (
     timer_fuer,
     zaehlt_als,
 )
+from .units import parse_dauer
 from .varianten import LABEL as VARIANTE_NAME
 from .varianten import VARIANTE, ist_variante
 from .zaehlen import zaehlt_in
@@ -1110,11 +1115,18 @@ def herkunft(
     feld: str,
     skala: str = "",
     ausfuehrung: str = "",
+    *,
+    gewaehlt: Planwert | None = None,
+    gewaehlt_text: str = "",
 ) -> str:
     """Woher ein Ziel aus dem Test kommt — die **Regel des Kurses**, ohne Wertung: „aus deinem
     Test“, mit Faktor „80 % von deinem Test (…)“, mit Vorgabe der gemessene Wert dazu.
     ``ausfuehrung``: wie der Test gemacht wurde (`ausfuehrung_aus`) — steht dahinter, damit
     der Wert nicht ohne sie gelesen wird (22 Wiederholungen **mit 10 kg**; Skizze F4).
+
+    ``gewaehlt``: Die Person hat den **Wert für den Plan** selbst gewählt (W3, Ben
+    17.11.2026) — dann nennt der Satz ihre Wahl statt der Regel des Kurses, der Test steht
+    dahinter. ``gewaehlt_text``: ihr Wert in Worten („20 Wdh.“), nur für „von Hand“.
 
     >>> herkunft(1.0, "48 s", None, "hold")
     'aus deinem Test'
@@ -1126,13 +1138,163 @@ def herkunft(
     '80 % von deinem Test (22 Wdh. bis Anstrengung 7 · links · 10 kg)'
     >>> herkunft(1.0, "48 s", None, "hold", ausfuehrung="links")
     'aus deinem Test (48 s · links)'
+
+    Mit der Wahl der Person — von Hand, ein anderer Anteil, ganz:
+
+    >>> from trainingsapp.core.kursbloecke import GANZ, planwert
+    >>> bis7 = Vorgabe(SKALA, 7)
+    >>> herkunft(0.8, "22 Wdh.", bis7, "reps", ausfuehrung="links · 10 kg",
+    ...          gewaehlt=planwert(HAND, 22, hand=20), gewaehlt_text="20 Wdh.")
+    'dein Wert von Hand (20 Wdh.) — Test: 22 Wdh. bis Anstrengung 7 · links · 10 kg'
+    >>> herkunft(0.8, "22 Wdh.", bis7, "reps", gewaehlt=planwert(ANTEIL, 22, anteil=0.9))
+    '90 % von deinem Test (22 Wdh. bis Anstrengung 7)'
+    >>> herkunft(0.8, "22 Wdh.", None, "reps", gewaehlt=planwert(GANZ, 22))
+    'dein Test, ganz (22 Wdh.)'
     """
+    dazu = anhang(v, feld, skala or SKALA_NAME) if v is not None else ""
+    kern = " ".join(t for t in (wert_text, dazu) if t)
+    klammer = " · ".join(t for t in (kern, ausfuehrung) if t)
+    if gewaehlt is not None:
+        if gewaehlt.wie == HAND:
+            return f"dein Wert von Hand ({gewaehlt_text or f'{gewaehlt.wert:g}'}) — Test: {klammer}"
+        if gewaehlt.wie == ANTEIL:
+            return f"{round((gewaehlt.anteil or 1.0) * 100)} % von deinem Test ({klammer})"
+        return f"dein Test, ganz ({klammer})"
     anteil = "aus deinem Test" if faktor == 1.0 else f"{round(faktor * 100)} % von deinem Test"
     if v is None and faktor == 1.0 and not ausfuehrung:
         return anteil
-    dazu = anhang(v, feld, skala or SKALA_NAME) if v is not None else ""
-    kern = " ".join(t for t in (wert_text, dazu) if t)
-    return f"{anteil} ({' · '.join(t for t in (kern, ausfuehrung) if t)})"
+    return f"{anteil} ({klammer})"
+
+
+# -- Wert für den Plan (W3, Ben 17.11.2026; `docs/plan_kurs_ablauf.md` §17) --------------------
+#
+# Die Karte „Wert für den Plan“ (`ui/components/planwert.py`) zeichnet nur: Schritt, Text im
+# Feld, Lesen der Eingabe und die Sätze stehen hier; was aus der Wahl wird, rechnet
+# `core.kursbloecke.planwert`.
+
+
+def zeitfeld(feld: FieldSpec) -> bool:
+    """Hält das Feld eine Zeit (Sekunden)? Dann wird sie als „1:30“ getippt und gezeigt.
+
+    >>> zeitfeld(vorrat_feld("hold")), zeitfeld(vorrat_feld("reps"))
+    (True, False)
+    """
+    return feld.unit == "s" or feld.type == FieldType.DURATION
+
+
+def hand_schritt(feld: FieldSpec) -> int:
+    """Der Schritt von − und + bei „Von Hand“: eine Zeit in 5 Sekunden, sonst 1.
+
+    >>> hand_schritt(vorrat_feld("reps")), hand_schritt(vorrat_feld("hold"))
+    (1, 5)
+    """
+    return 5 if zeitfeld(feld) else 1
+
+
+def hand_weiter(feld: FieldSpec, wert: float, richtung: int) -> float:
+    """Die nächste Zahl mit − oder + bei „Von Hand“: auf das Raster des Schritts, nie unter
+    einem Schritt.
+
+    >>> reps, hold = vorrat_feld("reps"), vorrat_feld("hold")
+    >>> hand_weiter(reps, 18, 1), hand_weiter(reps, 1, -1)
+    (19.0, 1.0)
+    >>> hand_weiter(hold, 47, 1), hand_weiter(hold, 47, -1), hand_weiter(hold, 45, -1)
+    (50.0, 45.0, 40.0)
+    """
+    schritt = hand_schritt(feld)
+    stufe = wert / schritt
+    naechste = math.floor(stufe) + 1 if richtung > 0 else math.ceil(stufe) - 1
+    return float(max(naechste, 1) * schritt)
+
+
+def hand_text(feld: FieldSpec, wert: float) -> str:
+    """Die Zahl, wie sie im Feld „Von Hand“ steht — eine Zeit als ``m:ss`` (nur Ziffern und
+    Doppelpunkt: so lässt sie sich mit der Zahlentastatur ändern), sonst die Zahl. `hand_lesen`
+    liest sie zurück.
+
+    >>> hand_text(vorrat_feld("reps"), 18.0), hand_text(vorrat_feld("hold"), 90)
+    ('18', '1:30')
+    >>> hand_text(vorrat_feld("hold"), 40), hand_lesen(vorrat_feld("hold"), "0:40")
+    ('0:40', 40.0)
+    """
+    return dauer_text(wert) if zeitfeld(feld) else f"{wert:g}"
+
+
+def hand_lesen(feld: FieldSpec, text: str) -> float | None:
+    """Die Eingabe im Feld „Von Hand“ als Zahl in der Einheit des Felds — ``None``, wenn sie
+    sich nicht lesen lässt oder nicht über 0 liegt. Eine Zeit wie überall (`parse_dauer`:
+    „45“, „1:30“, „90s“), sonst eine Zahl (auch mit Komma), auf ganze Einheiten.
+
+    >>> reps, hold = vorrat_feld("reps"), vorrat_feld("hold")
+    >>> hand_lesen(reps, " 20 "), hand_lesen(reps, "7,6"), hand_lesen(hold, "1:30")
+    (20.0, 8.0, 90.0)
+    >>> hand_lesen(reps, ""), hand_lesen(reps, "0"), hand_lesen(reps, "viel"), hand_lesen(hold, "x")
+    (None, None, None, None)
+    """
+    roh = text.strip()
+    if zeitfeld(feld):
+        wert = parse_dauer(roh)
+    else:
+        try:
+            wert = float(roh.replace(",", "."))
+        except ValueError:
+            return None
+    if wert is None or not math.isfinite(wert) or round(wert) < 1 or wert > 99999:
+        return None
+    return float(round(wert))
+
+
+def hand_einheit(feld: FieldSpec) -> str:
+    """Was hinter dem Feld „Von Hand“ steht: die Einheit — bei einer Zeit der Name des Felds.
+
+    >>> hand_einheit(vorrat_feld("reps")), hand_einheit(vorrat_feld("hold"))
+    ('Wdh.', 'Haltezeit')
+    """
+    return feld.label if zeitfeld(feld) else (feld.unit or feld.label)
+
+
+def planwert_satz(feld: FieldSpec, wert: float) -> str:
+    """Der eine Satz der Karte: welche Zahl der Plan nimmt — ohne Wertung.
+
+    >>> planwert_satz(vorrat_feld("reps"), 18), planwert_satz(vorrat_feld("hold"), 90)
+    ('Der Plan nimmt 18 Wdh.', 'Der Plan nimmt 1:30 Haltezeit.')
+    """
+    text = menge_text(feld, wert)
+    return f"Der Plan nimmt {text}" if text.endswith(".") else f"Der Plan nimmt {text}."
+
+
+def wahl_text(gewaehlt: Planwert) -> str:
+    """Die Wahl in einem Wort — hinter dem Wert für den Plan in der Testkarte.
+
+    >>> from trainingsapp.core.kursbloecke import GANZ, planwert
+    >>> [wahl_text(planwert(w, 22, anteil=0.9, hand=20)) for w in (GANZ, ANTEIL, HAND)]
+    ['ganz', '90 %', 'von Hand']
+    """
+    if gewaehlt.wie == HAND:
+        return "von Hand"
+    if gewaehlt.wie == ANTEIL:
+        return f"{round((gewaehlt.anteil or 1.0) * 100)} %"
+    return "ganz"
+
+
+def wert_jetzt(
+    block: Block, uebung: Exercise, *, wdh: int | None, sekunden: float, skala: int | None
+) -> float | None:
+    """Der Wert, den der Test hinterließe, wenn jetzt eingetragen würde — das Feld des Tests
+    im Eintrag (`eintrag`); ``None``, solange er fehlt (`fehlt`). Die Ergebnis-Seite rechnet
+    damit den Wert für den Plan, bevor „Eintragen“ gedrückt ist.
+
+    >>> from trainingsapp.core.kursbloecke import TEST
+    >>> kaefer = Exercise(name="Käfer", result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
+    >>> test = Block(TEST, uebung="k", feld="reps", vorgabe=Vorgabe(SKALA, 7))
+    >>> wert_jetzt(test, kaefer, wdh=22, sekunden=72, skala=7)
+    22.0
+    >>> wert_jetzt(test, kaefer, wdh=None, sekunden=72, skala=7) is None
+    True
+    """
+    _, werte = eintrag(block, uebung, wdh=wdh, sekunden=sekunden, skala=skala)
+    wert = wert_im_test(werte, block.feld)
+    return float(wert) if wert is not None and wert > 0 else None
 
 
 # -- Der Lauf auf der Teilnehmer-Seite: Anzeige, Ende, Ergebnis (Stufe 2, 16.11.2026) ---------
@@ -1567,6 +1729,11 @@ __all__ = [
     "fuehrt_ein_takt",
     "gemessen",
     "gezaehlte_zeit",
+    "hand_einheit",
+    "hand_lesen",
+    "hand_schritt",
+    "hand_text",
+    "hand_weiter",
     "herkunft",
     "ist_ausfuehrung",
     "karten_ueberschrift",
@@ -1576,6 +1743,7 @@ __all__ = [
     "lauf_satz",
     "marke",
     "neben_text",
+    "planwert_satz",
     "skala_am_ende",
     "skala_frage",
     "skala_name",
@@ -1592,9 +1760,12 @@ __all__ = [
     "vorgabe_fuer",
     "vorgabe_text",
     "vorher_knopf",
+    "wahl_text",
+    "wert_jetzt",
     "woher_wdh",
     "woher_zeit",
     "zaehl_text",
     "zeit_anzeige",
     "zeit_zeile",
+    "zeitfeld",
 ]

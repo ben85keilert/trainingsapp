@@ -21,15 +21,25 @@ ft = pytest.importorskip("flet")
 
 from attrappen import UTC0, Gurt, Seite, Uhr, ruhe, vorbei  # noqa: E402
 from trainingsapp.core.kursbloecke import (  # noqa: E402
+    ANTEIL,
     AUSWAHL,
+    GANZ,
+    HAND,
     MENGE,
+    PLAN_UEBUNG,
     SKALA,
     TEST,
     ZEIT,
     Block,
     Vorgabe,
 )
-from trainingsapp.core.kurse import Kapitel, Kurs  # noqa: E402
+from trainingsapp.core.kurse import (  # noqa: E402
+    Kapitel,
+    Kurs,
+    Kursplan,
+    PlanVorlage,
+    VorlageItem,
+)
 from trainingsapp.core.models import Exercise, lokaler_tag  # noqa: E402
 from trainingsapp.core.result_spec import ResultSpec, vorrat_feld  # noqa: E402
 from trainingsapp.core.takt import VORLAGEN  # noqa: E402
@@ -1260,3 +1270,275 @@ async def test_vorgabe_mit_timer_und_takt_der_timer_kann_eher_durch_sein(umgebun
     await _bis_vorbei(u)
     (eintrag,) = _eintraege(state, kaefer)
     assert eintrag.result == {"reps": [8], "duration": 40}
+
+
+# -- Wert für den Plan (W3, Ben 17.11.2026; `docs/plan_kurs_ablauf.md` §17) ---------------
+
+
+def _kurs_mit_ziel(state, vorgabe: Vorgabe | None, faktor: float = 0.8):
+    """Wie `_kurs`, aber der Kurs baut einen Plan, und ein Baustein nimmt sein Ziel aus dem
+    Test (``faktor`` vom Wert) — aus dem Testwert wird ein Ziel, also gibt es die Karte „Wert
+    für den Plan“."""
+    kaefer = Exercise(name="Käfer", result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
+    state.uebungen.speichern(kaefer)
+    kurs = Kurs(
+        name="Rumpf-Kurs",
+        kursplan=Kursplan("Rumpf", [0, 2, 4]),
+        kapitel=[
+            Kapitel(
+                titel="Erweiterung",
+                bloecke=[
+                    Block(TEST, id="test", uebung=kaefer.id, feld="reps", vorgabe=vorgabe),
+                    Block(PLAN_UEBUNG, id="dazu", uebung=kaefer.id, ziel_aus="test", faktor=faktor),
+                ],
+            )
+        ],
+    )
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    kapitel = kurs.kapitel[0]
+    _erreichen(state, kurs, kapitel)
+    return kurs, kapitel, kapitel.bloecke[0], state.uebungen.laden(kaefer.id)
+
+
+def _weg(karte, wie: str, schluessel=None) -> None:
+    """Den Weg der Karte „Wert für den Plan“ wählen — wie der Tipp auf den Umschalter."""
+    marke = ("planwert_weg", schluessel) if schluessel is not None else "planwert_weg"
+    umschalter = _daten(karte, marke)
+    umschalter.selected = [wie]
+    umschalter.on_change(SimpleNamespace(control=umschalter))
+
+
+def _tippen(feld, text: str) -> None:
+    feld.value = text
+    feld.on_change(SimpleNamespace(control=feld))
+
+
+async def _bis_zum_ergebnis(u, kurs, kapitel, block, kaefer, wdh: str = "22"):
+    """Der Lauf „bis Anstrengung 7“ bis zur Ergebnis-Seite, die Wiederholungen getippt."""
+    await _starten(u, kurs, kapitel)
+    await _sekunden(u, 72)
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_fertig"))
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    if wdh:
+        _tippen(_daten(ergebnis, "test_wdh"), wdh)
+    return ergebnis
+
+
+async def test_wert_fuer_den_plan_steht_direkt_nach_dem_test(umgebung) -> None:
+    """Ben, 17.11.2026: „Die Werteintragung kommt normal direkt nach einem Test“ — „ganz
+    genommen – prozentual abgeändert – manuell eingegeben (mit Klick und per Tastatur)“. Die
+    Karte steht auf der Ergebnis-Seite, vorgewählt, was der Kurs sagt (80 %); „Eintragen“
+    merkt die Wahl, und die Sammelkarte bietet sie als Ziel an."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs_mit_ziel(state, Vorgabe(SKALA, 7))
+    ergebnis = await _bis_zum_ergebnis(u, kurs, kapitel, block, kaefer, wdh="")
+    karte = _daten(ergebnis, "planwert_karte")
+    assert not karte.visible  # noch kein Wert: Die Wiederholungen fehlen
+    _tippen(_daten(ergebnis, "test_wdh"), "22")
+    assert karte.visible and _daten(karte, "planwert_test").value == "Dein Test: 22 Wdh."
+    # vorgewählt: was der Kurs sagt — 80 %, daneben die Zahl
+    assert _daten(karte, "planwert_weg").selected == [ANTEIL]
+    assert _daten(karte, "planwert_anteil").visible and not _daten(karte, "planwert_hand").visible
+    assert _daten(karte, "planwert_prozent").value == "80"
+    assert _daten(karte, "planwert_ergibt").value == "= 18 Wdh."
+    satz = _daten(karte, "planwert_satz")
+    assert satz.value == "Der Plan nimmt 18 Wdh."
+    assert "Dein Eintrag vom Test bleibt, wie er ist." in _texte(karte)
+    assert state.kurs_test.planwahl is None  # die Vorgabe: nichts zu merken
+
+    # Anteil mit Klick und per Tastatur
+    await klick(_daten(karte, "planwert_prozent_plus"))
+    assert _daten(karte, "planwert_prozent").value == "85" and "19 Wdh." in satz.value
+    _tippen(_daten(karte, "planwert_prozent"), "50")
+    assert "Der Plan nimmt 11 Wdh." in satz.value
+    assert (state.kurs_test.planwahl.wie, state.kurs_test.planwahl.anteil) == (ANTEIL, 0.5)
+
+    # ganz
+    _weg(karte, GANZ)
+    assert "Der Plan nimmt 22 Wdh." in satz.value and not _daten(karte, "planwert_anteil").visible
+
+    # von Hand: beginnt bei der Zahl, die dastand; − / + und Tastatur
+    _weg(karte, HAND)
+    zahl = _daten(karte, "planwert_zahl")
+    assert _daten(karte, "planwert_hand").visible and zahl.value == "22"
+    await klick(_daten(karte, "planwert_zahl_minus"))
+    assert zahl.value == "21" and "21 Wdh." in satz.value
+    _tippen(zahl, "20")
+    assert "Der Plan nimmt 20 Wdh." in satz.value
+    _tippen(zahl, "")  # eine leere Eingabe ändert nichts — beim Verlassen steht die Zahl wieder da
+    assert "Der Plan nimmt 20 Wdh." in satz.value
+    zahl.on_blur(SimpleNamespace(control=zahl))
+    assert zahl.value == "20"
+
+    # ändern sich die Wiederholungen, bleibt die Zahl von Hand — der Test darüber folgt
+    _tippen(_daten(ergebnis, "test_wdh"), "24")
+    assert _daten(karte, "planwert_test").value == "Dein Test: 24 Wdh."
+    assert "Der Plan nimmt 20 Wdh." in satz.value
+
+    # die Wahl überlebt den Neuaufbau der Ansicht
+    wieder = _daten(_ansicht(u, kurs, kapitel, block, kaefer), "planwert_karte")
+    assert _daten(wieder, "planwert_weg").selected == [HAND]
+    assert _daten(wieder, "planwert_zahl").value == "20"
+
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, kaefer)
+    assert eintrag.result["reps"] == [24]  # der Eintrag bleibt, wie er gemacht wurde
+    variable = state.kurse.variablen(kurs.id, state.profil.id)["test"]
+    assert (variable.wert, variable.wie, variable.hand, variable.schwebt) == (
+        24.0,
+        HAND,
+        20.0,
+        False,
+    )
+
+    # im Kapitel: die Wahl unter dem Wert, und die Sammelkarte bietet sie als Ziel an
+    danach = _kapitel(u, kurs, kapitel)
+    assert _daten(danach, "testwert").value == "24 Wdh."
+    assert _daten(danach, ("planwert", "test")).value == "Für den Plan: 20 Wdh. — von Hand"
+    texte = _texte(danach)
+    assert "Ziel für Käfer: 20 Wiederholungen" in texte
+    assert "dein Wert von Hand (20 Wdh.) — Test: 24 Wdh. bis Anstrengung 7" in texte
+
+
+async def test_ohne_wahl_rechnet_der_kurs_wie_bisher(umgebung) -> None:
+    """Wer die Karte nicht anfasst — oder wieder wählt, was der Kurs sagt —, hinterlässt keine
+    Wahl: Der Kurs rechnet wie bisher, die Sammelkarte nennt seine Regel."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs_mit_ziel(state, Vorgabe(SKALA, 7))
+    ergebnis = await _bis_zum_ergebnis(u, kurs, kapitel, block, kaefer)
+    karte = _daten(ergebnis, "planwert_karte")
+    _weg(karte, GANZ)
+    assert state.kurs_test.planwahl is not None
+    _weg(karte, ANTEIL)  # wieder 80 %: die Vorgabe des Kurses
+    assert state.kurs_test.planwahl is None
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    assert state.kurse.variablen(kurs.id, state.profil.id)["test"].wie == ""
+    danach = _kapitel(u, kurs, kapitel)
+    assert not _hat(danach, ("planwert", "test"))
+    texte = _texte(danach)
+    assert "Ziel für Käfer: 18 Wiederholungen" in texte
+    assert "80 % von deinem Test (22 Wdh. bis Anstrengung 7)" in texte
+
+
+async def test_wert_aendern_im_kapitel(umgebung) -> None:
+    """Skizze W3: „Wert ändern“ an der Testkarte klappt die Karte auf; „Übernehmen“ merkt die
+    Wahl, „Abbrechen“ nicht. Wer wieder wählt, was der Kurs sagt, ist die Wahl los. Am Plan
+    ändert sich dabei nichts — das Ziel steht in der Sammelkarte zum Übernehmen."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs_mit_ziel(state, Vorgabe(SKALA, 7))
+    ergebnis = await _bis_zum_ergebnis(u, kurs, kapitel, block, kaefer)
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    profil = state.profil.id
+
+    ansicht = _kapitel(u, kurs, kapitel)
+    assert not _hat(ansicht, ("planwert_karte", "test"))  # erst auf Tipp
+    await klick(_daten(ansicht, ("wert_aendern", "test")))
+    karte = _daten(ansicht, ("planwert_karte", "test"))
+    assert _daten(karte, ("planwert_weg", "test")).selected == [ANTEIL]  # die Vorgabe: 80 %
+    # Abbrechen: zu, nichts gemerkt
+    _weg(karte, GANZ, "test")
+    await klick(_daten(karte, ("planwert_abbrechen", "test")))
+    assert not _hat(ansicht, ("planwert_karte", "test"))
+    assert state.kurse.planwerte(kurs.id, profil, {"test": 22.0}) == {}
+
+    # von Hand, übernehmen
+    await klick(_daten(ansicht, ("wert_aendern", "test")))
+    karte = _daten(ansicht, ("planwert_karte", "test"))
+    _weg(karte, HAND, "test")
+    await klick(_daten(karte, ("planwert_zahl_plus", "test")))
+    await klick(_daten(karte, ("planwert_zahl_plus", "test")))
+    assert _daten(karte, ("planwert_zahl", "test")).value == "20"
+    await klick(_daten(karte, ("planwert_uebernehmen", "test")))
+    (gewaehlt,) = state.kurse.planwerte(kurs.id, profil, {"test": 22.0}).values()
+    assert (gewaehlt.wie, gewaehlt.wert) == (HAND, 20)
+    danach = _kapitel(u, kurs, kapitel)
+    assert _daten(danach, ("planwert", "test")).value == "Für den Plan: 20 Wdh. — von Hand"
+    assert "Ziel für Käfer: 20 Wiederholungen" in _texte(danach)
+    assert state.kurse.kursplan(kurs, profil) is None  # am Plan hat sich nichts geändert
+
+    # die Karte öffnet mit der Wahl; zurück zu dem, was der Kurs sagt: Die Wahl ist weg
+    await klick(_daten(danach, ("wert_aendern", "test")))
+    karte = _daten(danach, ("planwert_karte", "test"))
+    assert _daten(karte, ("planwert_weg", "test")).selected == [HAND]
+    _weg(karte, ANTEIL, "test")
+    assert _daten(karte, ("planwert_prozent", "test")).value == "80"
+    await klick(_daten(karte, ("planwert_uebernehmen", "test")))
+    assert state.kurse.planwerte(kurs.id, profil, {"test": 22.0}) == {}
+    assert "Ziel für Käfer: 18 Wiederholungen" in _texte(_kapitel(u, kurs, kapitel))
+
+
+async def test_ohne_ziel_im_plan_keine_karte(umgebung) -> None:
+    """Hinterlässt ein Test nur seinen Wert (kein Baustein nimmt ihn, das Kapitel hat keine
+    Plan-Vorlage), gibt es weder die Karte noch „Wert ändern“."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(SKALA, 7))
+    ergebnis = await _bis_zum_ergebnis(u, kurs, kapitel, block, kaefer)
+    assert not _hat(ergebnis, "planwert_karte")
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    assert not _hat(_kapitel(u, kurs, kapitel), ("wert_aendern", "test"))
+
+
+async def test_wert_fuer_den_plan_im_kapitelplan_mit_zeit(umgebung) -> None:
+    """Kapitelplan, Test ohne Lauf, Feld mit Zeit: Die Karte wählt vor, was der Test sagt
+    (80 %), „von Hand“ geht in 5-Sekunden-Schritten und steht als m:ss im Feld; „Plan anlegen“
+    nimmt die Wahl. Danach steht das Ziel im Plan — „Wert ändern“ gibt es nicht mehr."""
+    u = umgebung
+    state = u.state
+    planke = Exercise(name="Planke", result_spec=ResultSpec(fields=[vorrat_feld("hold")]))
+    state.uebungen.speichern(planke)
+    kurs = Kurs(
+        name="Halten",
+        kapitel=[
+            Kapitel(
+                titel="Wie lange?",
+                plaene=[PlanVorlage("Halten", [0, 2, 4], [VorlageItem(planke.id)])],
+                bloecke=[Block(TEST, id="t", uebung=planke.id, feld="hold", faktor=0.8)],
+            )
+        ],
+    )
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    kapitel = kurs.kapitel[0]
+    _erreichen(state, kurs, kapitel)
+    profil = state.profil.id
+    sitzung = state.sitzungen.session_fuer(profil, None, lokaler_tag(UTC0))
+    state.sitzungen.eintrag_anlegen(sitzung, planke, {"hold": [50]}, started_at=UTC0)
+
+    ansicht = _kapitel(u, kurs, kapitel)
+    assert any("Im Plan wird daraus das Ziel: 40s Haltezeit." in t for t in _texte(ansicht))
+    await klick(_daten(ansicht, ("wert_aendern", "t")))
+    karte = _daten(ansicht, ("planwert_karte", "t"))
+    assert _daten(karte, ("planwert_weg", "t")).selected == [ANTEIL]
+    assert _daten(karte, ("planwert_ergibt", "t")).value == "= 40s Haltezeit"
+    _weg(karte, HAND, "t")
+    zahl = _daten(karte, ("planwert_zahl", "t"))
+    assert zahl.value == "0:40" and zahl.keyboard_type == ft.KeyboardType.DATETIME
+    await klick(_daten(karte, ("planwert_zahl_plus", "t")))
+    assert zahl.value == "0:45"
+    _tippen(zahl, "1:05")
+    assert _daten(karte, ("planwert_satz", "t")).value == "Der Plan nimmt 1:05 Haltezeit."
+    await klick(_daten(karte, ("planwert_zahl_minus", "t")))
+    assert zahl.value == "1:00"
+    await klick(_daten(karte, ("planwert_uebernehmen", "t")))
+
+    # die Wahl hält den Testwert nicht fest (Test ohne Lauf): Er bleibt der jüngste Eintrag
+    variable = state.kurse.variablen(kurs.id, profil)["t"]
+    assert variable.schwebt and (variable.wie, variable.hand) == (HAND, 60.0)
+    danach = _kapitel(u, kurs, kapitel)
+    assert _daten(danach, ("planwert", "t")).value == "Für den Plan: 1:00 Haltezeit — von Hand"
+    assert any("Im Plan wird daraus das Ziel: 1:00 Haltezeit." in t for t in _texte(danach))
+
+    await klick(_daten(danach, "plan_anlegen"))
+    (plan,) = state.kurse.kapitel_plaene(kapitel.id, profil)
+    assert plan.items[0].target == {"hold": [60]}  # nicht 40 (80 % von 50)
+    fertig = _kapitel(u, kurs, kapitel)
+    assert not _hat(fertig, ("wert_aendern", "t"))  # das Ziel steht im Plan

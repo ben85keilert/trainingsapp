@@ -643,6 +643,9 @@ def workout_view(
         feld = skala_feld(u)
         gewaehlt = teil.skala_wert
 
+        def ist(wert: int) -> bool:
+            return gewaehlt is not None and int(gewaehlt) == wert
+
         def waehler(wert: int) -> Callable[[], None]:
             def handler() -> None:
                 if u is not None and e.t0 is not None:
@@ -685,10 +688,20 @@ def workout_view(
                         run_spacing=6,
                         controls=[
                             ft.Chip(
-                                label=ft.Text(str(w)),
-                                selected=gewaehlt is not None and int(gewaehlt) == w,
+                                label=ft.Text(
+                                    str(w),
+                                    weight=ft.FontWeight.W_700 if ist(w) else None,
+                                    color=ft.Colors.ON_SECONDARY if ist(w) else None,
+                                ),
+                                selected=ist(w),
                                 show_checkmark=False,
+                                # die gewählte Antwort kräftig: Die Vorgabe des Chips ist die
+                                # Farbe der Karte — der Wert war nicht zu erkennen (Web-Foto
+                                # 17.11.2026; bei einer Frage, die nur vorschlägt, bleibt er
+                                # stehen)
+                                selected_color=ft.Colors.SECONDARY,
                                 on_select=waehler(w),
+                                data=("skala", w),
                             )
                             for w in range(lo, hi + 1)
                         ],
@@ -825,12 +838,21 @@ def workout_view(
 
         ``gleich``: Die Abfrage bei mehreren gleichwertigen Wegen (Ben, 9.11.2026) — sie stehen
         gleich betont, keiner ist vorgezogen. ``ueber``: Die Wahl nach „Überspringen“ — der Weg
-        beendet die Übung ohne Eintrag."""
+        beendet die Übung ohne Eintrag.
+
+        **Ein Vorschlag an einer Frage** (`Kante.vorschlagen`, Ben 17.11.2026): Trifft die
+        Antwort einen Weg, der nur vorschlägt, steht er betont und zuerst — darüber der Satz
+        mit der Regel des Plans (`core.ablauf.vorschlag_text`); die anderen Wege folgen unter
+        „Oder“ (weich wählbar, hart nur erfüllte). Trifft sie einen Weg ohne den Vermerk, ist
+        die Frage schon weitergegangen (`PlanAblaufBaustein.antworten`)."""
         out: list[ft.Control] = []
         staende = teil.kanten_stand()
         frage = teil.schritt.frage is not None
         regulaer = ab.regulaere(staende)
         kandidaten = ab.wahl_offen(staende) if gleich else []
+        vorschlag = ab.empfohlen(staende) if frage and teil.skala_wert is not None else None
+        empfiehlt = vorschlag is not None
+        voran: list[ft.Control] = []
 
         def gehe(kk: ab.Kante) -> Callable[[], None]:
             def handler() -> None:
@@ -850,7 +872,9 @@ def workout_view(
             text = kanten_text(teil, st)
             if st.gesperrt:
                 text += " · gesperrt (Pflicht)"
-            if gleich:
+            if empfiehlt:
+                betont = st is vorschlag
+            elif gleich:
                 betont = any(st is x for x in kandidaten)
             else:
                 betont = st.angeboten or (
@@ -868,16 +892,30 @@ def workout_view(
                 else ft.Icons.SKIP_NEXT
             )
             knopf_art = ft.FilledButton if betont else ft.FilledTonalButton
-            out.append(
-                knopf_art(
-                    text,
-                    icon=symbol,
-                    height=50 if betont else 46,
-                    disabled=not st.waehlbar(weich and not frage),
-                    on_click=gehe(k),
-                    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=25)),
-                )
+            # Eine Frage verzweigt nur nach der Antwort — außer sie schlägt gerade einen Weg
+            # vor: Dann darf weich jeder genommen werden, hart nur ein erfüllter
+            aus = not st.waehlbar(weich and (empfiehlt or not frage))
+            knopf = knopf_art(
+                text,
+                icon=symbol,
+                height=50 if betont else 46,
+                disabled=aus,
+                on_click=gehe(k),
+                style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=25)),
+                data=("weg", k.nach, "vorschlag" if empfiehlt and betont else ""),
             )
+            (voran if empfiehlt and betont else out).append(knopf)
+        if vorschlag is not None and teil.schritt.frage is not None:
+            satz = ab.vorschlag_text(vorschlag.kante, teil.schritt.frage)
+            kopf: list[ft.Control] = [
+                ft.Text(satz, size=13, weight=ft.FontWeight.W_600, data="vorschlag_satz")
+            ]
+            oder: list[ft.Control] = (
+                [ft.Text("Oder:", size=12, opacity=0.7, data="vorschlag_oder")]
+                if voran and out
+                else []
+            )
+            return [*kopf, *voran, *oder, *out]
         return out
 
     bedarf_ids = set(ab.bedarf(plan.ablauf, ids)) if gezeichnet else set()

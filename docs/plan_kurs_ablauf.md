@@ -12,7 +12,8 @@ Stufe 0 („Von vorn“ fragt neu), Stufe 1 (der Kurs baut einen Plan: Kursplan,
 Sammelkarte, Kurs-Editor, §11), Stufe 2 (der Test läuft mit der Uhr, §13), A1 („Das kommt
 noch“, §13.6), das Bild des Kursplans im Editor (§14) und der Testwert als **Variable des
 Kurses** (§15.1), der flexibel gestaltete Test (§15.2–15.5) und das Bedienen des Plan-Bilds
-mit denselben Gesten wie im Plan (§16.3). **Plan** bleiben Stufe 3–5 und A2.
+mit denselben Gesten wie im Plan (§16.3). **17.11.2026:** der **Wert für den Plan** nach dem
+Test — ganz, Anteil oder von Hand (W3, §17). **Plan** bleiben Stufe 3–5 und A2.
 Bens Setzung vom 21.10.2026 („Pläne und Kurse nicht ohne Rückfrage ändern“) gilt: Jede
 berührte Stelle steht in §9, die Fragen in §10 (Katalog P207). Die Korrekturen am
 Workout-Bildschirm aus demselben Auftrag stehen in `plan_uhr_fokus.md` §10, die Kennzeichnung
@@ -375,7 +376,8 @@ ist.“
 | 5 | Kursbild zeichnen = **K3**, gemeinsame Graph-Schicht, Kapitel-Auslöser „Tor offen“ | Entscheidung nach Stufe 4 |
 | A1 | **Vorschau „Das kommt noch“** auf der Kursseite: was spätere Kapitel am Plan ändern werden, gerechnet aus ihren Bausteinen — ohne Sperren (§12) | **gebaut 16.11.2026** — §13.6; Skizze V1; Gerätetest T143 |
 | B1 | **Das Plan-Bild bedienen wie im Plan** (§16.3, Katalog P217): im Kurs-Editor dieselben Gesten wie im Reiter „Ablauf“ — den Punkt einer Übung auf eine andere ziehen legt nach kurzer Bestätigung den Baustein „Weg“ im bearbeiteten Kapitel an; gedrückt halten öffnet das Menü an der Übung | **gebaut 16.11.2026** — Skizze G4; Gerätetest T144 |
-| V | **Variablen weiter verwenden** (§16.2): andere Abnehmer als das Ziel (Auslöser eines Wegs „ab deinem Testwert“, Dauer eines Timers), ein Wert von Hand, die Antwort einer Frage als Variable (trifft Stufe 3) | Vorschlag — Bens Wort |
+| W3 | **Wert für den Plan** (§17): direkt nach dem Test und im Kapitel hinter „Wert ändern“ sagt die Person, wie der Testwert in den Plan geht — **ganz · Anteil · von Hand** (− / + und Tastatur); vorgewählt, was der Kurs sagt; ohne Wahl rechnet der Kurs wie bisher; die Sammelkarte bietet das neue Ziel wieder an (Migration 066) | **gebaut 17.11.2026** — Ben: „Nimm W3. Die Werteintragung kommt normal direkt nach einem Test“; Skizze W3; Gerätetest T143 |
+| V | **Variablen weiter verwenden** (§16.2): andere Abnehmer als das Ziel (Auslöser eines Wegs „ab deinem Testwert“, Dauer eines Timers), die Antwort einer Frage als Variable (trifft Stufe 3); der Wert von Hand ist als W3 gebaut | Vorschlag — Bens Wort |
 | A2 | **Autorenwerkzeug „vom fertigen Plan aus“**: Zielplan im Plan- und Ablauf-Editor bauen, jede Übung, jeden Weg und jede Einstellung einem Kapitel zuordnen („ab Kapitel 2“); der Editor erzeugt daraus die Bausteine (§12) | Skizzen; Bens Wort |
 
 Vor Stufe 1: **T134** (Material, Kurse aus Blöcken am Gerät, `offene_fragen.md` §2) sollte
@@ -403,6 +405,10 @@ Web-Fotos (`web-fotos`) der Karten; Gerätetest im Katalog; Doku in `plan_kurse.
   Baustein überschreibt nur, was anders sein soll (§16.1).
 - **Werte sind Variablen des Kurses** (§15.1): Was ein Baustein erzeugt (heute: der Wert eines
   Tests), steht unter einem Namen am Kurs und lässt sich in jedem Kapitel danach verwenden.
+- **Der Wert für den Plan gehört der Person** (§17, Ben 17.11.2026): Nach dem Test sagt sie,
+  wie er in den Plan geht — ganz, ein Anteil, von Hand. Vorgewählt ist, was der Kurs sagt;
+  ohne Wahl rechnet er wie bisher. Der Eintrag des Tests bleibt, und am Plan ändert auch
+  diese Wahl nichts ohne Tipp. Die App nimmt die Zahl und deutet sie nicht.
 - **Kapitel-`key`s und Block-IDs nie ändern** — Fortschritt, Marken, Antworten und die Namen
   der Variablen hängen daran.
 - **Pakete:** Kurse reisen mit Bausteinen im Paket; Antworten, „gesehen“ und Fortschritt nicht.
@@ -939,8 +945,9 @@ verwenden.
     Baustein mit `ziel_aus` darf den Test eines früheren Kapitels nennen, in jedem Kapitel
     danach. Der Faktor gehört dem, der verwendet, nicht der Variable.
   - **„Von vorn beginnen“** löscht die Variablen des Kurses — der neue Durchlauf misst neu.
-- Nicht gebaut: ein Wert, den die Person von Hand setzt; weitere Abnehmer als das Ziel
-  (Bedingungen an Wegen, Dauer eines Timers). Die Tabelle trägt beides.
+- **Der Wert für den Plan** — ganz, Anteil, von Hand — ist am 17.11.2026 dazugekommen (§17,
+  Migration 066). Nicht gebaut: weitere Abnehmer als das Ziel (Bedingungen an Wegen, Dauer
+  eines Timers).
 
 ### 15.2 Was am Test einstellbar ist (`core/kursbloecke.Block`, `art = "test"`)
 
@@ -1061,7 +1068,7 @@ wenn sie die Zeile der Sammelkarte übernimmt (§3, „Nichts am Plan ohne Tipp�
   2. **Dauer eines Timers aus einer Variable** — „halte 80 % deiner Testzeit“ als Abschnitt
      des Timers, nicht nur als Ziel.
   3. **Ein Wert von Hand** — die Person trägt den Wert selbst ein oder ändert ihn, ohne den
-     Test zu wiederholen („Überschreiben ist möglich“).
+     Test zu wiederholen („Überschreiben ist möglich“). **Gebaut 17.11.2026 als W3 (§17).**
   4. **Die Antwort einer Frage als Variable** — das ist Stufe 3 (Antworten speichern, Folgen)
      in diesem Bild: Die Antwort ist ein Ausgang wie der Testwert.
   5. **Im Editor sichtbar:** bei „Ziel aus …“ die Liste der Variablen des Kurses mit ihrem
@@ -1101,8 +1108,108 @@ am Plan der Person ändert sich dadurch nichts ohne ihren Tipp.
 1. **Fertig bauen, was entschieden ist:** flexibler Test (Editor, Lauf), Bedienen im Bild im
    Plan-Reiter, danach im Kurs-Editor (B1). Web-Fotos, Gerätetests T143/T144.
 2. **Stufe V, Punkte 5 und 3** (Variablen im Editor sichtbar; Wert von Hand) — klein, macht
-   das Bild von §16.1 im Editor erst sichtbar. Braucht Bens Wort und eine Skizze.
+   das Bild von §16.1 im Editor erst sichtbar. Punkt 3 ist als **W3** gebaut (§17, 17.11.2026);
+   Punkt 5 braucht Bens Wort (Skizzen W1, W2).
 3. **Stufe 3** (Antworten als Variable, Folgen) — der nächste große Baustein; mit Skizzen.
 4. **A2** („vom fertigen Plan aus“) — liegt nach B1 näher: Wer im Bild Wege ziehen kann, kann
    dort auch Übungen einem Kapitel zuordnen. Mit Skizzen.
 5. Stufe V 1–2, Stufe 4/5 nach Bedarf.
+
+## 17. Wert für den Plan — ganz, Anteil, von Hand (W3; Ben, 17.11.2026)
+
+> „Nimm W3. Die Werteintragung kommt normal direkt nach einem Test. Wichtig dabei – im Moment
+> geht die prozentuale Angabe. Für viele ist das verwirrend. Wenn ein Test gemacht wird bis 7,
+> ist das für eine Runde schon fast zu viel, dann braucht es eine Abstufung, ok. Wegen
+> Ehrgeizprobleme werden viele nicht bei 5 Schluss machen, wenn man danach fragt. Aber: Testen
+> – Wert wird genommen und kann ganz genommen werden – prozentual abgeändert – manuell
+> eingegeben (mit Klick und per Tastatur)“
+
+Bis hierher rechnete der Kurs still: „80 % von deinem Test“ stand erst in der Sammelkarte. Jetzt
+sagt die Person **direkt nach dem Test**, mit welcher Zahl ihr Plan weitergeht — und sieht die
+Zahl, bevor sie etwas übernimmt.
+
+### 17.1 Die Karte „Wert für den Plan“ (`ui/components/planwert.py`)
+
+- **Drei Wege, einer ist gewählt:** **Ganz** (der gemessene Wert) · **Anteil** (Prozent vom
+  Wert, − / + in 5-%-Schritten oder getippt; daneben steht die Zahl, die herauskommt) · **Von
+  Hand** (eine Zahl in der Einheit des Felds, − / + oder getippt: Wiederholungen in Einern,
+  eine Zeit in 5-Sekunden-Schritten und als ``m:ss``).
+- **Vorgewählt ist, was der Kurs sagt** (`core.kursbloecke.anteil_vorgabe`,
+  `planwert_vorgabe`): im Kursplan der Faktor des ersten Bausteins, der sein Ziel aus dem Test
+  nimmt, im Kapitelplan der Faktor des Tests — „Anteil 80 %“, wenn der Kurs mindert, sonst
+  „Ganz“. „Anteil“ beginnt beim Anteil des Kurses (ohne einen: 100 %), „Von Hand“ bei der
+  Zahl, die gerade dasteht. Die App erfindet keinen Abschlag.
+- **Ein Satz:** „Der Plan nimmt 18 Wdh.“ — darunter klein „Dein Eintrag vom Test bleibt, wie
+  er ist.“ Alles Weitere steht hinter dem (i) (`components/hilfe.PLANWERT_MD`).
+- **Wo sie steht:**
+  1. auf der **Ergebnis-Seite des Testlaufs** (`ui/views/kurs_testlauf.py`), unter der Skala
+     und vor „Eintragen“. Sie erscheint, sobald der Test einen Wert hat (bei „bis Anstrengung
+     7“: wenn die Wiederholungen getippt sind) und folgt ihm. „Eintragen“ speichert Eintrag,
+     Variable und Wahl.
+  2. im **Kapitel** an der Testkarte hinter **„Wert ändern“** (`ui/components/kursblock.py`,
+     Skizze W3): Die Karte klappt in der Testkarte auf, „Übernehmen“ merkt die Wahl,
+     „Abbrechen“ nicht. Unter dem Testwert steht dann „Für den Plan: 20 Wdh. — von Hand“.
+- **Nur, wo aus dem Wert ein Ziel wird** (`core.kursbloecke.wert_wird_ziel`): Ein Baustein
+  nimmt sein Ziel aus dem Test, oder das Kapitel hat Plan-Vorlagen. Hinterlässt ein Test nur
+  seinen Wert, gibt es weder Karte noch „Wert ändern“.
+
+### 17.2 Die Rechnung (flet-frei: `core/kursbloecke.py`, `core/kursplan.py`, `core/kurstest.py`)
+
+- **Ohne Wahl bleibt alles, wie es war:** Kapitelplan = Testwert × Faktor des Tests, Kursplan
+  = Testwert × Faktor des Bausteins. Kein Kurs von früher ändert sein Verhalten. Wer in der
+  Karte wieder wählt, was der Kurs sagt, hat keine Wahl getroffen (`ist_vorgabe`).
+- **Mit Wahl ist ihr Wert das Ziel** (`Planwert`, `planwert`, `ziel_im_plan`) — überall, wo der
+  Kurs sonst aus diesem Test rechnet, statt Testwert × Faktor. „Ganz“ und „Anteil“ folgen dem
+  Testwert, „von Hand“ bleibt die Zahl der Person. Auf ganze Einheiten, mindestens 1 (wie
+  `ziel_aus_test`).
+- **Die Sammelkarte nennt die Wahl statt der Regel des Kurses** (`core.kurstest.herkunft`):
+  „dein Wert von Hand (20 Wdh.) — Test: 22 Wdh. bis Anstrengung 7 · links · 10 kg“ · „90 % von
+  deinem Test (22 Wdh. …)“ · „dein Test, ganz (22 Wdh. …)“.
+- **Eine neue Wahl wird wieder angeboten** (`core.kursplan._Lauf._ziel_aus_test`): Die Zeile
+  des Ziels trägt mit einer Wahl deren Stempel in der ID (``<marke>#ziel@<stempel>``) — sie
+  ist eine eigene Zeile, auch wenn das Ziel aus dem Test schon übernommen war. Nichts ändert
+  sich ohne Tipp; hat die Person das Ziel im Plan selbst geändert, fragt die Zeile wie jede
+  andere („Du hast 15 eingestellt. Der Kurs schlägt 22 vor.“, Vorgabe „lassen“). Ohne Wahl
+  bleibt ein übernommenes Ziel übernommen — auch nach „Nochmal“.
+- **Kapitelplan:** „Plan anlegen“ setzt die Wahl als Ziel (`core.kursbloecke.vorlage_anwenden`
+  mit ``planwerte``). Ist der Plan angelegt, steht das Ziel im Plan und wird dort geändert —
+  „Wert ändern“ gibt es dann nicht mehr.
+- **Die Vorschau „Das kommt noch“** rechnet mit denselben Zielen (`core.kursvorschau`).
+
+### 17.3 Daten (Migration 066, gerätelokal wie die Tabelle)
+
+- `course_variable` bekommt ``wie`` (leer = Vorgabe · ``ganz`` · ``anteil`` · ``hand``),
+  ``plan_value`` (die Zahl von Hand), ``anteil``, ``plan_set_at`` (der Stempel der Wahl) und
+  ``floating``. `core.kurse.Kursvariable` trägt sie (`planwert`); `KursRepo.planwerte`,
+  `planwert_setzen`, `planwert_loeschen`.
+- **Ein neuer Testlauf („Nochmal“) setzt die Wahl zurück** (`variable_setzen`) — die Karte
+  kommt gleich wieder. „Von vorn beginnen“ löscht sie mit den Variablen.
+- **Ein Test ohne Lauf** hat bis zum Abschluss des Kapitels keine Variable; die Wahl braucht
+  trotzdem einen Platz. Sie steht in einer **schwebenden** Zeile (``floating = 1``): Der
+  Testwert bleibt der jüngste Eintrag der Übung, „ganz“ und „Anteil“ folgen ihm, „von Hand“
+  bleibt. Der Abschluss des Kapitels hält den Wert fest, die Wahl bleibt
+  (`_variablen_festhalten`); „zurück zur Vorgabe“ löscht eine schwebende Zeile ganz.
+- **Paket, Export, Sync:** nichts — die Wahl gehört dem Profil auf dem Gerät. Am Paketformat
+  ändert sich nichts.
+
+### 17.4 Recht
+
+Grundlage sind der Wert des Tests als Zahl (ein gewöhnlicher Eintrag, mit der Skala als
+Selbstauskunft) und die Wahl der Person — nie Messwerte (§8, `docs/recht/00_zweckbestimmung.md`
+„Vorschlag nach der Belastung“). Die App nennt die Regel und deutet die Zahl nicht: „zu viel“,
+„überlastet“ kommen nicht vor, sie schlägt auch keinen Abschlag von sich aus vor. Geändert wird
+der Plan nur auf Tipp.
+
+### 17.5 Offen
+
+- **Mehrere Abnehmer mit verschiedenen Faktoren:** Rechnet ein Kurs an mehreren Stellen mit
+  verschiedenen Anteilen aus demselben Test (Kapitel 2: 80 %, Kapitel 3: 90 %), gilt die Wahl
+  der Person an **allen** — die Stufung des Kurses ist damit weg. Vorgewählt wird der Anteil
+  des ersten Abnehmers. Ob die Wahl stattdessen den Testwert ersetzen soll (und die Faktoren
+  obenauf bleiben), ist Bens Entscheidung.
+- **Im Editor** steht der Anteil weiter am Baustein („Ziel aus dem Test × 0,8“) bzw. am Test
+  („Ziel in % des Tests“). Dort steht seit dem 17.11.2026 dabei, dass er die Vorgabe ist:
+  „Nach dem Test sieht die Person, was der Plan nimmt, und kann es ändern — ganz, Anteil oder
+  von Hand“ (`views/kurs_bearbeiten.ANTEIL_IST_VORGABE`, `components/baustein_form.py`).
+- Gerätetest T143: Tastatur (verdeckt sie die Karte auf der Ergebnis-Seite?), Zahlentastatur
+  mit Doppelpunkt bei einer Zeit.

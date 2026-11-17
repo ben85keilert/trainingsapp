@@ -89,13 +89,19 @@ from trainingsapp.core import kurstest
 from trainingsapp.core.einheit import AUSFUEHRUNG_SCHLUESSEL, Ereignis
 from trainingsapp.core.kursbloecke import (
     AUSWAHL,
+    HAND,
     MENGE,
     TEST,
     ZEIT,
     Block,
+    Planwert,
     Vorgabe,
+    anteil_vorgabe,
+    ist_vorgabe,
+    planwert,
     wert_im_test,
     wert_schluessel,
+    wert_wird_ziel,
 )
 from trainingsapp.core.kurse import Kapitel, Kurs
 from trainingsapp.core.models import Exercise, SessionEntry, lokaler_tag
@@ -122,7 +128,9 @@ from trainingsapp.ui.components.dialoge import meldung
 from trainingsapp.ui.components.fokus import FOKUS_ANSICHT, balken
 from trainingsapp.ui.components.fokus_eintragen import auspraegung_zeilen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
+from trainingsapp.ui.components.kursblock import feld_von
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.planwert import planwert_karte
 from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.timer_takt import TICK_S, ton_spielen
@@ -181,6 +189,10 @@ class Kurstestlauf:
     #: die Runden des Takts, wenn sie als Vorschlag in den Wiederholungen stehen
     #: (`core.kurstest.VOM_TAKT`) — ``None``: kein Vorschlag
     takt_runden: int | None = None
+    #: der **Wert für den Plan**, wie er in der Karte des Ergebnisses gewählt ist (W3, Ben
+    #: 17.11.2026) — ``None``: die Vorgabe des Kurses, nichts zu merken. „Eintragen“ rechnet
+    #: ihn gegen den Wert, der dann gilt (`eintragen`)
+    planwahl: Planwert | None = None
 
     @property
     def timer(self) -> TimerProfil | None:
@@ -425,13 +437,26 @@ def eintragen(page: Any, state: Any) -> SessionEntry | None:
     # mehr, „Nochmal“ überschreibt ihn (P214 a)
     wert = wert_im_test(eintrag.result, stand.block.feld)
     if wert is not None and wert > 0:
-        state.kurse.variable_setzen(
-            stand.kurs_id,
-            e.subject_id or state.profil.id,
-            wert_schluessel(stand.block, uebung.id),
-            wert,
-            eintrag.id,
-        )
+        profil_id = e.subject_id or state.profil.id
+        name = wert_schluessel(stand.block, uebung.id)
+        state.kurse.variable_setzen(stand.kurs_id, profil_id, name, wert, eintrag.id)
+        # Der Wert für den Plan, wie die Person ihn in der Karte gewählt hat (W3) — gegen den
+        # Wert gerechnet, der jetzt eingetragen ist. Ohne Wahl gilt die Vorgabe des Kurses:
+        # `variable_setzen` hat sie eben wiederhergestellt
+        if (w := stand.planwahl) is not None:
+            state.kurse.planwert_setzen(
+                stand.kurs_id,
+                profil_id,
+                name,
+                planwert(
+                    w.wie,
+                    wert,
+                    anteil=w.anteil if w.anteil is not None else 1.0,
+                    hand=w.wert if w.wie == HAND else None,
+                ),
+                test_wert=wert,
+                eintrag_id=eintrag.id,
+            )
     # In die Zeitleiste, was eingetragen wurde — nichts kommt zweimal hinein (``teil``)
     jetzt_s = max(e.dauer_s(), 0.0)
     f = stand.felder
@@ -1153,12 +1178,41 @@ def kurs_test_view(
             data="test_eintragen",
         )
 
+        # -- Wert für den Plan (W3, Ben 17.11.2026: „Die Werteintragung kommt normal direkt
+        # nach einem Test“) — nur, wo aus dem Wert ein Ziel wird; vorgewählt ist, was der
+        # Kurs sagt. Gemerkt wird die Wahl mit „Eintragen“ (`eintragen`)
+        alle_bloecke = [b for k in kurs.kapitel for b in k.bloecke]
+        anteil_kurs = anteil_vorgabe(block, alle_bloecke)
+
+        def wert_des_tests() -> float | None:
+            return kurstest.wert_jetzt(block, uebung, wdh=s.wdh, sekunden=s.sekunden, skala=s.skala)
+
+        def wahl_merken(wahl: Planwert) -> None:
+            wert = wert_des_tests()
+            vorgabe = wert is not None and ist_vorgabe(wahl, wert, anteil_kurs)
+            s.planwahl = None if vorgabe else wahl
+
+        plan_karte = (
+            planwert_karte(
+                page,
+                feld=feld_von(uebung, block.feld),
+                test_wert=wert_des_tests(),
+                vorgabe=anteil_kurs,
+                gewaehlt=s.planwahl,
+                bei_wahl=wahl_merken,
+            )
+            if wert_wird_ziel(block, alle_bloecke, bool(kapitel.plaene))
+            else None
+        )
+
         def stand_zeigen(aktualisieren: bool = True) -> None:
             """„Eintragen“ geht erst, wenn das Feld des Tests einen Wert hat."""
             fehlt = kurstest.fehlt(block, uebung, wdh=s.wdh, sekunden=s.sekunden, skala=s.skala)
             eintragen_knopf.disabled = bool(fehlt)
             fehlt_text.value = f"Es fehlt noch: {fehlt}." if fehlt else ""
             fehlt_text.visible = bool(fehlt)
+            if plan_karte is not None:  # die Karte folgt dem Wert, der eingetragen würde
+                plan_karte.wert_setzen(wert_des_tests())
             if aktualisieren:
                 for teil in (eintragen_knopf, fehlt_text):
                     with contextlib.suppress(Exception):
@@ -1389,6 +1443,7 @@ def kurs_test_view(
                     raster,
                     abstand=10,
                 ),
+                *([plan_karte.control] if plan_karte is not None else []),
                 ft.Text(
                     f"Eingetragen wird ein gewöhnlicher Eintrag bei „{uebung.name}“ — er steht "
                     "auch unter Heute. Was der Kurs daraus für deinen Plan vorschlägt, zeigt das "

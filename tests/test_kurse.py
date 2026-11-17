@@ -1329,3 +1329,215 @@ def test_sammelkarte_nennt_wie_der_test_gemacht_wurde(con, profil) -> None:
     assert ziel.unter == "80 % von deinem Test (22 Wdh. bis Anstrengung 7 · links · 10 kg)"
     # ein Test ohne Ausführung bleibt, wie er war (`test_testlauf_mit_vorgabe_…`)
     assert repo._test_ausfuehrung(kurs, profil.id) == {"test": "links · 10 kg"}
+
+
+# ---------------------------------------------------------------------------
+# Wert für den Plan (W3, Ben 17.11.2026; Migration 066, `docs/plan_kurs_ablauf.md` §17)
+# ---------------------------------------------------------------------------
+
+
+def _bis_zum_test(con, profil, faktor: float = 0.8):
+    """Der Rumpf-Kurs bis ins zweite Kapitel: Planke übernommen, Kapitel 1 abgeschlossen, der
+    Baustein „dazu“ nimmt ``faktor`` vom Test, der Testlauf hat 22 Wiederholungen hinterlassen."""
+    repo, sitzungen, uebungen = KursRepo(con), SessionRepo(con), ExerciseRepo(con)
+    kurs, ids = rumpf_kurs(con)
+    next(b for b in kurs.kapitel[1].bloecke if b.id == "dazu").faktor = faktor
+    repo.speichern(kurs)
+    kurs = repo.laden(kurs.id)
+    assert kurs is not None
+    eins, zwei, _drei = kurs.kapitel
+    repo.starten(kurs, profil.id)
+    repo.plan_uebernehmen(
+        kurs, eins, profil.id, {z.id for z in repo.plan_aenderungen(kurs, eins, profil.id)}
+    )
+    repo.kapitel_abschliessen(kurs, eins, profil.id)
+    kaefer = uebungen.laden(ids["kaefer"])
+    assert kaefer is not None
+    session = sitzungen.session_fuer(profil.id, None, datetime.now(UTC).astimezone().date())
+    eintrag = sitzungen.eintrag_anlegen(session, kaefer, {"reps": [22]})
+    repo.variable_setzen(kurs.id, profil.id, "test", 22.0, eintrag.id)
+    return repo, kurs, zwei, ids, eintrag
+
+
+def _ziel_zeile(zeilen):
+    """Die Zeile mit dem Ziel aus dem Test (Baustein „dazu“) — auch, wenn der Plan abweicht."""
+    return next(z for z in zeilen if z.id.startswith("dazu:") and "#ziel" in z.id)
+
+
+def test_wert_fuer_den_plan_ist_das_ziel_und_wird_wieder_angeboten(con, profil) -> None:
+    """Ben, 17.11.2026 (W3): „Wert wird genommen und kann ganz genommen werden – prozentual
+    abgeändert – manuell eingegeben“. Ohne Wahl rechnet der Kurs wie bisher (80 % vom Test);
+    mit Wahl ist sie das Ziel. Nichts ändert sich ohne Tipp: Die Sammelkarte bietet das neue
+    Ziel an — auch, wenn das Ziel aus dem Test schon übernommen war."""
+    from trainingsapp.core.kursbloecke import ANTEIL, GANZ, HAND, planwert
+
+    repo, kurs, zwei, ids, eintrag = _bis_zum_test(con, profil)
+    wahl = {"wahl": [ids["kaefer"]]}
+
+    def zeile():
+        return _ziel_zeile(repo.plan_aenderungen(kurs, zwei, profil.id, wahl))
+
+    # ohne Wahl: wie bisher — und so wird es übernommen
+    assert repo.planwerte(kurs.id, profil.id, {"test": 22.0}) == {}
+    assert (zeile().titel, zeile().unter, zeile().stand) == (
+        "Ziel für Käfer: 18 Wiederholungen",
+        "80 % von deinem Test (22 Wdh.)",
+        NEU,
+    )
+    alle = {z.id for z in repo.plan_aenderungen(kurs, zwei, profil.id, wahl)}
+    plan = repo.plan_uebernehmen(kurs, zwei, profil.id, alle, wahl=wahl)
+    assert plan.items[1].target == {"reps": [18]} and zeile().stand == UEBERNOMMEN
+
+    # von Hand: Das Ziel ist die Zahl der Person — angeboten, nicht gesetzt
+    repo.planwert_setzen(kurs.id, profil.id, "test", planwert(HAND, 22.0, hand=20), test_wert=22.0)
+    (gewaehlt,) = repo.planwerte(kurs.id, profil.id, {"test": 22.0}).values()
+    assert (gewaehlt.wie, gewaehlt.wert) == (HAND, 20) and gewaehlt.stempel
+    hand = zeile()
+    assert (hand.titel, hand.stand) == ("Ziel für Käfer: 20 Wiederholungen", NEU)
+    assert hand.unter == "dein Wert von Hand (20 Wdh.) — Test: 22 Wdh."
+    assert hand.id.endswith(f"@{gewaehlt.stempel}")
+    kursplan = repo.kursplan(kurs, profil.id)
+    assert kursplan is not None and kursplan.items[1].target == {"reps": [18]}  # noch nichts
+    plan = repo.plan_uebernehmen(kurs, zwei, profil.id, {hand.id}, wahl=wahl)
+    assert plan.items[1].target == {"reps": [20]} and zeile().stand == UEBERNOMMEN
+
+    # ein anderer Anteil, dann ganz: je Wahl eine neue Zeile
+    repo.planwert_setzen(
+        kurs.id, profil.id, "test", planwert(ANTEIL, 22.0, anteil=0.9), test_wert=22.0
+    )
+    assert (zeile().titel, zeile().unter, zeile().stand) == (
+        "Ziel für Käfer: 20 Wiederholungen",
+        "90 % von deinem Test (22 Wdh.)",
+        UEBERNOMMEN,  # 90 % von 22 sind auch 20 — am Plan ändert sich nichts
+    )
+    repo.planwert_setzen(kurs.id, profil.id, "test", planwert(GANZ, 22.0), test_wert=22.0)
+    ganz = zeile()
+    assert (ganz.titel, ganz.unter, ganz.stand) == (
+        "Ziel für Käfer: 22 Wiederholungen",
+        "dein Test, ganz (22 Wdh.)",
+        NEU,
+    )
+
+    # Hat die Person das Ziel im Plan selbst geändert, fragt der Kurs (Vorgabe: lassen)
+    plaene = PlanRepo(con)
+    eigener = plaene.laden(plan.id)
+    assert eigener is not None
+    eigener.items[1].target = {"reps": [15]}
+    plaene.speichern(eigener)
+    assert zeile().stand == WEICHT_AB and (zeile().eigen, zeile().kurs) == (
+        "15 Wiederholungen",
+        "22 Wiederholungen",
+    )
+
+    # zurück zur Vorgabe: Die Wahl ist weg; was übernommen war, bleibt übernommen
+    repo.planwert_loeschen(kurs.id, profil.id, "test")
+    assert repo.planwerte(kurs.id, profil.id, {"test": 22.0}) == {}
+    variable = repo.variablen(kurs.id, profil.id)["test"]
+    assert (variable.wert, variable.eintrag_id, variable.wie) == (22.0, eintrag.id, "")
+    assert zeile().stand == UEBERNOMMEN
+
+
+def test_nochmal_setzt_die_wahl_zurueck_und_von_vorn_loescht_sie(con, profil) -> None:
+    """Ein neuer Testlauf bringt die Karte gleich wieder mit — die Wahl fällt auf die Vorgabe
+    des Kurses zurück (`variable_setzen`). „Von vorn“ löscht die Variablen samt Wahl."""
+    from trainingsapp.core.kursbloecke import HAND, planwert
+
+    repo, kurs, _zwei, _ids, eintrag = _bis_zum_test(con, profil)
+    repo.planwert_setzen(kurs.id, profil.id, "test", planwert(HAND, 22.0, hand=20), test_wert=22.0)
+    assert repo.variablen(kurs.id, profil.id)["test"].wie == HAND
+    repo.variable_setzen(kurs.id, profil.id, "test", 25.0, eintrag.id)
+    variable = repo.variablen(kurs.id, profil.id)["test"]
+    assert (variable.wert, variable.wie, variable.hand, variable.wahl_stempel) == (
+        25.0,
+        "",
+        None,
+        "",
+    )
+    assert repo.planwerte(kurs.id, profil.id, {"test": 25.0}) == {}
+
+    repo.planwert_setzen(kurs.id, profil.id, "test", planwert(HAND, 25.0, hand=21), test_wert=25.0)
+    repo.zuruecksetzen(kurs, profil.id)
+    assert repo.variablen(kurs.id, profil.id) == {}
+
+
+def test_wahl_an_einem_test_ohne_lauf_haelt_den_testwert_nicht_fest(con, profil) -> None:
+    """Ein Test ohne Lauf hat bis zum Abschluss des Kapitels keine Variable — sein Wert ist der
+    jüngste Eintrag der Übung. Die Wahl braucht trotzdem einen Platz: eine **schwebende**
+    Zeile, die den Testwert nicht festhält. „Ganz“ und „Anteil“ folgen dem neuen Wert, „von
+    Hand“ bleibt die Zahl der Person; der Abschluss hält den Wert fest, die Wahl bleibt."""
+    from trainingsapp.core.kursbloecke import ANTEIL, HAND, planwert
+
+    repo, sitzungen, uebungen = KursRepo(con), SessionRepo(con), ExerciseRepo(con)
+    kurs, ids = rumpf_kurs(con)
+    eins, zwei, _drei = kurs.kapitel
+    repo.starten(kurs, profil.id)
+    repo.kapitel_abschliessen(kurs, eins, profil.id)
+    erreicht = repo.staende(profil.id, kurs.id)[zwei.id].erreicht
+    kaefer = uebungen.laden(ids["kaefer"])
+    assert kaefer is not None
+    session = sitzungen.session_fuer(profil.id, None, datetime.now(UTC).astimezone().date())
+    erster = sitzungen.eintrag_anlegen(session, kaefer, {"reps": [20]})
+
+    repo.planwert_setzen(
+        kurs.id,
+        profil.id,
+        "test",
+        planwert(ANTEIL, 20.0, anteil=0.5),
+        test_wert=20.0,
+        eintrag_id=erster.id,
+    )
+    variable = repo.variablen(kurs.id, profil.id)["test"]
+    assert variable.schwebt and (variable.wie, variable.anteil) == (ANTEIL, 0.5)
+    # der Testwert schwebt weiter: Der nächste Eintrag zählt — und der Anteil folgt ihm
+    zweiter = sitzungen.eintrag_anlegen(session, kaefer, {"reps": [30]})
+    werte = repo.testwerte(zwei, profil.id, erreicht)
+    assert werte == {"test": 30.0}
+    assert repo.testeintraege(zwei, profil.id, erreicht)["test"].id == zweiter.id
+    assert repo.planwerte(kurs.id, profil.id, werte)["test"].wert == 15
+    # von Hand bleibt die Zahl der Person
+    repo.planwert_setzen(kurs.id, profil.id, "test", planwert(HAND, 30.0, hand=12), test_wert=30.0)
+    assert repo.planwerte(kurs.id, profil.id, werte)["test"].wert == 12
+
+    # der Abschluss des Kapitels hält den Wert fest — die Wahl bleibt
+    repo.kapitel_abschliessen(kurs, zwei, profil.id)
+    fest = repo.variablen(kurs.id, profil.id)["test"]
+    assert (fest.wert, fest.eintrag_id, fest.schwebt) == (30.0, zweiter.id, False)
+    assert (fest.wie, fest.hand) == (HAND, 12.0)
+    sitzungen.eintrag_anlegen(session, kaefer, {"reps": [5]})
+    assert repo.testwerte(zwei, profil.id, erreicht) == {"test": 30.0}
+
+    # zurück zur Vorgabe an einer schwebenden Zeile: Sie verschwindet ganz
+    repo.zuruecksetzen(kurs, profil.id)
+    repo.starten(kurs, profil.id)
+    repo.planwert_setzen(kurs.id, profil.id, "test", planwert(HAND, 20.0, hand=9), test_wert=20.0)
+    repo.planwert_loeschen(kurs.id, profil.id, "test")
+    assert repo.variablen(kurs.id, profil.id) == {}
+
+
+def test_plan_anlegen_nimmt_den_wert_fuer_den_plan(con, profil) -> None:
+    """Kapitelplan: „Plan anlegen“ setzt das Ziel aus dem Test — Testwert × Faktor des Tests,
+    oder der Wert, den die Person gewählt hat."""
+    from trainingsapp.core.kursbloecke import HAND, planwert
+
+    repo, uebungen = KursRepo(con), ExerciseRepo(con)
+    planke = Exercise(name="Probe Planke", result_spec=SPEC_SAETZE_WDH)
+    uebungen.speichern(planke)
+    kurs = Kurs(
+        name="Mit Test",
+        kapitel=[
+            Kapitel(
+                titel="Rumpf",
+                plaene=[PlanVorlage("Rumpf", [0], [VorlageItem(planke.id)])],
+                bloecke=[Block(TEST, id="t", uebung=planke.id, feld="reps", faktor=0.8)],
+            )
+        ],
+    )
+    repo.speichern(kurs)
+    kurs = repo.laden(kurs.id)
+    assert kurs is not None
+    (kapitel,) = kurs.kapitel
+    repo.starten(kurs, profil.id)
+
+    repo.planwert_setzen(kurs.id, profil.id, "t", planwert(HAND, 50.0, hand=45), test_wert=50.0)
+    (plan,) = repo.plaene_anlegen(kapitel, profil.id, {"t": 50.0}, {})
+    assert plan.items[0].target == {"reps": [45]}  # nicht 40 (80 % von 50)

@@ -168,13 +168,20 @@ KEIN_KURSPLAN = (
 #: **läuft** (mit Vorgabe oder gestaltet: ein Lauf mit der Uhr, `Block.laeuft`) und ob er nur
 #: den Wert liefert (Kurs mit Kursplan, ohne Kapitelplan: Was daraus wird, sagt ein Baustein)
 #: oder selbst zum Ziel im Kapitelplan wird
+#: Der Anteil ist eine Vorgabe (Ben, 17.11.2026, W3 — `docs/plan_kurs_ablauf.md` §17): Nach dem
+#: Test steht er auf der Karte „Wert für den Plan“, und die Person kann ihn ändern
+ANTEIL_IST_VORGABE = (
+    "Der Anteil ist die Vorgabe: Nach dem Test sieht die Person, was der Plan nimmt, und kann "
+    "es ändern — ganz, Anteil oder von Hand."
+)
 TEST_HINWEIS: dict[tuple[bool, bool], str] = {
     (False, True): (
         "Der Test ist ein gewöhnlicher Eintrag der Übung. Was aus dem Wert wird, sagt ein "
         "Baustein unter „Am Plan“ (Ziel → „aus dem Test“)."
     ),
     (False, False): (
-        "Der Test ist ein gewöhnlicher Eintrag der Übung. Der Wert wird ihr Ziel im Kapitelplan."
+        "Der Test ist ein gewöhnlicher Eintrag der Übung. Der Wert wird ihr Ziel im "
+        f"Kapitelplan. {ANTEIL_IST_VORGABE}"
     ),
     (True, True): (
         "Zur Wahl steht, was der Lauf misst oder vorgibt. Wie viel davon ins Ziel "
@@ -182,7 +189,7 @@ TEST_HINWEIS: dict[tuple[bool, bool], str] = {
     ),
     (True, False): (
         "Zur Wahl steht, was der Lauf misst oder vorgibt. Der Wert, mal dem Faktor "
-        "daneben, wird das Ziel der Übung im Kapitelplan."
+        f"daneben, wird das Ziel der Übung im Kapitelplan. {ANTEIL_IST_VORGABE}"
     ),
 }
 #: … und der Hinweis, wenn die Übungen einer Auswahl kein Feld gemeinsam haben — ohne Lauf

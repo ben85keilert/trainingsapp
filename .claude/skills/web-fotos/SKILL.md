@@ -30,7 +30,13 @@ Alle Skripte liegen in `.claude/skills/web-fotos/scripts/`. Arbeitsordner ist ei
    Befehle: `nav`, `frisch`, `klick`, `lang`, `ziehen`, `rollen`, `rollen_bei`, `tippen`,
    `warten`, `foto`, `js` (Kopf von `cdp.py`). **Das Foto mit Read ansehen**, dann erst den
    nächsten Klick setzen: Fotokoordinaten sind Klickkoordinaten, und sie verschieben sich mit
-   jedem Layout.
+   jedem Layout. **Immer mit `timeout 100` davor** (`timeout 100 uv run python …/cdp.py …`):
+   Hängt die Seite, hinge der Aufruf sonst bis zum Abbruch der Sitzung.
+   **Ziehen mit Foto mittendrin, Finger, Gedrückthalten:**
+   `timeout 100 uv run python .claude/skills/web-fotos/scripts/geste.py <cdp-port> <maus|finger>
+   <x1> <y1> <x2> <y2> [mitte.png [danach.png]]` — das erste Foto entsteht vor dem Loslassen
+   (Ablageziele, die nur beim Ziehen erscheinen); `… geste.py <cdp-port> tipp <x> <y> [foto]`,
+   `… halten <x> <y> [foto]` (0,9 s).
 4. **Nach jeder Codeänderung:** `beenden.sh $W`, dann `starten.sh $W` — der Server lädt Code
    nicht neu, alte Fotos zeigten alten Code.
 5. **Am Ende:** `.claude/skills/web-fotos/scripts/beenden.sh $W`.
@@ -50,7 +56,11 @@ Messung 257, Verlauf 360); Reiter einer Ansicht bei y ≈ 78; Zahnrad oben recht
   schickt selbst ein Mausrad-Ereignis, weil kopfloses Chromium sonst das alte Bild liefert;
   im Zweifel zwei Fotos vergleichen (`md5sum`).
 - **Hover:** Nach einem Klick stellt `cdp.py` den Zeiger an den Rand; ein Knopf unter dem
-  Zeiger sähe sonst „gewählt“ aus.
+  Zeiger sähe sonst „gewählt“ aus. `foto` schickt sein Mausrad-Ereignis aber an (200, 500):
+  Ein Control an dieser Stelle sieht auf dem Foto „überfahren“ aus (ein mittleres Segment
+  wirkte grau, 17.11.2026) — ein paar Pixel weiterrollen und noch einmal fotografieren.
+- **Offene Flutter-Menüs nicht fotografieren:** Das Mausrad-Ereignis von `foto` schließt sie.
+  Eigene Menükarten in der Fläche (Ablaufbild) bleiben stehen.
 - **Text tippen:** erst das Feld anklicken, dann `tippen`.
 - **FastAPI:** `starten.sh` nimmt `uv run --with "fastapi==0.143.2"` — die neueste verträgt
   flet-web 1.0.3 nicht („openapi_prefix“). Nichts ins `.venv` installieren.

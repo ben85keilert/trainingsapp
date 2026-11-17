@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from . import kursplan as kp
-from .kursbloecke import AUSWAHL, PLAN_UEBUNG, ZU_ENDE, Block
+from .kursbloecke import AUSWAHL, PLAN_UEBUNG, ZU_ENDE, Block, Planwert
 from .kurse import Kurs
 from .models import Plan
 
@@ -90,8 +90,12 @@ def kommt_noch(
     aktuell: int,
     namen: Mapping[str, str],
     feld_von: kp.Feldsuche | None = None,
+    planwerte: Mapping[str, Planwert] | None = None,
 ) -> list[KapitelVorschau]:
     """Je Kapitel **nach** dem aktuellen, das am Plan noch etwas vorschlägt, seine Zeilen.
+    ``planwerte``: der Wert für den Plan je Test, den die Person gewählt hat (W3, wie in
+    `core.kursplan.aenderungen`) — die Vorschau rechnet mit denselben Zielen wie die
+    Sammelkarte.
 
     Args:
         kurs: der Kurs; ohne Kursplan gibt es keine Vorschau.
@@ -174,7 +178,15 @@ def kommt_noch(
     ergebnis: list[KapitelVorschau] = []
     for stelle, kapitel in enumerate(kurs.kapitel):
         zeilen = kp.aenderungen(
-            plan, kapitel.bloecke, werte, wahl, stand, namen, feld_von, bezug=alle
+            plan,
+            kapitel.bloecke,
+            werte,
+            wahl,
+            stand,
+            namen,
+            feld_von,
+            bezug=alle,
+            planwerte=planwerte,
         )
         # „wenn du alles übernimmst“: jede Zeile gilt als gewählt — wo der Plan abweicht,
         # bleibt der Wert der Person (kein ``trotz``). `anwenden` arbeitet auf einer Kopie
@@ -189,6 +201,7 @@ def kommt_noch(
             namen,
             feld_von,
             bezug=alle,
+            planwerte=planwerte,
         )
         # auch die Kapitel bis zum aktuellen gehen durch: Was dort auf eine Wahl wartet,
         # müssen die späteren wissen

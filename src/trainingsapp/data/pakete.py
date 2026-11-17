@@ -94,6 +94,7 @@ from ..core.pakete import (
     plan_stand,
     stand,
     stand_normieren,
+    voraussetzungen_lesen,
     zusammenfuehren_mit_hinweisen,
 )
 from ..core.pakete import abweichungen as _abweichungen
@@ -191,9 +192,13 @@ class Vorschau:
     #: „Radfahren“ in „Standard“ (`core.pakete.ausdauer_urfassungen`)
     uebernommen: list[str] = field(default_factory=list)
     #: Pakete, die das Paket braucht (``paket.braucht``, V3) und die hier fehlen oder zu alt
-    #: sind — mit der installierten Version (``None`` = nicht da). Ohne sie fallen ihre
-    #: Übungen aus Plänen und Kursen; die Rückfrage bietet an, sie zuerst zu laden (V6)
+    #: sind — mit der installierten Version (``None`` = nicht da). Ohne sie warten ihre
+    #: Übungen in Plänen und Kursen, bis das Paket kommt (V4); die Rückfrage bietet an, sie
+    #: zuerst zu laden (V6)
     fehlt: list[tuple[Voraussetzung, int | None]] = field(default_factory=list)
+    #: Pläne anderer Pakete und Kurse, in die der Import Übungen nachgetragen hat, die dort
+    #: fehlten (V4, `PaketRepo.fehlendes_nachtragen`)
+    nachgetragen: int = 0
 
     def anzahl(self, *stati: Status) -> int:
         return sum(1 for s in self.status.values() if s in stati)
@@ -1235,6 +1240,7 @@ class PaketRepo:
         vorschau, ziele, staende, kurs_ziele, plan_ziele = self._planen(
             inhalt, aktualisieren=aktualisieren, subject_id=subject_id
         )
+        vorher = self._vorhandene_uebungen()  # V4: was danach erst da ist, wird nachgetragen
         # Ein Paket nur mit Ergänzungen (U5) schreibt keine eigene Übung — es zählt trotzdem
         if vorschau.installiert is None and not vorschau.zu_tun and not inhalt.ergaenzungen:
             return vorschau
@@ -1311,6 +1317,7 @@ class PaketRepo:
         if inhalt.code is not None:  # ein privates Paket (U7): den Code merken — für Updates
             self.zugang_setzen(inhalt.paket.id, inhalt.code, inhalt.paket.fuer)
         self._ergaenzungen_einspielen(inhalt)  # nach den Übungen: sie ergänzen fremde (U5)
+        vorschau.nachgetragen = self.fehlendes_nachtragen(vorher)
         self.aufraeumen()  # Dateien alter Fassungen, die nichts mehr nennt
         return vorschau
 
@@ -1428,6 +1435,60 @@ class PaketRepo:
         """Alle Übungen, die es hier gibt — auch im Archiv und im Papierkorb (deren
         Planübungen bleiben verborgen im Plan, bis die Übung zurückkommt)."""
         return {r[0] for r in self.con.execute("SELECT id FROM exercise WHERE purged_at IS NULL")}
+
+    # -- Fehlendes von selbst nachtragen (V4, `docs/plan_paketverweise.md`) --------------
+
+    def fehlendes_nachtragen(self, vorher: set[str]) -> int:
+        """Übungen, die erst jetzt da sind (das Paket kam, das andere brauchten), kommen in die
+        Pläne, die sie nennen (Ben, 17.11.2026, F3: „von selbst“): in die Paketpläne aller
+        Profile und in die Kapitelpläne erreichter Kapitel (`KursRepo.fehlendes_nachtragen`).
+        Gerechnet wie ein Update, das genau diese Planübungen neu bringt — was die Person am
+        Plan geändert hat, bleibt; ein Plan im Papierkorb bleibt, wie er ist. ``vorher``: die
+        Übungen vor dem Import (`_vorhandene_uebungen`). Wie viele Pläne."""
+        da = self._vorhandene_uebungen()
+        neu = da - vorher
+        if not neu:
+            return 0
+        plaene = PlanRepo(self.con)
+        anzahl = 0
+        with transaktion(self.con):
+            for paket, _ in self.alle():
+                if not paket.aktiv:
+                    continue
+                for pp in self.paketplaene(paket.id):
+                    if not any(i.exercise_id in neu for i in pp.vorlage.items):
+                        continue
+                    for (pid,) in self.con.execute(
+                        "SELECT id FROM plan WHERE package_id = ? AND package_key = ? "
+                        "AND deleted_at IS NULL AND purged_at IS NULL",
+                        (paket.id, pp.key),
+                    ).fetchall():
+                        alt = plaene.laden(pid, mit_verborgenen=True)
+                        if alt is None or alt.subject_id is None:
+                            continue
+                        neu_plan = _nachgetragen(alt, pp, vorher, da)
+                        if neu_plan is not None:
+                            plaene.speichern(neu_plan)
+                            anzahl += 1
+            anzahl += KursRepo(self.con).fehlendes_nachtragen(vorher, da)
+        return anzahl
+
+    def fehlende_im_plan(self, plan: Plan) -> list[str]:
+        """Die Übungen des Paketplans, aus dem ``plan`` stammt, die es hier nicht gibt (V4) —
+        sie warten auf ihr Paket. Leer für eigene Pläne und solange alles da ist."""
+        pp = self.paketplan_fuer(plan)
+        if pp is None:
+            return []
+        da = self._vorhandene_uebungen()
+        return list(
+            dict.fromkeys(i.exercise_id for i in pp.vorlage.items if i.exercise_id not in da)
+        )
+
+    def wartet_auf(self, paket_id: str | None) -> list[tuple[Voraussetzung, int | None]]:
+        """Was das installierte Paket braucht und hier fehlt oder zu alt ist (V4, aus
+        ``package.requires_json``) — woher seine fehlenden Übungen kämen."""
+        paket = self.laden(paket_id) if paket_id else None
+        return self.fehlende_voraussetzungen(paket) if paket is not None else []
 
     # -- Paketpläne neu laden (U2, `docs/plan_paketinhalte.md` §9) ----------------------
 
@@ -1871,6 +1932,12 @@ class PaketRepo:
         )
         if plaene_json is not None:  # nur, wenn das Paket Pläne bringt (Migration 033)
             self.con.execute("UPDATE package SET plans_json = ? WHERE id = ?", (plaene_json, p.id))
+        if installieren:  # was die Datei braucht (V4, Migration 069) — auch: nichts mehr
+            braucht = [v.als_dict() for v in p.braucht if v.id != p.id]
+            self.con.execute(
+                "UPDATE package SET requires_json = ? WHERE id = ?",
+                (json.dumps(braucht, ensure_ascii=False) if braucht else None, p.id),
+            )
 
     @staticmethod
     def _zeile(r: sqlite3.Row) -> Paket:
@@ -1891,8 +1958,21 @@ class PaketRepo:
             verfuegbar_sha256=r["available_sha256"],
             verfuegbar_neuigkeiten=r["available_news"] or "",
             geprueft=datetime.fromisoformat(r["checked_at"]) if r["checked_at"] else None,
+            braucht=_braucht_lesen(r["requires_json"]),
             **_zugang_lesen(r["access_json"]),
         )
+
+
+def _braucht_lesen(roh: str | None) -> list[Voraussetzung]:
+    """``package.requires_json`` (Migration 069) — Unlesbares heißt: nichts.
+
+    >>> [v.name for v in _braucht_lesen('[{"id": "s", "name": "Standard"}]')], _braucht_lesen("x")
+    (['Standard'], [])
+    """
+    try:
+        return voraussetzungen_lesen(json.loads(roh) if roh else None)
+    except ValueError:
+        return []
 
 
 def _zugang_lesen(roh: str | None) -> dict[str, Any]:
@@ -1940,6 +2020,31 @@ def _plan_aus_paketplan(
     verweise_aufloesen(plan.items, positionen)  # P97: „#n“ → ID der Planübung
     ablauf_aufloesen(plan, pp.vorlage, positionen)  # G4: der gezeichnete Ablauf
     return plan
+
+
+def _nachgetragen(alt: Plan, pp: PaketPlan, vorher: set[str], da: set[str]) -> Plan | None:
+    """Der Paketplan ``alt`` mit den Planübungen, deren Übung erst jetzt da ist (V4) — ``None``,
+    wenn sich nichts ändert. Basis ist der Plan, wie das Paket ihn mit den Übungen von
+    ``vorher`` hätte bauen können; Soll derselbe mit ``da``: So kommt nur das Neue dazu, und
+    was die Person geändert oder herausgenommen hat, bleibt (`plan_abgleichen`). Der Paketstand
+    bleibt — das Paket selbst ist nicht neuer geworden."""
+    assert alt.package_id is not None and alt.subject_id is not None
+
+    def gebaut(uebungen: set[str]) -> dict[str, Any]:
+        plan = _plan_aus_paketplan(pp, str(alt.package_id), str(alt.subject_id), uebungen)
+        return plan_stand(paketplan_aus(plan, pp.key))
+
+    nutzer = plan_stand(paketplan_aus(alt, pp.key))
+    gemischt = plan_abgleichen(gebaut(vorher), nutzer, gebaut(da))
+    if gemischt == nutzer:
+        return None
+    neu = _plan_aus_paketplan(
+        PaketPlan.from_dict(gemischt), alt.package_id, alt.subject_id, da, alt=alt
+    )
+    neu.id, neu.created_at, neu.aktiv = alt.id, alt.created_at, alt.aktiv
+    eigenes_uebernehmen(neu, alt)  # K35: Timer, Chips, Takt … kennt der Paketplan nicht
+    neu.package_standard = alt.package_standard
+    return neu
 
 
 def _lokales_behalten(ziel: Exercise, alt: Exercise) -> None:

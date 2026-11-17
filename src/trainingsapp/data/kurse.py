@@ -1196,6 +1196,96 @@ class KursRepo:
                         angelegt += 1
         return geladen, angelegt
 
+    def fehlendes_nachtragen(self, vorher: set[str], da: set[str]) -> int:
+        """V4 (`PaketRepo.fehlendes_nachtragen`): in jedem erreichten Kapitel jedes Profils die
+        Planübungen, deren Übung erst jetzt da ist — wie „Fehlendes zurückholen“, aber nur
+        diese: Was die Person herausgenommen hat, bleibt draußen. Ein Kapitelplan, der mangels
+        Übungen nie entstand, entsteht jetzt (aktiv, solange das Kapitel läuft). Kapitel mit
+        Test oder Auswahl bleiben, wie sie sind (ihre Pläne macht „Plan anlegen“), ebenso ein
+        Plan im Papierkorb. Wie viele Pläne."""
+        neu = da - vorher
+        plaene = PlanRepo(self.con)
+        anzahl = 0
+        for kurs in self.alle():
+            for kapitel in kurs.kapitel:
+                if kapitel.braucht_eingabe or not neu & {
+                    i.exercise_id for v in kapitel.plaene for i in v.items
+                }:
+                    continue
+                for r in self.con.execute(
+                    "SELECT subject_id, completed_at FROM course_progress WHERE chapter_id = ?",
+                    (kapitel.id,),
+                ).fetchall():
+                    for vorlage, alt in self._kapitel_zuordnen(kapitel, r["subject_id"]):
+                        if not neu & {i.exercise_id for i in vorlage.items}:
+                            continue
+                        plan = self._nachgetragen(
+                            kapitel, vorlage, alt, r["subject_id"], vorher, da
+                        )
+                        if plan is not None:
+                            if alt is None:
+                                plan.aktiv = r["completed_at"] is None
+                            plaene.speichern(plan)
+                            anzahl += 1
+        return anzahl
+
+    def _nachgetragen(
+        self,
+        kapitel: Kapitel,
+        vorlage: PlanVorlage,
+        alt: Plan | None,
+        subject_id: str,
+        vorher: set[str],
+        da: set[str],
+    ) -> Plan | None:
+        def gebaut(uebungen: set[str]) -> Plan:
+            return plan_aus_vorlage(vorlage, kapitel, subject_id, uebungen)
+
+        if alt is None:  # nie entstanden, weil keine Übung da war — oder endgültig gelöscht
+            if gebaut(vorher).items:
+                return None
+            plan = gebaut(da)
+            return plan if plan.items else None
+        if alt.deleted_at is not None:
+            return None
+        nutzer = plan_stand(paketplan_aus(alt, "kapitel"))
+        gemischt = plan_abgleichen(
+            plan_stand(paketplan_aus(gebaut(vorher), "kapitel")),
+            nutzer,
+            plan_stand(paketplan_aus(gebaut(da), "kapitel")),
+        )
+        if gemischt == nutzer:
+            return None
+        neu = plan_aus_vorlage(
+            PaketPlan.from_dict(gemischt).vorlage, kapitel, subject_id, da, alt=alt
+        )
+        neu.id, neu.created_at, neu.aktiv = alt.id, alt.created_at, alt.aktiv
+        neu.description, neu.timer = alt.description, alt.timer
+        neu.weiter_automatisch, neu.pause_ohne_timer = alt.weiter_automatisch, alt.pause_ohne_timer
+        eigenes_uebernehmen(neu, alt)  # K35
+        return neu
+
+    def fehlende_uebungen(self, kapitel: Kapitel) -> list[str]:
+        """Die Übungen, die das Kapitel nennt (Plan-Vorlagen, Auswahl, Bedingung „Summe“) und
+        die es hier nicht gibt (V4) — sie warten auf ihr Paket."""
+        genannt = [i.exercise_id for v in kapitel.plaene for i in v.items]
+        genannt += [u for b in kapitel.bloecke if b.art == AUSWAHL for u in b.uebungen]
+        if kapitel.bedingung.art == SUMME and kapitel.bedingung.exercise_id:
+            genannt.append(kapitel.bedingung.exercise_id)
+        da = self._vorhandene_uebungen()
+        return [u for u in dict.fromkeys(genannt) if u and u not in da]
+
+    def fehlende_im_plan(self, plan: Plan) -> list[str]:
+        """Die Übungen der Vorlage, aus der der Kapitelplan ``plan`` entstand, die es hier
+        nicht gibt (V4)."""
+        quelle = self.kapitelplan_vorlage(plan)
+        if quelle is None:
+            return []
+        da = self._vorhandene_uebungen()
+        return list(
+            dict.fromkeys(i.exercise_id for i in quelle[2].items if i.exercise_id not in da)
+        )
+
     def kapitel_plaene(self, kapitel_id: str, subject_id: str) -> list[Plan]:
         """Die (nicht gelöschten) Pläne, die dieses Kapitel für das Profil angelegt hat — im
         laufenden Durchlauf; die aus früheren stehen in `fruehere_plaene`."""

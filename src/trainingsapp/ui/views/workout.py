@@ -180,7 +180,7 @@ def workout_view(
         """Eine Erklärung, die sich **beim ersten Mal von selbst zeigt** (P200), auch im Workout
         (Ben, 17.11.2026: „Medienverfügbarkeit mit Option auf einmalig auch für Workouts“): Beginnt
         ein Schritt, dessen Übung so ein Stück hat, das noch nicht als gesehen abgehakt ist, geht
-        das Blatt „Material“ auf — die Uhr des Schritts steht, solange es offen ist
+        das Blatt „Medien“ auf — die Uhr des Schritts steht, solange es offen ist
         (`components/material.py`), auch bei „hart“. Je Schritt und Durchlauf wird einmal
         nachgesehen; was schon von selbst kam, kommt in dieser Sitzung nicht wieder
         (`material.neu_zeigen`).

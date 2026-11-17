@@ -141,7 +141,7 @@ def test_erstes_start_zeigt_die_erklaerung_dann_startet_die_uhr(page, state) -> 
         state, [], [Media(uri=NEU, title="An der Stufe", zeigen=True)]
     )
     knopf = material.material_knopf(page, state, uebung, item)
-    assert knopf.content == "Material · neu"
+    assert knopf.content == "Medien · neu"
     assert material.neu_zeigen(page, state, uebung, item) is True
     blatt = page.dialoge[-1]
     assert "Neu zu dieser Übung" in _texte(blatt)
@@ -152,7 +152,7 @@ def test_erstes_start_zeigt_die_erklaerung_dann_startet_die_uhr(page, state) -> 
     assert haken.value is False
     haken.on_change(SimpleNamespace(control=SimpleNamespace(value=True)))
     assert material.gesehen(state) == {NEU}
-    assert material.material_knopf(page, state, uebung, item).content == "Material"
+    assert material.material_knopf(page, state, uebung, item).content == "Medien"
     state.material_angeboten = set()  # neue Sitzung
     assert material.neu_zeigen(page, state, uebung, item) is False
 

@@ -2327,8 +2327,8 @@ def plan_view(
             felder.append(
                 einzel_seite.Verwalten(
                     ft.Icons.MENU_BOOK_OUTLINED,
-                    "Material",
-                    f"Material: {material.kurztext()} — die Uhr steht, solange du es ansiehst",
+                    "Medien",
+                    f"Medien: {material.kurztext()} — die Uhr steht, solange du sie ansiehst",
                     lambda: page.show_dialog(material_blatt(page, state, uebung, item, material)),
                     kennung="material",
                 )

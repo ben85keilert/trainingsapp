@@ -130,7 +130,7 @@ def test_fuenf_reiter_mit_wort_und_symbol_einer_ist_offen(page, state) -> None:
     assert ansicht.appbar.title.value == "Unterarmstütz"  # der Name, nicht „Übung bearbeiten“
     leiste = _daten(ansicht, "editor_reiter")
     tabs = [t for t in _alle(leiste) if isinstance(t, ft.Tab)]
-    assert [t.label for t in tabs] == ["Übung", "Parameter", "Uhr", "Sensor", "Material"]
+    assert [t.label for t in tabs] == ["Übung", "Parameter", "Uhr", "Sensor", "Medien"]
     assert all(t.icon for t in tabs)
     assert [k for k in er.SCHLUESSEL if _seite(ansicht, k).visible] == [er.UEBUNG]
     # Ein Tipp schaltet um — dasselbe Formular, nichts wird neu gebaut
@@ -258,7 +258,7 @@ def test_im_plan_einstellen_hat_dieselben_reiter(page, state) -> None:
         "Parameter",
         "Uhr",
         "Sensor",
-        "Material",
+        "Medien",
     ]
     assert "PARAMETER" in _texte(_seite(ansicht, er.PARAMETER))
     assert "UHR" in _texte(_seite(ansicht, er.UHR))

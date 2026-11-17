@@ -529,7 +529,7 @@ nie auf (nachgestellt am 17.11.2026: Übung mit Link und Paketdatei, beide „vo
 
 | Was | Gebaut | Wo |
 |---|---|---|
-| Von selbst zeigen | Beginnt ein Schritt, dessen Übung oder Planübung eine Erklärung mit „von selbst zeigen“ hat, die noch nicht als gesehen abgehakt ist, geht das Blatt „Material“ auf („Neu zu dieser Übung“). **Die Uhr des Schritts steht, solange es offen ist** — auch bei „hart“: Es geht nicht weiter, bevor das Blatt zu ist. Links und Paketdateien gleich; kein Video startet von selbst | `views/workout.material_zeigen` → `components/material.neu_zeigen` |
+| Von selbst zeigen | Beginnt ein Schritt, dessen Übung oder Planübung eine Erklärung mit „von selbst zeigen“ hat, die noch nicht als gesehen abgehakt ist, geht das Blatt „Medien“ (bis 17.11.2026 „Material“) auf („Neu zu dieser Übung“). **Die Uhr des Schritts steht, solange es offen ist** — auch bei „hart“: Es geht nicht weiter, bevor das Blatt zu ist. Links und Paketdateien gleich; kein Video startet von selbst | `views/workout.material_zeigen` → `components/material.neu_zeigen` |
 | Einmalig | Wie am ▶ der Uhr: Was von selbst kam, kommt in dieser Sitzung nicht wieder; abgehakt („gesehen“, beim Öffnen des Stücks oder von Hand) kommt es nie wieder. In einer Schleife zeigt es sich nur im ersten Durchlauf | `material.neu_zeigen`, `data/material.py` |
 | Bleibt anschaubar | Unverändert: Alles Material steht hinter dem Buch-Symbol im Fokus (neben den Ebenen) — gefüllt und in der Akzentfarbe, solange etwas neu ist, sonst als Umriss. Abgehaktes bleibt in der Liste, mit seinem Haken | `material_knopf`, `material_blatt` |
 

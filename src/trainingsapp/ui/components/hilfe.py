@@ -528,8 +528,8 @@ ANWEISUNGEN_MD = """\
 „Für dich“) und Links zu Videos, Texten oder PDFs. Sie kommen aus dem Paketplan oder du
 schreibst sie selbst. Die Beschreibung der Übung bleibt, wie sie ist — sie steht im „i“.
 
-Beim Üben zeigt ein Buch-Symbol neben dem „i“ (und im Fokus), dass es **Material** gibt.
-**Solange du es ansiehst, steht die Uhr**; „Uhr weiter“ lässt sie von Hand weiterlaufen, beim
+Beim Üben zeigt ein Buch-Symbol neben dem „i“ (und im Fokus), dass es **Medien** gibt.
+**Solange du sie ansiehst, steht die Uhr**; „Uhr weiter“ lässt sie von Hand weiterlaufen, beim
 Schließen läuft sie von selbst weiter. Die Messung läuft immer weiter.
 
 Eine Erklärung mit **„Beim ersten Mal von selbst zeigen“** öffnet sich beim ersten ▶ — im
@@ -568,7 +568,7 @@ THEMEN: dict[str, tuple[str, str, str]] = {
     "plan": ("Üben im Plan", PLAN_MD, "Knöpfe und Eingabe"),
     "varianten": ("Varianten", VARIANTEN_MD, "Was sind Varianten?"),
     "parameter": ("Parameter, Chips und Ziel", PARAMETER_MD, "Parameter, Chips und Ziel"),
-    "anweisungen": ("Anweisungen im Plan", ANWEISUNGEN_MD, "Anweisungen und Material"),
+    "anweisungen": ("Anweisungen im Plan", ANWEISUNGEN_MD, "Anweisungen und Medien"),
     "uhr": ("Uhr", UHR_MD, "Uhr: Stoppuhr, Timer, zählt, Zeit stellen"),
     "takt": ("Takt", TAKT_MD, "Takt, Tempo und „Takt zählt“"),
     "beschleunigung": (

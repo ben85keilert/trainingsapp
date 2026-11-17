@@ -74,11 +74,12 @@ def neu_zeigen(page: Any, state: Any, uebung: Exercise, item: PlanItem | None) -
 def material_knopf(
     page: Any, state: Any, uebung: Exercise, item: PlanItem | None, *, text: bool = True
 ) -> ft.Control | None:
-    """„Material“ — ``None`` ohne Material; ``text=False``: nur das Symbol (Fokus)."""
+    """„Medien“ (bis 17.11.2026 „Material“; Ben: „Medien überall“) — ``None`` ohne Material;
+    ``text=False``: nur das Symbol (Fokus)."""
     m = material_von(uebung, item)
     if m.leer:
         return None
-    hilfe = f"Material: {m.kurztext()} — die Uhr steht, solange du es ansiehst"
+    hilfe = f"Medien: {m.kurztext()} — die Uhr steht, solange du sie ansiehst"
     neu = bool(m.neu(gesehen(state)))
     symbol = ft.Icons.MENU_BOOK if neu else ft.Icons.MENU_BOOK_OUTLINED
     farbe = ft.Colors.PRIMARY if neu else None
@@ -93,7 +94,7 @@ def material_knopf(
             symbol, icon_color=farbe, tooltip=hilfe, on_click=oeffnen, data="material"
         )
     return ft.TextButton(
-        "Material · neu" if neu else "Material",
+        "Medien · neu" if neu else "Medien",
         icon=symbol,
         tooltip=hilfe,
         on_click=oeffnen,
@@ -158,7 +159,7 @@ def material_blatt(
             controls=[
                 ft.Icon(ft.Icons.MENU_BOOK_OUTLINED),
                 ft.Text(
-                    "Neu zu dieser Übung" if neu else "Material",
+                    "Neu zu dieser Übung" if neu else "Medien",
                     size=18,
                     weight=ft.FontWeight.W_600,
                     expand=True,

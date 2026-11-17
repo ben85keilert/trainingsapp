@@ -80,7 +80,7 @@ def rollen_zeile(
         hinweis.value = (
             "Läuft beim Üben mit, die Uhr läuft weiter."
             if werte.get("rolle") == BEGLEITUNG
-            else "Ansehen und abhaken — danach liegt es still hinter „Material“."
+            else "Ansehen und abhaken — danach liegt es still hinter „Medien“."
         )
 
     def rolle_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:

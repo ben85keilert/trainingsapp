@@ -206,7 +206,7 @@ dazu C1/C2):
 | Parameter | Stellung, Parameter-Chips, Karten mit Ziel, Varianten, Verlauf-Ansichten | Parameter, „Weitere Parameter holen“, Karten, Varianten |
 | Uhr | Uhr beim Üben, Zeit zählt, Zählt als, Timer, „Timer hinzufügen“, Takt, Bild der Bewegung | Uhr und Timer, Takt |
 | Sensor | Beschleunigungssensor mit Bewegung und **Bewegungstyp** | dieselbe Karte, „nur hier“ |
-| Material | Videos, Links, Dateien (unverändert, P200) | Anweisungen der Planübung (ihr Material, `core/material.py`) |
+| Medien (bis 17.11.2026 „Material“, `docs/plan_medien_reiter.md` §2) | Videos, Links, Dateien (unverändert, P200) | Anweisungen der Planübung (ihr Material, `core/material.py`) |
 
 Regeln:
 

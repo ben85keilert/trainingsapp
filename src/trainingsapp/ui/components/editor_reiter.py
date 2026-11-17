@@ -38,7 +38,7 @@ REITER: tuple[tuple[str, str, ft.IconData], ...] = (
     (PARAMETER, "Parameter", ft.Icons.TUNE),
     (UHR, "Uhr", ft.Icons.TIMER_OUTLINED),
     (SENSOR, "Sensor", ft.Icons.GRAPHIC_EQ),
-    (MATERIAL, "Material", ft.Icons.SMART_DISPLAY_OUTLINED),
+    (MATERIAL, "Medien", ft.Icons.SMART_DISPLAY_OUTLINED),
 )
 SCHLUESSEL: tuple[str, ...] = tuple(k for k, _, _ in REITER)
 

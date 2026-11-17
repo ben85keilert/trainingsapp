@@ -336,7 +336,7 @@ async def test_workout_zeigt_neues_material_von_selbst_und_haelt_die_uhr(umgebun
     assert not knopf.tooltip.startswith("Neu") and knopf.icon == ft.Icons.MENU_BOOK_OUTLINED
     knopf.on_click(None)
     (offen,) = _blaetter(seite)
-    assert "Material" in _texte(offen) and "Technik" in _texte(offen)
+    assert "Medien" in _texte(offen) and "Technik" in _texte(offen)
     await _aufraeumen(erste, seite)
 
 

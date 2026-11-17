@@ -255,7 +255,8 @@ def kurs_kopieren(state: Any, kurs: Kurs) -> Kurs:
     umgeschrieben, und ein Plan des Pakets als Grundlage wird zur Vorlage im Kurs. Hier wird
     nur gespeichert.
     """
-    kopie = kurs_kopie(kurs, state.pakete.paketplaene)
+    paket = state.pakete.laden(kurs.package_id) if kurs.package_id else None
+    kopie = kurs_kopie(kurs, state.pakete.paketplaene, paket.version if paket else None)
     state.kurse.speichern(kopie)
     return state.kurse.laden(kopie.id) or kopie
 

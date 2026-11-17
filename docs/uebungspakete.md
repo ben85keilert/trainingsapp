@@ -422,6 +422,7 @@ Je Kurs (`kurse[]`, Formatversion 2):
 | `id` / `key` | nein | wie bei Übungen: ID = UUIDv5 aus Paket-ID und `kurs:<key>` |
 | `beschreibung` | nein | |
 | `freischaltung` | nein | `frei`, `rueckfrage` (Vorgabe), `streng` |
+| `kopie_von` | nein | nur in Exporten der App (Migration 067, Ben 17.11.2026): die **Kopie eines Paketkurses** nennt ihr Original — `{ kurs, paket, version, kapitel = { neu = alt }, bloecke = { neu = alt } }`. Kein Inhalt, zählt für kein Update; `trainingsapp-paket uebernehmen` führt die Kopie damit in ihren Kurs zurück. Ältere Apps übergehen das Feld |
 | `kursplan` | nein | der Kurs baut **einen Plan**, der über die Kapitel wächst (Formatversion 6, Abschnitt [Kursplan und Bausteine](#kursplan-und-bausteine-formatversion-6-ben-16112026)); fehlt = jedes Kapitel legt wie bisher seine eigenen Pläne an |
 | `kapitel[]` | ja | mindestens eines, in dieser Reihenfolge |
 
@@ -913,6 +914,18 @@ die einer Vorlage entsprechen, werden wieder `spec = "…"`, andere ein vollstä
   wurde dort gestrichen und kommt nicht zurück.
 - Übungen aus Paketen daneben werden nur genannt; Übungen der Datei, die nicht in der Quelle
   sind, bleiben unverändert — ein Export darf eine Auswahl sein.
+- **Paketpläne** (`plaene[]`, Stufe 6): aus einem Export über ihren Schlüssel (die App schreibt
+  Paketpläne mit ihrem Paketschlüssel; Paketmanager → Paket → Exportieren hakt die Pläne des
+  Pakets mit an), aus der Datenbank die Pläne mit `package_key` gegen ihren Paketstand — je Feld
+  und je Planübung (`core.pakete.plan_abgleichen`, die Datei gewinnt); neue Pläne werden
+  angehängt.
+- **Kurse** (Stufe 6): Kurse eines Pakets bearbeitet man in der App als Kopie; die Kopie merkt
+  sich ihr Original (`kurse[].kopie_von`, unten). `uebernehmen` gibt ihr die IDs des Originals
+  zurück und gleicht den Kurs **als Ganzes** ab — wie ein Update der App: Ist er in der Datei
+  seit der Basis gleich, kommt die Kopie hinein (Kapitel behalten ihren `key`, neue bekommen
+  einen aus dem Titel; Kommentare im Kursblock gehen verloren); haben beide ihn geändert,
+  bleibt die Datei. Basis: der Paketstand des Originals in der Datenbank, sonst die Version,
+  aus der die Kopie entstand, aus der git-Geschichte.
 - Typen und Regionen gelten als Mengen (die App führt sie in anderer Reihenfolge).
 - **Pläne** (nur aus der Datenbank): Ein Plan mit `kurs_kapitel_id` gehört zur Vorlage
   gleichen Namens in seinem Kapitel (`plaene[]`); Wochentage und Übungen (mit `key`,

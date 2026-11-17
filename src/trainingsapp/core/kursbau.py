@@ -2020,7 +2020,11 @@ def folgen_anwenden(bloecke: Sequence[Block], folgen: Iterable[Folge]) -> list[B
     return ergebnis
 
 
-def kurs_kopie(kurs: Kurs, paketplaene: Callable[[str], Iterable[PaketPlan]] | None = None) -> Kurs:
+def kurs_kopie(
+    kurs: Kurs,
+    paketplaene: Callable[[str], Iterable[PaketPlan]] | None = None,
+    version: int | None = None,
+) -> Kurs:
     """Eine eigene Kopie des Kurses mit neuen IDs — Fortschritt und Pläne des Originals
     bleiben dort; gespeichert wird hier nichts.
 
@@ -2038,6 +2042,10 @@ def kurs_kopie(kurs: Kurs, paketplaene: Callable[[str], Iterable[PaketPlan]] | N
     trägt sie nicht.) ``paketplaene``: Paket-ID → die Pläne, die das Paket zuletzt mitbrachte
     (`data.pakete.PaketRepo.paketplaene`) — gefragt wird nur, wenn der Kurs sie braucht.
 
+    Die Kopie eines **Paketkurses** merkt sich ihr Original (``kopie_von``: Kurs, Paket, dessen
+    ``version``, Kapitel und Blöcke neu → alt; Ben 17.11.2026, Stufe 6 in
+    `docs/plan_rueckweg_handy.md`) — so findet `trainingsapp-paket uebernehmen` zurück.
+
     >>> kurs = Kurs(name="Rumpf", kursplan=Kursplan("Plan"), kapitel=[Kapitel(titel="Eins",
     ...     bloecke=[Block(AUSWAHL, id="w", uebungen=["a", "b"]),
     ...              Block(PLAN_UEBUNG, id="b1", uebung="p"),
@@ -2051,26 +2059,42 @@ def kurs_kopie(kurs: Kurs, paketplaene: Callable[[str], Iterable[PaketPlan]] | N
     (['uebung-1', 'uebung-2', 'weg-1'], True, True)
     >>> zwei.hinter, weg.von, weg.zu
     ('uebung-1', 'uebung-1', 'ende')
+    >>> kopie.kopie_von is None  # ein eigener Kurs: keine Herkunft
+    True
+    >>> kurs.package_id = "p1"
+    >>> h = kurs_kopie(kurs, version=10200).kopie_von
+    >>> h["kurs"] == kurs.id, h["version"], list(h["kapitel"].values()) == [kurs.kapitel[0].id]
+    (True, 10200, True)
+    >>> sorted(h["bloecke"].values())
+    ['b1', 'b2', 'b3', 'w']
     """
     neu: dict[str, str] = {}
     for k in kurs.kapitel:
         for b in k.bloecke:
             if b.id not in neu:
                 neu[b.id] = neue_id(b.art, neu.values()) if b.baustein else new_id()
+    kapitel = [
+        replace(k, id=new_id(), kurs_id="", bloecke=[umschreiben(b, neu) for b in k.bloecke])
+        for k in kurs.kapitel
+    ]
+    herkunft = (
+        {
+            "kurs": kurs.id,
+            "paket": kurs.package_id,
+            "version": version,
+            "kapitel": {n.id: a.id for n, a in zip(kapitel, kurs.kapitel, strict=True)},
+            "bloecke": {n: a for a, n in neu.items()},
+        }
+        if kurs.package_id
+        else None
+    )
     return Kurs(
         name=f"{kurs.name} (Kopie)",
         beschreibung=kurs.beschreibung,
         freischaltung=kurs.freischaltung,
         kursplan=_kursplan_kopie(kurs, paketplaene),
-        kapitel=[
-            replace(
-                k,
-                id=new_id(),
-                kurs_id="",
-                bloecke=[umschreiben(b, neu) for b in k.bloecke],
-            )
-            for k in kurs.kapitel
-        ],
+        kapitel=kapitel,
+        kopie_von=herkunft,
     )
 
 

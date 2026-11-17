@@ -542,6 +542,10 @@ class Kurs:
     kursplan: Kursplan | None = None
     #: Aus welchem Paket der Kurs kam (`core/pakete.py`); ``None`` = eigener Kurs
     package_id: str | None = None
+    #: Eine eigene Kopie eines Paketkurses merkt sich ihr Original (Migration 067, Ben
+    #: 17.11.2026): ``{"kurs", "paket", "version", "kapitel": {neu: alt}, "bloecke": {neu:
+    #: alt}}`` — so führt `trainingsapp-paket uebernehmen` sie zurück; ``None`` = keine Kopie
+    kopie_von: dict[str, Any] | None = None
     created_at: datetime = field(default_factory=jetzt)
     updated_at: datetime = field(default_factory=jetzt)
     deleted_at: datetime | None = None

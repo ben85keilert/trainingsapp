@@ -108,9 +108,10 @@ class KursRepo:
                 """
                 INSERT INTO course (id, name, description, unlock_mode, package_id,
                                     package_standard_json, created_at, updated_at, deleted_at,
-                                    kursplan_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    kursplan_json, copy_of_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
+                    copy_of_json = excluded.copy_of_json,
                     name = excluded.name,
                     description = excluded.description,
                     unlock_mode = excluded.unlock_mode,
@@ -137,6 +138,9 @@ class KursRepo:
                     None
                     if kurs.kursplan is None
                     else json.dumps(kurs.kursplan.als_dict(), ensure_ascii=False),
+                    None
+                    if kurs.kopie_von is None
+                    else json.dumps(kurs.kopie_von, ensure_ascii=False, sort_keys=True),
                 ),
             )
             ids = [k.id for k in kurs.kapitel]
@@ -1303,10 +1307,16 @@ class KursRepo:
             freischaltung=r["unlock_mode"],
             kursplan=Kursplan.aus_dict(_json(r["kursplan_json"], None)),
             package_id=r["package_id"],
+            kopie_von=_herkunft(_json(r["copy_of_json"], None)),
             created_at=datetime.fromisoformat(r["created_at"]),
             updated_at=datetime.fromisoformat(r["updated_at"]),
             deleted_at=datetime.fromisoformat(r["deleted_at"]) if r["deleted_at"] else None,
         )
+
+
+def _herkunft(roh: Any) -> dict[str, Any] | None:
+    """``copy_of_json`` (Migration 067) — nur ein Wörterbuch mit ``kurs`` zählt."""
+    return roh if isinstance(roh, dict) and isinstance(roh.get("kurs"), str) else None
 
 
 def _wahl_zusammen(

@@ -870,8 +870,36 @@ def _kurs_lesen(eintrag: Any, paket: str, schluessel: Mapping[str, str]) -> Kurs
         freischaltung=freischaltung,
         kapitel=kapitel,
         kursplan=_kursplan_lesen(eintrag.get("kursplan"), schluessel),
+        kopie_von=_herkunft_lesen(eintrag.get("kopie_von")),
         package_id=paket,
     )
+
+
+def _herkunft_lesen(roh: Any) -> dict[str, Any] | None:
+    """``kurse[].kopie_von`` — die Herkunft einer Kurs-Kopie (Migration 067): Kurs-ID und die
+    Abbildungen neu → alt als Texte; alles andere fällt weg.
+
+    >>> _herkunft_lesen({"kurs": "k", "version": 3, "kapitel": {"n": "a", "x": 1}, "y": 2})
+    {'kurs': 'k', 'paket': None, 'version': 3, 'kapitel': {'n': 'a'}, 'bloecke': {}}
+    >>> _herkunft_lesen({"kapitel": {}}) is None
+    True
+    """
+    if not isinstance(roh, dict) or not isinstance(roh.get("kurs"), str):
+        return None
+
+    def abbildung(x: Any) -> dict[str, str]:
+        if not isinstance(x, dict):
+            return {}
+        return {str(k): v for k, v in x.items() if isinstance(v, str)}
+
+    version = roh.get("version")
+    return {
+        "kurs": roh["kurs"],
+        "paket": roh["paket"] if isinstance(roh.get("paket"), str) else None,
+        "version": version if _ganzzahl(version) else None,
+        "kapitel": abbildung(roh.get("kapitel")),
+        "bloecke": abbildung(roh.get("bloecke")),
+    }
 
 
 def _kursplan_lesen(roh: Any, schluessel: Mapping[str, str]) -> Kursplan | None:
@@ -1667,7 +1695,12 @@ def paket_bauen(
         # byteidentisch, die Prüfsumme im Index bleibt gleich (K28)
         roh["exportiert"] = (exportiert or jetzt()).isoformat(timespec="seconds")
     if kurse:
-        roh["kurse"] = [{"id": k.id, **kurs_stand(k)} for k in kurse]
+        # Eine Kopie eines Paketkurses nennt ihr Original (Migration 067) — nicht im Paketstand:
+        # Sie ist Herkunft, kein Inhalt, und zählt für kein Update
+        roh["kurse"] = [
+            {"id": k.id, **kurs_stand(k), **({"kopie_von": k.kopie_von} if k.kopie_von else {})}
+            for k in kurse
+        ]
     if plaene:
         roh["plaene"] = [p.to_dict() for p in plaene]
     if ergaenzungen:

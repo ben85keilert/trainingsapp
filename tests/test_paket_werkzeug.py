@@ -972,3 +972,59 @@ def test_uebernehmen_paketplan_aus_der_datenbank(tmp_path) -> None:
     assert fehler == [] and "Plan „Morgens“: wochentage" in zeilen
     assert "wochentage = [5, 6]" in datei.read_text("utf-8")
     assert uebernehmen(db, datei)[0] == ["Keine Änderung"]
+
+
+def test_kurs_kopie_kehrt_in_ihren_kurs_zurueck(tmp_path) -> None:
+    """Stufe 6 (Ben, 17.11.2026): Einen Paketkurs bearbeitet man in der App als Kopie; die
+    Kopie merkt sich ihr Original (Migration 067), `uebernehmen` führt sie zurück — Kapitel
+    behalten ihren ``key`` (daran hängt der Fortschritt), neue bekommen einen. Aus der
+    Datenbank wie aus einem Export (eigenes Paket mit der Kopie)."""
+    from trainingsapp.core.kursbau import kurs_kopie
+    from trainingsapp.core.kurse import Kapitel
+    from trainingsapp.core.pakete import Paket, paket_json
+    from trainingsapp.data.db import oeffnen
+    from trainingsapp.data.kurse import KursRepo
+    from trainingsapp.data.pakete import PaketRepo
+    from trainingsapp.data.seed import seed_inhalt
+
+    datei = tmp_path / "qigong.toml"
+    datei.write_text(QIGONG_MIT_KURS, encoding="utf-8")
+    _committen(datei)
+    inhalt = seed_inhalt(datei)
+    db = tmp_path / "app.db"
+    con = oeffnen(db)
+    PaketRepo(con).importieren(inhalt)
+    kurse = KursRepo(con)
+    (original,) = kurse.des_pakets(inhalt.paket.id)
+    kopie = kurs_kopie(original, version=inhalt.paket.version)
+    kopie.kapitel[0].text = "Weil Stehen trägt."
+    kopie.kapitel.append(Kapitel(titel="Dritte Woche", text="Weiter."))
+    kurse.speichern(kopie)
+    assert kurse.laden(kopie.id).kopie_von["kurs"] == original.id, "gespeichert (Migration 067)"
+    con.close()
+
+    zeilen, fehler = uebernehmen(db, datei)
+    assert fehler == []
+    assert any(
+        z.startswith("Kurs „Einstieg“: aus der Kopie übernommen (3 Kapitel)") for z in zeilen
+    )
+    text = datei.read_text("utf-8")
+    assert "Weil Stehen trägt." in text and "(Kopie)" not in text
+    gelesen = paket_lesen(tomllib.loads(text))
+    (kurs,) = gelesen.kurse
+    assert kurs.id == original.id and kurs.name == "Einstieg"
+    assert [k.id for k in kurs.kapitel[:2]] == [k.id for k in original.kapitel], "Fortschritt"
+    assert kurs.kapitel[2].titel == "Dritte Woche"
+    assert [i.exercise_id for i in kurs.kapitel[1].plaene[0].items] == [
+        u.id for u in gelesen.uebungen if u.name == "Baum"
+    ]
+    assert 'uebung = "baum"' in text
+    # Am Laptop dasselbe Kapitel anders: die Datei bleibt
+    datei.write_text(text.replace("Weil Stehen trägt.", "Am Laptop."), encoding="utf-8")
+    kopie.kapitel[0].text = "Am Handy noch einmal."
+    export = tmp_path / "eigen.json"
+    export.write_bytes(paket_json(Paket(id="eigen", name="Meins", version=10000), [], [kopie]))
+    assert json.loads(export.read_bytes())["kurse"][0]["kopie_von"]["kurs"] == original.id
+    zeilen, fehler = uebernehmen(export, datei)
+    assert any("Kurs „Einstieg“: in der Datei und in der Kopie geändert" in z for z in zeilen)
+    assert "Am Laptop." in datei.read_text("utf-8")

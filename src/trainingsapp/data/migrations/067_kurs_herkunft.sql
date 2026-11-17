@@ -1,0 +1,11 @@
+-- Herkunft einer Kurs-Kopie (Ben, 17.11.2026, docs/plan_rueckweg_handy.md Stufe 6: „beides“ —
+-- am Handy ändern sich auch die Kurse eines Pakets). Einen Kurs aus einem Paket bearbeitet man
+-- als Kopie (`kurs_kopieren`); damit `trainingsapp-paket uebernehmen` die Kopie in den Kurs des
+-- Pakets zurückführen kann, merkt sie sich das Original:
+--
+--   {"kurs": <ID>, "paket": <ID>, "version": <Zahl oder null>,
+--    "kapitel": {<neue ID>: <alte ID>}, "bloecke": {<neue ID>: <alte ID>}}
+--
+-- JSON (`core.kurse.Kurs.kopie_von`); NULL = keine Kopie eines Paketkurses (oder eine von vor
+-- dieser Migration — sie läuft dann als neuer Kurs).
+ALTER TABLE course ADD COLUMN copy_of_json TEXT;

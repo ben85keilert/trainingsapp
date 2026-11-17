@@ -43,7 +43,7 @@ import tomllib
 import uuid
 import zipfile
 from collections.abc import Callable, Collection, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -95,6 +95,7 @@ from trainingsapp.core.pakete import (
     PaketPlan,
     dateiname,
     ergaenzung_ziel,
+    kurs_stand,
     noetige_version,
     nutzt_kursplan,
     paket_json,
@@ -102,6 +103,7 @@ from trainingsapp.core.pakete import (
     paket_ziel,
     paketplan_aus,
     plan_abgleichen,
+    plan_schluessel,
     plan_stand,
     stand,
     stand_normieren,
@@ -1524,6 +1526,10 @@ class Quelle:
     #: Ihr Paketstand je Schlüssel (`core.pakete.plan_stand`) — aus der Datenbank
     #: (`Plan.package_standard`); ``None`` = nicht dabei
     plan_basis: dict[str, dict[str, Any]] | None = None
+    #: Kurse — zählen nur als **Kopie eines Kurses der Datei** (`Kurs.kopie_von`, Stufe 6)
+    kurse: list[Kurs] = field(default_factory=list)
+    #: Der Paketstand der Originale je Kurs-ID (`core.pakete.kurs_stand`) — aus der Datenbank
+    kurs_basis: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def _exportiert(quelle: Path) -> datetime | None:
@@ -1589,6 +1595,20 @@ def _quelle_lesen(quelle: Path, paket_id: str, arbeit: Path) -> Quelle:
                 for u in uebungen
                 if (standard := repo.standard(u.id)) is not None
             }
+            from trainingsapp.data.kurse import KursRepo
+
+            kurs_repo = KursRepo(con)
+            kopien = [
+                k
+                for k in kurs_repo.alle()
+                if k.kopie_von is not None and k.kopie_von.get("paket") == paket_id
+            ]
+            kurs_basis = {
+                k.kopie_von["kurs"]: s
+                for k in kopien
+                if k.kopie_von is not None
+                and (s := kurs_repo.standard(k.kopie_von["kurs"])) is not None
+            }
         finally:
             con.close()
         return Quelle(
@@ -1600,6 +1620,8 @@ def _quelle_lesen(quelle: Path, paket_id: str, arbeit: Path) -> Quelle:
             aus_datenbank=True,
             paketplaene=list(paketplaene.values()),
             plan_basis=plan_basis,
+            kurse=kopien,
+            kurs_basis=kurs_basis,
         )
     arbeit.mkdir(parents=True, exist_ok=True)
     inhalt = paket_oeffnen(quelle, quelle.stem, arbeit=arbeit)
@@ -1609,6 +1631,7 @@ def _quelle_lesen(quelle: Path, paket_id: str, arbeit: Path) -> Quelle:
         exportiert=_exportiert(quelle),
         medien=inhalt.medien,
         paketplaene=list(inhalt.plaene),
+        kurse=list(inhalt.kurse),
     )
 
 
@@ -1634,7 +1657,10 @@ def _dateien_merken(roh: dict[str, Any], ordner: Path, arbeit: Path) -> dict[str
 
 def _basis_aus_git(
     datei: Path, version: int | None, bis: datetime | None, namen: Mapping[str, str], arbeit: Path
-) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], str] | None:
+) -> (
+    tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], str, dict[str, dict[str, Any]]]
+    | None
+):
     """Der Paketstand je Übung und je Plan der Fassung ``version`` aus der Geschichte von
     ``datei`` — der jüngste Commit mit dieser Version, der **vor dem Export** (``bis``) lag:
     Was danach committet wurde, kann das Gerät nicht haben. ``(Stand je Übungs-ID, Stand je
@@ -1667,6 +1693,7 @@ def _basis_aus_git(
             {u.id: stand(u) for u in inhalt.uebungen},
             {p.key: plan_stand(p) for p in inhalt.plaene},
             f"Version {version_text(version)} aus Commit {commit[:7]} vom {datum:%d.%m.%Y}",
+            {k.id: kurs_stand(k) for k in inhalt.kurse},
         )
     return None
 
@@ -1867,6 +1894,163 @@ def _paketplaene_uebernehmen(
     return zeilen, hinweise, ohne
 
 
+_KOPIE = " (Kopie)"
+
+
+def kurs_zurueck(kopie: Kurs) -> Kurs:
+    """Die Kopie eines Paketkurses mit den IDs ihres Originals (`Kurs.kopie_von`): Kurs,
+    Kapitel und Blöcke samt ihrer Verweise (`core.kursbau.umschreiben`); „ (Kopie)“ fällt vom
+    Namen. Ein Kapitel, das erst in der Kopie entstand, behält seine ID.
+
+    >>> from trainingsapp.core.kursbau import kurs_kopie
+    >>> original = Kurs(name="Rumpf", package_id="p", kapitel=[Kapitel(titel="Eins")])
+    >>> z = kurs_zurueck(kurs_kopie(original))
+    >>> z.id == original.id, z.name, z.kapitel[0].id == original.kapitel[0].id
+    (True, 'Rumpf', True)
+    """
+    from trainingsapp.core.kursbau import umschreiben
+
+    h = kopie.kopie_von or {}
+    kapitel_alt: Mapping[str, str] = h.get("kapitel") or {}
+    bloecke_alt: Mapping[str, str] = h.get("bloecke") or {}
+    return replace(
+        kopie,
+        id=str(h.get("kurs") or kopie.id),
+        name=kopie.name.removesuffix(_KOPIE),
+        kopie_von=None,
+        kapitel=[
+            replace(
+                k,
+                id=kapitel_alt.get(k.id, k.id),
+                bloecke=[umschreiben(b, bloecke_alt) for b in k.bloecke],
+            )
+            for k in kopie.kapitel
+        ],
+    )
+
+
+def _kurse_uebernehmen(
+    quelle: Quelle,
+    dokument: Any,
+    inhalt_datei: Paketinhalt,
+    ohne_basis: bool,
+    ids: Mapping[str, str],
+    datei: Path,
+    medien: Callable[[Any], list[dict[str, Any]]],
+    namen: Mapping[str, str],
+    arbeit: Path,
+) -> tuple[list[str], list[str], list[str]]:
+    """Kopien von Kursen der Datei (`Kurs.kopie_von`) zurück in ihren Kurs — Stufe 6, Ben
+    17.11.2026. Kurse eines Pakets bearbeitet man in der App als Kopie; hier bekommt die Kopie
+    die IDs des Originals zurück (`kurs_zurueck`) und wird **als Ganzes** gegen die Basis
+    abgeglichen — wie ein Update der App einen Kurs ganz ersetzt (`docs/plan_paketversionen.md`
+    §2): Ist der Kurs in der Datei seit der Basis gleich, kommt die Kopie hinein (Kapitel
+    behalten ihren ``key``, neue bekommen einen; Übungen als ``key`` bzw. ``uebung`` +
+    ``paket``); haben beide ihn geändert, bleibt die Datei. Basis: der Paketstand des
+    Originals in der Datenbank, sonst die Version, aus der die Kopie entstand, aus der
+    git-Geschichte. ``(Zeilen, Hinweise, ohne Basis)``."""
+    from trainingsapp.paket_einlesen import _toml_block, _Uebersetzung, nachbar_schluessel
+
+    zeilen: list[str] = []
+    hinweise: list[str] = []
+    ohne: list[str] = []
+    kopien = [k for k in quelle.kurse if k.kopie_von is not None]
+    if not kopien:
+        return zeilen, hinweise, ohne
+    bloecke = list(dokument.get("kurse") or [])
+    je_id = {
+        k.id: (i, b, k) for i, (b, k) in enumerate(zip(bloecke, inhalt_datei.kurse, strict=True))
+    }
+    u = _Uebersetzung(nachbar_schluessel(datei))
+    u.uebungen = dict(ids)
+    git_basis: dict[int | None, dict[str, dict[str, Any]]] = {}
+    for kopie in kopien:
+        h = kopie.kopie_von or {}
+        if h.get("kurs") not in je_id:
+            hinweise.append(
+                f"Kurs „{kopie.name}“: Kopie eines Kurses, den die Datei nicht hat — nicht "
+                "übernommen"
+            )
+            continue
+        i, block, original = je_id[h["kurs"]]
+        zurueck = kurs_zurueck(kopie)
+        b = quelle.kurs_basis.get(original.id)
+        if b is None:
+            version = h.get("version")
+            if version not in git_basis:
+                gefunden = _basis_aus_git(datei, version, None, namen, arbeit / f"k{version}")
+                git_basis[version] = gefunden[3] if gefunden is not None else {}
+            b = git_basis[version].get(original.id)
+        d, q = kurs_stand(original), kurs_stand(zurueck)
+        if b is not None and q == b:
+            continue  # die Kopie ist unverändert
+        if b is None and not ohne_basis:
+            if q != d:
+                ohne.append(f"Kurs „{original.name}“ (aus der Kopie)")
+            continue
+        if b is not None and d != b:
+            if q != d:
+                hinweise.append(
+                    f"Kurs „{original.name}“: in der Datei und in der Kopie geändert, die Datei "
+                    "bleibt"
+                )
+            continue
+        neu = _kurs_fuers_toml(q, block, original, u, medien)
+        dokument["kurse"][i] = _toml_block(neu)
+        zeilen.append(
+            f"Kurs „{original.name}“: aus der Kopie übernommen ({len(q['kapitel'])} Kapitel) — "
+            "Kommentare im Kursblock gehen dabei verloren"
+        )
+    return zeilen, hinweise, ohne
+
+
+def _kurs_fuers_toml(
+    stand_: Mapping[str, Any],
+    block: Any,
+    original: Kurs,
+    u: Any,
+    medien: Callable[[Any], list[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Ein Kurs (`kurs_stand`) in der Form der TOML: ``key``/``id`` wie im alten Block,
+    Kapitel mit ihrem ``key`` (aus der ID zurückgerechnet), neue mit einem aus dem Titel."""
+    alte_keys: dict[str, str] = {}
+    for kap_roh, kap in zip(list(block.get("kapitel") or []), original.kapitel, strict=False):
+        if kap_roh.get("key"):
+            alte_keys[kap.id] = str(kap_roh["key"])
+    vergeben = set(alte_keys.values())
+    kapitel: list[dict[str, Any]] = []
+    for e in stand_.get("kapitel") or []:
+        e = dict(e)
+        cid = str(e.pop("id", ""))
+        if cid in alte_keys:
+            key = alte_keys[cid]
+        else:
+            key = plan_schluessel(str(e.get("titel") or "kapitel").casefold())
+            n, basis_key = 2, key
+            while key in vergeben:
+                key, n = f"{basis_key}-{n}", n + 1
+            vergeben.add(key)
+        kap_neu: dict[str, Any] = {"key": key, **u.umschreiben(e)}
+        if isinstance(kap_neu.get("media"), list):
+            kap_neu["media"] = medien(kap_neu["media"])
+        for pl in kap_neu.get("plaene") or []:
+            for pe in pl.get("uebungen") or []:
+                if isinstance(pe, dict) and isinstance(pe.get("medien"), list):
+                    pe["medien"] = medien(pe["medien"])
+        for blk in kap_neu.get("bloecke") or []:
+            if isinstance(blk, dict) and isinstance(blk.get("medium"), dict):
+                umgesetzt = medien([blk["medium"]])
+                if umgesetzt:
+                    blk["medium"] = umgesetzt[0]
+        kapitel.append(kap_neu)
+    kopf: dict[str, Any] = {}
+    for feld in ("key", "id"):
+        if block.get(feld):
+            kopf[feld] = str(block[feld])
+    rest = {f: w for f, w in stand_.items() if f != "kapitel"}
+    return {**kopf, **u.umschreiben(rest), "kapitel": kapitel}
+
+
 def _vorlage_aus_plan(plan: Plan) -> PlanVorlage:
     """Der Plan, wie ihn ein Kapitel anlegen würde — Ziel, Felder, Sensor-Karte und Takt nur,
     wo der Plan eigene hat (sonst folgt die Planübung der Übung, P79)."""
@@ -1960,7 +2144,7 @@ def uebernehmen(
                 datei, inhalt_quelle.paket.version, inhalt_quelle.exportiert, namen, arbeit / "b"
             )
             if gefunden is not None:
-                basis, plan_basis, woher = gefunden
+                basis, plan_basis, woher, _ = gefunden
         dokument = tomlkit.parse(text)
         bloecke = list(dokument.get("exercises") or [])
         kurs_bloecke = list(dokument.get("kurse") or [])
@@ -2060,6 +2244,12 @@ def uebernehmen(
         zeilen += p_zeilen
         hinweise += p_hinweise
         ohne += p_ohne
+        k_zeilen, k_hinweise, k_ohne = _kurse_uebernehmen(
+            inhalt_quelle, dokument, inhalt_datei, ohne_basis, ids, datei, medien, namen, arbeit
+        )
+        zeilen += k_zeilen
+        hinweise += k_hinweise
+        ohne += k_ohne
     schluessel = {
         u.id: str(block.get("key") or "")
         for block, u in zip(bloecke, inhalt_datei.uebungen, strict=True)

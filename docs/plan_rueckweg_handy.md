@@ -15,7 +15,7 @@ Zwei Zwecke (Ben, 17.11.2026):
   private Pakete hochgeladen und gedownloadet werden können. Evtl. wird aus einem Standardpaket
   ein Plan/Kurs erstellt und nur das ist anders […] (Paketverlinkungen müssen passen)“.
 
-**Stand 17.11.2026 abends: Stufe 1–5 im Werkzeug gebaut** (§6); die App-Stufen 6–8 nicht. Die Inhalte liegen im privaten Repo
+**Stand 17.11.2026 abends: Stufe 1–6 gebaut** (§6); 7 und 8 nicht. Die Inhalte liegen im privaten Repo
 `trainingsapp-inhalte` (`pakete/*.toml`, `veroeffentlichen.sh`); Werkzeug und App hier.
 
 ---
@@ -158,7 +158,7 @@ dem Server (nur, wenn Ben sie will — dann Caddy, `veroeffentlichen.sh`, rsync 
 | 3 | Werkzeug | Verweise V1 + V2 — **gebaut** | B |
 | 4 | Werkzeug, Inhalte | X.Y.Z, Vorschlag der Nummer, `veroeffentlichen.sh` mit `--gegen` — **gebaut** (`--stufe-als-hinweis`, Vorschlag nach `uebernehmen`) | A, B |
 | 5 | Werkzeug | Medientabelle Datei → Link mit `sha256` — **gebaut als `verlinken`** (je Datei, `--pruefen` lädt und vergleicht; `sha256` am Link erst mit Stufe 7, weil die App das Feld dann lesen muss) | Medien |
-| 6 | App | Export mit Ziel und Herkunft, Kurskopie merkt das Original | A |
+| 6 | App, Werkzeug | Export mit Ziel und Herkunft, Kurskopie merkt das Original — **gebaut** anders als geplant: Der Export eines installierten Pakets (Paketmanager → Paket → Exportieren) trug schon alle Felder der Übungen und Paketpläne mit ihrem Schlüssel; dazu hakt er jetzt die Pläne des Pakets an. `uebernehmen` gleicht Paketpläne ab; eine Kurs-Kopie merkt sich ihr Original (`kopie_von`, Migration 067) und kehrt zurück. Die Wahl „Ziel“ im Dialog entfiel: neues Paket = eigenes Paket + `einlesen`, altes Paket = Export des Pakets + `uebernehmen` | A |
 | 7 | App | Videolinks: je Server, Abspielen, Herunterladen, Anhänge, Aufräumen | Medien |
 | 8 | App | Verweise V3–V6 | B |
 | 9 | Gerät | A und B durchspielen; dazu ein Update, das ein Video herausnimmt (keine Leiche) | — |

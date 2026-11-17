@@ -387,7 +387,7 @@ Version 1:
 | `paket.beschreibung` | nein | ein Satz, erscheint in der Paketliste und beim Import |
 | `paket.version` | nein | vom Autor gepflegt: **„X.Y.Z“** (Y und Z unter 100) oder eine ganze Zahl wie bisher. Gespeichert und in Paketdatei und Index geschrieben wird immer die Zahl X·10000 + Y·100 + Z — ältere Apps vergleichen so weiter richtig; eine bisherige Version 4 ist 0.0.4. Angezeigt wird „X.Y.Z“ (Ben, 9.11.2026, `core/paketversion.py`). Text nur in der vollen Form („3“ wäre sonst 3.0.0, die Zahl 3 aber 0.0.3) |
 | `paket.neuigkeiten` | nein | kurzer Text: was in dieser Version neu ist — die App zeigt ihn unter „Updates“ |
-| `paket.braucht` | nein | **Voraussetzungen** (V3/V6, Ben 17.11.2026, `docs/plan_paketverweise.md`): `[{ id, name, version, quelle }]` — die Pakete, auf deren Übungen dieses verweist, die kleinste Version und die Paketdatei, aus der die App es laden kann. Schreibt das Werkzeug beim Bauen aus den Verweisen (`paket_werkzeug.voraussetzungen`; Version = die des Pakets daneben; `quelle` mit `--basis-url`, für ein privates Paket nur in einem privaten, der Code nie). Fehlt eines beim Import oder ist zu alt, nennt die Rückfrage es und bietet „Erst … laden“ an (ein privates fragt nach dem Code, P220); danach kommt das Paket noch einmal. Keine neue Formatversion — ältere Apps übergehen das Feld |
+| `paket.braucht` | nein | **Voraussetzungen** (V3/V6, Ben 17.11.2026, `docs/plan_paketverweise.md`): `[{ id, name, version, quelle }]` — die Pakete, auf deren Übungen dieses verweist, die kleinste Version und die Paketdatei, aus der die App es laden kann. Schreibt das Werkzeug beim Bauen aus den Verweisen (`paket_werkzeug.voraussetzungen`; Version = die des Pakets daneben; `quelle` mit `--basis-url`, für ein privates Paket nur in einem privaten, der Code nie). Fehlt eines beim Import oder ist zu alt, nennt die Rückfrage es und bietet „Erst … laden“ an (ein privates fragt nach dem Code, P220); danach kommt das Paket noch einmal. Wer ohne importiert: Die fremden Übungen **warten** — Kapitel und Plan sagen, woher sie kämen, und kommt das Paket, trägt die App sie von selbst in Paket- und Kapitelpläne nach (V4, Migration 069 merkt `braucht` am Paket). Der Export eines eigenen Pakets vom Handy schreibt das Feld selbst (V5: installierte Version, Adresse der Quelle, bei privaten keine). Keine neue Formatversion — ältere Apps übergehen das Feld |
 | `exportiert` | nein | Zeitpunkt des Exports, nur zur Information |
 | `exercises[]` | ja* | Übungen — *darf fehlen, wenn `kurse[]` da ist |
 | `kurse[]` | nein | Kurse (Version 2, `docs/plan_kurse.md`) — Felder unten |
@@ -962,7 +962,13 @@ eines installierten Pakets in dessen TOML geht wie `uebernehmen`.
 Link“): Jeder Eintrag, der die Datei nennt, bekommt `uri = "https://…"`, Titel und alles
 andere bleiben. Mit `--pruefen` lädt das Werkzeug den Link einmal (nur https, auch nach
 Umleitungen) und vergleicht die Prüfsumme — liefert er eine Webseite (`text/html`, bei Dropbox
-`dl=0` statt `raw=1`) oder eine andere Datei, bleibt die Datei im Paket.
+`dl=0` statt `raw=1`) oder eine andere Datei, bleibt die Datei im Paket. Ein Video, das die
+App selbst lädt (`.mp4`, `.mov`, Dropbox mit `raw=1`), bekommt die **Prüfsumme am Link**:
+`uri = "https://…/x.mp4#sha256=<64 Zeichen>"` (18.11.2026). Das Fragment geht nie an den
+Server; die App vergleicht nach dem Laden und spielt ein anderes Video nicht ab — ersetzt
+jemand die Datei in der Cloud, merkt sie es. Ein neues Video unter neuem Link: `verlinken`
+erneut (eine Datei daneben) oder die Prüfsumme von Hand weglassen. `pruefen` meldet eine
+unlesbare.
 
 **Version gegen die veröffentlichte Fassung:** `pruefen --gegen <Index oder Datei>` meldet eine
 Nummer, die nicht zur Stufe des Unterschieds passt, als Fehler; mit `--stufe-als-hinweis`

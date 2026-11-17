@@ -29,6 +29,7 @@ from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.beschreibung import abschnitte
 from trainingsapp.core.bewegungsbild import png_masse
 from trainingsapp.core.links import erlaubt as link_erlaubt
+from trainingsapp.core.material import VIDEO
 from trainingsapp.core.medien_uebersicht import (
     ANIMATION,
     AUS_PLAN,
@@ -47,7 +48,7 @@ from trainingsapp.core.medien_uebersicht import (
     uebersicht,
 )
 from trainingsapp.core.models import Exercise, Media, MediaSource, Plan
-from trainingsapp.core.paketmedien import groesse_text, ist_paketmedium
+from trainingsapp.core.paketmedien import dateiname, groesse_text, ist_paketmedium
 from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components import editor_reiter as er
 from trainingsapp.ui.components.blatt import blatt_spalte
@@ -58,6 +59,7 @@ from trainingsapp.ui.components.material import gesehen
 from trainingsapp.ui.components.medienliste import SYMBOLE, oeffner
 from trainingsapp.ui.components.plan_reiter import ohne_uebergang, plan_reiter
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.verkleinern import verkleinern_route
 
 _log = logging.getLogger(__name__)
 
@@ -461,10 +463,23 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
 
         rechts: list[ft.Control] = []
         if z.datei is not None:
+            # Ein Video aus dem Paket lässt sich verkleinern (Stufe 3) — die Größe ist der Weg
+            # dorthin, bei „groß“ betont
+            verkleinern: Any = None
+            if z.paketdatei and z.art == VIDEO and z.medium is not None:
+                medium = z.medium
+
+                def verkleinern(_e: Any = None, m: Media = medium, titel: str = z.titel) -> None:
+                    state.paketmedium_titel[dateiname(m.uri) or ""] = titel
+                    page.run_task(page.push_route, verkleinern_route(hier, m.uri))
+
             rechts.append(
                 ft.Container(
                     padding=ft.Padding.symmetric(horizontal=8, vertical=3),
                     border_radius=10,
+                    on_click=verkleinern,
+                    ink=verkleinern is not None,
+                    tooltip="Verkleinern …" if verkleinern is not None else None,
                     bgcolor=ft.Colors.TERTIARY_CONTAINER if z.gross else None,
                     content=ft.Text(
                         f"{groesse_text(z.datei.bytes)} · groß"

@@ -275,6 +275,8 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   zwei Orten, im Ablauf und im Kurs. Rechnung `core/medien_uebersicht.py`, Köpfe `core/videoinfo.py`.
   **Medien am Plan selbst** (Migration 069, `plaene[].medien`) bearbeitet nur dieser Reiter;
   „von selbst“ beim ersten Start, nie beim Aufbau einer Ansicht (Geister-Dialog).
+  **Verkleinern** (`core/verkleinern.py`, `views/verkleinern.py`): nur auf Tipp, eine Kopie — das
+  Original bleibt gerätelokal vermerkt (`medien_originale`), reist nie mit; ffmpeg nur aufrufen.
 - **Übungen kommen über Pakete** (Ben, 14.10.2026; Verträge `docs/uebungspakete.md`,
   `docs/plan_paketinhalte.md`; Einzelheiten in `.claude/rules/pakete.md`). Der Katalog ist das
   Paket „Standard“ (`data/seed/standard.toml`). Ein Import aktualisiert nur Übungen desselben

@@ -13,6 +13,7 @@ Paketdateien gehen nie in Backup oder Sync (wie die Anhänge) — sie kommen wie
 from __future__ import annotations
 
 import contextlib
+import json
 import re
 import sqlite3
 import uuid
@@ -20,11 +21,17 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from ..core.bereinigen import NichtBereinigbar, datei_bereinigen
 from ..core.paketdatei import sha256_datei
 from ..core.paketmedien import Paketmedium, art_fuer, dateiname, name_fuer, name_lesen
+from .db import transaktion
+
+#: Verkleinerte Dateien und ihr Original (Ben, 17.11.2026, `docs/plan_medien_reiter.md` §5) —
+#: Schlüssel in `app_setting`, JSON ``{neu: original}``, gerätelokal: nie in Paket, Export,
+#: Backup oder Sync. Die Ablage räumt ein so vermerktes Original nicht weg.
+ORIGINALE: Final = "medien_originale"
 
 #: Wo die Datenbank Paketdateien nennen kann — je Spalte eine feste Abfrage
 _ABFRAGEN: Final = (
@@ -42,6 +49,8 @@ _ABFRAGEN: Final = (
     "SELECT media_json FROM course_chapter WHERE media_json LIKE '%medien/%'",
     "SELECT plans_json FROM course_chapter WHERE plans_json LIKE '%medien/%'",
     "SELECT blocks_json FROM course_chapter WHERE blocks_json LIKE '%medien/%'",
+    # das Original einer verkleinerten Datei (P225 Stufe 3) — bleibt, bis die Person es löscht
+    "SELECT value FROM app_setting WHERE key = 'medien_originale'",
 )
 _NAME: Final = re.compile(r"medien/[0-9a-f]{64}\.[a-z0-9]{2,4}")
 #: Wo die Datenbank eine **Adresse** nennen kann (Stufe 7: geladene Videos hinter Links) — je
@@ -238,6 +247,128 @@ class Paketablage:
                     continue
         return weg
 
+    # -- Verkleinern: eine Datei durch eine andere ersetzen (P225 Stufe 3) --------------------
+
+    def originale(self) -> dict[str, str]:
+        """Verkleinerte Dateien und ihr Original (``{neu: original}``)."""
+        try:
+            r = self.con.execute(
+                "SELECT value FROM app_setting WHERE key = ?", (ORIGINALE,)
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return {}
+        try:
+            roh = json.loads(r[0]) if r is not None and r[0] else {}
+        except ValueError:
+            return {}
+        if not isinstance(roh, dict):
+            return {}
+        return {str(k): str(v) for k, v in roh.items() if name_lesen(str(k)) and name_lesen(str(v))}
+
+    def _originale_setzen(self, werte: dict[str, str]) -> None:
+        self.con.execute(
+            "INSERT INTO app_setting (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (ORIGINALE, json.dumps(werte, sort_keys=True)),
+        )
+
+    def original(self, neu: str) -> str | None:
+        """Das Original, aus dem ``neu`` verkleinert wurde — ``None``, wenn keins (mehr) da ist."""
+        original = self.originale().get(neu)
+        return original if original is not None and self.vorhanden(original) else None
+
+    def ersetzen(self, alt: str, neu: str, *, original_behalten: bool = True) -> int:
+        """Jedes Stück, das ``alt`` nennt, nennt danach ``neu`` — an Übungen, Planübungen, Plänen
+        und Kurskapiteln, auch in „ersetzt“; der Haken „gesehen“ geht mit. ``original_behalten``:
+        ``alt`` bleibt als Original von ``neu`` vermerkt (beim zweiten Verkleinern das erste
+        Original); sonst geht der Vermerk, und eine Datei, die nichts mehr nennt, gleich mit.
+        Paketstände bleiben, wie sie sind — gegen sie ist die neue Datei eine Änderung der
+        Person (Drei-Wege-Abgleich: sie bleibt bei Updates). Wie viele Übungsmedien sich
+        änderten."""
+        stempel = datetime.now(UTC).isoformat()
+        with transaktion(self.con):
+            n = self.con.execute(
+                "UPDATE exercise_media SET uri = ? WHERE uri = ?", (neu, alt)
+            ).rowcount
+            self.con.execute("UPDATE exercise_media SET ersetzt = ? WHERE ersetzt = ?", (neu, alt))
+            self.con.execute(
+                "UPDATE exercise SET updated_at = ? WHERE id IN "
+                "(SELECT exercise_id FROM exercise_media WHERE uri = ? OR ersetzt = ?)",
+                (stempel, neu, neu),
+            )
+            self._json_ersetzen(
+                "SELECT id, media_json FROM plan_item WHERE instr(media_json, ?)",
+                "UPDATE plan_item SET media_json = ? WHERE id = ?",
+                alt,
+                neu,
+            )
+            self._json_ersetzen(
+                "SELECT id, media_json FROM plan WHERE instr(media_json, ?)",
+                "UPDATE plan SET media_json = ? WHERE id = ?",
+                alt,
+                neu,
+            )
+            self._json_ersetzen(
+                "SELECT id, media_json FROM course_chapter WHERE instr(media_json, ?)",
+                "UPDATE course_chapter SET media_json = ? WHERE id = ?",
+                alt,
+                neu,
+            )
+            self._json_ersetzen(
+                "SELECT id, blocks_json FROM course_chapter WHERE instr(blocks_json, ?)",
+                "UPDATE course_chapter SET blocks_json = ? WHERE id = ?",
+                alt,
+                neu,
+            )
+            with contextlib.suppress(sqlite3.OperationalError):  # vor Migration 059
+                self.con.execute(
+                    "INSERT OR IGNORE INTO media_seen (subject_id, uri, seen_at) "
+                    "SELECT subject_id, ?, seen_at FROM media_seen WHERE uri = ?",
+                    (neu, alt),
+                )
+            originale = self.originale()
+            ursprung = originale.pop(alt, alt)
+            originale.pop(neu, None)
+            if original_behalten and ursprung != neu:
+                originale[neu] = ursprung
+            self._originale_setzen(originale)
+        if not original_behalten:
+            self.verwerfen(alt)
+        return n
+
+    def _json_ersetzen(self, lesen: str, schreiben: str, alt: str, neu: str) -> None:
+        """In einer JSON-Spalte jede Adresse ``alt`` (``uri`` und ``ersetzt``) gegen ``neu``."""
+        try:
+            zeilen = self.con.execute(lesen, (alt,)).fetchall()
+        except sqlite3.OperationalError:  # eine Datenbank ohne diese Spalte
+            return
+        for kennung, roh in zeilen:
+            try:
+                wert = json.loads(roh)
+            except (TypeError, ValueError):
+                continue
+            if _adressen_ersetzen(wert, alt, neu):
+                self.con.execute(schreiben, (json.dumps(wert, ensure_ascii=False), kennung))
+
+    def original_vergessen(self, neu: str) -> None:
+        """„Original löschen“: der Vermerk weg und die Datei, wenn nichts sie mehr nennt."""
+        originale = self.originale()
+        original = originale.pop(neu, None)
+        self._originale_setzen(originale)
+        if original is not None:
+            self.verwerfen(original)
+
+    def verwerfen(self, name: str) -> bool:
+        """Eine Datei gleich löschen, wenn nichts sie nennt (ein verworfener Entwurf) —
+        ``True``, wenn sie weg ist."""
+        if name in self.benutzte():
+            return False
+        pfad = self.pfad(name)
+        if pfad is None:
+            return False
+        pfad.unlink(missing_ok=True)
+        return True
+
     def belegt(self) -> int:
         """Wie viel Platz die Ablage braucht (Bytes)."""
         if not self.ordner.is_dir():
@@ -245,4 +376,27 @@ class Paketablage:
         return sum(d.stat().st_size for d in self.ordner.iterdir() if d.is_file())
 
 
-__all__ = ["Paketablage"]
+def _adressen_ersetzen(wert: Any, alt: str, neu: str) -> bool:
+    """Ersetzt in einer JSON-Struktur jedes ``uri``/``ersetzt`` = ``alt`` — ``True`` bei einer
+    Änderung.
+
+    >>> d = [{"uri": "a", "ersetzt": "x"}, {"medium": {"uri": "a"}}, {"uri": "b"}]
+    >>> _adressen_ersetzen(d, "a", "n"), d
+    (True, [{'uri': 'n', 'ersetzt': 'x'}, {'medium': {'uri': 'n'}}, {'uri': 'b'}])
+    """
+    geaendert = False
+    if isinstance(wert, list):
+        for w in wert:
+            geaendert = _adressen_ersetzen(w, alt, neu) or geaendert
+    elif isinstance(wert, dict):
+        for schluessel in ("uri", "ersetzt"):
+            if wert.get(schluessel) == alt:
+                wert[schluessel] = neu
+                geaendert = True
+        for w in wert.values():
+            if isinstance(w, (list, dict)):
+                geaendert = _adressen_ersetzen(w, alt, neu) or geaendert
+    return geaendert
+
+
+__all__ = ["ORIGINALE", "Paketablage"]

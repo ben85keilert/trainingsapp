@@ -107,6 +107,9 @@ class FletHochladenService extends FletService {
       "jpeg_qualitaet": qualitaet,
       "video_bitrate": a["video_bitrate"],
       "audio_bitrate": a["audio_bitrate"],
+      // Verkleinern im Reiter „Medien“ (P225, Stufe 3) — fehlen sie, gilt die Vorgabe
+      "bildrate": a["bildrate"],
+      "kanaele": a["kanaele"],
     });
     return Map<String, dynamic>.from(antwort ?? const {});
   }

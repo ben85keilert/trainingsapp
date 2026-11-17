@@ -22,7 +22,8 @@ Ben, 17.11.2026, in mehreren Schritten:
   Lösungen und arbeite das selbständig aus.“
 
 **Stand:** Stufe 0 gebaut (17.11.2026), Stufe 1 gebaut (17.11.2026, Gerätetest T148), Stufe 2
-gebaut (18.11.2026, Gerätetest T149). Stufe 3: im Bau. Gebaut auf dem Zweig
+gebaut (18.11.2026, Gerätetest T149), Stufe 3 gebaut für Rechner und Android (18.11.2026,
+Gerätetest T150; iPhone und Paketwerkzeug offen, §5). Gebaut auf dem Zweig
 `worktree-medien-reiter` (eigener Worktree, `CLAUDE.md` „Große Änderungen im eigenen
 Worktree“). Skizzen:
 <https://claude.ai/artifact/CvfAkLSzXyQfip8BMftrWD>. Katalog **P225**.
@@ -259,6 +260,39 @@ wird“) — die Oberfläche fragt nur „kann dieses Gerät das?“ und gibt da
 
 **Reihenfolge:** 3a Schema, Schätzung und Ablauf mit ffmpeg am Rechner (testbar) · 3b Android
 (Gerätetest) · 3c iPhone, sobald es einen iOS-Build gibt.
+
+**Gebaut 18.11.2026 (3a und 3b):**
+
+| Teil | Wo | Stand |
+|---|---|---|
+| Schema, Ziel, Schätzung, „wäre nicht kleiner“, Wahl nie über dem Original | `core/verkleinern.py` (Doctests) | getestet |
+| ffmpeg-Aufruf und -Lauf (Fortschritt aus `-progress`, Abbruch ohne halbe Datei) | `core/verkleinern.mit_ffmpeg` | getestet mit echtem ffmpeg 8.1.3 (Auflösung, Bildrate, ohne Ton, Ort weg); in der CI übersprungen |
+| Womit: Android vor ffmpeg, sonst keiner | `ui/verkleinern.py` (`weg`, `ausfuehren`, `abbrechen`) | — |
+| Ansicht: Vorlagen mit Größe, „Genauer …“, Erstellen, Jetzt · Neu im Spieler, Anders erstellen, Verwerfen, Übernehmen, „Original wieder nehmen“, „Original löschen“ (fragt) | `views/verkleinern.py`, Route `…/verkleinern/<datei>` über jeder Ansicht | getestet; Web-Fotos |
+| Einstieg: Tipp auf die Größe eines Videos im Reiter „Medien“ (bei „groß“ betont) | `views/plan_medien.py` | getestet |
+| Übernehmen: jedes Stück auf die neue Datei — Übung, Planübung, Plan, Kurskapitel, auch „ersetzt“; „gesehen“ geht mit; das Original gerätelokal vermerkt (`app_setting` `medien_originale`), die Ablage räumt es nicht weg | `data/paketmedien.Paketablage.ersetzen`, `original`, `original_vergessen`, `verwerfen` | getestet |
+| Android: Bildrate und Kanäle (0 = ohne Ton) als neue, wahlfreie Argumente | `erweiterungen/flet_hochladen` (Python, Dart, Kotlin) | Kotlin kompiliert gegen Transcoder 0.10.5 (`RemoveTrackStrategy` ist dort), `flutter analyze` ohne Befund; **am Gerät ungeprüft** (T150) |
+
+Web-Fotos am 18.11.2026 (412 px): ein 1080p-Video von 31 MB — „Mittel · etwa 2 MB“, nach
+„Erstellen“ „720p · 30 fps · 0:20 · 2 MB (vorher 31 MB)“; „Übernehmen“ → die Übersicht zeigt die
+neue Fassung ohne „groß“; die Ansicht der neuen Datei nennt das Original (31 MB) mit „Original
+wieder nehmen“ und „Original löschen“, Mittel und Groß „wäre nicht kleiner“. Der Spieler bleibt im
+kopflosen Browser schwarz (kein Video-Dekoder) — abspielen ist Gerätetest.
+
+**Noch nicht gebaut:**
+
+- **iPhone (3c):** ein Swift-Teil von `flet_hochladen` mit demselben Vertrag; hier weder baubar
+  noch prüfbar. Bis dahin steht auf Apple-Geräten statt „Erstellen“ ein Satz dazu.
+- **Paketwerkzeug** (`trainingsapp-paket verkleinern`): am Rechner geht es heute über die App
+  selbst (`flet run`, ffmpeg). Ein Werkzeugschritt käme in `paket_werkzeug.py`, an dem die
+  Sitzung „Rückweg vom Handy“ gerade arbeitet — darum nicht in dieser Nacht.
+- **Nach „Datei wählen …“ fragen:** Die Formulare halten ihre Medien bis zum Speichern selbst;
+  ein Ersetzen darunter ginge verloren. Verkleinert wird darum aus der Übersicht.
+- **Bilder** verkleinern (die Fotoauswahl tut es schon) — auf Wunsch.
+- **Übungen ohne Plan** erreicht die Übersicht nicht; ein Einstieg auf der Übungsseite wäre der
+  nächste kleine Schritt.
+
+Gerätetest **T150**.
 
 ## 6. Fragen an Ben (Katalog P225) — a bis f beantwortet am 17.11.2026
 

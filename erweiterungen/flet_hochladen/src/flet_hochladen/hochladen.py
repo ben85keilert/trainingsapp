@@ -68,23 +68,30 @@ class FletHochladen(ft.Service):
         jpeg_qualitaet: int,
         video_bitrate: int,
         audio_bitrate: int,
+        bildrate: int | None = None,
+        kanaele: int | None = None,
     ) -> dict[str, Any]:
         """``art`` ``"bild"`` oder ``"video"``. Antwort: ``bytes`` (und beim Video ``breite``,
-        ``hoehe``, ``dauer_ms``) — oder ``{"abgebrochen": True}``."""
-        antwort = await self._invoke_method(
-            "verkleinern",
-            {
-                "quelle": quelle,
-                "art": art,
-                "ziel": ziel,
-                "frontbild": frontbild,
-                "kurze_seite": int(kurze_seite),
-                "jpeg_qualitaet": int(jpeg_qualitaet),
-                "video_bitrate": int(video_bitrate),
-                "audio_bitrate": int(audio_bitrate),
-            },
-            timeout=_FRIST_VERKLEINERN,
-        )
+        ``hoehe``, ``dauer_ms``) — oder ``{"abgebrochen": True}``.
+
+        ``bildrate`` (Bilder je Sekunde) und ``kanaele`` (0 = ohne Ton, 1 = einkanalig) kommen
+        vom Verkleinern im Reiter „Medien“ (trainingsapp P225, Stufe 3); fehlen sie, gilt wie
+        beim Hochladen 30 Bilder je Sekunde und der Ton wie im Original."""
+        werte: dict[str, Any] = {
+            "quelle": quelle,
+            "art": art,
+            "ziel": ziel,
+            "frontbild": frontbild,
+            "kurze_seite": int(kurze_seite),
+            "jpeg_qualitaet": int(jpeg_qualitaet),
+            "video_bitrate": int(video_bitrate),
+            "audio_bitrate": int(audio_bitrate),
+        }
+        if bildrate is not None:
+            werte["bildrate"] = int(bildrate)
+        if kanaele is not None:
+            werte["kanaele"] = int(kanaele)
+        antwort = await self._invoke_method("verkleinern", werte, timeout=_FRIST_VERKLEINERN)
         return dict(antwort or {})
 
     async def abbrechen(self) -> None:

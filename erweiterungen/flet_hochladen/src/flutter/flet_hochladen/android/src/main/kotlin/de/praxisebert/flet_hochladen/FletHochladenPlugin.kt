@@ -9,6 +9,8 @@ import com.otaliastudios.transcoder.source.DataSourceWrapper
 import com.otaliastudios.transcoder.source.FilePathDataSource
 import com.otaliastudios.transcoder.strategy.DefaultAudioStrategy
 import com.otaliastudios.transcoder.strategy.DefaultVideoStrategy
+import com.otaliastudios.transcoder.strategy.RemoveTrackStrategy
+import com.otaliastudios.transcoder.strategy.TrackStrategy
 import com.otaliastudios.transcoder.validator.WriteAlwaysValidator
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
@@ -96,6 +98,10 @@ class FletHochladenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         val bildrate = call.argument<Number>("video_bitrate")?.toLong() ?: 800_000L
         val tonrate = call.argument<Number>("audio_bitrate")?.toLong() ?: 64_000L
         val qualitaet = call.argument<Int>("jpeg_qualitaet") ?: 85
+        // Verkleinern im Reiter „Medien“ (trainingsapp P225, Stufe 3): Bilder je Sekunde und
+        // Tonkanäle (0 = ohne Ton, 1 = einkanalig) — fehlen sie, wie beim Hochladen bisher
+        val fps = call.argument<Number>("bildrate")?.toInt() ?: 30
+        val kanaele = call.argument<Number>("kanaele")?.toInt()
         File(ziel).parentFile?.mkdirs()
 
         // Kurze Seite höchstens `kurz`, lange höchstens 16:9 dazu; ein Hochkant-Video bekommt
@@ -104,14 +110,18 @@ class FletHochladenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // neu kodiert (die Bitrate allein verhindert das Durchreichen nicht).
         val video = DefaultVideoStrategy.atMost(kurz, kurz * 16 / 9)
             .bitRate(bildrate)
-            .frameRate(30)
+            .frameRate(fps)
             .keyFrameInterval(5f)
             .build()
-        val ton = DefaultAudioStrategy.builder()
-            .channels(DefaultAudioStrategy.CHANNELS_AS_INPUT)
-            .sampleRate(DefaultAudioStrategy.SAMPLE_RATE_AS_INPUT)
-            .bitRate(tonrate)
-            .build()
+        val ton: TrackStrategy = if (kanaele == 0) {
+            RemoveTrackStrategy()
+        } else {
+            DefaultAudioStrategy.builder()
+                .channels(kanaele ?: DefaultAudioStrategy.CHANNELS_AS_INPUT)
+                .sampleRate(DefaultAudioStrategy.SAMPLE_RATE_AS_INPUT)
+                .bitRate(tonrate)
+                .build()
+        }
         laufend = Transcoder.into(ziel)
             .addDataSource(OhneOrt(FilePathDataSource(quelle)))
             .setVideoTrackStrategy(video)

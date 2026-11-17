@@ -204,6 +204,8 @@ from trainingsapp.ui.views.uebungen import neuen_plan_anlegen, uebungen
 from trainingsapp.ui.views.updates import ROUTE as UPDATES_ROUTE
 from trainingsapp.ui.views.updates import beim_start as updates_beim_start
 from trainingsapp.ui.views.updates import updates_view
+from trainingsapp.ui.views.verkleinern import SEGMENT as VERKLEINERN_SEGMENT
+from trainingsapp.ui.views.verkleinern import verkleinern_view
 from trainingsapp.ui.views.verlauf import verlauf
 from trainingsapp.ui.views.verlauf_herzfrequenz import verlauf_herzfrequenz_view
 from trainingsapp.ui.views.verlauf_kachel import verlauf_kachel_view
@@ -981,6 +983,12 @@ def main(page: ft.Page, browserspeicher: Browserspeicher | None = None) -> None:
             if len(teile) > i + 1:
                 medium_basis, medium_name = "/" + "/".join(teile[:i]), teile[i + 1]
                 ablegen(lambda: paketmedium_view(page, state, medium_basis, medium_name))
+        # Ein Video verkleinern (P225 Stufe 3) legt sich genauso über die Ansicht, aus der es kam
+        elif (i := wo(VERKLEINERN_SEGMENT)) is not None:
+            stapel(teile[:i])
+            if len(teile) > i + 1:
+                klein_basis, klein_name = "/" + "/".join(teile[:i]), teile[i + 1]
+                ablegen(lambda: verkleinern_view(page, state, klein_basis, klein_name))
         # Anhänge (Foto, Video) legen sich wie der Timer über jede Ansicht
         elif (i := wo("anhang")) is not None:
             stapel(teile[:i])

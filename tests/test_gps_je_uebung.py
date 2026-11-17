@@ -25,7 +25,7 @@ from trainingsapp.core.pakete import (
     paket_lesen,
     stand,
 )
-from trainingsapp.data.db import MIGRATIONS_DIR, migrieren, oeffnen, verbinden
+from trainingsapp.data.db import MIGRATIONS_DIR, letzte_migration, migrieren, oeffnen, verbinden
 from trainingsapp.data.pakete import PaketRepo, Status
 from trainingsapp.data.repositories import ExerciseRepo, SettingRepo, StreckeRepo
 from trainingsapp.data.seed import SEED_DATEI, seed_einspielen, seed_id
@@ -111,7 +111,7 @@ def test_migration_062_fuellt_die_uebung_der_strecke(tmp_path) -> None:
         )
     con.commit()
 
-    assert migrieren(con) == 68
+    assert migrieren(con) == letzte_migration()
     strecken = StreckeRepo(con)
     assert strecken.laden("mit").exercise_id == "u"
     assert strecken.laden("ohne").exercise_id is None

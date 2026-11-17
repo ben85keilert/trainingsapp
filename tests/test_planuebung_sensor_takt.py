@@ -20,7 +20,7 @@ from trainingsapp.core.takt import AUS, VORLAGEN
 from trainingsapp.core.timer import Abschnitt
 from trainingsapp.core.uebung_timer import takt_der_uebung, takt_fuer
 from trainingsapp.core.zaehlen import SensorWahl
-from trainingsapp.data.db import MIGRATIONS_DIR, migrieren, verbinden
+from trainingsapp.data.db import MIGRATIONS_DIR, letzte_migration, migrieren, verbinden
 from trainingsapp.data.repositories import ExerciseRepo, PlanRepo
 
 
@@ -194,7 +194,7 @@ def test_migration_039_alte_planuebungen_folgen_der_uebung(tmp_path) -> None:
         "VALUES ('i', 'p', 'u', 0, 'null')"
     )
     con.commit()
-    assert migrieren(con) == 68
+    assert migrieren(con) == letzte_migration()
     zeile = con.execute("SELECT acc_json, takt_json FROM plan_item WHERE id = 'i'").fetchone()
     assert tuple(zeile) == (None, None)
     item = PlanRepo(con).item_laden("i")

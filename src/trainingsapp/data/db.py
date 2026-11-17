@@ -49,6 +49,17 @@ def verfuegbare_migrationen(ordner: Path = MIGRATIONS_DIR) -> list[tuple[int, Pa
     return sorted(gefunden)
 
 
+def letzte_migration(ordner: Path = MIGRATIONS_DIR) -> int:
+    """Die Nummer der jüngsten Migration — Tests vergleichen damit statt mit einer festen Zahl,
+    die jede neue Migration in vielen Testdateien bräche (Ben, 18.11.2026: sieben Dateien und
+    ein zusätzlicher voller Testlauf für Migration 067/068).
+
+    >>> letzte_migration() >= 68
+    True
+    """
+    return max((n for n, _ in verfuegbare_migrationen(ordner)), default=0)
+
+
 def migrieren(con: sqlite3.Connection, ordner: Path = MIGRATIONS_DIR) -> int:
     """Spielt alle noch nicht angewandten Migrationen ein.
 
@@ -118,6 +129,7 @@ def transaktion(con: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
 
 __all__ = [
     "MIGRATIONS_DIR",
+    "letzte_migration",
     "migrieren",
     "oeffnen",
     "schema_version",

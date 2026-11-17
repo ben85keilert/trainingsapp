@@ -27,7 +27,7 @@ from trainingsapp.core.dokument import (  # noqa: E402
     gezeigte_masse,
     pdf_aus_jpegs,
 )
-from trainingsapp.data.db import MIGRATIONS_DIR, migrieren  # noqa: E402
+from trainingsapp.data.db import MIGRATIONS_DIR, letzte_migration, migrieren  # noqa: E402
 from trainingsapp.ui.components.anhang_reihe import kachel  # noqa: E402
 from trainingsapp.ui.views.anhang import anhang_view  # noqa: E402
 from trainingsapp.ui.views.anhang_aufnahme import (  # noqa: E402
@@ -256,7 +256,7 @@ def test_migration_060_behaelt_zeilen_und_erlaubt_dokumente(tmp_path) -> None:
             "VALUES ('d', 'p', '2026-11-13', 'document', 'x.pdf', '')"
         )
     con.commit()
-    assert migrieren(con) == 68
+    assert migrieren(con) == letzte_migration()
     con.execute(
         "INSERT INTO entry_media (id, subject_id, day, kind, uri, recorded_at) "
         "VALUES ('d', 'p', '2026-11-13', 'document', 'x.pdf', '')"

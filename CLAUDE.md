@@ -71,6 +71,18 @@ Arbeit wie `stash`; einzelne eigene Dateien bleiben frei. **Ein Hook erzwingt da
 Befehle für alle Sitzungen und Subagenten und nennt den Ersatz; er fängt Versehen ab, dicht ist
 er nicht (Variablen, Skripte).
 
+**Große Änderungen im eigenen Worktree, zusammengeführt über einen Zweig** (Ben, 18.11.2026 —
+der Rückweg vom Handy, Stufen 6–8: fertig auf einem Zweig, aber `git merge --ff-only` im
+Hauptordner brach an der unkommitteten Arbeit einer anderen Sitzung ab): Mehrere Stufen,
+Migrationen oder viele Dateien baut eine Sitzung in einem eigenen `git worktree` auf einem Zweig
+(hrv-core und hrv-watch auf dem Stand der `.ref` daneben, wie oben), committet dort je Stufe nach
+grünen Tests. Zusammengeführt wird erst, wenn der Hauptordner keine fremde unkommittete Arbeit
+mehr hat: Zweig auf den aktuellen `main` rebasen (auch auf lokale, noch nicht gepushte Commits
+der anderen), voller Testlauf, dann `main` per Fast-Forward nachziehen und pushen. Nie an einer
+laufenden Sitzung vorbei auf `origin/main` pushen; nie über fremde Änderungen im Hauptordner
+mergen. Migrationsnummern vor dem Zusammenführen gegen `main` prüfen (zwei Zweige mit derselben
+Nummer); Tests vergleichen mit `data.db.letzte_migration()`, nie mit einer festen Zahl.
+
 **APK über GitHub bauen** (Ben, 9.11.2026: „ab jetzt wieder git build automatisch“; hier
 eingetragen 10.11.2026): Nach einem Versions-Commit (Version in `pyproject.toml` und `uv.lock`
 angehoben, im Betreff „(Version X.Y.Z)“) und **grüner CI dieses Commits** den Tag `v<Version>`

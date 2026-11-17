@@ -29,7 +29,7 @@ from trainingsapp.data.anhaenge import (
     video_max_s,
     video_max_setzen,
 )
-from trainingsapp.data.db import oeffnen
+from trainingsapp.data.db import letzte_migration, oeffnen
 from trainingsapp.data.repositories import (
     DayNoteRepo,
     ExerciseRepo,
@@ -300,7 +300,7 @@ def test_migration_029_behaelt_anhaenge_und_erlaubt_audio_und_tag(tmp_path) -> N
         (eintrag.id,),
     )
     con.commit()
-    assert migrieren(con) == 68
+    assert migrieren(con) == letzte_migration()
     repo = AnhangRepo(con, tmp_path / "Anhaenge")
     alt = repo.laden("alt")
     assert alt is not None and (alt.eintrag_id, alt.note, alt.bytes) == (eintrag.id, "links", 300)
@@ -417,7 +417,7 @@ def test_migration_036_notizen_mit_tagebuch_und_anhaengen(tmp_path) -> None:
         (t,),
     )
     con.commit()
-    assert migrieren(con) == 68
+    assert migrieren(con) == letzte_migration()
     notizen, tags = DayNoteRepo(con), NoteTagRepo(con)
     (tagebuch,) = tags.alle("p")
     assert tagebuch.fest and tagebuch.name == "Tagebuch"

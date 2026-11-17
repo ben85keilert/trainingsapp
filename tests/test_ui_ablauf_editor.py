@@ -1151,6 +1151,121 @@ def test_aus_dem_ablauf_nehmen_laesst_die_uebung_im_plan(umgebung) -> None:
     assert ik not in [it.id for it in state.plaene.laden(plan.id).items]
 
 
+def test_mehrfach_verwendete_uebung_herausnehmen(umgebung) -> None:
+    """Ben, 17.11.2026 (P224): „Wenn Übungen mehrfach in den Ablauf genommen werden, werden
+    diese mit nx oben in der Leiste gelistet. Löscht man eine Übung einmal raus, ist diese noch
+    im Plan … Einerseits könnte eine Übung einfach gelöscht werden, wenn sie mehrfach vorhanden
+    ist und dann rausgenommen wird, wenn diese aber Einstellungen hat, werden diese
+    mitgelöscht.“ — Steht die Übung mehrfach im Plan, geht die herausgenommene Planübung mit
+    aus dem Plan; hat sie Eigenes, wird gefragt (Vorgabe: bleibt frei, „1 frei“ an der Kachel).
+    Die letzte Planübung einer Übung bleibt immer."""
+    state, plan = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    iw, ik, ip, id_ = (it.id for it in plan.items)
+    uk = plan.items[1].exercise_id
+    zweite = state.plaene.uebung_hinzufuegen(plan.id, uk)
+    dritte = state.plaene.uebung_hinzufuegen(plan.id, uk)
+    dritte.beiname = "langsam"  # sie hat Eigenes
+    state.plaene.item_speichern(dritte)
+    state.plaene.ablauf_setzen(
+        plan.id,
+        ab.Ablauf(True, iw, (Kante(iw, ik), Kante(iw, zweite.id), Kante(iw, dritte.id))),
+    )
+    plan = state.plaene.laden(plan.id)
+    seite = _Seite()
+    ansicht = ablauf_view(seite, state, plan, basis)
+
+    def im_plan() -> list[str]:
+        return [it.id for it in state.plaene.laden(plan.id).items]
+
+    assert _texte(_kacheln(ansicht)[uk]) == ["3×", "Kniebeuge"]
+    # Ohne Eigenes: keine Rückfrage — aus Ablauf und Plan, die Kachel zählt eine weniger
+    vorher = len(seite.dialoge)
+    _menue(ansicht, zweite.id, "Aus dem Ablauf nehmen")
+    assert not [d for d in seite.dialoge[vorher:] if isinstance(d, ft.AlertDialog)]
+    assert im_plan() == [iw, ik, ip, id_, dritte.id]
+    assert any("aus Ablauf und Plan genommen" in t for t in _meldungen(seite))
+    assert _texte(_kacheln(ansicht)[uk]) == ["2×", "Kniebeuge"]
+    # Mit Eigenem (Beiname): eine Rückfrage — die Vorgabe lässt sie frei im Plan
+    _menue(ansicht, dritte.id, "Aus dem Ablauf nehmen")
+    dialog = seite.dialoge[-1]
+    assert isinstance(dialog, ft.AlertDialog)
+    assert any("Diese hat Eigenes: Beiname." in t for t in _texte(dialog))
+    zeilen = {x.title.value: x for x in _alle(dialog) if isinstance(x, ft.ListTile)}
+    assert list(zeilen) == ["Nur aus dem Ablauf", "Auch aus dem Plan löschen"]
+    _klick(zeilen["Nur aus dem Ablauf"].on_click, None)
+    _klick(dialog.on_dismiss, None)
+    assert im_plan() == [iw, ik, ip, id_, dritte.id]
+    assert [k.nach for k in state.plaene.laden(plan.id).ablauf.von(iw)] == [ik]
+    assert _texte(_kacheln(ansicht)[uk]) == ["2×", "Kniebeuge", "1 frei"]
+    # Die Kachel setzt die freie wieder ein — mit ihrem Beinamen, keine neue Planübung
+    state.ablauf_wahl[plan.id] = iw
+    _klick(_kacheln(ansicht)[uk].content.on_click, None)
+    assert im_plan() == [iw, ik, ip, id_, dritte.id]
+    assert [k.nach for k in state.plaene.laden(plan.id).ablauf.von(iw)] == [ik, dritte.id]
+    # Noch einmal heraus, diesmal mit aus dem Plan: ihre Einstellungen gehen mit
+    _menue(ansicht, dritte.id, "Aus dem Ablauf nehmen")
+    dialog = seite.dialoge[-1]
+    zeilen = {x.title.value: x for x in _alle(dialog) if isinstance(x, ft.ListTile)}
+    _klick(zeilen["Auch aus dem Plan löschen"].on_click, None)
+    _klick(dialog.on_dismiss, None)
+    assert im_plan() == [iw, ik, ip, id_]
+    assert _texte(_kacheln(ansicht)[uk]) == ["Kniebeuge"]
+    # Die letzte Kniebeuge bleibt im Plan, „frei“ — wie jede Übung, die nur einmal dasteht
+    # (Ben, 9.11.2026: Sie soll nicht aus der Auswahl verschwinden)
+    _menue(ansicht, ik, "Aus dem Ablauf nehmen")
+    assert im_plan() == [iw, ik, ip, id_]
+    assert _texte(_kacheln(ansicht)[uk]) == ["Kniebeuge", "frei"]
+
+
+def test_reihe_herausnehmen_mit_mehrfach_verwendeter_uebung(umgebung) -> None:
+    """P224 in der Rückfrage zur Reihe: Was mehrfach im Plan steht und nichts Eigenes hat,
+    geht mit aus dem Plan; für Eigenes steht ein Schalter im Dialog (Vorgabe: behalten). Von
+    zwei gleichen in der Reihe bleibt die letzte im Plan."""
+    state, plan = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    iw, ik, ip, id_ = (it.id for it in plan.items)
+    uk = plan.items[1].exercise_id
+    zweite = state.plaene.uebung_hinzufuegen(plan.id, uk)
+    zweite.beiname = "2. Durchgang"
+    state.plaene.item_speichern(zweite)
+    kette = (Kante(iw, ip), Kante(ip, ik), Kante(ik, zweite.id))
+    state.plaene.ablauf_setzen(plan.id, ab.Ablauf(True, iw, kette))
+    plan = state.plaene.laden(plan.id)
+    seite = _Seite()
+    ansicht = ablauf_view(seite, state, plan, basis)
+
+    def im_plan() -> list[str]:
+        return [it.id for it in state.plaene.laden(plan.id).items]
+
+    # Die Planke mit ihrer Reihe (beide Kniebeugen): der Schalter nennt die mit Eigenem
+    _menue(ansicht, ip, "Aus dem Ablauf nehmen")
+    dialog = seite.dialoge[-1]
+    schalter = next(x for x in _alle(dialog) if getattr(x, "data", None) == "eigenes_behalten")
+    assert schalter.value is True and "Kniebeuge" in schalter.label
+    zeilen = {x.title.value: x for x in _alle(dialog) if isinstance(x, ft.ListTile)}
+    _klick(zeilen["Mit der Nachfolgereihe herausnehmen"].on_click, None)
+    _klick(dialog.on_dismiss, None)
+    # Planke: nur einmal im Plan → bleibt. Erste Kniebeuge: mehrfach, nichts Eigenes → aus dem
+    # Plan. Zweite: Eigenes, behalten → bleibt frei
+    assert im_plan() == [iw, ip, id_, zweite.id]
+    assert state.plaene.laden(plan.id).ablauf.kanten == ()
+    # Noch einmal mit ausgeschaltetem Schalter: Von zwei gleichen bleibt die letzte im Plan
+    dritte = state.plaene.uebung_hinzufuegen(plan.id, uk)
+    kette = (Kante(iw, ip), Kante(ip, zweite.id), Kante(zweite.id, dritte.id))
+    state.plaene.ablauf_setzen(plan.id, ab.Ablauf(True, iw, kette))
+    ansicht = ablauf_view(seite, state, state.plaene.laden(plan.id), basis)
+    _menue(ansicht, ip, "Aus dem Ablauf nehmen")
+    dialog = seite.dialoge[-1]
+    schalter = next(x for x in _alle(dialog) if getattr(x, "data", None) == "eigenes_behalten")
+    schalter.value = False
+    _klick(schalter.on_change, SimpleNamespace(control=schalter))
+    zeilen = {x.title.value: x for x in _alle(dialog) if isinstance(x, ft.ListTile)}
+    _klick(zeilen["Mit der Nachfolgereihe herausnehmen"].on_click, None)
+    _klick(dialog.on_dismiss, None)
+    assert im_plan() == [iw, ip, id_, dritte.id]
+
+
 def test_punkt_je_verbindung_und_blatt_auf_dem_weg(umgebung) -> None:
     """Ben, 9.11.2026: Verbindungen bekommen einen Punkt zwischen den Ebenen. Seit 10.11.2026
     verlassen alle Wege die Übung an einem Abzweig: Tipp auf den Griff eines Wegs = nur dieser
@@ -1330,8 +1445,9 @@ def test_leiste_ist_ein_vorrat_an_uebungen(umgebung) -> None:
     # übrigen Katalog
     kacheln = _kacheln(ansicht)
     assert list(kacheln)[:4] == [uw, uk, up, ud]
-    # „2×“ nur an der Kniebeuge, keine Listennummer mehr; „frei“, solange keine im Bild ist
-    assert _texte(kacheln[uk]) == ["2×", "Kniebeuge"]
+    # „2×“ nur an der Kniebeuge, keine Listennummer mehr; „frei“, solange keine im Bild ist —
+    # „1 frei“, wenn eine von mehreren nicht im Bild steht (P224)
+    assert _texte(kacheln[uk]) == ["2×", "Kniebeuge", "1 frei"]
     assert _texte(kacheln[uw]) == ["Wandsitz"]
     assert _texte(kacheln[up]) == ["Planke", "frei"] and _texte(kacheln[ud]) == ["Dehnung", "frei"]
     assert _daten(ansicht, "mehrfach") == [("mehrfach", uk)]
@@ -1530,6 +1646,8 @@ def test_kachel_auf_uebung_und_auf_start(umgebung) -> None:
     zeilen = {x.title.value: x for x in _alle(dialog) if isinstance(x, ft.ListTile)}
     _klick(zeilen["Nur diese herausnehmen"].on_click, None)
     _klick(dialog.on_dismiss, None)
+    # Der Wandsitz steht noch einmal im Plan: Der herausgenommene geht mit aus dem Plan (P224)
+    assert [it.id for it in state.plaene.laden(plan.id).items] == [ik, ip, _id, neu.id]
     start = next(
         x.content for x in _alle(ansicht) if isinstance(x, ft.Container) and x.data == ("start",)
     )
@@ -1537,7 +1655,7 @@ def test_kachel_auf_uebung_und_auf_start(umgebung) -> None:
     start.on_accept(SimpleNamespace(src=SimpleNamespace(data=uk)))
     plan = state.plaene.laden(plan.id)
     neuer_start = plan.items[-1]
-    assert len(plan.items) == 6 and neuer_start.exercise_id == uk
+    assert len(plan.items) == 5 and neuer_start.exercise_id == uk
     assert plan.ablauf.start == neuer_start.id != ik
     assert not plan.ablauf.von(neuer_start.id) and not plan.ablauf.zu(neuer_start.id)
     assert [k.nach for k in plan.ablauf.von(ik)] == [ip]  # die alte Kette steht noch

@@ -380,6 +380,40 @@ def abweichungen(item: PlanItem, uebung: Exercise) -> list[str]:
     return teile
 
 
+def eigenes(item: PlanItem, uebung: Exercise) -> list[str]:
+    """Was die Planübung **für sich** hat — und was mit ihr aus dem Plan verschwände (Ben,
+    17.11.2026, P224: „wenn diese aber Einstellungen hat, werden diese mitgelöscht“): worin sie
+    von der Übung abweicht (`abweichungen`), dazu Beiname, Notiz, Anweisung und Medien — und
+    die Marke eines Kurses, der sie in seinen Plan gesetzt hat. Leer: Sie folgt nur der Übung,
+    eine neue Planübung derselben Übung wäre dasselbe.
+
+    „Weiter, wenn“ zählt nicht: Im Workout sind das die Wege, und die fallen mit dem Knoten
+    ohnehin weg (Ben: „Andererseits sind die Haupteinstellungen Wegbedingungen“).
+
+    >>> from trainingsapp.core.result_spec import vorrat_feld
+    >>> u = Exercise(default_target={"reps": [15]},
+    ...              result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
+    >>> eigenes(PlanItem(), u)
+    []
+    >>> eigenes(PlanItem(target={"reps": [20]}, beiname="2. Durchgang", description="Langsam"), u)
+    ['Ziel', 'Beiname', 'Anweisung']
+    >>> eigenes(PlanItem(kurs_marke="b1"), u)
+    ['gehört zum Kursplan']
+    """
+    teile = [t for t in abweichungen(item, uebung) if t != "Weiter, wenn"]
+    if item.beiname:
+        teile.append("Beiname")
+    if item.note:
+        teile.append("Notiz")
+    if item.description:
+        teile.append("Anweisung")
+    if item.media:
+        teile.append("Medien")
+    if item.kurs_marke:
+        teile.append("gehört zum Kursplan")
+    return teile
+
+
 def bereinigt(item: PlanItem, uebung: Exercise) -> PlanItem:
     """Was der Übung gleicht, folgt ihr wieder — so speichert „Im Plan einstellen“ (P79).
 
@@ -579,6 +613,7 @@ __all__ = [
     "bereinigt",
     "chips_fuer",
     "eigene_chips",
+    "eigenes",
     "mit_plan_spec",
     "parameter_keys",
     "plan_spec",

@@ -148,6 +148,10 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   dessen Griff, sonst unter dem Knoten (Punkt 10). **Gleichwertige Wege** (Punkt 11,
   `core.ablauf.gleichwertige`): mehrere freie Wege und alle Wege einer Frage gehören zum
   Ablauf — „bei Bedarf“ ist nur, was allein ein Weg mit Auslöser neben dem regulären erreicht.
+  **Herausnehmen** (Punkt 12, P224): „Aus dem Ablauf nehmen“ lässt die Übung im Plan („frei“,
+  Ben 9.11.2026) — **außer sie steht mehrfach im Plan**: Dann geht die herausgenommene
+  Planübung mit aus dem Plan; hat sie Eigenes (`core.standards.eigenes`), wird gefragt
+  (Vorgabe: bleibt frei, „1 frei“ an der Kachel). Die letzte Planübung einer Übung bleibt.
 
 - **Neue Ereignisse der Zeitleiste** (Ben, 16.11.2026): Wer eines plant, sieht **vorher** in
   `core/einheit.py` nach — `ARTEN` und `DATEN_SCHLUESSEL` sind eine feste Liste, alles andere

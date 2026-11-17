@@ -457,8 +457,10 @@ dann in der Palette, bis du sie einsetzt.
 - **Gedrückt halten** auf einer Übung öffnet ihr **Menü**: Übung einstellen, Beiname, nur
   ihren Weg zeigen („Alles zeigen“ holt den Rest zurück), Als Start, **Aus dem Ablauf nehmen**
   (Lücke schließen oder die Reihe danach mitnehmen — die Übung bleibt im Plan und in der
-  Palette). An einer Frage: ändern, löschen. **Aus dem Plan** nimmt eine Übung erst
-  **Gedrückthalten** an ihrer Kachel in der Palette — bei „2×“ die zuletzt hinzugekommene.
+  Palette; steht sie **mehrfach** im Plan, geht die herausgenommene auch aus dem Plan — hat
+  sie eigene Einstellungen, wirst du gefragt, und bleibt sie, steht „1 frei“ an der Kachel).
+  An einer Frage: ändern, löschen. Sonst nimmt eine Übung erst **Gedrückthalten** an ihrer
+  Kachel in der Palette **aus dem Plan** — bei „2×“ die zuletzt hinzugekommene.
 - **Leer bleibt leer:** Nimmst du alles aus dem Bild, stehen dort „Start“ und ein leerer Platz
   — nichts setzt sich von selbst hinein. Eine Übung antippen oder auf „Start“ ziehen beginnt
   neu; „Wie die Liste“ holt die Reihenfolge der Liste zurück.

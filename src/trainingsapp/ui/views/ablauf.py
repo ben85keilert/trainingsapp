@@ -66,6 +66,7 @@ Bedingungen der Planübungen — so stimmt auch „Der Reihe nach“.
 from __future__ import annotations
 
 import contextlib
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from typing import Any
@@ -75,6 +76,7 @@ import flet as ft
 from trainingsapp.core import ablauf as ab
 from trainingsapp.core.ablauf import Ablauf, Frage, Kante
 from trainingsapp.core.models import Exercise, Plan
+from trainingsapp.core.standards import eigenes
 from trainingsapp.core.uebung_timer import timer_fuer
 from trainingsapp.core.uebungsfilter import paket_wahl
 from trainingsapp.ui.components import ablaufbild as abbild
@@ -381,10 +383,16 @@ def entfernen_fragen(
     (Ben, 8.11.2026, Frage 4): **Lücke schließen** (Vorgänger mit dem Nachfolger verbinden) oder
     **mit der ganzen Nachfolgereihe** löschen (was nur über sie erreichbar ist).
 
-    ``nur_ablauf`` (Ben, 9.11.2026: „wenn Übungen in einer Kette gelöscht werden, werden diese
-    oben in der Auswahl komplett entfernt. Das soll nicht passieren“): nur aus der Zeichnung —
-    die Planübung bleibt in der Palette, „frei“; aus dem Plan nimmt man sie dort mit
-    Gedrückthalten."""
+    ``nur_ablauf``: „Aus dem Ablauf nehmen“ im Menü der Übung — nur aus der Zeichnung (Ben,
+    9.11.2026: „wenn Übungen in einer Kette gelöscht werden, werden diese oben in der Auswahl
+    komplett entfernt. Das soll nicht passieren“): Die Übung bleibt im Plan und vorn in der
+    Leiste, „frei“. **Steht die Übung mehrfach im Plan** (Ben, 17.11.2026, P224: „Einerseits
+    könnte eine Übung einfach gelöscht werden, wenn sie mehrfach vorhanden ist und dann
+    rausgenommen wird, wenn diese aber Einstellungen hat, werden diese mitgelöscht“), geht die
+    herausgenommene Planübung auch aus dem Plan — die Übung bleibt mit ihren anderen dort, die
+    Kachel zählt eine weniger. Hat sie **Eigenes** (`core.standards.eigenes`: Ziel, Timer,
+    Beiname, Anweisung, Medien, Marke eines Kurses), wird gefragt; die Vorgabe lässt sie frei
+    im Plan („1 frei“ an der Kachel). Die letzte Planübung einer Übung bleibt immer."""
     p = state.plaene.laden(plan_id)
     if p is None:
         return
@@ -401,16 +409,47 @@ def entfernen_fragen(
     # Meldung sagt es gleich, die Warnung über dem Bild bleibt stehen, bis einer gesetzt ist
     war_start = a.an and a.startknoten(ids) == knoten
     ohne_start = " Der Ablauf hat jetzt keinen Start." if war_start else ""
+    # Herausnehmen (P224): Wie oft jede Übung noch im Plan steht — die letzte Planübung einer
+    # Übung bleibt immer, „frei“. Von den mehrfach vorhandenen: was sie für sich haben
+    je_id = {it.id: it for it in p.items}
+    noch = Counter(it.exercise_id for it in p.items)
+    eigen: dict[str, list[str]] = {}
+    if nur_ablauf:
+        for k in [knoten, *reihe]:
+            it = je_id.get(k)
+            if it is None or noch[it.exercise_id] < 2:
+                continue
+            u = state.uebungen.laden(it.exercise_id)
+            if u is not None and (teile := eigenes(it, u)):
+                eigen[k] = teile
+    #: mit Eigenem: frei im Plan lassen (die Vorgabe) — oder mit löschen
+    behalten = {"an": True}
+    #: was dabei wirklich aus dem Plan ging — für die Meldung
+    aus_dem_plan: set[str] = set()
+
+    def bleibt(k: str) -> bool:
+        """Bleibt diese Planübung beim Herausnehmen frei im Plan? Ja, solange sie die letzte
+        ihrer Übung ist — und mit Eigenem, wenn die Person es behalten will."""
+        it = je_id.get(k)
+        if not nur_ablauf or it is None:
+            return False
+        return noch[it.exercise_id] < 2 or (k in eigen and behalten["an"])
+
+    def aus_plan(k: str) -> None:
+        state.plaene.uebung_entfernen(k)  # nimmt die Kanten von und zu ihr mit
+        if (it := je_id.get(k)) is not None:
+            noch[it.exercise_id] -= 1
+        aus_dem_plan.add(k)
 
     def weg(k: str) -> None:
-        if nur_ablauf or a.frage(k) is not None or k not in ids:
+        if bleibt(k) or a.frage(k) is not None or k not in ids:
             jetzt = state.plaene.laden(plan_id)
             if jetzt is not None:
                 # War sie der Start, bleibt der Start leer — nichts setzt sich von selbst
                 # hinein (`Ablauf.ohne_knoten`)
                 ablauf_speichern(state, plan_id, jetzt.ablauf.ohne_knoten(k))
         else:
-            state.plaene.uebung_entfernen(k)  # nimmt die Kanten von und zu ihr mit
+            aus_plan(k)
         if state.ablauf_wahl.get(plan_id) == k:
             state.ablauf_wahl[plan_id] = None
 
@@ -418,14 +457,23 @@ def entfernen_fragen(
         with contextlib.suppress(Exception):
             page.show_dialog(ft.SnackBar(ft.Text(text)))
 
-    raus_text = "aus dem Ablauf genommen — sie bleibt im Plan" if nur_ablauf else "entfernt"
-    if not a.an or not ((rein and raus) or reihe):
-        weg(knoten)
-        melden(f"„{name}“ {raus_text} — Einträge bleiben.{ohne_start}")
-        danach()
-        return
+    def raus_text() -> str:
+        """Was mit der Übung geschah — gelesen, wenn die Wahl im Dialog feststeht."""
+        if not nur_ablauf:
+            return "entfernt"
+        if ist_frage:
+            return "aus dem Ablauf genommen"
+        if knoten in aus_dem_plan:
+            return "aus Ablauf und Plan genommen — die Übung steht noch im Plan"
+        return "aus dem Ablauf genommen — sie bleibt im Plan"
 
     dialog: ft.AlertDialog
+    einfach = not a.an or not ((rein and raus) or reihe)
+    if einfach and knoten not in eigen:
+        weg(knoten)
+        melden(f"„{name}“ {raus_text()} — Einträge bleiben.{ohne_start}")
+        danach()
+        return
 
     def fertig(text: str) -> None:
         nachher.danach(danach)
@@ -434,20 +482,24 @@ def entfernen_fragen(
 
     def luecke(_e: Any = None) -> None:
         ablauf_speichern(state, plan_id, ab.luecke_schliessen(a, knoten))
-        if not ist_frage and not nur_ablauf:
-            state.plaene.uebung_entfernen(knoten)
+        if not ist_frage and not bleibt(knoten):
+            aus_plan(knoten)
         if state.ablauf_wahl.get(plan_id) == knoten:
             state.ablauf_wahl[plan_id] = None
-        fertig(f"„{name}“ {raus_text}, die Lücke ist geschlossen.{ohne_start}")
+        fertig(f"„{name}“ {raus_text()}, die Lücke ist geschlossen.{ohne_start}")
 
     def mit_reihe(_e: Any = None) -> None:
         for k in [knoten, *reihe]:
             weg(k)
-        fertig(f"„{name}“ und {len(reihe)} danach {raus_text} — Einträge bleiben.{ohne_start}")
+        fertig(f"„{name}“ und {len(reihe)} danach {raus_text()} — Einträge bleiben.{ohne_start}")
 
     def nur(_e: Any = None) -> None:
         weg(knoten)
-        fertig(f"„{name}“ {raus_text} — Einträge bleiben.{ohne_start}")
+        fertig(f"„{name}“ {raus_text()} — Einträge bleiben.{ohne_start}")
+
+    def mit_plan(_e: Any = None) -> None:
+        behalten["an"] = False
+        nur()
 
     def zeile(
         titel: str, unter: str, aktion: Callable[[Any], None], gefahr: bool = False
@@ -458,6 +510,39 @@ def entfernen_fragen(
             on_click=aktion,
             content_padding=ft.Padding.symmetric(horizontal=8),
         )
+
+    if einfach:
+        # Kein Platz in einer Reihe zu klären — nur: Was wird aus ihren eigenen Einstellungen?
+        was = ", ".join(eigen[knoten])
+        dialog = ft.AlertDialog(
+            title=ft.Text(f"„{name}“ aus dem Ablauf nehmen"),
+            content=ft.Column(
+                tight=True,
+                spacing=0,
+                controls=[
+                    ft.Text(
+                        f"Die Übung steht mehrfach im Plan. Diese hat Eigenes: {was}.",
+                        size=13,
+                        opacity=0.8,
+                        data="eigenes",
+                    ),
+                    zeile(
+                        "Nur aus dem Ablauf", "bleibt frei im Plan — mit ihren Einstellungen", nur
+                    ),
+                    zeile(
+                        "Auch aus dem Plan löschen",
+                        "ihre Einstellungen gehen verloren — Einträge bleiben",
+                        mit_plan,
+                        gefahr=True,
+                    ),
+                ],
+            ),
+            actions=[ft.TextButton("Abbrechen", on_click=lambda _e: schliessen(dialog))],
+            on_dismiss=nachher.bei_schliessen,
+        )
+        with contextlib.suppress(Exception):
+            page.show_dialog(dialog)
+        return
 
     zeilen: list[ft.Control] = []
     if rein and raus and not raus[0].zurueck:
@@ -496,6 +581,22 @@ def entfernen_fragen(
                     opacity=0.8,
                 ),
                 *zeilen,
+                *(
+                    [
+                        # Mehrfach im Plan: Was nichts Eigenes hat, geht mit aus dem Plan; für
+                        # den Rest ein Schalter statt einer zweiten Rückfrage — die Vorgabe
+                        # lässt es stehen
+                        ft.Switch(
+                            label="Eigene Einstellungen behalten — frei im Plan: "
+                            + ", ".join(namen.get(k, "?") for k in eigen),
+                            value=True,
+                            on_change=lambda e: behalten.__setitem__("an", bool(e.control.value)),
+                            data="eigenes_behalten",
+                        )
+                    ]
+                    if eigen
+                    else []
+                ),
             ],
         ),
         actions=[ft.TextButton("Abbrechen", on_click=lambda _e: schliessen(dialog))],
@@ -782,7 +883,20 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                             max_lines=2,
                             width=68,
                         ),
-                        *([ft.Text("frei", size=9, opacity=0.6)] if frei else []),
+                        # „frei“: keine ihrer Planübungen steht im Bild; „1 frei“: eine von
+                        # mehreren nicht — die Kachel setzt sie zuerst wieder ein (P224)
+                        *(
+                            [
+                                ft.Text(
+                                    "frei" if frei else f"{len(v.frei)} frei",
+                                    size=9,
+                                    opacity=0.6,
+                                    data=("frei", u.id),
+                                )
+                            ]
+                            if v is not None and v.frei
+                            else []
+                        ),
                     ],
                 ),
             ),

@@ -866,6 +866,29 @@ Ben, drei Punkte zum Reiter „Ablauf“ — alle gebaut:
     Auslöser **neben** dem regulären erreichbar ist (Skala ≥ 7 → Dehnung) — oder gar nicht.
     Am Lauf des Workouts ändert sich nichts.
 
+12. **Eine mehrfach verwendete Übung herausnehmen** (Ben, 17.11.2026, Katalog P224: „Löscht
+    man eine Übung einmal raus, ist diese noch im Plan in den Einzelübungen, man kann sie aber
+    nicht mehr einbauen? … Einerseits könnte eine Übung einfach gelöscht werden, wenn sie
+    mehrfach vorhanden ist und dann rausgenommen wird, wenn diese aber Einstellungen hat,
+    werden diese mitgelöscht“ — auf den Vorschlag: „Ja“). „Aus dem Ablauf nehmen“
+    (`views/ablauf.entfernen_fragen` mit ``nur_ablauf``):
+    - Steht die Übung **nur einmal** im Plan, bleibt es wie seit dem 9.11.2026: Sie geht aus
+      der Zeichnung, bleibt im Plan und vorn in der Leiste, „frei“.
+    - Steht sie **mehrfach** im Plan und hat die herausgenommene Planübung **nichts Eigenes**
+      (`core.standards.eigenes`), geht sie auch aus dem Plan — die Kachel zählt eine weniger
+      („3×“ → „2×“), eine gleiche legt die Kachel jederzeit neu an. Die Meldung sagt es.
+    - Hat sie **Eigenes** (Ziel, Parameter, Timer, Takt, Sensor, Beiname, Notiz, Anweisung,
+      Medien — oder die Marke eines Kurses), wird gefragt: „Nur aus dem Ablauf“ (bleibt frei im
+      Plan, die Vorgabe) oder „Auch aus dem Plan löschen“. In der Rückfrage zur Reihe (Lücke
+      schließen · mit der Nachfolgereihe · nur diese) steht dafür ein Schalter „Eigene
+      Einstellungen behalten“. „Weiter, wenn“ zählt nicht als Eigenes — das sind die Wege.
+    - Die **letzte** Planübung einer Übung bleibt immer im Plan — auch wenn zwei gleiche in
+      derselben Reihe herausgenommen werden.
+    - An der Kachel steht **„1 frei“**, solange eine von mehreren Planübungen nicht im Bild
+      ist; die Kachel setzt sie zuerst wieder ein (`Vorrat.naechste`).
+    Nicht gebaut: dieselbe Regel für Übungen, die nur einmal im Plan stehen — „mit der
+    Nachfolgereihe herausnehmen“ leerte sonst den Plan.
+
 **Offen / nur am Gerät:** Ziehen mit dem Finger in den leeren Platz und auf „Start“ (im
 Browser mit der Maus geprüft), Treffen des einen Punkts mit dem Finger, „2×“ neben dem Rand der
 Kachel bei großer Schrift — zu T98.

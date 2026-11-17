@@ -4,7 +4,9 @@ Tabelle ``own_package``: Kopf, Auswahl (IDs von Übungen, Plänen, Kursen) und V
 Inhalts-Prüfsumme der letzten exportierten Fassung (`core/eigenes_paket.py`). `inhalt` holt die
 Objekte so, wie ein Export sie schreibt: Pläne als Paketpläne mit ihrer **ID als Schlüssel**
 (bleibt über alle Fassungen — beim Empfänger dieselbe Plan-ID je Profil), dazu jede Übung, die
-ein Plan oder Kurs braucht. Gelöschtes (Papierkorb) bleibt draußen.
+ein Plan oder Kurs braucht. Gelöschtes (Papierkorb) bleibt draußen. Übungen anderer Pakete
+reisen nicht mit; ihr Paket steht in ``paket.braucht`` (V5), damit die App des Empfängers es
+zuerst lädt.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
@@ -21,7 +24,14 @@ from ..core.ergaenzungen import Ergaenzung, ergaenzung_aus
 from ..core.kurse import Kurs
 from ..core.models import Exercise, Plan, jetzt
 from ..core.paketdatei import export_schreiben
-from ..core.pakete import Paket, PaketPlan, paket_bauen, paketplan_aus, stand
+from ..core.pakete import (
+    Paket,
+    PaketPlan,
+    Voraussetzung,
+    paket_bauen,
+    paketplan_aus,
+    stand,
+)
 from .db import transaktion
 from .kurse import KursRepo
 from .pakete import PaketRepo
@@ -44,6 +54,28 @@ def _liste(roh: str | None) -> list[str]:
     except ValueError:
         return []
     return [str(x) for x in werte] if isinstance(werte, list) else []
+
+
+def _voraussetzung(paket: Paket | None) -> Voraussetzung | None:
+    """V5 (`docs/plan_paketverweise.md`): ein Paket, auf dessen Übungen der Export verweist —
+    mit der Version, die hier installiert ist, und der Adresse, von der es kam (die Paketdatei
+    oder der Index seiner Quelle). Ein privates Paket nennt keine Adresse: Sie öffnete seinen
+    geheimen Ordner, und den Code fragt die App ohnehin (P220).
+
+    >>> _voraussetzung(Paket(id="s", name="Standard", version=6)).als_dict()
+    {'id': 's', 'name': 'Standard', 'version': 6}
+    >>> _voraussetzung(Paket(id="q", name="Q", quelle="https://x/i.json")).quelle
+    'https://x/i.json'
+    >>> _voraussetzung(Paket(id="p", name="P", quelle="https://x/p/a/paket.json",
+    ...     zugangscode="abcd")).quelle
+    ''
+    """
+    if paket is None:
+        return None
+    quelle = paket.quelle or ""
+    if paket.privat or not quelle.startswith("https://"):
+        quelle = ""
+    return Voraussetzung(paket.id, paket.name, paket.version, quelle)
 
 
 class EigenesPaketRepo:
@@ -152,13 +184,16 @@ class EigenesPaketRepo:
                 ids.append(i)
         eigene: list[Exercise] = []
         ergaenzungen: list[Ergaenzung] = []
+        fremde: dict[str, None] = {}  # Pakete der Übungen, die nicht mitreisen (V5)
         for u in (uebungen_repo.laden(i) for i in ids):
             if u is None:
                 continue
             standard = pakete.standard(u.id) if u.package_id not in (None, ep.id) else None
             if standard is None:
                 eigene.append(u)
-            elif daten := ergaenzung_aus(standard, stand(u)):
+                continue
+            fremde.setdefault(str(u.package_id), None)
+            if daten := ergaenzung_aus(standard, stand(u)):
                 ergaenzungen.append(Ergaenzung(ep.id, u.id, daten))
         paket = Paket(
             id=ep.id,
@@ -166,6 +201,7 @@ class EigenesPaketRepo:
             beschreibung=ep.beschreibung.strip(),
             version=version,
             neuigkeiten=ep.neuigkeiten.strip(),
+            braucht=[v for i in fremde if (v := _voraussetzung(pakete.laden(i))) is not None],
         )
         paketplaene = [paketplan_aus(p, key=p.id) for p in plaene]
         return Ausgabe(paket, eigene, paketplaene, kurse, ergaenzungen)
@@ -174,7 +210,8 @@ class EigenesPaketRepo:
         """Die Prüfsumme des Inhalts — gleich, solange sich nichts geändert hat."""
         a = self.inhalt(ep)
         roh = paket_bauen(
-            a.paket,
+            # ohne ``braucht``: Ein Update von „Standard“ ändert nichts an diesem Paket
+            replace(a.paket, braucht=[]),
             a.uebungen,
             kurse=a.kurse or None,
             plaene=a.plaene or None,

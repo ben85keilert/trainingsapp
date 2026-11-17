@@ -156,6 +156,40 @@ def test_eigenes_paket_bringt_geaenderte_fremde_uebung_als_ergaenzung(tmp_path, 
     con2.close()
 
 
+def test_eigenes_paket_nennt_die_pakete_seiner_fremden_uebungen(tmp_path, con) -> None:
+    """V5 (`docs/plan_paketverweise.md`): Ein Plan aus Standard-Übungen reist ohne die Übungen;
+    ``paket.braucht`` nennt „Standard“ mit der Version, die hier installiert ist — der Import
+    beim Empfänger fragt danach. Ein Update von „Standard“ ändert die Prüfsumme des eigenen
+    Pakets nicht (sonst hieße es „geändert seit dem letzten Export“)."""
+    from trainingsapp.core.eigenes_paket import EigenesPaket, naechste_version
+    from trainingsapp.core.models import Plan, PlanItem
+    from trainingsapp.core.paketdatei import paket_oeffnen
+    from trainingsapp.data.eigene_pakete import EigenesPaketRepo
+    from trainingsapp.data.repositories import PlanRepo
+
+    knie_id = seed_id("kniebeuge")
+    plan = Plan(name="Für Anna", items=[PlanItem(exercise_id=knie_id)])
+    PlanRepo(con).speichern(plan)
+    repo = EigenesPaketRepo(con)
+    ep = EigenesPaket(name="Für Anna", plaene=[plan.id])
+    repo.speichern(ep)
+    standard = PaketRepo(con).laden(GRUNDAUSSTATTUNG)
+    a = repo.inhalt(ep)
+    assert a.uebungen == []
+    assert [(v.id, v.name, v.version) for v in a.paket.braucht] == [
+        (GRUNDAUSSTATTUNG, standard.name, standard.version)
+    ]
+    sha = repo.sha(ep)
+    con.execute("UPDATE package SET version = version + 1 WHERE id = ?", (GRUNDAUSSTATTUNG,))
+    assert repo.sha(ep) == sha
+    datei, _, _ = repo.exportieren(ep, naechste_version(None), tmp_path / "E", lambda _n: None)
+    gelesen = paket_oeffnen(datei)
+    assert [v.id for v in gelesen.paket.braucht] == [GRUNDAUSSTATTUNG]
+    con2 = oeffnen(tmp_path / "leer.db")  # ohne Seed: „Standard“ fehlt beim Empfänger
+    assert [v.id for v, _ in PaketRepo(con2).vorschau(gelesen).fehlt] == [GRUNDAUSSTATTUNG]
+    con2.close()
+
+
 def test_ergaenzung_mit_timer_und_takt_gilt_nicht_als_eigene_aenderung(con) -> None:
     """K36: Timer und Takt einer Ergänzung stehen in derselben Form im Paketstand wie an der
     Übung — sonst hieße eine unberührte Übung sofort „geändert: Timer“, und beim Deaktivieren

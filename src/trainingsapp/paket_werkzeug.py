@@ -74,6 +74,7 @@ from trainingsapp.core.kursbloecke import (
 from trainingsapp.core.kurse import Kapitel, Kurs, PlanVorlage, VorlageItem
 from trainingsapp.core.kursplan import GRUNDLAGE
 from trainingsapp.core.links import erlaubt as links_erlaubt
+from trainingsapp.core.linkvideos import direkt, mit_pruefsumme, nennt_pruefsumme, pruefsumme
 from trainingsapp.core.models import Exercise, MediaSource, Plan
 from trainingsapp.core.paketdatei import (
     PAKET_JSON,
@@ -410,6 +411,15 @@ def pruefen(
                 fehler.extend(f"{wo_pe}: bedingung: {x}" for x in f_bed)
                 hinweise.extend(f"{wo_pe}: bedingung: {x}" for x in h_bed)
             hinweise.extend(f"{wo_pe}: {x}" for x in _planmedien_pruefen(pe.get("medien")))
+    # Prüfsumme am Link (`verlinken`, ``#sha256=…``): unlesbar hieße, die App prüft nichts
+    for liste in medienlisten(roh):
+        for e in liste:
+            uri = str(e.get("uri") or "") if isinstance(e, dict) else ""
+            if nennt_pruefsumme(uri) and not pruefsumme(uri):
+                fehler.append(
+                    f"Medium „{e.get('title') or uri}“: Prüfsumme am Link unlesbar "
+                    "(#sha256= und 64 Zeichen 0–9, a–f)"
+                )
     if datei.suffix == ".toml" and _nennt_dateien(roh):
         with tempfile.TemporaryDirectory() as arbeit:
             try:
@@ -2470,6 +2480,10 @@ def verlinken(
                 "die Datei bleibt"
             ]
         zeilen.append(f"Link geprüft: dieselbe Datei ({groesse / 1e6:.1f} MB, {art or '?'})")
+    if direkt(url):
+        # Ein Video, das die App selbst lädt: Sie vergleicht nach dem Laden (Stufe 7)
+        url = mit_pruefsumme(url, sha256_datei(pfad))
+        zeilen.append("Prüfsumme am Link (#sha256=…): Die App spielt nur genau diese Datei")
     for e in treffer:
         del e["datei"]
         e["uri"] = url

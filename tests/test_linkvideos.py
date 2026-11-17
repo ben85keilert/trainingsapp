@@ -57,6 +57,36 @@ def test_laden_nur_videodateien_ueber_https(tmp_path) -> None:
     assert not list(tmp_path.glob("*.teil")), "keine halben Dateien"
 
 
+def test_pruefsumme_am_link(tmp_path) -> None:
+    """``#sha256=…`` (`verlinken`): Die App vergleicht nach dem Laden — ein anderes Video spielt
+    sie nicht ab; liegt dieselbe Datei schon in der Ablage, lädt sie nichts. Das Fragment geht
+    nicht an den Server."""
+    sha = hashlib.sha256(VIDEO).hexdigest()
+    gesendet: list[str] = []
+
+    def oeffnen(anfrage):
+        gesendet.append(anfrage.selector)
+        return _Antwort(VIDEO, anfrage.full_url, "video/mp4")
+
+    falsch = tmp_path / "falsch"
+    with pytest.raises(LinkFehler, match="anderes Video"):
+        laden(f"https://x.invalid/v.mp4#sha256={'0' * 64}", falsch, oeffnen=oeffnen)
+    assert list(falsch.iterdir()) == [], "nichts bleibt liegen"
+    name, n = laden(
+        f"https://x.invalid/v.mp4?raw=1#sha256={sha.upper()}", tmp_path, oeffnen=oeffnen
+    )
+    assert name == f"medien/{sha}.mp4" and n == len(VIDEO)
+    assert all("#" not in s and "sha256" not in s for s in gesendet), gesendet
+
+    def kein_netz(_anfrage):
+        raise AssertionError("lädt, obwohl die Datei da ist")
+
+    assert laden(f"https://y.invalid/w.mp4#sha256={sha}", tmp_path, oeffnen=kein_netz) == (
+        name,
+        len(VIDEO),
+    )
+
+
 @pytest.fixture
 def state(tmp_path):
     s = AppState.starten(tmp_path / "app.db")

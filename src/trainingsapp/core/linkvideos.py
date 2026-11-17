@@ -15,6 +15,11 @@ WLAN mit Möglichkeit auf Umstellung“.
   (``text/html``) ist kein Video; höchstens `MAX_BYTES`; geschrieben als ``.teil``, dann unter
   der Prüfsumme — wie eine Paketdatei (`core.paketmedien`). Abgespielt wird die Datei auf dem
   Gerät, im Spieler der Paketdateien.
+- **Prüfsumme am Link** (`pruefsumme`): ``#sha256=<64 Zeichen>`` hinter der Adresse schreibt
+  `trainingsapp-paket verlinken` (die Prüfsumme der Datei, die der Link ersetzt). Ein Fragment
+  geht nie an den Server — Browser und ältere Apps öffnen den Link wie bisher. Die App lädt und
+  vergleicht: Liegt unter dem Link inzwischen ein anderes Video, spielt sie es nicht ab. Liegt
+  dieselbe Datei schon in der Ablage (aus einer Paketdatei, einem anderen Link), lädt sie nichts.
 
 Kein flet, kein sqlite — die Ablage und die Rückfragen liegen in `data`/`ui`.
 """
@@ -22,6 +27,7 @@ Kein flet, kein sqlite — die Ablage und die Rückfragen liegen in `data`/`ui`.
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 import urllib.request
 from collections.abc import Callable
@@ -40,6 +46,10 @@ VIDEO_ENDUNGEN: Final = tuple(e for e, art in ENDUNGEN.items() if art == MediaKi
 _TYPEN: Final = dict(
     reversed([(MIME[e], e) for e in VIDEO_ENDUNGEN if e in MIME])
 )  # die erste Endung je Typ
+
+
+#: ``sha256=<64 Zeichen>`` im Fragment der Adresse (`pruefsumme`)
+_PRUEFSUMME: Final = re.compile(r"(?:^|&)sha256=([0-9A-Fa-f]{64})(?=&|$)")
 
 
 class LinkFehler(Exception):
@@ -111,6 +121,48 @@ def roh_link(url: str) -> str:
     return teile._replace(query="&".join([*rest, "raw=1"])).geturl()
 
 
+def pruefsumme(url: str) -> str:
+    """Die Prüfsumme, die der Link selbst nennt (``#sha256=…``), klein — leer ohne.
+
+    >>> pruefsumme("https://x.org/v.mp4#sha256=" + "AB" * 32) == "ab" * 32
+    True
+    >>> pruefsumme("https://x.org/v.mp4"), pruefsumme("https://x.org/v.mp4#t=10&sha256=12")
+    ('', '')
+    """
+    try:
+        treffer = _PRUEFSUMME.search(urlsplit(url).fragment)
+    except ValueError:
+        return ""
+    return treffer.group(1).lower() if treffer else ""
+
+
+def nennt_pruefsumme(url: str) -> bool:
+    """Steht ``sha256=`` im Fragment — lesbar oder nicht (`trainingsapp-paket pruefen`)?
+
+    >>> nennt_pruefsumme("https://x.org/v.mp4#sha256=12"), nennt_pruefsumme("https://x.org/v")
+    (True, False)
+    """
+    try:
+        return "sha256=" in urlsplit(url).fragment
+    except ValueError:
+        return False
+
+
+def mit_pruefsumme(url: str, sha256: str) -> str:
+    """``url`` mit ``#sha256=<sha256>`` — eine alte Prüfsumme fällt weg, anderes im Fragment
+    bleibt.
+
+    >>> mit_pruefsumme("https://x.org/v.mp4?raw=1", "A" * 64) == (
+    ...     "https://x.org/v.mp4?raw=1#sha256=" + "a" * 64)
+    True
+    >>> mit_pruefsumme("https://x.org/v.mp4#t=5&sha256=" + "0" * 64, "b" * 64).split("#")[1][:12]
+    't=5&sha256=b'
+    """
+    teile = urlsplit(url)
+    rest = [p for p in teile.fragment.split("&") if p and not p.startswith("sha256=")]
+    return teile._replace(fragment="&".join([*rest, f"sha256={sha256.lower()}"])).geturl()
+
+
 def laden(
     url: str,
     ordner: Path,
@@ -120,10 +172,14 @@ def laden(
     oeffnen: Callable[[urllib.request.Request], Any] | None = None,
 ) -> tuple[str, int]:
     """Lädt das Video hinter ``url`` nach ``ordner`` — ``(Name in der Ablage, Bytes)``. Wirft
-    `LinkFehler` (Webseite statt Datei, zu groß, keine https-Umleitung, Netz). ``oeffnen``: für
-    Tests statt `urllib.request.urlopen`."""
+    `LinkFehler` (Webseite statt Datei, zu groß, keine https-Umleitung, Netz, eine andere
+    Datei als die Prüfsumme am Link sagt). ``oeffnen``: für Tests statt
+    `urllib.request.urlopen`."""
     if not url.startswith("https://"):
         raise LinkFehler("nur https-Adressen")
+    soll = pruefsumme(url)
+    if soll and endung(url) and (schon := ordner / f"{soll}.{endung(url)}").is_file():
+        return name_fuer(soll, endung(url)), schon.stat().st_size  # dieselbe Datei liegt da
     anfrage = urllib.request.Request(roh_link(url), headers={"User-Agent": "trainingsapp"})
     ordner.mkdir(parents=True, exist_ok=True)
     teil = ordner / f"{secrets.token_hex(8)}.teil"
@@ -153,6 +209,10 @@ def laden(
                     aus.write(block)
                     if fortschritt is not None:
                         fortschritt(n, gesamt_n)
+        if soll and h.hexdigest() != soll:
+            raise LinkFehler(
+                "Unter dem Link liegt ein anderes Video als im Paket — die App spielt es nicht ab."
+            )
         name = name_fuer(h.hexdigest(), e)
         teil.replace(ordner / name.removeprefix("medien/"))
         return name, n
@@ -171,6 +231,9 @@ __all__ = [
     "direkt",
     "endung",
     "laden",
+    "mit_pruefsumme",
+    "nennt_pruefsumme",
+    "pruefsumme",
     "roh_link",
     "server",
 ]

@@ -902,6 +902,34 @@ def test_verlinken_ersetzt_die_datei_durch_einen_link(tmp_path) -> None:
     assert verlinken(datei, "medien/foto.png", "http://x")[1], "nur https"
 
 
+def test_verlinken_schreibt_die_pruefsumme_an_einen_videolink(tmp_path) -> None:
+    """Ein Video, das die App selbst lädt (`core.linkvideos.direkt`), bekommt ``#sha256=…`` —
+    die App spielt nur diese Datei; ``pruefen`` meldet eine unlesbare Prüfsumme."""
+    from trainingsapp.core.linkvideos import pruefsumme
+    from trainingsapp.paket_werkzeug import verlinken
+
+    video = b"\x00\x00\x00\x18ftypmp42" + b"v" * 100
+    (tmp_path / "medien").mkdir()
+    (tmp_path / "medien" / "baum.mp4").write_bytes(video)
+    datei = tmp_path / "qigong.toml"
+    datei.write_text(
+        QIGONG.replace(
+            'icon_key = "fitness_center"',
+            'icon_key = "fitness_center"\nmedia = [{ datei = "medien/baum.mp4", title = "Baum" }]',
+        ),
+        encoding="utf-8",
+    )
+    zeilen, fehler = verlinken(datei, "medien/baum.mp4", "https://example.invalid/baum.mp4")
+    assert fehler == [] and any("Prüfsumme am Link" in z for z in zeilen)
+    (eintrag,) = [e for e in tomllib.loads(datei.read_text("utf-8"))["exercises"] if "media" in e]
+    uri = eintrag["media"][0]["uri"]
+    assert uri.startswith("https://example.invalid/baum.mp4#sha256=")
+    assert pruefsumme(uri) == hashlib.sha256(video).hexdigest()
+    assert pruefen(datei)[0] == []
+    datei.write_text(datei.read_text("utf-8").replace(uri, uri[:-3]), encoding="utf-8")
+    assert any("Prüfsumme am Link unlesbar" in f for f in pruefen(datei)[0])
+
+
 QIGONG_MIT_PLAN = (
     QIGONG
     + """

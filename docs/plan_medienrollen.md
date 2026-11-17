@@ -59,7 +59,7 @@ Drei Rollen genügen für das, was Ben nennt:
 
 | Rolle | Uhr beim Ansehen | Haken „gesehen“ | Wo | Arten | Im Paket |
 |---|---|---|---|---|---|
-| **Erklärung** (Bestand, Vorgabe) | steht, solange das Blatt offen ist | ja | Übungsseite, Material-Blatt, Kurs-Block; auf Wunsch beim ersten ▶ von selbst | Video, Bild, Ton, PDF, Link | ja |
+| **Erklärung** (Bestand, Vorgabe) | steht, solange das Blatt offen ist | ja | Übungsseite, Material-Blatt, Kurs-Block; auf Wunsch beim ersten ▶ von selbst — seit 17.11.2026 auch im Workout, sobald der Schritt beginnt (`plan_uhr_fokus.md` §10.7) | Video, Bild, Ton, PDF, Link | ja |
 | **Begleitung** (Bestand) | läuft | nein | Material-Blatt; **neu: im Fokus selbst** (siehe unten) | Video, Ton | ja |
 | **Bewegung** (Funktion gebaut, Name neu) | läuft | nein | Fokus, Ebene „Bewegung“, im Takt | Bildfolge, Video, GIF — mehrere (entschieden 16.11.) | heute nein (§3.2 Nr. 2); **entschieden: ja** (§3.3) |
 

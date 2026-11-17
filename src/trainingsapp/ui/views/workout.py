@@ -17,6 +17,7 @@ Aufgefrischt wird wie der Ablauf: je Takt der Einheit und des Timers nur Werte
 from __future__ import annotations
 
 import contextlib
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -46,8 +47,9 @@ from trainingsapp.devices.plan_ablauf import (
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import plan_ablauf
 from trainingsapp.ui.components import fokus_eintragen as fe
-from trainingsapp.ui.components import links, zaehl_stand
+from trainingsapp.ui.components import links, material, zaehl_stand
 from trainingsapp.ui.components.ablaufbild import ablaufbild, abspielen
+from trainingsapp.ui.components.dialoge import dialog_offen
 from trainingsapp.ui.components.fokus import FOKUS_ANSICHT, Fokus, abbrechen_knopf, steuerzeile
 from trainingsapp.ui.components.fokus import OBEN as FOKUS_OBEN
 from trainingsapp.ui.components.hilfe import WORKOUT_MD
@@ -66,6 +68,8 @@ from trainingsapp.ui.views.ablauf import fehlende_namen, warn_karte
 from trainingsapp.ui.views.timer import timer_knopf
 from trainingsapp.ui.views.workout_eintrag import durchlauf_laden
 from trainingsapp.ui.views.workout_eintrag import route as workout_eintrag_route
+
+_log = logging.getLogger(__name__)
 
 
 def workout_route(plan: Plan) -> str:
@@ -121,6 +125,8 @@ def workout_view(
         "oben": 0,
         #: „Überspringen“ bei mehreren gleichwertigen Wegen: (Planübung, Durchlauf) bis gewählt
         "ueberspringen": None,
+        #: für welchen Schritt und Durchlauf schon nach neuem Material gesehen wurde
+        "material_fuer": None,
     }
 
     def beide_auffrischen() -> None:
@@ -169,6 +175,42 @@ def workout_view(
         `plan_ablauf.schritt_einrichten`, das auch der Beobachter der Einheit ruft: Es hängt
         nicht mehr daran, dass diese Ansicht offen ist (N62)."""
         plan_ablauf.schritt_einrichten(page, state, e)
+
+    def material_zeigen() -> None:
+        """Eine Erklärung, die sich **beim ersten Mal von selbst zeigt** (P200), auch im Workout
+        (Ben, 17.11.2026: „Medienverfügbarkeit mit Option auf einmalig auch für Workouts“): Beginnt
+        ein Schritt, dessen Übung so ein Stück hat, das noch nicht als gesehen abgehakt ist, geht
+        das Blatt „Material“ auf — die Uhr des Schritts steht, solange es offen ist
+        (`components/material.py`), auch bei „hart“. Je Schritt und Durchlauf wird einmal
+        nachgesehen; was schon von selbst kam, kommt in dieser Sitzung nicht wieder
+        (`material.neu_zeigen`).
+
+        Nur aus dem Takt gerufen (`auffrischen`), nie beim Aufbau der Ansicht, und nur, wenn diese
+        Ansicht oben liegt: Ein Blatt, das vor einem Neuaufbau der Ansichten aufgeht, bliebe als
+        Geist stehen (`components/dialoge.py`). Steht gerade ein anderer Dialog offen, wartet es
+        auf den nächsten Takt."""
+        paar = plan_ablauf.laufender(state, plan.id)
+        if paar is None:
+            return
+        e, teil = paar
+        s = teil.schritt
+        marke = (e.id, teil.k, len(teil.verlauf))
+        if stand["material_fuer"] == marke or teil.phase != UEBUNG or not s.uebung_id:
+            return
+        # Im Start-Bild des Workout-Plans (``/plan/<id>``) noch nicht: `zum_fokus` wechselt gleich
+        # die Route, die Ansichten entstehen neu — das Blatt kommt mit dem ersten Takt im Fokus
+        if route != workout_route(plan) or getattr(page, "route", None) != route:
+            return
+        if dialog_offen(page):
+            return
+        stand["material_fuer"] = marke
+        u = katalog.get(s.uebung_id)
+        if u is None:
+            return
+        try:
+            material.neu_zeigen(page, state, u, state.plaene.item_laden(s.item_id))
+        except Exception:  # das Material darf das Workout nie aufhalten — mit Protokoll
+            _log.exception("Material des Workout-Schritts nicht gezeigt")
 
     def starten(fort: ab.Fortsetzung | None = None) -> None:
         """Los — ``fort``: dort weiter, wo das Workout heute vorzeitig endete (P166)."""
@@ -1764,10 +1806,12 @@ def workout_view(
         """Je Takt: neu bauen, wenn sich Phase oder Schritt änderten — sonst nur Werte."""
         if schluessel() != stand["schluessel"]:
             neu_bauen()
+            material_zeigen()
             return
         paar = plan_ablauf.laufender(state, plan.id)
         if paar is None:
             return
+        material_zeigen()
         e, teil = paar
         fokus = stand["fokus"]
         if fokus is not None and teil.timer is not None:

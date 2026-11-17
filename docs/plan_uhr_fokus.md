@@ -515,3 +515,36 @@ Workout mit Streifen, Workout mit Abzweigen ohne, Abfrage nach „Fertig“, Sä
 
 **Nicht gebaut:** das kleine Ablaufbild im Fokus (P112) als Ersatz für den Streifen bei
 Abzweigen.
+
+### 10.7 Material im Workout (Ben, 17.11.2026) — gebaut
+
+Ben: „Bau die Medienverfügbarkeit mit Option auf einmalig auch für Workouts. Angeschaute Medien
+sollen im Materialteil anschaubar bleiben. Wenn Material existiert, wird das dezent beim Üben
+angezeigt, wirklich nicht aufdringlich, aber sichtbar.“
+
+**Anlass:** „Beim ersten Mal von selbst zeigen“ (P200) hing allein am ▶ der Uhr
+(`components/uhr.py`). Ein Workout startet die Uhr seiner Schritte selbst — dort ging das Blatt
+nie auf (nachgestellt am 17.11.2026: Übung mit Link und Paketdatei, beide „von selbst zeigen“,
+„Workout starten“ → kein Blatt, nur das Buch-Symbol im Fokus).
+
+| Was | Gebaut | Wo |
+|---|---|---|
+| Von selbst zeigen | Beginnt ein Schritt, dessen Übung oder Planübung eine Erklärung mit „von selbst zeigen“ hat, die noch nicht als gesehen abgehakt ist, geht das Blatt „Material“ auf („Neu zu dieser Übung“). **Die Uhr des Schritts steht, solange es offen ist** — auch bei „hart“: Es geht nicht weiter, bevor das Blatt zu ist. Links und Paketdateien gleich; kein Video startet von selbst | `views/workout.material_zeigen` → `components/material.neu_zeigen` |
+| Einmalig | Wie am ▶ der Uhr: Was von selbst kam, kommt in dieser Sitzung nicht wieder; abgehakt („gesehen“, beim Öffnen des Stücks oder von Hand) kommt es nie wieder. In einer Schleife zeigt es sich nur im ersten Durchlauf | `material.neu_zeigen`, `data/material.py` |
+| Bleibt anschaubar | Unverändert: Alles Material steht hinter dem Buch-Symbol im Fokus (neben den Ebenen) — gefüllt und in der Akzentfarbe, solange etwas neu ist, sonst als Umriss. Abgehaktes bleibt in der Liste, mit seinem Haken | `material_knopf`, `material_blatt` |
+
+**Wann genau:** aus dem Takt der Ansicht (`auffrischen`), nie beim Aufbau, und nur, wenn der
+Workout-Fokus (`/plan/<id>/workout`) oben liegt — ein Blatt, das vor einem Neuaufbau der
+Ansichten aufgeht, bliebe als Geist stehen (`components/dialoge.py`). Startet das Workout aus
+dem Start-Bild des Plans (`/plan/<id>`), kommt das Blatt mit dem ersten Takt im Fokus; steht
+gerade ein anderer Dialog offen, mit dem nächsten Takt danach. **Liegt der Fokus nicht oben**
+(die Person ist in einer anderen Ansicht, hart läuft weiter), geht nichts auf und die Uhr läuft
+— das Blatt kommt, wenn sie in den Fokus zurückkehrt und der Schritt noch läuft.
+
+**Nicht gebaut:** der Testlauf im Kurs (`views/kurs_testlauf.py` startet die Uhr ebenfalls
+selbst — gelesen, nicht nachgestellt; Verhalten von Kursen ändert sich nur nach Rückfrage).
+
+Tests: `tests/test_ui_workout.py`
+(`test_workout_zeigt_neues_material_von_selbst_und_haelt_die_uhr`). Web-Fotos am 17.11.2026:
+Blatt beim Start, Uhr „angehalten“ bei 0:40, nach „Schließen“ läuft sie; zweiter Schritt mit
+Material ohne „von selbst“ — nur das Buch-Symbol. Gerätetest **T146**.

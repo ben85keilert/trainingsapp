@@ -532,6 +532,10 @@ Beim Üben zeigt ein Buch-Symbol neben dem „i“ (und im Fokus), dass es **Mat
 **Solange du es ansiehst, steht die Uhr**; „Uhr weiter“ lässt sie von Hand weiterlaufen, beim
 Schließen läuft sie von selbst weiter. Die Messung läuft immer weiter.
 
+Eine Erklärung mit **„Beim ersten Mal von selbst zeigen“** öffnet sich beim ersten ▶ — im
+Workout, sobald ihre Übung beginnt —, bis du sie als gesehen abgehakt hast. Danach bleibt sie
+hinter dem Buch-Symbol.
+
 Kommt der Plan aus einem Paket, bekommt eine Planübung, die du nicht geändert hast, mit dem
 nächsten Update die neue Fassung; deine eigene bleibt.
 """

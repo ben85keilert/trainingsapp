@@ -4,6 +4,7 @@ hart/weich, Fokus je Übung mit Minus-Timer, Ende — und die Wege hinein (Schal
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -11,12 +12,13 @@ import pytest
 ft = pytest.importorskip("flet")
 
 from attrappen import Gurt, Seite, Uhr, ruhe  # noqa: E402
-from trainingsapp.core.models import Exercise, Plan, PlanItem  # noqa: E402
+from trainingsapp.core.models import Exercise, Media, Plan, PlanItem  # noqa: E402
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld  # noqa: E402
 from trainingsapp.core.timer import Abschnitt, TimerProfil  # noqa: E402
 from trainingsapp.devices.messlauf import Messlauf  # noqa: E402
 from trainingsapp.devices.plan_ablauf import HART, UEBERZEIT, WEICH  # noqa: E402
 from trainingsapp.ui import plan_ablauf  # noqa: E402
+from trainingsapp.ui.components import material  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.plan import plan_view  # noqa: E402
 from trainingsapp.ui.views.workout import uebergang_fuer, workout_view  # noqa: E402
@@ -96,6 +98,16 @@ def _plan(state) -> Plan:
     )
     state.plaene.speichern(plan)
     return state.plaene.laden(plan.id)
+
+
+async def _aufraeumen(*seiten) -> None:
+    """Takt und Laufleiste einer Einheit (`ui.einheit._laufen`, `_anzeigen`) enden nicht von
+    selbst — bliebe eine Aufgabe hängen, meldete der nächste Test „coroutine ignored
+    GeneratorExit“."""
+    aufgaben = [a for s in seiten for a in s.aufgaben if not a.done()]
+    for a in aufgaben:
+        a.cancel()
+    await asyncio.gather(*aufgaben, return_exceptions=True)
 
 
 async def _sekunden(state, uhr, gurt, n: int) -> None:
@@ -226,6 +238,106 @@ async def test_workout_start_weich_ueberzeit_weiter_und_ende(umgebung) -> None:
     marken = [x for x in ereignisse if (x.get("marke") or {}).get("spur") == "workout"]
     assert [m["text"] for m in marken] == ["Workout Beine: Start", "Workout Beine: Ende"]
     assert "Kniebeuge: Start" in [x["text"] for x in ereignisse]  # die Übungen liegen darin
+    await _aufraeumen(seite)
+
+
+TECHNIK = "https://x.org/technik"
+MERKBLATT = "https://x.org/merkblatt.pdf"
+
+
+def _blaetter(seite) -> list:
+    return [d for d in seite.dialoge if isinstance(d, ft.BottomSheet)]
+
+
+async def test_workout_zeigt_neues_material_von_selbst_und_haelt_die_uhr(umgebung) -> None:
+    """Ben, 17.11.2026: „Medienverfügbarkeit mit Option auf einmalig auch für Workouts.
+    Angeschaute Medien sollen im Materialteil anschaubar bleiben.“ — Eine Erklärung mit „beim
+    ersten Mal von selbst zeigen“ öffnet das Blatt, sobald ihr Schritt beginnt; die Uhr steht,
+    solange es offen ist, auch bei „hart“. Abgehakt kommt es nicht wieder, bleibt aber hinter
+    dem Buch-Symbol."""
+    state, uhr, gurt = umgebung
+    plan = _plan(state)
+    a, b = plan.items
+    kniebeuge = state.uebungen.laden(a.exercise_id)
+    # an der Übung und — nur in diesem Plan — an der Planübung
+    state.uebungen.speichern(
+        replace(kniebeuge, media=[Media(uri=TECHNIK, title="Technik", zeigen=True)])
+    )
+    state.plaene.item_speichern(
+        replace(b, media=[Media(uri=MERKBLATT, title="Merkblatt", zeigen=True)])
+    )
+    plan = state.plaene.laden(plan.id)
+    state.workout_uebergang[plan.id] = HART
+    route = f"/plan/{plan.id}/workout"
+    seite = Seite()
+
+    # Aus dem Start-Bild des Workout-Plans: Die Route wechselt gleich in den Fokus — vorher
+    # geht kein Blatt auf (es bliebe beim Neuaufbau der Ansichten als Geist stehen)
+    seite.route = f"/plan/{plan.id}"
+    erste = seite
+    start = workout_view(seite, state, plan, route=seite.route)
+    _knopf(start, "Workout starten").on_click()
+    await ruhe()
+    assert seite.route == route and not _blaetter(seite)
+    paar = plan_ablauf.laufender(state, plan.id)
+    assert paar is not None
+    teil = paar[1]
+
+    # Im Fokus: Der Aufbau zeigt nichts, der erste Takt öffnet das Blatt — die Uhr steht
+    laufend = workout_view(seite, state, plan, route=route)
+    assert not _blaetter(seite)
+    state.timer_beobachter["workout"]()
+    (blatt,) = _blaetter(seite)
+    assert "Neu zu dieser Übung" in _texte(blatt) and "Technik" in _texte(blatt)
+    assert teil.timer is not None and not teil.timer.lauf.laeuft
+    await _sekunden(state, uhr, gurt, 15)  # länger als der Timer (10 s): hart geht nicht weiter
+    state.timer_beobachter["workout"]()
+    assert teil.k == 0 and teil.phase == "uebung" and len(_blaetter(seite)) == 1
+
+    # Blatt zu: Die Uhr läuft weiter, hart geht es von selbst zur nächsten Übung — und deren
+    # Material (an der Planübung) zeigt sich ebenso
+    await blatt.on_dismiss(None)
+    assert teil.timer.lauf.laeuft
+    for _ in range(40):
+        await _sekunden(state, uhr, gurt, 1)
+        state.timer_beobachter["workout"]()
+        if teil.k == 1 and teil.phase == "uebung":
+            break
+    assert teil.k == 1
+    state.timer_beobachter["workout"]()
+    zweites = _blaetter(seite)[-1]
+    assert len(_blaetter(seite)) == 2 and "Merkblatt" in _texte(zweites)
+    # Haken „gesehen“ an beiden — wie beim Öffnen des Stücks
+    for b_, uri in ((blatt, TECHNIK), (zweites, MERKBLATT)):
+        haken = next(x for x in _alle(b_) if getattr(x, "data", None) == ("gesehen", uri))
+        haken.on_change(SimpleNamespace(control=SimpleNamespace(value=True)))
+    await zweites.on_dismiss(None)
+    assert material.gesehen(state) == {TECHNIK, MERKBLATT}
+    assert laufend.route == route
+    _knopf(workout_view(seite, state, plan, route=route), "Fertig").on_click()
+    await _sekunden(state, uhr, gurt, 3)
+    assert plan_ablauf.laufender(state, plan.id) is None
+
+    # Neue Sitzung, dasselbe Workout noch einmal: nichts geht von selbst auf — das Material
+    # bleibt hinter dem Buch-Symbol des Fokus, jetzt ohne „Neu“
+    state.material_angeboten = set()
+    seite = Seite()
+    seite.route = route
+    wieder = workout_view(seite, state, plan, route=route)
+    _knopf(wieder, "Noch einmal").on_click()
+    _knopf(wieder, "Workout starten").on_click()
+    await ruhe()
+    state.timer_beobachter["workout"]()
+    await _sekunden(state, uhr, gurt, 2)
+    state.timer_beobachter["workout"]()
+    assert plan_ablauf.laufender(state, plan.id) is not None and not _blaetter(seite)
+    wieder = workout_view(seite, state, plan, route=route)
+    knopf = next(x for x in _alle(wieder) if getattr(x, "data", None) == "material")
+    assert not knopf.tooltip.startswith("Neu") and knopf.icon == ft.Icons.MENU_BOOK_OUTLINED
+    knopf.on_click(None)
+    (offen,) = _blaetter(seite)
+    assert "Material" in _texte(offen) and "Technik" in _texte(offen)
+    await _aufraeumen(erste, seite)
 
 
 def test_workout_plan_schalter_und_als_plan(tmp_path, monkeypatch) -> None:

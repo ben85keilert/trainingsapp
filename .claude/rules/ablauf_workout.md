@@ -89,6 +89,10 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   nur Gemachtes. **Hart | Weich jederzeit** (`PlanAblaufBaustein.uebergang_setzen`, Umschalter
   in der Unterzeile; der Übergang steht im Schlüssel des Aufbaus) — ein Kurs setzt ihn nur als
   Vorgabe („Eigenverantwortung“); kein Ereignis in der Zeitleiste (Ben, 16.11.2026: „nein“).
+  **Material von selbst** (Ben, 17.11.2026, §10.7): Eine Erklärung mit „beim ersten Mal von
+  selbst zeigen“ öffnet das Blatt, sobald ihr Schritt beginnt — die Uhr steht solange, auch
+  bei „hart“ (`views/workout.material_zeigen`); nur aus dem Takt und nur, wenn der Fokus oben
+  liegt, nie beim Aufbau der Ansicht (Geister-Dialog).
   **Reiter „Ablauf“, drei Punkte** (Ben, 16.11.2026, §8.13): **Die Palette ist ein Vorrat an
   Übungen** — eine Kachel je Übung, „2×“ bei Mehrfachverwendung; Tippen oder Ziehen nimmt eine
   freie Planübung, sonst entsteht eine neue derselben Übung (`core.ablauf.vorrat`,

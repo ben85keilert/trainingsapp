@@ -56,7 +56,7 @@ auch das.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from ..core import ablauf as ab
@@ -154,6 +154,13 @@ class PlanAblaufBaustein:
         self._vorher = self._index(vorher) if vorher else None
         #: die Selbsteinschätzung im laufenden Schritt (Skala-Kanten, Fragen) — je Durchlauf
         self.skala_wert: float | None = None
+        #: die Antwort auf eine Frage mit Antworten zum Antippen (`core.ablauf.Frage.wahl`) —
+        #: ``None``: noch keine; leer: bei „mehrere“ nichts angekreuzt
+        self.antwort: tuple[str, ...] | None = None
+        #: was an einer Frage mit mehreren Antworten gerade angekreuzt ist — noch keine Antwort
+        #: (die gibt „Weiter“, `antwort_geben`); hier, damit es einen Neuaufbau der Ansicht
+        #: übersteht
+        self.kreuze: set[str] = set()
         #: was der Zähl-Teil im laufenden Schritt zählte — setzt die Ansicht (`wdh_setzen`)
         self._wdh: int | None = None
         #: Wiederholungen von Hand im laufenden Schritt (`wdh_von_hand`) — wo niemand zählt
@@ -280,6 +287,7 @@ class PlanAblaufBaustein:
             skala=st.skala,
             gelaufen_s=st.gelaufen_s,
             wdh_bei=st.wdh_bei,
+            antwort=self.antwort,
         )
 
     @property
@@ -414,12 +422,35 @@ class PlanAblaufBaustein:
         return ab.regulaere(self.kanten_stand())
 
     @property
-    def empfiehlt(self) -> bool:
-        """Der laufende Knoten ist eine Frage, und ihre Antwort trifft einen Weg, der **nur
-        vorschlägt** (`Kante.vorschlagen`) — es geht erst weiter, wenn die Person tippt."""
+    def beantwortet(self) -> bool:
+        """Der laufende Knoten ist eine Frage, und sie hat ihre Antwort."""
         if self.ablauf is None or not self.schritte or self.schritt.frage is None:
             return False
-        return self.skala_wert is not None and ab.empfohlen(self.kanten_stand()) is not None
+        if self.schritt.frage.wahl:
+            return self.antwort is not None
+        return self.skala_wert is not None
+
+    def antwort_wege(self) -> list[ab.KanteStand]:
+        """Wohin die Antwort auf die laufende Frage führt (`core.ablauf.antwort_wege`) — leer
+        ohne Antwort und wenn kein Weg zu ihr passt."""
+        if not self.beantwortet:
+            return []
+        frage = self.schritt.frage
+        assert frage is not None
+        return ab.antwort_wege(frage, self.kanten_stand())
+
+    @property
+    def empfiehlt(self) -> bool:
+        """Der laufende Knoten ist eine Frage, und ihre Antwort trifft **einen** Weg, der **nur
+        vorschlägt** (`Kante.vorschlagen`) — es geht erst weiter, wenn die Person tippt."""
+        wege = self.antwort_wege()
+        return len(wege) == 1 and wege[0].kante.vorschlagen
+
+    @property
+    def antwort_waehlt(self) -> bool:
+        """Die Antwort führt zu **mehreren** Wegen (mehrere angekreuzt, je ein anderer Weg) —
+        die Person wählt unter ihnen (Ben, 17.11.2026: „Person wählt“)."""
+        return len(self.antwort_wege()) > 1
 
     def antworten(self, wert: float) -> None:
         """Die Selbsteinschätzung im Schritt (Skala-Kante oder Frage). Bei einer Frage geht
@@ -431,13 +462,30 @@ class PlanAblaufBaustein:
         if self._t0 is None or self.phase == FERTIG:
             return
         if self.ablauf is not None and self.schritt.frage is not None:
-            if self.empfiehlt:
-                return
-            stand = self._regulaere_kante()
-            if stand is not None:
-                self.kante_gehen(stand.kante)
+            self._nach_der_antwort()
             return
         self._weiter_wenn_frei()
+
+    def antwort_geben(self, wahl: Sequence[str]) -> None:
+        """Die Antwort auf eine Frage mit Antworten zum Antippen (Ja/Nein, Auswahl; Ben,
+        17.11.2026) — eine, oder bei „mehrere“ alle angekreuzten (auch keine). Führt sie zu
+        genau einem Weg, wird er gegangen — außer er schlägt nur vor; bei mehreren wählt die
+        Person (`antwort_waehlt`); passt keiner, bleibt die Frage stehen."""
+        self.antwort = tuple(wahl)
+        if self._t0 is None or self.phase == FERTIG:
+            return
+        if self.ablauf is not None and self.schritt.frage is not None:
+            self._nach_der_antwort()
+
+    def ankreuzen(self, antwort: str) -> None:
+        """An einer Frage mit mehreren Antworten ein Kreuz setzen oder nehmen — geantwortet ist
+        damit noch nicht (`antwort_geben`)."""
+        self.kreuze ^= {antwort}
+
+    def _nach_der_antwort(self) -> None:
+        wege = self.antwort_wege()
+        if len(wege) == 1 and not wege[0].kante.vorschlagen:
+            self.kante_gehen(wege[0].kante)
 
     def kante_gehen(self, kante: ab.Kante) -> None:
         """Diese Kante nehmen — aus der Übung (sie endet als fertig), der Überzeit oder der
@@ -813,6 +861,11 @@ class PlanAblaufBaustein:
             if self.skala_wert is not None:
                 daten["wert"] = self.skala_wert
             wert = f"{self.skala_wert:g}" if self.skala_wert is not None else "ohne Antwort"
+            if s.frage.wahl and self.antwort is not None:
+                # Antworten zum Antippen: ihr Wortlaut (bei „mehrere“ alle angekreuzten, mit
+                # Komma — die Zeitleiste trägt nur Text und Zahlen)
+                daten["antwort"] = ", ".join(self.antwort)
+                wert = daten["antwort"] or "nichts davon"
             return Ereignis(jetzt - self._t0, "plan", "antwort", f"{s.name}: {wert}", daten)
         if (ueber := self.ueber_s()) > 0:
             daten["ueber_s"] = round(ueber, 1)  # weich: die Überzeit geht in den Eintrag
@@ -882,6 +935,8 @@ class PlanAblaufBaustein:
         self._start_t_s = bei - self._t0
         self.verlauf.append(k)
         self.skala_wert = None
+        self.antwort = None
+        self.kreuze = set()
         self._wdh = None
         self.wdh_hand = None
         self._wdh_bei = []

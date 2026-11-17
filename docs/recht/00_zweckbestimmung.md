@@ -120,7 +120,11 @@ Grundlage ist nur die **Selbstauskunft**; die App nennt die Regel (den Bereich) 
 Zahl nicht; der Text am Weg stammt von der Person, die den Plan gebaut hat; genommen wird ein
 Weg nur auf Tipp, im weichen Übergang auch ein anderer. Der Weg, den die Frage von selbst geht
 (seit 8.11.2026, die Vorgabe), bleibt daneben bestehen — er steuert den Ablauf des Workouts
-nach derselben Selbstauskunft, ohne Tipp. *Nicht anwaltlich geprüft; gehört mit dem „Vorschlag nach der
+nach derselben Selbstauskunft, ohne Tipp. Seit 17.11.2026 kann die Frage statt einer Skala
+auch **Antworten zum Antippen** haben (Ja/Nein, eigene Antworten, mehrere zum Ankreuzen —
+`docs/plan_verzweigungen.md` §8.13 Punkt 9): Es bleibt Selbstauskunft, Frage und Antworten
+schreibt die Person, die den Plan baut, die App deutet sie nicht; führt das Angekreuzte zu
+mehreren Wegen, wählt die Person. *Nicht anwaltlich geprüft; gehört mit dem „Vorschlag nach der
 Belastung“ in die fachanwaltliche Prüfung.*
 
 **Empfehlungen aus Messwerten** (Ben, 16.11.2026 — **Absicht, nicht gebaut, nicht

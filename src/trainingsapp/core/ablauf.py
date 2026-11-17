@@ -9,7 +9,9 @@ P115), **Kanten** führen von Knoten zu Knoten und tragen ihren **Auslöser**:
 - ``zeit`` — der Timer ist ab;
 - ``wdh`` — ``n`` Wiederholungen (Sensor oder Takt zählen);
 - ``skala`` — die Selbsteinschätzung liegt bei ``n`` oder darüber (bis ``bis``, wenn gesetzt —
-  so verzweigt eine Frage nach Bereichen: 0–6 weiter, 7–10 Einschub).
+  so verzweigt eine Frage nach Bereichen: 0–6 weiter, 7–10 Einschub);
+- ``antwort`` — nur an einem Weg **aus einer Frage** mit Antworten zum Antippen (Ja/Nein,
+  Auswahl; Ben, 17.11.2026): Die Person hat eine der ``antworten`` des Wegs gewählt.
 
 Eine erfüllte Kante wird **angeboten** (ihr Knopf ist betont) oder **ausgeführt** (es geht von
 selbst weiter, ``ausfuehren``). **Pflicht** sperrt die anderen Wege, bis diese Kante erfüllt
@@ -51,7 +53,11 @@ WDH: Final = "wdh"
 #: ``n`` Wiederholungen innerhalb von ``sekunden`` — wie die Bedingung der Planübung
 WDH_IN_ZEIT: Final = "wdh_in_zeit"
 SKALA: Final = "skala"
-AUSLOESER: Final[tuple[str, ...]] = (FREI, ZEIT, WDH, WDH_IN_ZEIT, SKALA)
+#: eine der ``antworten`` des Wegs ist gewählt — nur aus einer Frage mit Antworten (`Frage.wahl`)
+ANTWORT: Final = "antwort"
+AUSLOESER: Final[tuple[str, ...]] = (FREI, ZEIT, WDH, WDH_IN_ZEIT, SKALA, ANTWORT)
+#: die Auslöser zur Wahl an einem Weg **aus einer Übung** — ``antwort`` steht nicht dabei: Ihn
+#: gibt es nur aus einer Frage, dort wählt man die Antworten selbst
 AUSLOESER_TEXT: Final[dict[str, str]] = {
     FREI: "Frei (Knopf)",
     ZEIT: "Zeit ab",
@@ -59,6 +65,24 @@ AUSLOESER_TEXT: Final[dict[str, str]] = {
     WDH_IN_ZEIT: "Wdh. in einer Zeit",
     SKALA: "Skala",
 }
+#: Arten einer Frage (Ben, 17.11.2026: „Mehrfachauswahl, Ja/Nein usw. geht bisher nicht, wird
+#: aber gebraucht“): eine Skala · Ja oder Nein · eigene Antworten zum Antippen (eine — oder,
+#: mit `Frage.mehrfach`, mehrere zum Ankreuzen)
+F_SKALA: Final = "skala"
+F_JA_NEIN: Final = "ja_nein"
+F_AUSWAHL: Final = "auswahl"
+FRAGE_ARTEN: Final[tuple[str, ...]] = (F_SKALA, F_JA_NEIN, F_AUSWAHL)
+FRAGE_ART_TEXT: Final[dict[str, str]] = {
+    F_SKALA: "Skala",
+    F_JA_NEIN: "Ja/Nein",
+    F_AUSWAHL: "Auswahl",
+}
+JA: Final = "Ja"
+NEIN: Final = "Nein"
+#: so viele eigene Antworten trägt eine Auswahl höchstens — mehr passt nicht auf einen Blick
+ANTWORTEN_MAX: Final = 8
+#: die eine Antwort einer Auswahl ohne Antworten — ein Hinweis, den man bestätigt
+NUR_WEITER: Final = "Weiter"
 #: Kantenziel: dorthin zurück, wo man herkam (Einschub)
 ZURUECK: Final = "__zurueck__"
 #: Vorgabe einer Frage (0–10)
@@ -96,6 +120,9 @@ class Kante:
     #: selbst weiter — er steht als Vorschlag des Plans da, die Person tippt. Aus (die
     #: Vorgabe): Die Antwort geht ihn sofort, wie bisher. Je Weg — eine Frage kann beides.
     vorschlagen: bool = False
+    #: nur mit ``antwort``: die Antworten der Frage, bei denen dieser Weg gilt (ihr Wortlaut,
+    #: `Frage.wahl`) — bei einer Frage mit mehreren Antworten reicht eine angekreuzte davon
+    antworten: tuple[str, ...] = ()
 
     @property
     def zum_ende(self) -> bool:
@@ -118,7 +145,11 @@ class Kante:
         'Skala 0–6'
         >>> Kante("a", "b", WDH, 12).ausloeser_text(), Kante("a", "b").ausloeser_text()
         ('12 Wdh.', 'frei')
+        >>> Kante("f", "b", ANTWORT, antworten=("leicht", "passend")).ausloeser_text()
+        '„leicht“ · „passend“'
         """
+        if self.ausloeser == ANTWORT:
+            return " · ".join(f"„{a}“" for a in self.antworten)
         if self.ausloeser == ZEIT:
             return "Zeit ab"
         if self.ausloeser == WDH:
@@ -158,6 +189,8 @@ class Kante:
             d["sekunden"] = self.sekunden
         if self.ausloeser == SKALA and self.bis is not None:
             d["bis"] = self.bis
+        if self.ausloeser == ANTWORT:
+            d["antworten"] = list(self.antworten)
         for k in ("pflicht", "ausfuehren", "wiederholen", "vorschlagen"):
             if getattr(self, k):
                 d[k] = True
@@ -184,6 +217,11 @@ class Kante:
         (True, True, 'Skala ≥ 7 · Für heute reicht es · Vorschlag')
         >>> "vorschlagen" in Kante("f", ENDE).als_dict()  # die Vorgabe steht nicht im Speicher
         False
+        >>> j = Kante("f", "b", ANTWORT, antworten=(JA,))
+        >>> j.als_dict(), Kante.aus_dict(j.als_dict()) == j
+        ({'von': 'f', 'nach': 'b', 'ausloeser': 'antwort', 'antworten': ['Ja']}, True)
+        >>> Kante.aus_dict({"von": "f", "nach": "b", "ausloeser": "antwort"}).ausloeser
+        'frei'
         """
         if not isinstance(roh, Mapping) or not roh.get("von") or not roh.get("nach"):
             return None
@@ -200,6 +238,9 @@ class Kante:
             ausloeser = WDH
         if bis is not None and bis < n:
             bis = None
+        antworten = _texte(roh.get("antworten")) if ausloeser == ANTWORT else ()
+        if ausloeser == ANTWORT and not antworten:
+            ausloeser = FREI  # ohne Antwort gilt der Weg bei jeder anderen
         inhalt_roh = roh.get("inhalt")
         inhalt = (
             Inhalt(str(inhalt_roh.get("text") or ""), str(inhalt_roh.get("url") or ""))
@@ -219,12 +260,20 @@ class Kante:
             inhalt,
             sekunden if ausloeser == WDH_IN_ZEIT else 0.0,
             bool(roh.get("vorschlagen")),
+            antworten,
         )
 
 
 @dataclass(frozen=True, slots=True)
 class Frage:
-    """Ein Entscheidungsknoten (P115): fragt nach einer Skala und verzweigt nach dem Wert.
+    """Ein Entscheidungsknoten (P115): fragt und verzweigt nach der Antwort.
+
+    **Drei Arten** (Ben, 17.11.2026: „Eine Frage lässt bisher nur Skala von x bis y zu.
+    Mehrfachauswahl, Ja/Nein usw. geht bisher nicht, wird aber gebraucht“): eine **Skala**
+    (``min``–``max``, Wege nach Bereichen — wie bisher), **Ja/Nein** oder eine **Auswahl** aus
+    eigenen ``antworten`` — genau eine, oder mit ``mehrfach`` mehrere zum Ankreuzen. Die Wege
+    aus einer Frage mit Antworten tragen, bei welchen sie gelten (`Kante.antworten`); ein
+    freier Weg gilt bei jeder anderen.
 
     **Eine Frage kann beides** (Ben, 17.11.2026: „ich brauche die Möglichkeit, mit der Skala
     Empfehlungen auszusprechen — Übung lieber beenden → Ende, oder den Weg zu einer Übung
@@ -236,11 +285,59 @@ class Frage:
     text: str = "Wie fühlt es sich an?"
     min: int = FRAGE_MIN
     max: int = FRAGE_MAX
+    #: `F_SKALA` · `F_JA_NEIN` · `F_AUSWAHL`
+    art: str = F_SKALA
+    #: die eigenen Antworten einer Auswahl, in ihrer Reihenfolge
+    antworten: tuple[str, ...] = ()
+    #: nur Auswahl: mehrere Antworten ankreuzen, dann „Weiter“
+    mehrfach: bool = False
+
+    @property
+    def wahl(self) -> tuple[str, ...]:
+        """Die Antworten zum Antippen — leer bei einer Skala. Eine Auswahl ohne eigene
+        Antworten hat die eine Antwort „Weiter“: ein Hinweis, den man bestätigt.
+
+        >>> Frage("f").wahl, Frage("f", art=F_JA_NEIN).wahl
+        ((), ('Ja', 'Nein'))
+        >>> Frage("f", art=F_AUSWAHL, antworten=("leicht", "schwer")).wahl
+        ('leicht', 'schwer')
+        >>> Frage("f", art=F_AUSWAHL).wahl
+        ('Weiter',)
+        """
+        if self.art == F_JA_NEIN:
+            return (JA, NEIN)
+        if self.art == F_AUSWAHL:
+            return self.antworten or (NUR_WEITER,)
+        return ()
+
+    @property
+    def mehrere(self) -> bool:
+        """Dürfen mehrere Antworten angekreuzt werden?"""
+        return self.art == F_AUSWAHL and self.mehrfach
+
+    def kurz(self) -> str:
+        """Was unter der Frage im Bild steht.
+
+        >>> Frage("f").kurz(), Frage("f", art=F_JA_NEIN).kurz()
+        ('Skala 0–10', 'Ja · Nein')
+        >>> Frage("f", art=F_AUSWAHL, antworten=("Kraft", "Ausdauer"), mehrfach=True).kurz()
+        'mehrere: Kraft · Ausdauer'
+        """
+        if self.art == F_SKALA:
+            return f"Skala {self.min}–{self.max}"
+        return ("mehrere: " if self.mehrere else "") + " · ".join(self.wahl)
 
     def als_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"id": self.id, "text": self.text}
-        if (self.min, self.max) != (FRAGE_MIN, FRAGE_MAX):
-            d["min"], d["max"] = self.min, self.max
+        if self.art == F_SKALA:
+            if (self.min, self.max) != (FRAGE_MIN, FRAGE_MAX):
+                d["min"], d["max"] = self.min, self.max
+            return d
+        d["art"] = self.art
+        if self.art == F_AUSWAHL:
+            d["antworten"] = list(self.antworten)
+            if self.mehrfach:
+                d["mehrfach"] = True
         return d
 
     @classmethod
@@ -250,13 +347,37 @@ class Frage:
         5
         >>> Frage.aus_dict({"id": "f1", "min": 8, "max": 3}).max  # verdreht → Vorgabe
         10
+        >>> f = Frage("f", "Was war schwer?", art=F_AUSWAHL, antworten=("Kraft", "Ausdauer"))
+        >>> f.als_dict()
+        {'id': 'f', 'text': 'Was war schwer?', 'art': 'auswahl', 'antworten': ['Kraft', 'Ausdauer']}
+        >>> Frage.aus_dict(f.als_dict()) == f
+        True
+        >>> m = replace(f, mehrfach=True)
+        >>> Frage.aus_dict(m.als_dict()) == m
+        True
+        >>> Frage.aus_dict(Frage("j", art=F_JA_NEIN).als_dict()).art
+        'ja_nein'
+        >>> Frage.aus_dict({"id": "f", "art": "tanz"}).art  # Unbekanntes: die Vorgabe
+        'skala'
         """
         if not isinstance(roh, Mapping) or not roh.get("id"):
             return None
         lo, hi = _ganzzahl(roh.get("min", FRAGE_MIN)), _ganzzahl(roh.get("max", FRAGE_MAX))
         if hi <= lo or hi - lo > 20:
             lo, hi = FRAGE_MIN, FRAGE_MAX
-        return cls(str(roh["id"]), str(roh.get("text") or "Wie fühlt es sich an?").strip(), lo, hi)
+        art = str(roh.get("art") or F_SKALA)
+        if art not in FRAGE_ARTEN:
+            art = F_SKALA
+        auswahl = art == F_AUSWAHL
+        return cls(
+            str(roh["id"]),
+            str(roh.get("text") or "Wie fühlt es sich an?").strip(),
+            lo,
+            hi,
+            art,
+            _texte(roh.get("antworten"))[:ANTWORTEN_MAX] if auswahl else (),
+            bool(roh.get("mehrfach")) and auswahl,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -715,6 +836,7 @@ def kante_pruefen(
     skala: float | None,
     gelaufen_s: float = 0.0,
     wdh_bei: tuple[tuple[int, float], ...] = (),
+    antwort: Sequence[str] | None = None,
 ) -> KanteStand:
     """Ob der Stand den Auslöser der Kante erfüllt — dieselbe Rechnung wie die Bedingung der
     Planübung (`core.bedingung.pruefen`), dazu Skala-Bereiche (``bis``).
@@ -733,9 +855,24 @@ def kante_pruefen(
     True
     >>> kante_pruefen(k, zeit_ab=True, wdh=9, skala=None, gelaufen_s=40).verfehlt
     True
+
+    Ein Weg aus einer Frage mit Antworten (``antwort``: was gewählt ist — ``None``: noch
+    nichts): Er gilt, sobald **eine** seiner Antworten dabei ist.
+
+    >>> j = Kante("f", "b", ANTWORT, antworten=("Kraft", "Ausdauer"))
+    >>> pr = lambda a: kante_pruefen(j, zeit_ab=False, wdh=None, skala=None, antwort=a)
+    >>> pr(None).unpruefbar, pr(("Ausdauer", "Balance")).erfuellt, pr(("Balance",)).erfuellt
+    (True, True, False)
+    >>> pr(()).erfuellt  # nichts angekreuzt
+    False
     """
     if k.ausloeser == FREI:
         return KanteStand(k, True, False, False, k.text or "Weiter")
+    if k.ausloeser == ANTWORT:
+        if antwort is None:
+            return KanteStand(k, False, False, True, f"Antwort wählen — {k.ausloeser_text()}")
+        passt = any(a in antwort for a in k.antworten)
+        return KanteStand(k, passt, False, False, k.ausloeser_text())
     if k.ausloeser == SKALA and k.bis is not None:
         if skala is None:
             return KanteStand(k, False, False, True, f"Skala wählen — {k.ausloeser_text()}")
@@ -754,6 +891,7 @@ def kanten_pruefen(
     skala: float | None,
     gelaufen_s: float = 0.0,
     wdh_bei: tuple[tuple[int, float], ...] = (),
+    antwort: Sequence[str] | None = None,
 ) -> list[KanteStand]:
     """Alle Kanten eines Knotens — mit der Sperre: eine unerfüllte **Pflicht**-Kante sperrt
     die anderen (nicht sich selbst; sie ist erst gangbar, wenn erfüllt).
@@ -766,7 +904,13 @@ def kanten_pruefen(
     """
     staende = [
         kante_pruefen(
-            k, zeit_ab=zeit_ab, wdh=wdh, skala=skala, gelaufen_s=gelaufen_s, wdh_bei=wdh_bei
+            k,
+            zeit_ab=zeit_ab,
+            wdh=wdh,
+            skala=skala,
+            gelaufen_s=gelaufen_s,
+            wdh_bei=wdh_bei,
+            antwort=antwort,
         )
         for k in kanten
     ]
@@ -817,6 +961,38 @@ def wahl_offen(staende: Sequence[KanteStand]) -> list[KanteStand]:
     return gangbar if len(gangbar) > 1 else []
 
 
+def antwort_wege(frage: Frage, staende: Sequence[KanteStand]) -> list[KanteStand]:
+    """Wohin die **Antwort auf eine Frage** führt — die Wege, unter denen es weitergeht
+    (``staende``: die Wege der Frage gegen die gegebene Antwort).
+
+    Eine **Skala** geht den ersten Weg, dessen Bereich sie trifft, sonst den ersten freien
+    (`regulaere`, wie bisher). Bei **Antworten zum Antippen** zählen alle getroffenen Wege —
+    trifft die Antwort keinen, die freien („jede andere“). Sind es **mehrere**, wählt die
+    Person unter ihnen (Ben, 17.11.2026 — die Regel des Ablaufs: mehrere gleichwertige Wege,
+    erst fragen); einer allein wird gegangen oder, mit `Kante.vorschlagen`, vorgeschlagen.
+
+    >>> f = Frage("f", art=F_AUSWAHL, antworten=("Kraft", "Balance", "Ausdauer"), mehrfach=True)
+    >>> ks = [
+    ...     Kante("f", "a", ANTWORT, antworten=("Kraft",)),
+    ...     Kante("f", "b", ANTWORT, antworten=("Balance",)),
+    ...     Kante("f", "c"),
+    ... ]
+    >>> pr = lambda a, s=None: kanten_pruefen(ks, zeit_ab=False, wdh=None, skala=s, antwort=a)
+    >>> wege = lambda a: [s.kante.nach for s in antwort_wege(f, pr(a))]
+    >>> wege(("Kraft",)), wege(("Kraft", "Balance")), wege(("Ausdauer",)), wege(())
+    (['a'], ['a', 'b'], ['c'], ['c'])
+    >>> s = Frage("s")
+    >>> ks = [Kante("s", "a", SKALA, 0, 6), Kante("s", "b", SKALA, 5)]
+    >>> [x.kante.nach for x in antwort_wege(s, pr(None, 5))]
+    ['a']
+    """
+    if frage.art == F_SKALA:
+        stand = regulaere(staende)
+        return [stand] if stand is not None else []
+    getroffen = [s for s in staende if s.angeboten]
+    return getroffen or [s for s in staende if s.gangbar]
+
+
 # -- Struktur ------------------------------------------------------------------------------------
 
 
@@ -842,13 +1018,43 @@ def erreichbar(ablauf: Ablauf, items: Sequence[str]) -> set[str]:
     return gesehen
 
 
+def gleichwertige(ablauf: Ablauf, knoten: str) -> list[Kante]:
+    """Die Wege eines Knotens, die **ohne Abzweig** drankommen: der reguläre (die erste Kante)
+    — und die gleichwertigen daneben (Ben, 17.11.2026: „Mehrere gleichwertige Wege sollen auch
+    als solche dargestellt werden, nicht rot unterbrochen liniert“). Ist der erste Weg frei,
+    sind es **alle freien** Wege der Übung: Im Workout wird die Person gefragt, bevor es
+    weitergeht (`wahl_offen`) — keiner ist „bei Bedarf“. Aus einer **Frage** alle Wege: Jeder
+    gehört zu einer Antwort. Ein Weg mit Auslöser neben dem regulären bleibt ein Abzweig.
+
+    >>> a = Ablauf(True, "a", (Kante("a", "b"), Kante("a", "c"), Kante("a", "d", SKALA, 7)))
+    >>> [k.nach for k in gleichwertige(a, "a")]
+    ['b', 'c']
+    >>> zeit = Ablauf(True, "a", (Kante("a", "b", ZEIT), Kante("a", "c", text="Pause")))
+    >>> [k.nach for k in gleichwertige(zeit, "a")]  # der reguläre hat einen Auslöser
+    ['b']
+    >>> wege = (Kante("f", "b", SKALA, 0, 6), Kante("f", "c", SKALA, 7))
+    >>> f = Ablauf(True, "a", wege, (Frage("f"),))
+    >>> [k.nach for k in gleichwertige(f, "f")], gleichwertige(f, "x")
+    (['b', 'c'], [])
+    """
+    kanten = ablauf.von(knoten)
+    if not kanten or ablauf.frage(knoten) is not None:
+        return kanten
+    if kanten[0].ausloeser != FREI:
+        return kanten[:1]
+    return [k for k in kanten if k.ausloeser == FREI]
+
+
 def von_selbst(ablauf: Ablauf, items: Sequence[str]) -> set[str]:
-    """Was ohne jede Entscheidung drankommen kann: vom Start aus über die **erste** Kante
-    jedes Knotens (die reguläre), nicht über Abzweige mit Auslöser oder weitere Wege.
+    """Was **ohne Abzweig** drankommt: vom Start aus über den regulären Weg jedes Knotens und
+    die gleichwertigen daneben (`gleichwertige`) — nicht über Abzweige mit Auslöser.
 
     >>> a = Ablauf(True, "a", (Kante("a", "b"), Kante("a", "c", SKALA, 7), Kante("b", "a")))
     >>> sorted(von_selbst(a, ["a", "b", "c"]))
     ['a', 'b']
+    >>> drei = Ablauf(True, "a", (Kante("a", "b"), Kante("a", "c"), Kante("a", "d")))
+    >>> sorted(von_selbst(drei, ["a", "b", "c", "d"]))  # drei freie Wege: gleichwertig
+    ['a', 'b', 'c', 'd']
     """
     start = ablauf.startknoten(items)
     if start is None:
@@ -857,16 +1063,17 @@ def von_selbst(ablauf: Ablauf, items: Sequence[str]) -> set[str]:
     warte = deque([start])
     while warte:
         k = warte.popleft()
-        kanten = ablauf.von(k)
-        if kanten and kanten[0].nach not in gesehen and kanten[0].nach not in (ENDE, ZURUECK):
-            gesehen.add(kanten[0].nach)
-            warte.append(kanten[0].nach)
+        for kante in gleichwertige(ablauf, k):
+            if kante.nach not in gesehen and kante.nach not in (ENDE, ZURUECK):
+                gesehen.add(kante.nach)
+                warte.append(kante.nach)
     return gesehen
 
 
 def bedarf(ablauf: Ablauf, items: Sequence[str]) -> list[str]:
     """Die Bedarfsübungen (§2): Planübungen, die nie von selbst drankommen — nur über einen
-    Abzweig (zweite Kante, Auslöser) oder gar nicht.
+    Abzweig (ein Weg mit Auslöser neben dem regulären) oder gar nicht. Mehrere **freie** Wege
+    und die Wege einer Frage sind gleichwertig (`gleichwertige`), ihre Ziele kein Bedarf.
 
     >>> a = Ablauf(True, "a", (Kante("a", "b"), Kante("a", "d", SKALA, 7)))
     >>> bedarf(a, ["a", "b", "c", "d"])
@@ -1129,6 +1336,20 @@ def warnungen(ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str]) ->
             f"Läuft von selbst im Kreis: {liste} — ohne Halt, bis jemand abbricht. Einen der "
             "Wege auf „Anbieten“ stellen."
         )
+    out.extend(_antwort_ohne_weg(ablauf))
+    return out
+
+
+def _antwort_ohne_weg(ablauf: Ablauf) -> list[str]:
+    """Je Frage ein Satz zu den Antworten, bei denen kein Weg weiterführt (`ohne_weg`)."""
+    out: list[str] = []
+    for f in ablauf.fragen:
+        if offen := ohne_weg(ablauf, f):
+            liste = ", ".join(f"„{a}“" for a in offen)
+            out.append(
+                f"Frage „{f.text}“: Bei {liste} führt kein Weg weiter — dort bliebe das "
+                "Workout stehen."
+            )
     return out
 
 
@@ -1191,6 +1412,7 @@ def pruefung(ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str]) -> 
         anzahl = len(ablauf.von(i))
         if anzahl >= VIELE_WEGE:
             out.append(f"{anzahl} Wege ab {namen.get(i, i)} — im Workout wird die Wahl länger.")
+    out.extend(_antwort_ohne_weg(ablauf))
     return out
 
 
@@ -1697,6 +1919,14 @@ def verbinden(ablauf: Ablauf, von: str, nach: str) -> Ablauf | None:
     (True, True)
     >>> verbinden(neu, "b", VOM_START) is None
     True
+
+    Aus einer Frage mit Antworten bekommt der neue Weg die nächste, die noch kein Weg hat
+    (`weg_neu`) — der erste „Ja“, der zweite „Nein“:
+
+    >>> j = Ablauf(True, "a", (Kante("a", "j"),), (Frage("j", art=F_JA_NEIN),))
+    >>> j = verbinden(verbinden(j, "j", "a"), "j", ENDE)
+    >>> [(k.nach, k.antworten) for k in j.von("j")]
+    [('a', ('Ja',)), ('__ende__', ('Nein',))]
     """
     if nach == VOM_START or not von or not nach:
         return None
@@ -1710,7 +1940,150 @@ def verbinden(ablauf: Ablauf, von: str, nach: str) -> Ablauf | None:
         if ablauf.frage(von) is not None:
             return None
         return ablauf.mit_kante(Kante(von, von, text=NOCH_EINMAL))
-    return ablauf.mit_kante(Kante(von, nach))
+    return ablauf.mit_kante(weg_neu(ablauf, von, nach))
+
+
+def weg_neu(ablauf: Ablauf, von: str, nach: str) -> Kante:
+    """Ein **neuer Weg** von ``von`` nach ``nach`` mit seiner Vorgabe (Ben, 16.11.2026: „Dinge
+    mit Standardwerten versehen“): frei — außer aus einer Frage mit Antworten zum Antippen
+    (`Frage.wahl`): Dort gilt er bei der ersten Antwort, die noch kein anderer Weg der Frage
+    hat; sind alle vergeben, bei „jeder anderen“ (frei). Die Wege einer Skala bleiben frei,
+    bis man „Bereich“ wählt (`antwort_bereich`).
+
+    >>> f = Frage("f", art=F_AUSWAHL, antworten=("leicht", "passend", "schwer"))
+    >>> leicht = Kante("f", "p", ANTWORT, antworten=("leicht",))
+    >>> a = Ablauf(True, "x", (Kante("x", "f"), leicht), (f,))
+    >>> weg_neu(a, "f", "q").antworten, weg_neu(a, "x", "q").ausloeser
+    (('passend',), 'frei')
+    >>> voll = a.mit_kante(Kante("f", "q", ANTWORT, antworten=("passend", "schwer")))
+    >>> weg_neu(voll, "f", ENDE).ausloeser  # alles vergeben: jede andere
+    'frei'
+    >>> weg_neu(Ablauf(True, "s", fragen=(Frage("s"),)), "s", "p").ausloeser  # Skala
+    'frei'
+    """
+    frage = ablauf.frage(von)
+    if frage is None or not frage.wahl:
+        return Kante(von, nach)
+    vergeben = {a for k in ablauf.von(von) for a in k.antworten}
+    frei = next((a for a in frage.wahl if a not in vergeben), None)
+    if frei is None:
+        return Kante(von, nach)
+    return Kante(von, nach, ANTWORT, antworten=(frei,))
+
+
+def antwort_umschalten(k: Kante, frage: Frage, antwort: str) -> Kante:
+    """Im Editor eine Antwort an einem Weg aus einer Frage an- oder abwählen — der Weg gilt
+    bei jeder seiner Antworten (in der Reihenfolge der Frage). Ohne Antwort gilt er bei
+    „jeder anderen“ (frei); ``antwort`` leer: gleich dorthin.
+
+    >>> f = Frage("f", art=F_AUSWAHL, antworten=("leicht", "passend", "schwer"))
+    >>> k = antwort_umschalten(Kante("f", "p"), f, "schwer")
+    >>> k.ausloeser, k.antworten
+    ('antwort', ('schwer',))
+    >>> k = antwort_umschalten(k, f, "leicht")
+    >>> k.antworten, antwort_umschalten(k, f, "leicht").antworten
+    (('leicht', 'schwer'), ('schwer',))
+    >>> antwort_umschalten(antwort_umschalten(k, f, "leicht"), f, "schwer").ausloeser
+    'frei'
+    >>> antwort_umschalten(k, f, "").ausloeser, antwort_umschalten(k, f, "fremd") == k
+    ('frei', True)
+    """
+    if not antwort:
+        return replace(k, ausloeser=FREI, n=0, bis=None, antworten=())
+    if antwort not in frage.wahl:
+        return k
+    jetzt = set(k.antworten) if k.ausloeser == ANTWORT else set()
+    jetzt ^= {antwort}
+    neu = tuple(a for a in frage.wahl if a in jetzt)
+    if not neu:
+        return replace(k, ausloeser=FREI, n=0, bis=None, antworten=())
+    return replace(k, ausloeser=ANTWORT, n=0, bis=None, antworten=neu)
+
+
+def frage_ersetzen(
+    ablauf: Ablauf, neu: Frage, umbenannt: Mapping[str, str] | None = None
+) -> Ablauf:
+    """Eine Frage ist geändert (Blatt „Frage ändern“): Sie ersetzt die alte mit derselben ID —
+    und **ihre Wege ziehen mit**, damit keiner an einer Antwort hängt, die es nicht mehr gibt.
+
+    - Dieselbe Art: Ein Weg behält seine Antworten; ``umbenannt`` (alt → neu) zieht einen
+      geänderten Wortlaut nach, eine gestrichene Antwort fällt am Weg weg — bleibt ihm keine,
+      gilt er bei „jeder anderen“.
+    - **Andere Art** (Skala → Ja/Nein …): Die alten Angaben passen nicht mehr. Die Wege
+      bekommen der Reihe nach die Vorgabe eines neuen Wegs (`weg_neu`) — der erste „Ja“, der
+      zweite „Nein“; zu einer Skala hin sind sie frei, bis man „Bereich“ wählt. Ziel,
+      Beschriftung und „nur vorschlagen“ bleiben.
+
+    >>> alt = Frage("f")
+    >>> wege = (Kante("x", "f"), Kante("f", "p", SKALA, 7, text="reicht"), Kante("f", ENDE))
+    >>> a = Ablauf(True, "x", wege, (alt,))
+    >>> b = frage_ersetzen(a, Frage("f", "Noch eine Runde?", art=F_JA_NEIN))
+    >>> [(k.nach, k.ausloeser, k.antworten, k.text) for k in b.von("f")]
+    [('p', 'antwort', ('Ja',), 'reicht'), ('__ende__', 'antwort', ('Nein',), '')]
+    >>> wahl = Frage("f", art=F_AUSWAHL, antworten=("leicht", "schwer"))
+    >>> beide = Kante("f", "p", ANTWORT, antworten=("leicht", "schwer"))
+    >>> c = frage_ersetzen(
+    ...     Ablauf(True, "x", (beide,), (wahl,)),
+    ...     replace(wahl, antworten=("locker",)),
+    ...     {"leicht": "locker"},
+    ... )
+    >>> c.von("f")[0].antworten  # umbenannt zieht nach, gestrichen fällt weg
+    ('locker',)
+    >>> d = frage_ersetzen(b, Frage("f"))  # zurück zur Skala: frei
+    >>> [k.ausloeser for k in d.von("f")], d.frage("f").art
+    (['frei', 'frei'], 'skala')
+    """
+    alt = ablauf.frage(neu.id)
+    if alt is None:
+        return ablauf
+    fragen = tuple(neu if f.id == neu.id else f for f in ablauf.fragen)
+    if alt.art != neu.art:
+        # der Reihe nach neu vergeben — gegen den Ablauf, wie er bis dahin steht
+        stand = replace(
+            ablauf,
+            fragen=fragen,
+            kanten=tuple(
+                replace(k, ausloeser=FREI, n=0, bis=None, antworten=()) if k.von == neu.id else k
+                for k in ablauf.kanten
+            ),
+        )
+        for k in stand.von(neu.id):
+            vorgabe = weg_neu(stand.ohne_kante(k), k.von, k.nach)
+            stand = stand.kante_ersetzen(
+                k, replace(k, ausloeser=vorgabe.ausloeser, antworten=vorgabe.antworten)
+            )
+        return stand
+    if not neu.wahl:
+        return replace(ablauf, fragen=fragen)
+    namen = dict(umbenannt or {})
+
+    def angepasst(k: Kante) -> Kante:
+        if k.von != neu.id or k.ausloeser != ANTWORT:
+            return k
+        bleibt = {namen.get(a, a) for a in k.antworten}
+        antworten = tuple(a for a in neu.wahl if a in bleibt)
+        if not antworten:
+            return replace(k, ausloeser=FREI, antworten=())
+        return replace(k, antworten=antworten)
+
+    return replace(ablauf, fragen=fragen, kanten=tuple(angepasst(k) for k in ablauf.kanten))
+
+
+def ohne_weg(ablauf: Ablauf, frage: Frage) -> list[str]:
+    """Die Antworten einer Frage, bei denen **kein Weg** weiterführt — dort bliebe das Workout
+    stehen. Leer, solange die Frage noch gar keinen Weg hat (sie endet das Workout), einen
+    freien Weg hat („jede andere“) oder eine Skala ist.
+
+    >>> f = Frage("f", art=F_JA_NEIN)
+    >>> a = Ablauf(True, "x", (Kante("x", "f"), Kante("f", "p", ANTWORT, antworten=("Ja",))), (f,))
+    >>> ohne_weg(a, f), ohne_weg(a.mit_kante(Kante("f", ENDE)), f), ohne_weg(Ablauf(fragen=(f,)), f)
+    (['Nein'], [], [])
+    """
+    wege = ablauf.von(frage.id)
+    if not wege or not frage.wahl or any(k.ausloeser == FREI for k in wege):
+        return []
+    vergeben = {a for k in wege for a in k.antworten}
+    return [a for a in frage.wahl if a not in vergeben]
 
 
 def ausloeser_wechsel(k: Kante, art: str) -> Kante:
@@ -1817,7 +2190,13 @@ def vorschlag_text(k: Kante, frage: Frage) -> str:
     'Bei 0–6 schlägt der Plan vor:'
     >>> vorschlag_text(Kante("f", "x", vorschlagen=True), f)  # der freie Weg: jede andere
     'Der Plan schlägt vor:'
+    >>> vorschlag_text(Kante("f", ENDE, ANTWORT, antworten=("Nein",), vorschlagen=True), f)
+    'Bei „Nein“ schlägt der Plan vor:'
+    >>> vorschlag_text(Kante("f", ENDE, ANTWORT, antworten=("Kraft", "Balance")), f)
+    'Bei „Kraft“ oder „Balance“ schlägt der Plan vor:'
     """
+    if k.ausloeser == ANTWORT:
+        return "Bei " + " oder ".join(f"„{a}“" for a in k.antworten) + " schlägt der Plan vor:"
     if k.ausloeser != SKALA:
         return "Der Plan schlägt vor:"
     oben = frage.max if k.bis is None else k.bis
@@ -1943,6 +2322,23 @@ def ablauf_pruefen(roh: Any) -> tuple[list[str], list[str]]:
     >>> f, h = ablauf_pruefen(roh)
     >>> len(f), h
     (2, ['Kante 2: Auslöser „tanz“ unbekannt — „frei“ gilt'])
+
+    Fragen mit Antworten zum Antippen (Formatversion 7): Ein Weg nennt die Antworten der
+    Frage, von der er kommt.
+
+    >>> roh = {
+    ...     "fragen": [{"id": "?1", "art": "ja_nein"}, {"id": "?2", "art": "auswahl"}],
+    ...     "kanten": [
+    ...         {"von": "?1", "nach": "#1", "ausloeser": "antwort", "antworten": ["Ja"]},
+    ...         {"von": "?1", "nach": "#2", "ausloeser": "antwort", "antworten": ["Vielleicht"]},
+    ...         {"von": "?2", "nach": "#2", "ausloeser": "antwort"},
+    ...     ],
+    ... }
+    >>> for zeile in ablauf_pruefen(roh)[1]:
+    ...     print(zeile)
+    Kante 2: Antwort „Vielleicht“ kennt die Frage nicht — der Weg gilt bei ihr nie
+    Kante 3: Auslöser „antwort“ ohne antworten — „frei“ gilt
+    Frage 2: Auswahl ohne antworten — sie hat die eine Antwort „Weiter“
     """
     fehler: list[str] = []
     hinweise: list[str] = []
@@ -1960,12 +2356,27 @@ def ablauf_pruefen(roh: Any) -> tuple[list[str], list[str]]:
     if not isinstance(kanten, list):
         fehler.append("kanten ist keine Liste")
         kanten = []
+    fragen_roh = roh.get("fragen", [])
+    wahl: dict[str, tuple[str, ...]] = {}
+    for x in fragen_roh if isinstance(fragen_roh, list) else []:
+        if (frage := Frage.aus_dict(x)) is not None:
+            wahl[frage.id] = frage.wahl
     for nr, k in enumerate(kanten, start=1):
         if not isinstance(k, Mapping) or not position(k.get("von")) or not position(k.get("nach")):
             fehler.append(f"Kante {nr}: von und nach fehlen oder sind keine Position („#2“, „?1“)")
         if isinstance(k, Mapping):
             if "ausloeser" in k and k["ausloeser"] not in AUSLOESER:
                 hinweise.append(f"Kante {nr}: Auslöser „{k['ausloeser']}“ unbekannt — „frei“ gilt")
+            if k.get("ausloeser") == ANTWORT:
+                antworten = _texte(k.get("antworten"))
+                if not antworten:
+                    hinweise.append(f"Kante {nr}: Auslöser „antwort“ ohne antworten — „frei“ gilt")
+                for a in antworten:
+                    if a not in wahl.get(str(k.get("von")), ()):
+                        hinweise.append(
+                            f"Kante {nr}: Antwort „{a}“ kennt die Frage nicht — der Weg gilt "
+                            "bei ihr nie"
+                        )
             for z in ("n", "bis"):
                 if z in k and not isinstance(k[z], int | float):
                     fehler.append(f"Kante {nr}: {z} ist keine Zahl")
@@ -1976,7 +2387,33 @@ def ablauf_pruefen(roh: Any) -> tuple[list[str], list[str]]:
         for nr, f in enumerate(fragen, start=1):
             if not isinstance(f, Mapping) or not position(f.get("id")):
                 fehler.append(f"Frage {nr}: id fehlt oder ist keine Position („?1“)")
+                continue
+            if "art" in f and f["art"] not in FRAGE_ARTEN:
+                hinweise.append(f"Frage {nr}: Art „{f['art']}“ unbekannt — „skala“ gilt")
+            if f.get("art") == F_AUSWAHL and not _texte(f.get("antworten")):
+                hinweise.append(
+                    f"Frage {nr}: Auswahl ohne antworten — sie hat die eine Antwort „{NUR_WEITER}“"
+                )
     return fehler, hinweise
+
+
+def braucht_antworten(roh: Any) -> bool:
+    """Nutzt das Paketfeld ``ablauf`` eine Frage mit **Antworten zum Antippen** (Ja/Nein,
+    Auswahl)? Dann braucht das Paket Formatversion 7 (`core.pakete.noetige_version`): Eine
+    ältere App läse die Frage als Skala und ihre Wege als frei — sie ginge bei jeder Antwort
+    den ersten Weg.
+
+    >>> braucht_antworten({"fragen": [{"id": "?1"}]}), braucht_antworten(None)
+    (False, False)
+    >>> braucht_antworten({"fragen": [{"id": "?1", "art": "ja_nein"}]})
+    True
+    """
+    if not isinstance(roh, Mapping):
+        return False
+    fragen = roh.get("fragen")
+    return isinstance(fragen, list) and any(
+        isinstance(f, Mapping) and f.get("art") in (F_JA_NEIN, F_AUSWAHL) for f in fragen
+    )
 
 
 def kanten_zaehlen(paare: Iterable[tuple[str, str]]) -> Counter[tuple[str, str]]:
@@ -1986,6 +2423,17 @@ def kanten_zaehlen(paare: Iterable[tuple[str, str]]) -> Counter[tuple[str, str]]
     2
     """
     return Counter(paare)
+
+
+def _texte(roh: Any) -> tuple[str, ...]:
+    """Eine Liste von Antworten: nur Text, ohne Leeres und Doppeltes, in ihrer Reihenfolge.
+
+    >>> _texte(["Ja", " Nein ", "", "Ja", 3]), _texte("Ja"), _texte(None)
+    (('Ja', 'Nein', '3'), (), ())
+    """
+    if not isinstance(roh, (list, tuple)):
+        return ()
+    return tuple(dict.fromkeys(s for s in (str(x).strip() for x in roh) if s))
 
 
 def _ganzzahl(roh: Any) -> int:
@@ -2004,11 +2452,21 @@ def _zahl(roh: Any) -> float:
 
 
 __all__ = [
+    "ANTWORT",
+    "ANTWORTEN_MAX",
     "AUSLOESER",
     "AUSLOESER_TEXT",
     "ENDE",
+    "FRAGE_ARTEN",
+    "FRAGE_ART_TEXT",
     "FREI",
+    "F_AUSWAHL",
+    "F_JA_NEIN",
+    "F_SKALA",
+    "JA",
+    "NEIN",
     "NOCH_EINMAL",
+    "NUR_WEITER",
     "SEKUNDEN_SCHRITT",
     "SKALA",
     "START_FEHLT",
@@ -2028,19 +2486,24 @@ __all__ = [
     "ablauf_pruefen",
     "als_position",
     "antwort_bereich",
+    "antwort_umschalten",
+    "antwort_wege",
     "aus_bedingungen",
     "aus_position",
     "ausloeser_wechsel",
     "bedarf",
     "bedingung_aus_kante",
+    "braucht_antworten",
     "empfohlen",
     "erreichbar",
     "fehlende",
     "folgt_der_liste",
     "fortsetzung",
+    "frage_ersetzen",
     "freie_lage",
     "fuer_plan",
     "gesperrt",
+    "gleichwertige",
     "hat_verzweigung",
     "hauptpfad",
     "hauptwege_spiegeln",
@@ -2062,6 +2525,7 @@ __all__ = [
     "ohne_ausweg",
     "ohne_start_text",
     "ohne_verzweigung",
+    "ohne_weg",
     "pruefung",
     "regulaere",
     "sekunden_text",
@@ -2076,4 +2540,5 @@ __all__ = [
     "wahl_offen",
     "warnungen",
     "weg_durch",
+    "weg_neu",
 ]

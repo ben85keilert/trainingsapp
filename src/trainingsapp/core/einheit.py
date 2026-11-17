@@ -216,6 +216,10 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         "nach",
         "kante",
         "frage",
+        # ``plan/antwort`` auf eine Frage mit Antworten zum Antippen (Ja/Nein, Auswahl — Ben,
+        # 17.11.2026): der Wortlaut der gewählten Antwort, mehrere angekreuzte mit Komma; leer:
+        # nichts davon. Selbstauskunft wie ``wert`` der Skala — nur Zeitleiste
+        "antwort",
         # Durcharbeiten (Ben, 9.11.2026, P166/P167): ``pflicht_offen`` an ``plan/kante`` — der
         # Knoten wurde verlassen, ohne dass seine Pflicht erfüllt war (Überspringen), das Tor ist
         # damit nicht offen; ``bei``/``vorher`` an ``plan/ende`` — hier geht ein vorzeitig

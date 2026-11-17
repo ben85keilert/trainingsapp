@@ -416,14 +416,16 @@ Planübung gehört dazu, Umordnen ordnet das Workout um. Sobald du im Ablauf etw
 Abzweig, eine Frage, ein anderes Ziel), ist es ein **eigener Ablauf**: Neue Planübungen stehen
 dann in der Palette, bis du sie einsetzt.
 
-- **Palette** oben: die **Übungen** des Plans, jede einmal — **„2×“, „3×“**, wenn sie mehrfach
-  im Plan steht, **„frei“**, solange sie nicht im Bild ist. Eine Kachel bringt immer einen
+- **Palette** oben: **alle Übungen** — zuerst die des Plans, jede einmal (**„2×“, „3×“**, wenn
+  sie mehrfach im Plan steht, **„frei“**, solange sie nicht im Bild ist), hinter dem Strich
+  der Katalog. **Suche** und **Filter** (Typ · Region · Paket) grenzen ein. Eine Kachel aus
+  dem Katalog kommt beim Antippen oder Ziehen in den Plan und in den Ablauf. Eine Kachel
+  bringt immer einen
   **neuen Knoten** ins Bild: **Antippen** (mit gewählter Übung im Bild: die neue kommt
   dahinter) oder **nach unten ziehen** — auf eine **Übung im Bild** (die neue kommt hinter
   sie) oder auf „Start“. Dabei kommt zuerst eine Planübung, die noch nicht im Bild steht —
-  sonst kommt die Übung **noch einmal** in den Plan. Am Ende der Leiste steht die Kachel
-  **„Frage“**: antippen oder auf eine Übung ziehen setzt eine Frage dahinter. „+“ fügt eine
-  andere Übung hinzu.
+  sonst kommt die Übung **noch einmal** in den Plan. Rechts neben der Leiste steht die Kachel
+  **„Frage“**: antippen oder auf eine Übung ziehen setzt eine Frage dahinter.
 - Im Bild ist **jede Verwendung ein eigener Knoten** mit ihrer **Nummer** (die Stelle in der
   Liste — sie ändert sich beim Umordnen, die Wege bleiben).
 - **Verbinden durch Ziehen:** Jede Übung und jede Frage hat unter sich **ihren Punkt**. Zieh
@@ -443,6 +445,15 @@ dann in der Palette, bis du sie einsetzt.
   Im Workout steht er als Vorschlag des Plans da, und du tippst ihn oder einen anderen. Ohne
   den Schalter geht es von selbst weiter — eine Frage kann beides, etwa „0–6“ läuft weiter,
   „7–10“ schlägt „Für heute reicht es“ vor.
+- **Wie geantwortet wird**, stellst du an der Frage ein (gedrückt halten → „Frage ändern …“):
+  **Skala**, **Ja/Nein** oder **Auswahl** – eigene Antworten zum Antippen, auf Wunsch
+  **mehrere zum Ankreuzen**. Die Wege zeigen dann je Antwort einen Chip: Ein Weg gilt bei
+  jeder gewählten Antwort, „jede andere“ fängt den Rest. Führen angekreuzte Antworten zu
+  verschiedenen Wegen, wählst du im Workout einen davon. Hat eine Antwort keinen Weg, warnt
+  der Ablauf.
+- **Mehrere freie Wege** aus einer Übung sind gleichwertig: Im Workout wirst du gefragt, im
+  Bild sehen sie gleich aus. **„Bei Bedarf“** (gestrichelt) ist nur, was über einen Weg mit
+  Bedingung neben dem ersten erreichbar ist.
 - **Gedrückt halten** auf einer Übung öffnet ihr **Menü**: Übung einstellen, Beiname, nur
   ihren Weg zeigen („Alles zeigen“ holt den Rest zurück), Als Start, **Aus dem Ablauf nehmen**
   (Lücke schließen oder die Reihe danach mitnehmen — die Übung bleibt im Plan und in der

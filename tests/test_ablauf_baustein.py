@@ -559,3 +559,171 @@ def test_geleerter_ablauf_beginnt_nicht_und_sagt_was_fehlt() -> None:
     # Ohne den Vermerk gilt weiter die erste Planübung (Altbestand, Pakete ohne ``start``)
     alt = PlanAblaufBaustein("p1", "Rumpf", _schritte(), workout=True, ablauf=Ablauf(True))
     assert alt.schritt.item_id == "w"
+
+
+def test_frage_mit_antworten_ja_nein_auswahl_und_mehrere() -> None:
+    """Ben, 17.11.2026: „Eine Frage lässt bisher nur Skala von x bis y zu. Mehrfachauswahl,
+    Ja/Nein usw. geht bisher nicht, wird aber gebraucht.“ Eine Frage mit Antworten zum Antippen
+    geht den Weg, zu dem die Antwort gehört — ein freier Weg fängt „jede andere“; die Antwort
+    steht mit ihrem Wortlaut in der Zeitleiste."""
+
+    def bis_zur_frage(teil, uhr, frage) -> None:
+        _lauf(teil, uhr, 10)
+        if teil.schritt.frage is None:
+            teil.kante_gehen(teil.kanten_stand()[0].kante)
+            teil.takt(uhr[0])
+        assert teil.schritt.frage is frage
+
+    # Ja/Nein: „Ja“ zurück zur Übung, „Nein“ zum Ende
+    ja_nein = Frage("f", "Noch eine Runde?", art=ab.F_JA_NEIN)
+    a = Ablauf(
+        True,
+        "w",
+        (
+            Kante("w", "f", ab.ZEIT),
+            Kante("f", "w", ab.ANTWORT, antworten=(ab.JA,)),
+            Kante("f", ab.ENDE, ab.ANTWORT, antworten=(ab.NEIN,)),
+        ),
+        (ja_nein,),
+    )
+    for uebergang in (HART, WEICH):
+        teil, uhr = _baustein(a, uebergang, frage=ja_nein)
+        bis_zur_frage(teil, uhr, ja_nein)
+        assert not teil.beantwortet and teil.antwort_wege() == []
+        teil.antwort_geben((ab.JA,))
+        teil.takt(uhr[0])
+        assert teil.schritt.item_id == "w" and teil.durchlauf == 2
+        bis_zur_frage(teil, uhr, ja_nein)
+        assert teil.antwort is None  # ein neuer Durchlauf fragt neu
+        teil.antwort_geben((ab.NEIN,))
+        ereignisse = teil.takt(uhr[0])
+        antwort = next(e for e in ereignisse if (e.quelle, e.art) == ("plan", "antwort"))
+        assert antwort.daten["antwort"] == "Nein" and antwort.text.endswith(": Nein")
+        assert teil.phase == FERTIG
+
+    # Auswahl mit einer Antwort: „schwer“ schlägt das Ende nur vor, alles andere geht weiter
+    wahl = Frage("f", "Wie war es?", art=ab.F_AUSWAHL, antworten=("leicht", "passend", "schwer"))
+    b = Ablauf(
+        True,
+        "w",
+        (
+            Kante("w", "f", ab.ZEIT),
+            Kante("f", ab.ENDE, ab.ANTWORT, antworten=("schwer",), vorschlagen=True),
+            Kante("f", "w"),  # jede andere
+        ),
+        (wahl,),
+    )
+    teil, uhr = _baustein(b, HART, frage=wahl)
+    bis_zur_frage(teil, uhr, wahl)
+    teil.antwort_geben(("passend",))
+    teil.takt(uhr[0])
+    assert teil.schritt.item_id == "w"  # „jede andere“
+    bis_zur_frage(teil, uhr, wahl)
+    teil.antwort_geben(("schwer",))
+    _lauf(teil, uhr, 5)
+    assert teil.schritt.frage is wahl and teil.empfiehlt and not teil.antwort_waehlt
+    (vorschlag,) = teil.antwort_wege()
+    assert ab.vorschlag_text(vorschlag.kante, wahl) == "Bei „schwer“ schlägt der Plan vor:"
+
+
+def test_mehrere_antworten_zu_verschiedenen_wegen_die_person_waehlt() -> None:
+    """Ben auf die Rückfrage (17.11.2026): Führt das Angekreuzte zu verschiedenen Wegen, wählt
+    die Person — die Regel des Ablaufs („mehrere gleichwertige Wege, erst fragen“). Nichts
+    geht von selbst; ein Kreuz allein geht seinen Weg, kein Kreuz den Weg „jede andere“."""
+    frage = Frage(
+        "f", "Was war schwer?", art=ab.F_AUSWAHL, antworten=("Kraft", "Balance"), mehrfach=True
+    )
+    a = Ablauf(
+        True,
+        "w",
+        (
+            Kante("w", "f", ab.ZEIT),
+            Kante("f", "w", ab.ANTWORT, antworten=("Kraft",)),
+            Kante("f", "k", ab.ANTWORT, antworten=("Balance",)),
+            Kante("f", ab.ENDE),
+        ),
+        (frage,),
+    )
+
+    def frisch():
+        teil, uhr = _baustein(a, HART, frage=frage)
+        _lauf(teil, uhr, 10)
+        assert teil.schritt.frage is frage
+        return teil, uhr
+
+    teil, uhr = frisch()
+    teil.antwort_geben(("Kraft", "Balance"))
+    _lauf(teil, uhr, 5)
+    assert teil.schritt.frage is frage and teil.antwort_waehlt and not teil.empfiehlt
+    assert [s.kante.nach for s in teil.antwort_wege()] == ["w", "k"]
+    teil.kante_gehen(teil.antwort_wege()[0].kante)
+    ereignisse = teil.takt(uhr[0])
+    antwort = next(e for e in ereignisse if (e.quelle, e.art) == ("plan", "antwort"))
+    assert antwort.daten["antwort"] == "Kraft, Balance"
+    assert teil.schritt.item_id == "w"
+
+    teil, uhr = frisch()
+    teil.antwort_geben(("Kraft",))  # ein Kreuz: sein Weg
+    teil.takt(uhr[0])
+    assert teil.schritt.item_id == "w"
+
+    teil, uhr = frisch()
+    teil.antwort_geben(())  # nichts davon: „jede andere“ — hier das Ende
+    ereignisse = teil.takt(uhr[0])
+    antwort = next(e for e in ereignisse if (e.quelle, e.art) == ("plan", "antwort"))
+    assert antwort.daten["antwort"] == "" and antwort.text.endswith("nichts davon")
+    assert teil.phase == FERTIG
+
+
+def test_antwort_ohne_weg_bleibt_stehen_und_die_pruefung_sagt_es() -> None:
+    """Eine Antwort, zu der kein Weg führt, lässt die Frage stehen — die Warnung beim Bauen
+    nennt sie (`core.ablauf.ohne_weg`), damit es dazu nicht kommt."""
+    frage = Frage("f", "Noch eine Runde?", art=ab.F_JA_NEIN)
+    a = Ablauf(
+        True,
+        "w",
+        (Kante("w", "f", ab.ZEIT), Kante("f", "w", ab.ANTWORT, antworten=(ab.JA,))),
+        (frage,),
+    )
+    assert ab.ohne_weg(a, frage) == ["Nein"]
+    (satz,) = [w for w in ab.warnungen(a, ["w"], {"w": "Wandsitz"}) if w.startswith("Frage")]
+    assert satz == (
+        "Frage „Noch eine Runde?“: Bei „Nein“ führt kein Weg weiter — dort bliebe das "
+        "Workout stehen."
+    )
+    teil, uhr = _baustein(a, HART, frage=frage)
+    _lauf(teil, uhr, 10)
+    teil.antwort_geben((ab.NEIN,))
+    _lauf(teil, uhr, 5)
+    assert teil.schritt.frage is frage and teil.beantwortet and teil.antwort_wege() == []
+    teil.antwort_geben((ab.JA,))  # die Antwort lässt sich ändern
+    teil.takt(uhr[0])
+    assert teil.schritt.item_id == "w"
+
+
+def test_mehrere_freie_wege_sind_gleichwertig_und_kein_bedarf() -> None:
+    """Ben, 17.11.2026: „Mehrere gleichwertige Wege sollen auch als solche dargestellt werden,
+    nicht rot unterbrochen liniert.“ Drei freie Wege aus einer Übung — und die Wege einer Frage
+    — gehören zum Ablauf; „bei Bedarf“ ist nur, was allein ein Weg mit Auslöser neben dem
+    regulären erreicht."""
+    frage = Frage("f")
+    a = Ablauf(
+        True,
+        "w",
+        (
+            Kante("w", "k"),
+            Kante("w", "p"),
+            Kante("w", "d", ab.SKALA, 7, text="Beine krampfen"),
+            Kante("k", "f"),
+            Kante("f", "x", ab.SKALA, 0, 6),
+            Kante("f", "y", ab.SKALA, 7),
+        ),
+        (frage,),
+    )
+    ids = ["w", "k", "p", "d", "x", "y", "z"]
+    assert [k.nach for k in ab.gleichwertige(a, "w")] == ["k", "p"]
+    assert ab.von_selbst(a, ids) == {"w", "k", "p", "f", "x", "y"}
+    assert ab.bedarf(a, ids) == ["d", "z"]  # hinter der Skala · ohne jeden Weg
+    # ein regulärer Weg mit Auslöser: der freie daneben ist ein Abzweig
+    zeit = Ablauf(True, "w", (Kante("w", "k", ab.ZEIT), Kante("w", "p", text="Pause")))
+    assert ab.bedarf(zeit, ["w", "k", "p"]) == ["p"]

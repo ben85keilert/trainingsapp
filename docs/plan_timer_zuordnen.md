@@ -232,3 +232,32 @@ Timer zeigt keine Ausführungen (P174). Zugeklappt steht unter der Zeile der Kur
 **Tests.** `tests/test_timer_bibliothek.py` (Umzug, Verweise, Löschen, Export),
 `tests/test_ui_timer_zuordnen.py` (Filter + alle ankreuzen, Pläne, Zusammenlegen, Dialog),
 `tests/test_ui_plan_uhren.py`, `tests/test_ui_uebung_einstellen.py`.
+
+## 8. Timer einer Planübung für die anderen im Plan (Ben, 17.11.2026) — gebaut
+
+Ben: „Wenn man einen Timer setzt im Bereich ‚In {Plan}‘, wird dieser Timer den anderen Übungen
+im Timereditor des Plans nicht zur Verfügung gestellt. Überprüfe das.“
+
+**Nachgestellt** (Stand v0.3.95, Plan mit zwei Planübungen, die erste mit einem Timer „nur in
+diesem Plan“): Das Uhr-Blatt der zweiten zeigte ihn weder beim Üben noch im Editor („Im Plan
+einstellen“, Uhrenplan) — nicht in der Liste und nicht unter „Aus der Bibliothek …“. Er lag
+nur an seiner Planübung (`TimerWahl.eigen`); wer ihn woanders wollte, musste ihn unter
+Einstellungen → „Alle Timer“ erst in die Bibliothek legen.
+
+**Gebaut:** Unter **„In „Plan““** stehen im Uhr-Blatt auch die Timer, die **andere
+Planübungen dieses Plans** festhalten — eigene Kopien wie zugeordnete —, jeder einmal, mit der
+Herkunft „in diesem Plan · bei <Übung>“ (`core.uebung_timer.timer_im_plan`). Gewählt und
+übernommen wird **zugeordnet, nicht kopiert** (§4): War der Timer „nur hier“, kommt er in die
+Bibliothek, und die Planübung, an der er lag, verweist darauf (`ui/timer_bibliothek.
+in_die_bibliothek`); danach gilt er an beiden Stellen, und wer ihn ändert, wird gefragt (§5).
+An der Planübung, von der er stammt, ändert sich sonst nichts — erst mit „Übernehmen“, nicht
+schon beim Antippen. Nicht angeboten wird ein Timer, der eine **Ausführung je Abschnitt**
+trägt: Die gehört zur Übung (P174). Unter „Für jetzt“ und „Übung“ stehen diese Timer nicht.
+
+Dabei: Hatte die Planübung schon einen eigenen Timer, bleibt er als Eintrag der Bibliothek,
+auch wenn an seine Stelle ein zugeordneter tritt (N71 galt bisher nur für „keinen eigenen
+mehr“).
+
+Tests: `tests/test_ui_uhr_fokus.py`
+(`test_timer_einer_planuebung_steht_den_anderen_im_plan_zur_wahl`), Doctest
+`core.uebung_timer.timer_im_plan`.

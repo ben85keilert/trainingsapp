@@ -1154,6 +1154,8 @@ class TimerLauf:
         self.profil = profil
         self._uhr = uhr
         self._basis_s = 0.0  # Laufzeit vor dem letzten Start
+        #: Stoppuhr: die gelaufene Zeit beim Tipp auf „Fertig“ — für die Anzeige danach
+        self._fertig_nach_s: float | None = None
         self._start: float | None = None  # Uhr beim letzten Start; None = angehalten
         self._teile = profil.alle_teile()
         # Je Abschnitt über alle Teile und Runden: (Teil, Runde, Index im Teil, Abschnitt)
@@ -1232,8 +1234,17 @@ class TimerLauf:
         >>> timer = TimerLauf(TimerProfil(abschnitte=[Abschnitt("A", 30)]), uhr=lambda: t[0])
         >>> timer.start(); t[0] = 84.0; timer.anzeige()
         '0:30'
+
+        Eine mit „Fertig“ beendete Stoppuhr zeigt weiter, was sie gelaufen ist — nicht ihr
+        Ende nach zwölf Stunden („720:00“ stand im Workout, solange nach „Fertig“ die Wahl
+        des Wegs offen war; Web-Foto 17.11.2026, N182):
+
+        >>> uhr.fertig_machen(); uhr.anzeige(), uhr.fertig  # bei 84 s getippt
+        ('1:24', True)
         """
         if self.vorwaerts:
+            if self._fertig_nach_s is not None and self.fertig:
+                return dauer_text(int(self._fertig_nach_s))
             return dauer_text(int(self.vergangen_s()))
         stand = self.stand()
         return dauer_text(math.ceil(stand.rest_s)) if not stand.fertig else "0:00"
@@ -1302,6 +1313,7 @@ class TimerLauf:
         self._start = None
         self._gemeldet = None  # der nächste Start meldet den ersten Abschnitt wieder
         self._gemeldet_bis_fertig = None
+        self._fertig_nach_s = None
         self.angehalten_bei = None
         self.abgebrochen = False
         # Der Takt beginnt mit dem nächsten Start von vorn: ein `TaktLauf` mit Tempoanker aus
@@ -1335,6 +1347,8 @@ class TimerLauf:
         if self.begonnen and self._gemeldet is not None:
             # was bis jetzt wirklich begann, wird noch gemeldet — der Rest nicht
             self._gemeldet_bis_fertig = self.stand().nummer
+        if self.vorwaerts and not self.fertig:
+            self._fertig_nach_s = self.vergangen_s()
         self._springen(None)
 
     def weiter(self) -> None:

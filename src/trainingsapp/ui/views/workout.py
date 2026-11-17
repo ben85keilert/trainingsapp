@@ -710,6 +710,101 @@ def workout_view(
             ),
         )
 
+    def antwort_auswahl(teil: PlanAblaufBaustein, frage: ab.Frage) -> ft.Control:
+        """Eine Frage mit **Antworten zum Antippen** (Ben, 17.11.2026: Ja/Nein, Auswahl): je
+        Antwort ein Knopf — ein Tipp ist die Antwort (`PlanAblaufBaustein.antwort_geben`). Bei
+        „mehrere“ wird angekreuzt und mit „Weiter“ geantwortet; ohne Kreuz heißt der Knopf
+        „Nichts davon — weiter“. Die gegebene Antwort bleibt sichtbar, solange die Frage steht
+        (Vorschlag, Wahl unter mehreren Wegen) — ein neuer Tipp antwortet neu."""
+        gegeben = teil.antwort
+        kreuze = teil.kreuze  # am Baustein: Sie überstehen einen Neuaufbau der Ansicht
+
+        def geben(wahl: tuple[str, ...]) -> None:
+            teil.antwort_geben(wahl)
+            einheit_ui.melden(state)
+            auffrischen()
+
+        def kreuzen(antwort: str) -> Callable[[Any], None]:
+            def handler(_e: Any = None) -> None:
+                teil.ankreuzen(antwort)
+                auffrischen()
+
+            return handler
+
+        knoepfe: list[ft.Control]
+        if frage.mehrere:
+            knoepfe = [
+                ft.Chip(
+                    label=ft.Text(
+                        a,
+                        weight=ft.FontWeight.W_700 if a in kreuze else None,
+                        color=ft.Colors.ON_SECONDARY if a in kreuze else None,
+                    ),
+                    selected=a in kreuze,
+                    show_checkmark=True,
+                    check_color=ft.Colors.ON_SECONDARY,
+                    selected_color=ft.Colors.SECONDARY,
+                    on_select=kreuzen(a),
+                    data=("antwort", a),
+                )
+                for a in frage.wahl
+            ]
+        else:
+            knoepfe = [
+                (ft.FilledButton if gegeben == (a,) else ft.OutlinedButton)(
+                    a,
+                    height=44,
+                    on_click=lambda _e, a=a: geben((a,)),
+                    data=("antwort", a),
+                )
+                for a in frage.wahl
+            ]
+        zeilen: list[ft.Control] = [
+            ft.Row(
+                spacing=8,
+                controls=[
+                    ft.Icon(ft.Icons.HELP_OUTLINE, size=18, color=ft.Colors.SECONDARY),
+                    ft.Text(frage.text, size=14, weight=ft.FontWeight.W_600, expand=True),
+                ],
+            ),
+            ft.Row(wrap=True, spacing=8, run_spacing=6, controls=knoepfe),
+        ]
+        if frage.mehrere:
+            gewaehlt = tuple(a for a in frage.wahl if a in kreuze)
+            zeilen.append(
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.END,
+                    controls=[
+                        ft.FilledButton(
+                            "Weiter" if gewaehlt else "Nichts davon — weiter",
+                            icon=ft.Icons.ARROW_FORWARD,
+                            height=44,
+                            # was beim Tipp angekreuzt ist — nicht, was es beim Aufbau war
+                            on_click=lambda _e: geben(
+                                tuple(a for a in frage.wahl if a in teil.kreuze)
+                            ),
+                            data="antwort_weiter",
+                        )
+                    ],
+                )
+            )
+        if teil.beantwortet and not teil.antwort_wege():
+            zeilen.append(
+                ft.Text(
+                    "Für diese Antwort hat der Plan keinen Weg — wähle eine andere, oder beende "
+                    "das Workout.",
+                    size=12,
+                    color=ft.Colors.ERROR,
+                    data="antwort_ohne_weg",
+                )
+            )
+        return ft.Container(
+            padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            border_radius=12,
+            bgcolor=ft.Colors.SECONDARY_CONTAINER,
+            content=ft.Column(spacing=8, controls=zeilen),
+        )
+
     def wdh_eintrag(
         e: Einheitslauf, teil: PlanAblaufBaustein, u: Exercise | None, ziel: int | None
     ) -> ft.Control:
@@ -844,14 +939,20 @@ def workout_view(
         Antwort einen Weg, der nur vorschlägt, steht er betont und zuerst — darüber der Satz
         mit der Regel des Plans (`core.ablauf.vorschlag_text`); die anderen Wege folgen unter
         „Oder“ (weich wählbar, hart nur erfüllte). Trifft sie einen Weg ohne den Vermerk, ist
-        die Frage schon weitergegangen (`PlanAblaufBaustein.antworten`)."""
+        die Frage schon weitergegangen (`PlanAblaufBaustein.antworten`).
+
+        **Mehrere Wege zu einer Antwort** (Fragen mit mehreren Antworten, Ben 17.11.2026:
+        „Person wählt“): Die getroffenen Wege stehen gleich betont unter „Deine Antwort führt
+        zu mehreren Wegen — wähle einen:“, die übrigen unter „Oder“."""
         out: list[ft.Control] = []
         staende = teil.kanten_stand()
         frage = teil.schritt.frage is not None
         regulaer = ab.regulaere(staende)
         kandidaten = ab.wahl_offen(staende) if gleich else []
-        vorschlag = ab.empfohlen(staende) if frage and teil.skala_wert is not None else None
-        empfiehlt = vorschlag is not None
+        # wohin die Antwort führt: ein Weg, der nur vorschlägt — oder mehrere zur Wahl
+        getroffen = [w.kante for w in teil.antwort_wege()] if frage else []
+        empfiehlt = bool(getroffen) and (len(getroffen) > 1 or getroffen[0].vorschlagen)
+        mehrere = len(getroffen) > 1
         voran: list[ft.Control] = []
 
         def gehe(kk: ab.Kante) -> Callable[[], None]:
@@ -873,7 +974,7 @@ def workout_view(
             if st.gesperrt:
                 text += " · gesperrt (Pflicht)"
             if empfiehlt:
-                betont = st is vorschlag
+                betont = k in getroffen
             elif gleich:
                 betont = any(st is x for x in kandidaten)
             else:
@@ -905,8 +1006,12 @@ def workout_view(
                 data=("weg", k.nach, "vorschlag" if empfiehlt and betont else ""),
             )
             (voran if empfiehlt and betont else out).append(knopf)
-        if vorschlag is not None and teil.schritt.frage is not None:
-            satz = ab.vorschlag_text(vorschlag.kante, teil.schritt.frage)
+        if empfiehlt and teil.schritt.frage is not None:
+            satz = (
+                "Deine Antwort führt zu mehreren Wegen — wähle einen:"
+                if mehrere
+                else ab.vorschlag_text(getroffen[0], teil.schritt.frage)
+            )
             kopf: list[ft.Control] = [
                 ft.Text(satz, size=13, weight=ft.FontWeight.W_600, data="vorschlag_satz")
             ]
@@ -1185,7 +1290,9 @@ def workout_view(
 
         # -- Uhr, Frage oder Pause ---------------------------------------------------------
         stand["fokus"], stand["ohne_timer"] = None, None
-        if s.frage is not None:
+        if s.frage is not None and s.frage.wahl:
+            teile.append(antwort_auswahl(teil, s.frage))
+        elif s.frage is not None:
             teile.append(skala_auswahl(e, teil, None, s.frage.text, s.frage.min, s.frage.max))
         elif teil.phase == PAUSE:
             teile.append(karte(ft.Text("Pause", size=15, weight=ft.FontWeight.W_600), abstand=4))
@@ -1604,6 +1711,10 @@ def workout_view(
                 kanten,
                 flags,
                 teil.skala_wert,
+                # Antworten zum Antippen: die gegebene und, bei „mehrere“, jedes Kreuz — der
+                # Knopf „Weiter“ und die Wege darunter hängen daran
+                teil.antwort,
+                tuple(sorted(teil.kreuze)),
                 teil.wdh_hand,
                 wdh_jetzt(teil) is None,
                 # hart | weich lässt sich im Lauf umschalten — der Umschalter zeigt den Stand,

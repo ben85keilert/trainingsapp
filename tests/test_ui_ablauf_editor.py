@@ -39,6 +39,7 @@ from trainingsapp.ui.components.ablaufbild import (  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.ablauf import (  # noqa: E402
     FRAGE_KACHEL,
+    KACHELN_HOECHSTENS,
     MENUE_NACH_OBEN_AB,
     ablauf_speichern,
     ablauf_view,
@@ -287,23 +288,22 @@ def test_palette_kachel_auf_uebung_frage_und_punkt_ziehen(umgebung) -> None:
     seite = _Seite()
     ansicht = ablauf_view(seite, state, plan, basis)
     assert ansicht.route == f"{basis}/ablauf" and ansicht.scroll is None
-    # Palette: eine Kachel je Übung — die Dehnung ist noch frei (nicht im Bild) —, am Ende
-    # die Kachel „Frage“
+    # Palette: eine Kachel je Übung — zuerst die vier des Plans (die Dehnung ist noch frei,
+    # nicht im Bild), dahinter der Katalog —, fest daneben die Kachel „Frage“
     ziehbar = [
         x for x in _alle(ansicht) if isinstance(x, ft.Draggable) and x.group == GRUPPE_KACHEL
     ]
-    assert [x.data for x in ziehbar] == [uw, uk, up, ud, FRAGE_KACHEL]
+    assert [x.data for x in ziehbar[:4]] == [uw, uk, up, ud]
+    assert ziehbar[-1].data == FRAGE_KACHEL and len(ziehbar) > 5
     assert all(x.affinity == ft.Axis.VERTICAL for x in ziehbar)
     assert "frei" in _texte(ansicht) and _texte(ziehbar[-1]) == ["Frage"]
-    _klick(
-        next(
-            x
-            for x in _alle(ansicht)
-            if isinstance(x, ft.IconButton) and x.tooltip == "Übung hinzufügen"
-        ).on_click,
-        None,
-    )
-    assert seite.routen[-1] == f"{basis}/ablauf/hinzufuegen"  # Zurück führt in den Ablauf
+    # Das Plus ist weg (Ben, 17.11.2026): an seiner Stelle steht der Filter
+    assert not [
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.IconButton) and x.tooltip == "Übung hinzufügen"
+    ]
+    assert not seite.routen
     # Ohne Wahl nennt die Zeile unter dem Bild die Gesten; „Routing“, „Neuer Slot“ und die
     # Knopfzeile gibt es nicht mehr — und kein Flutter-Menü (es reichte den schließenden Tipp
     # an das Darunter weiter)
@@ -591,7 +591,8 @@ def test_weg_leiste_unter_dem_bild_stellt_den_weg_ein(umgebung) -> None:
     assert texte[:3] == ["Weg 2", "1 · Wandsitz", "3 · Planke"]
     assert "Wann geht es weiter?" in texte and "Pflicht" in texte
     chips = {x.data[1]: x for x in _alle(leiste) if isinstance(x, ft.Chip)}
-    assert list(chips) == list(ab.AUSLOESER)
+    # „antwort“ gibt es nur an einem Weg aus einer Frage mit Antworten
+    assert list(chips) == list(ab.AUSLOESER_TEXT)
     assert [a for a, c in chips.items() if c.selected] == [ab.FREI]
     assert all(c.show_checkmark for c in chips.values())
     assert not [
@@ -754,11 +755,142 @@ def test_schleife_ueber_eine_frage_ende_und_was_der_plan_sagt(umgebung) -> None:
     # „Entfernen“ steht ausgeschrieben da (Ben: „mach aus x --> entfernen“)
     entfernen = _in_leiste(ansicht, "weg_entfernen")
     assert isinstance(entfernen, ft.TextButton) and entfernen.content == "Entfernen"
-    # Im Blatt der Frage steht nur noch die Frage — die Wahl gehört an den Weg
+    # Im Blatt der Frage steht die Frage und wie geantwortet wird (Skala · Ja/Nein · Auswahl)
+    # — ob ein Weg von selbst geht oder nur vorschlägt, gehört an den Weg
     _menue(ansicht, frage.id, "Frage ändern …")
     blatt = seite.dialoge[-1]
-    assert not [x for x in _alle(blatt) if isinstance(x, ft.SegmentedButton)]
+    (art,) = [x for x in _alle(blatt) if isinstance(x, ft.SegmentedButton)]
+    assert art.data == "frage_art" and art.selected == [ab.F_SKALA]
+    assert [s.label.value for s in art.segments] == ["Skala", "Ja/Nein", "Auswahl"]
     assert any("Eine Frage kann beides." in x for x in _texte(blatt))
+
+
+def test_frage_ja_nein_auswahl_und_mehrere_im_editor(umgebung) -> None:
+    """Ben, 17.11.2026: „Eine Frage lässt bisher nur Skala von x bis y zu. Mehrfachauswahl,
+    Ja/Nein usw. geht bisher nicht, wird aber gebraucht.“ Im Blatt der Frage wählt man die Art;
+    ihre Wege ziehen mit — der erste gilt bei „Ja“, der zweite bei „Nein“. Ein neuer Weg nimmt
+    die nächste freie Antwort; an der Leiste stehen die Antworten als Chips. Fehlt einer
+    Antwort der Weg, warnt der Ablauf."""
+    state, plan = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    iw, ik = (it.id for it in plan.items[:2])
+    frage = ab.Frage(text="Noch eine Runde?")
+    eigen = ab.Ablauf(
+        True,
+        iw,
+        (Kante(iw, frage.id), Kante(iw, ik), Kante(frage.id, iw, ab.SKALA, 0, 6, text="weiter")),
+        (frage,),
+    )
+    state.plaene.ablauf_setzen(plan.id, eigen)
+    plan = state.plaene.laden(plan.id)
+    seite = _Seite()
+    ansicht = ablauf_view(seite, state, plan, basis)
+
+    def jetzt() -> ab.Ablauf:
+        return state.plaene.laden(plan.id).ablauf
+
+    def _feld(c, daten: str):
+        return next(x for x in _alle(c) if getattr(x, "data", None) == daten)
+
+    def blatt_der_frage() -> ft.BottomSheet:
+        _menue(ansicht, frage.id, "Frage ändern …")
+        return seite.dialoge[-1]
+
+    def art_waehlen(blatt, art: str) -> None:
+        knopf = _feld(blatt, "frage_art")
+        knopf.selected = [art]
+        _klick(knopf.on_change, SimpleNamespace(control=knopf))
+
+    def uebernehmen(blatt) -> None:
+        _klick(_feld(blatt, "frage_uebernehmen").on_click, None)
+        _klick(blatt.on_dismiss, None)
+
+    # Ja/Nein: der vorhandene Weg (Skala 0–6) gilt jetzt bei „Ja“, seine Beschriftung bleibt
+    blatt = blatt_der_frage()
+    art_waehlen(blatt, ab.F_JA_NEIN)
+    assert "Antworten: Ja · Nein" in _texte(blatt)
+    uebernehmen(blatt)
+    f = jetzt().frage(frage.id)
+    assert f.art == ab.F_JA_NEIN and f.wahl == ("Ja", "Nein")
+    (weg,) = jetzt().von(frage.id)
+    assert (weg.ausloeser, weg.antworten, weg.text) == (ab.ANTWORT, ("Ja",), "weiter")
+    assert "Ja · Nein" in _texte(_knoten(ansicht, frage.id))
+    # … und „Nein“ führt noch nirgends hin: die Warnung über dem Bild nennt es
+    assert any("Bei „Nein“ führt kein Weg weiter" in x for x in _texte(ansicht))
+    # Vom Punkt der Frage auf „Ende“: der neue Weg gilt bei „Nein“ — die Warnung ist weg
+    _ziehen(ansicht, frage.id, ab.ENDE)
+    ende = jetzt().von(frage.id)[1]
+    assert (ende.ausloeser, ende.antworten) == (ab.ANTWORT, ("Nein",))
+    assert not any("führt kein Weg weiter" in x for x in _texte(ansicht))
+    leiste = _leiste(ansicht)
+    assert "Bei welcher Antwort?" in _texte(leiste)
+    chips = {x.data: x for x in _alle(leiste) if isinstance(x, ft.Chip)}
+    assert list(chips) == [("antwort", "Ja"), ("antwort", "Nein"), ("ausloeser", ab.FREI)]
+    assert [x.selected for x in chips.values()] == [False, True, False]
+    assert "Ende · „Nein“" in _texte(_mit_daten(ansicht, "kante", frage.id, ab.ENDE))
+    # „jede andere“ macht den Weg frei; „Nein“ wieder an: zurück
+    _klick(chips[("ausloeser", ab.FREI)].on_select, None)
+    assert jetzt().von(frage.id)[1].ausloeser == ab.FREI
+    chips = {x.data: x for x in _alle(_leiste(ansicht)) if isinstance(x, ft.Chip)}
+    _klick(chips[("antwort", "Nein")].on_select, None)
+    assert jetzt().von(frage.id)[1].antworten == ("Nein",)
+
+    # Auswahl mit eigenen Antworten, mehrere zum Ankreuzen
+    blatt = blatt_der_frage()
+    art_waehlen(blatt, ab.F_AUSWAHL)
+    felder = [x for x in _alle(blatt) if isinstance(x, ft.TextField) and x.data == "frage_antwort"]
+    assert len(felder) == 2  # zwei leere Antworten zum Ausfüllen
+    # ohne Antwort wird nichts übernommen — nichts von selbst eingesetzt
+    _klick(_feld(blatt, "frage_uebernehmen").on_click, None)
+    assert (
+        felder[0].error == "Mindestens eine Antwort" and jetzt().frage(frage.id).art == ab.F_JA_NEIN
+    )
+    _klick(_feld(blatt, "frage_antwort_dazu").on_click, None)
+    felder = [x for x in _alle(blatt) if isinstance(x, ft.TextField) and x.data == "frage_antwort"]
+    for feld, text in zip(felder, ("Kraft", "Balance", "Ausdauer"), strict=True):
+        feld.value = text
+    schalter = _feld(blatt, "frage_mehrfach")
+    schalter.value = True
+    _klick(schalter.on_change, SimpleNamespace(control=schalter))
+    uebernehmen(blatt)
+    f = jetzt().frage(frage.id)
+    assert (f.art, f.antworten, f.mehrere) == (ab.F_AUSWAHL, ("Kraft", "Balance", "Ausdauer"), True)
+    # die Art ist neu: die zwei Wege bekommen der Reihe nach die ersten Antworten
+    assert [k.antworten for k in jetzt().von(frage.id)] == [("Kraft",), ("Balance",)]
+    assert "mehrere: Kraft · Balance · Ausdauer" in _texte(_knoten(ansicht, frage.id))
+    # Ein Weg darf bei mehreren Antworten gelten: „Ausdauer“ dazu an den Weg zum Ende
+    _klick(_mit_daten(ansicht, "kante", frage.id, ab.ENDE).on_click, None)
+    leiste = _leiste(ansicht)
+    assert "Wenn eine davon angekreuzt ist:" in _texte(leiste)
+    chips = {x.data: x for x in _alle(leiste) if isinstance(x, ft.Chip)}
+    _klick(chips[("antwort", "Ausdauer")].on_select, None)
+    assert jetzt().von(frage.id)[1].antworten == ("Balance", "Ausdauer")
+
+    # Eine Antwort umbenennen und eine streichen: die Wege ziehen mit
+    blatt = blatt_der_frage()
+    felder = [x for x in _alle(blatt) if isinstance(x, ft.TextField) and x.data == "frage_antwort"]
+    assert [x.value for x in felder] == ["Kraft", "Balance", "Ausdauer"]
+    felder[1].value = "Gleichgewicht"
+    weg = [x for x in _alle(blatt) if getattr(x, "data", None) == "frage_antwort_weg"]
+    _klick(weg[2].on_click, None)  # „Ausdauer“ streichen
+    uebernehmen(blatt)
+    assert jetzt().frage(frage.id).antworten == ("Kraft", "Gleichgewicht")
+    assert [k.antworten for k in jetzt().von(frage.id)] == [("Kraft",), ("Gleichgewicht",)]
+
+
+def test_gleichwertige_wege_sind_im_bild_kein_bedarf(umgebung) -> None:
+    """Ben, 17.11.2026: „Mehrere gleichwertige Wege sollen auch als solche dargestellt werden,
+    nicht rot unterbrochen liniert.“ Drei freie Wege aus dem Start: Keine der drei Übungen
+    trägt „bei Bedarf“, der Kopf im Reiter „Plan“ zählt keine; erst ein Weg mit Auslöser neben
+    dem regulären macht sein Ziel zum Bedarf."""
+    state, plan = umgebung
+    iw, ik, ip, id_ = (it.id for it in plan.items)
+    katalog = {u.id: u for u in state.uebungen.alle()}
+    frei = ab.Ablauf(True, iw, (Kante(iw, ik), Kante(iw, ip), Kante(iw, id_)))
+    assert "bei Bedarf" not in _texte(abbild.ablaufbild(state, frei, plan.items, katalog).control)
+    skala = ab.Ablauf(True, iw, (Kante(iw, ik), Kante(iw, ip), Kante(iw, id_, ab.SKALA, 7)))
+    texte = _texte(abbild.ablaufbild(state, skala, plan.items, katalog).control)
+    assert texte.count("bei Bedarf") == 1
 
 
 def test_ohne_rueckrufe_ist_das_bild_wie_bisher(umgebung) -> None:
@@ -1157,6 +1289,20 @@ def _kacheln(ansicht) -> dict[str, ft.Draggable]:
     }
 
 
+def _im_plan(ansicht) -> dict[str, ft.Draggable]:
+    """Die Kacheln der Übungen, die im Plan stehen — nur sie lassen sich gedrückt halten („aus
+    dem Plan“); dahinter steht der übrige Katalog."""
+    return {i: k for i, k in _kacheln(ansicht).items() if k.content.on_long_press is not None}
+
+
+def _suchen(ansicht, text: str) -> None:
+    feld = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.hint_text == "Übung suchen"
+    )
+    feld.value = text
+    feld.on_change(SimpleNamespace(control=feld))
+
+
 def _daten(ansicht, art: str) -> list[tuple]:
     return [
         x.data
@@ -1180,9 +1326,10 @@ def test_leiste_ist_ein_vorrat_an_uebungen(umgebung) -> None:
     plan = state.plaene.laden(plan.id)
     seite = _Seite()
     ansicht = ablauf_view(seite, state, plan, basis)
-    # Fünf Planübungen, vier Kacheln — in der Reihenfolge des ersten Vorkommens
+    # Fünf Planübungen, vier Kacheln — in der Reihenfolge des ersten Vorkommens, vor dem
+    # übrigen Katalog
     kacheln = _kacheln(ansicht)
-    assert list(kacheln) == [uw, uk, up, ud]
+    assert list(kacheln)[:4] == [uw, uk, up, ud]
     # „2×“ nur an der Kniebeuge, keine Listennummer mehr; „frei“, solange keine im Bild ist
     assert _texte(kacheln[uk]) == ["2×", "Kniebeuge"]
     assert _texte(kacheln[uw]) == ["Wandsitz"]
@@ -1237,6 +1384,120 @@ def test_leiste_ist_ein_vorrat_an_uebungen(umgebung) -> None:
     assert _texte(_kacheln(ansicht)[uk]) == ["Kniebeuge"]  # nur noch einmal: kein „1×“
     _klick(_kacheln(ansicht)[up].content.on_long_press, None)
     assert seite.dialoge[-1].title.value == "„2 · Planke“ aus dem Plan entfernen?"
+
+
+def test_leiste_zeigt_den_ganzen_katalog_mit_suche_und_filter(umgebung) -> None:
+    """Ben, 17.11.2026: „Ersetze das Suchfeld und das Plus rechts daneben lieber durch die
+    Übungen aller Kataloge und den Filter (dort, wo das Plus steht), so dass dieser Bereich so
+    wirkt wie die View, wenn man jetzt das Plus drückt.“ — zuerst die Übungen des Plans, hinter
+    einem Strich der übrige Katalog; Suche und Filter wie in „Übung hinzufügen“; eine Kachel
+    von außerhalb des Plans legt ihre Planübung an."""
+    state, plan = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    iw, ik, _ip, _id = (it.id for it in plan.items)
+    uw, uk, up, ud = (it.exercise_id for it in plan.items)
+    zebra = Exercise(name="Zebrastand")
+    state.uebungen.speichern(zebra)
+    state.plaene.ablauf_setzen(plan.id, ab.Ablauf(True, iw, (Kante(iw, ik),)))
+    plan = state.plaene.laden(plan.id)
+    seite = _Seite()
+    ansicht = ablauf_view(seite, state, plan, basis)
+    alle = state.uebungen.alle()
+    assert len(alle) > KACHELN_HOECHSTENS  # das Paket „Standard“ und die fünf eigenen
+    # Ohne Suche: die vier des Plans, der Strich, der Katalog bis zum Deckel, „+ n weitere“ —
+    # und fest daneben die Kachel „Frage“ (nicht in der scrollenden Reihe)
+    kacheln = _kacheln(ansicht)
+    assert list(kacheln)[:4] == [uw, uk, up, ud] and list(_im_plan(ansicht)) == [uw, uk, up, ud]
+    assert len(kacheln) == KACHELN_HOECHSTENS
+    assert _daten(ansicht, "palette_strich") == [("palette_strich",)]
+    assert _daten(ansicht, "palette_weitere") == [
+        ("palette_weitere", len(alle) - KACHELN_HOECHSTENS)
+    ]
+    reihe = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.Row) and x.scroll == ft.ScrollMode.AUTO
+    )
+    frage = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.Draggable) and x.data == FRAGE_KACHEL
+    )
+    assert frage not in list(_alle(reihe))
+    # Suchfeld, Filter (wo das Plus stand) und „i“ in einer Zeile
+    feld = next(x for x in _alle(ansicht) if isinstance(x, ft.TextField))
+    filterknopf = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.IconButton) and x.icon == ft.Icons.FILTER_LIST
+    )
+    assert feld.hint_text == "Übung suchen" and feld.expand
+    assert "Übungen des Plans suchen" not in [
+        x.hint_text for x in _alle(ansicht) if isinstance(x, ft.TextField)
+    ]
+    # Suche über den Katalog: „Zebra“ findet die Übung, die nicht im Plan steht — keine
+    # Kachel des Plans, kein Strich, kein Gedrückthalten
+    _suchen(ansicht, "Zebra")
+    kacheln = _kacheln(ansicht)
+    assert list(kacheln) == [zebra.id] and _im_plan(ansicht) == {}
+    assert _daten(ansicht, "palette_strich") == [] and _daten(ansicht, "palette_weitere") == []
+    assert "kommt in den Plan" in kacheln[zebra.id].content.tooltip
+    # Angetippt ohne gewählte Übung (der Ablauf hat einen Start): nur der Hinweis, nichts
+    # kommt in den Plan
+    _klick(kacheln[zebra.id].content.on_click, None)
+    assert len(state.plaene.laden(plan.id).items) == 4
+    assert any(t.startswith("Erst eine Übung im Bild antippen") for t in _meldungen(seite))
+    # Mit gewählter Kniebeuge: Die Planübung entsteht, der Weg führt zu ihr, sie ist gewählt
+    _gesten(ansicht, ik).on_tap(None)
+    _klick(_kacheln(ansicht)[zebra.id].content.on_click, None)
+    plan = state.plaene.laden(plan.id)
+    neu = plan.items[-1]
+    assert len(plan.items) == 5 and neu.exercise_id == zebra.id
+    assert neu.target is None and neu.felder is None  # sie folgt der Übung (P79)
+    assert [k.nach for k in plan.ablauf.von(ik)] == [neu.id]
+    assert state.ablauf_wahl[plan.id] == neu.id
+    assert any("neu im Plan" in t for t in _meldungen(seite))
+    assert _mit_daten(ansicht, "knoten", neu.id) is not None
+    # Jetzt gehört sie zum Plan: Gedrückthalten nimmt sie wieder heraus
+    assert list(_im_plan(ansicht)) == [zebra.id]
+    # Die Suche trifft Plan und Katalog: die Kniebeuge des Plans zuerst
+    _suchen(ansicht, "Kniebeuge")
+    assert next(iter(_kacheln(ansicht))) == uk and list(_im_plan(ansicht)) == [uk]
+    _suchen(ansicht, "gibtesnicht")
+    assert _kacheln(ansicht) == {} and "Keine Übung passt zu Suche und Filter." in _texte(ansicht)
+    _suchen(ansicht, "")
+    # Der Filter: „Eigene Übungen“ — nur die fünf ohne Paket, alle im Plan
+    _klick(filterknopf.on_click, None)
+    blatt = seite.dialoge[-1]
+    chip = next(x for x in _alle(blatt) if isinstance(x, ft.Chip) and x.data == ("Paket", None))
+    _klick(chip.on_select, None)
+    assert state.hinzufuegen_filter.pakete == {None}
+    assert list(_kacheln(ansicht)) == [uw, uk, up, ud, zebra.id]
+    assert _daten(ansicht, "palette_strich") == [] and _daten(ansicht, "palette_weitere") == []
+    # … und wirkt in „Übung hinzufügen“ genauso (derselbe Stand); geleert steht alles wieder da
+    state.hinzufuegen_filter.leeren()
+    ansicht = ablauf_view(_Seite(), state, state.plaene.laden(plan.id), basis)
+    assert len(_kacheln(ansicht)) == KACHELN_HOECHSTENS
+    # Eine Kachel aus dem Katalog auf eine Übung im Bild gezogen: neu im Plan, dahinter
+    fremd = next(i for i in _kacheln(ansicht) if i not in _im_plan(ansicht))
+    _ablage(ansicht, iw, GRUPPE_KACHEL).on_accept(SimpleNamespace(src=_kacheln(ansicht)[fremd]))
+    plan = state.plaene.laden(plan.id)
+    assert plan.items[-1].exercise_id == fremd and len(plan.items) == 6
+    assert plan.ablauf.von(iw)[-1].nach == plan.items[-1].id
+    assert fremd in _im_plan(ansicht)
+    # Eine Übung, die es nicht gibt, ändert nichts
+    _ablage(ansicht, iw, GRUPPE_KACHEL).on_accept(SimpleNamespace(src=SimpleNamespace(data="x")))
+    assert len(state.plaene.laden(plan.id).items) == 6
+
+
+def test_archivierte_uebung_des_plans_bleibt_in_der_leiste(umgebung) -> None:
+    """Die Katalogsuche kennt keine archivierten Übungen — steht eine im Plan, bleibt ihre
+    Kachel in der Leiste (sie ist ja im Bild), und die Suche nach ihrem Namen findet sie."""
+    state, plan = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    uw, uk, up, ud = (it.exercise_id for it in plan.items)
+    state.plaene.ablauf_setzen(plan.id, ab.Ablauf(True, plan.items[0].id))
+    state.uebungen.archivieren(up)
+    ansicht = ablauf_view(_Seite(), state, state.plaene.laden(plan.id), basis)
+    assert list(_im_plan(ansicht)) == [uw, uk, up, ud]
+    _suchen(ansicht, "plank")
+    assert list(_im_plan(ansicht)) == [up]
+    _suchen(ansicht, "Wand")
+    assert list(_im_plan(ansicht)) == [uw]
 
 
 def test_kachel_auf_uebung_und_auf_start(umgebung) -> None:
@@ -1399,7 +1660,7 @@ def test_geleertes_bild_bleibt_leer(umgebung, tmp_path) -> None:
         assert _daten(a, "knoten") == [] and _daten(a, "kante") == []
         assert _daten(a, "punkt") == []  # auch „Start“ hat keinen Punkt: nichts, wohin er zöge
         assert _daten(a, "start") == [("start",)] and _daten(a, "startplatz") == [("startplatz",)]
-        assert all(_texte(k)[-1] == "frei" for k in _kacheln(a).values())
+        assert all(_texte(k)[-1] == "frei" for k in _im_plan(a).values())
         assert any(t.startswith("Der Ablauf ist leer") for t in _texte(a))
 
     pruefen(ansicht, state.plaene.laden(plan.id))

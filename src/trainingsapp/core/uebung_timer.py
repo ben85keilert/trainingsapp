@@ -601,6 +601,38 @@ def stellen(timer_id: str, uebungen: Sequence[Exercise], plaene: Sequence[Plan])
     return out
 
 
+def timer_im_plan(plan: Plan, ausser: str = "") -> list[tuple[PlanItem, TimerProfil]]:
+    """Die Timer, die **andere Planübungen dieses Plans** für sich festhalten — eine eigene
+    Kopie („nur hier“) oder ein zugeordneter Timer der Bibliothek —, jeder einmal, mit der
+    Planübung, an der er zuerst steht (Ben, 17.11.2026: „Wenn man einen Timer setzt im Bereich
+    ‚In Plan‘, wird dieser Timer den anderen Übungen im Timereditor des Plans nicht zur
+    Verfügung gestellt“). Das Uhr-Blatt bietet sie unter „In Plan“ an; gewählt wird **zugeordnet,
+    nicht kopiert** — eine eigene Kopie kommt dafür in die Bibliothek. Ohne die Planübung
+    ``ausser`` und ohne Timer, die eine Ausführung tragen: Die gehört zur Übung (P174).
+
+    >>> h = TimerProfil(id="h", name="Halten", abschnitte=[Abschnitt("H", 30)])
+    >>> links = Abschnitt("L", 30, ausfuehrung={"variant": "l"})
+    >>> s = TimerProfil(id="s", name="Seiten", abschnitte=[links])
+    >>> plan = Plan(id="p", items=[
+    ...     PlanItem(id="a", exercise_id="u", timer=TimerWahl("", h).als_dict()),
+    ...     PlanItem(id="b", exercise_id="v"),
+    ...     PlanItem(id="c", exercise_id="w", timer=TimerWahl("", h).als_dict()),
+    ...     PlanItem(id="d", exercise_id="x", timer=TimerWahl("", s).als_dict())])
+    >>> [(it.id, t.name) for it, t in timer_im_plan(plan, ausser="b")]
+    [('a', 'Halten')]
+    >>> [(it.id, t.name) for it, t in timer_im_plan(plan, ausser="a")]  # die eigene zählt nicht
+    [('c', 'Halten')]
+    """
+    out: list[tuple[PlanItem, TimerProfil]] = []
+    for item in plan.items:
+        eigen = TimerWahl.aus_dict(item.timer).eigen
+        if item.id == ausser or eigen is None or hat_ausfuehrung(eigen):
+            continue
+        if all(eigen.id != t.id for _, t in out):
+            out.append((item, eigen))
+    return out
+
+
 def stellen_text(orte: Sequence[Stelle]) -> str:
     """„gilt in 3 Übungen, 1 Plan“ — leer: „nicht zugeordnet“.
 
@@ -723,6 +755,7 @@ __all__ = [
     "takt_der_uebung",
     "takt_fuer",
     "timer_fuer",
+    "timer_im_plan",
     "uebung_loesen",
     "uebung_zuordnen",
     "uhr_an",

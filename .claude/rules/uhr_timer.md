@@ -16,7 +16,10 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   Die Uhr-Zeile ist `Uhr ▾ · Zeit · Takt · ▶` (`components/uhr.py`); **▶ öffnet den Fokus**
   (`AppState.fokus_auto`, Vorgabe an, Schalter rechts in der Zeile von „Gemacht“, in der Einzelübung im Kopf über dem ▶), „Uhr aus“
   heißt **„Ohne Uhr“** (`core.timer.ohne_uhr`: Stoppuhr, die nicht zählt). Das ⏱ öffnet das
-  **Uhr-Blatt** mit Geltung Für jetzt · In „Plan“ · Übung (`components/uhr_blatt.py`). Der Fokus
+  **Uhr-Blatt** mit Geltung Für jetzt · In „Plan“ · Übung (`components/uhr_blatt.py`; Ben,
+  17.11.2026, §4.1: beim Üben ist **„Für jetzt“ vorbelegt**, dort steht **„Timer stellen …“ in
+  der Liste hinter der Stoppuhr** — kein Knopf darunter; „Übernehmen“ ohne Änderung schreibt bei
+  „Für jetzt“ nichts fest). Der Fokus
   hat die Karte **„Eintragen“** (`components/fokus_eintragen.py`, auch im Workout): Eingaben als
   `person/wdh|skala|auspraegung`, eingetragen erst mit dem Ende des Laufs; Wiederholungen mit
   den Knöpfen des Blocks — **jeder Tipp ein Satz dazu**, „−“ nimmt den letzten zurück
@@ -61,4 +64,7 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   (eingebettete Kopie). Im Plan-Editor **eine Timer-Zeile** (`components/timer_zeile.py`: Name ▾
   = Uhr-Blatt mit Für jetzt · In „Plan“ · Übung, ✎ = derselbe Editor wie beim Haupttimer in der
   Karte, `components/timer_editor.py`, darunter „Geändert gilt:“); „Für jetzt“ gibt es dort
-  nur, solange geübt wird.
+  nur, solange geübt wird. **Unter „In „Plan““ stehen auch die Timer der anderen Planübungen
+  dieses Plans** (Ben, 17.11.2026, §8; `core.uebung_timer.timer_im_plan`) — gewählt wird
+  zugeordnet, nie kopiert: ein „nur hier“-Timer kommt dafür in die Bibliothek, erst mit
+  „Übernehmen“; keiner mit Ausführung je Abschnitt (P174).

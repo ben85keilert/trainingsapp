@@ -120,6 +120,31 @@ Ein Blatt von unten, **dieselbe Sprache wie das Takt-Blatt** (Geltung, K5):
 - Die Timer-Seite der Übung bleibt der Fokus (Vorher · Während · Danach); man erreicht sie
   mit ▶.
 
+### 4.1 „Für jetzt“ zuerst, „Timer stellen …“ in der Liste (Ben, 17.11.2026) — gebaut
+
+Ben: „Eigentlich reicht die Funktion, so wie sie jetzt ist, gestalte das nur um. Es gibt je
+nach View-Position (ob man in der Übung selbst oder im Planaufbau ist) ‚Für jetzt‘ – ‚In
+{Plan}‘ – Übung. Setze standardmäßig den Button ‚Für jetzt‘ aktiv und dort zwischen Stoppuhr
+und ‚Ohne Uhr‘ bei Für jetzt den Button, um den Timer einzustellen.“
+
+- **Vorgabe der Geltung beim Üben ist „Für jetzt“** (⏱ am Block, „Uhr einstellen …“ im Menü,
+  Fokus; Einzelübung: Für jetzt · Übung). Im Planaufbau („Im Plan einstellen“, Uhrenplan)
+  bleibt „In „Plan““ vorbelegt — dort wird der Plan gebaut, und „Für jetzt“ gibt es nur,
+  solange geübt wird (P171). Das ersetzt den Satz „Vorbelegt nach dem Ort“ oben.
+- **„Timer stellen …“** steht unter „Für jetzt“ in der Liste, **gleich hinter der Stoppuhr**
+  (vor den Timern der Übung): ein umrandeter Knopf über die ganze Breite, ein Tipp öffnet die
+  Räder (Zeit-Blatt, „Mit Abschnitten …“ wie bisher). Die gestellte Zeit steht danach an
+  derselben Stelle als wählbare Zeile „Für jetzt · gestellt“ — ⏱ stellt sie neu (die Räder
+  beginnen bei ihr), ✎ öffnet das Fenster mit Abschnitten. Der Knopf „Zeit stellen …“ unter
+  der Liste ist weg; „Neuer Timer …“ und „Aus der Bibliothek …“ stehen nur noch bei „In
+  „Plan““ und „Übung“.
+- **„Übernehmen“ ohne Änderung schreibt bei „Für jetzt“ nichts fest:** Nur eine Wahl, die von
+  der Einstellung abweicht, gilt für diese Sitzung (`AppState.uhr_wahl`, `uhr_zaehlt`) — sonst
+  folgte ▶ der Einstellung nicht mehr, wenn sie sich danach ändert (N55).
+- Tests: `tests/test_ui_uhr_fokus.py`
+  (`test_uhr_blatt_fuer_jetzt_ist_vorgabe_und_timer_stellen_steht_in_der_liste`). Gerätetest:
+  Katalog §2.
+
 ## 5. Einstellungen → Timer → „Alle Timer“ (F5)
 
 Wie die Vorlagen, nur für alle: eine Seite unter Einstellungen → Timer, Reiter **„Alle“**

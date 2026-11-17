@@ -795,6 +795,77 @@ Ben, drei Punkte zum Reiter „Ablauf“ — alle gebaut:
    - **Unverändert:** Trifft keine Regel die Antwort, bleibt die Person bei der Frage, bis
      die Antwort passt.
 
+8. **Die Leiste zeigt den ganzen Katalog** (Ben, 17.11.2026, Katalog P220: „Ersetze das
+   Suchfeld und das Plus rechts daneben lieber durch die Übungen aller Kataloge und den Filter
+   (dort wo das Plus steht), so dass dieser Bereich so wirkt, wie die View, wenn man jetzt das
+   Plus drückt“). Über dem Bild stehen „Übung suchen“ (sucht live in allen Übungen), der
+   Filterknopf (Typ · Region · Paket, derselbe Stand wie in „Übung hinzufügen“) und das (i);
+   wirkende Filter stehen als Labels darunter. Die Reihe zeigt zuerst die Übungen des Plans
+   (gefüllt, „2×“, „frei“), hinter einem Strich den übrigen Katalog (umrandet) — höchstens 40
+   Kacheln, dahinter „+ n weitere — Suche oder Filter“. Eine Kachel aus dem Katalog legt beim
+   Antippen (mit gewählter Übung) oder Ablegen ihre Planübung an; ohne gewählte Übung und mit
+   vorhandenem Start ändert der Tipp nichts. Gedrückthalten („aus dem Plan“) gibt es nur an
+   Übungen des Plans. Die Kachel „Frage“ steht fest rechts neben der Reihe. Das „+“ entfällt;
+   die Route `…/ablauf/hinzufuegen` bleibt bestehen, „Neue Übung anlegen“ erreicht man über
+   den Reiter „Plan“.
+
+9. **Fragen mit Antworten zum Antippen** (Ben, 17.11.2026, Katalog P221: „Eine Frage lässt
+   bisher nur Skala von x bis y zu. Mehrfachauswahl, Ja/Nein usw. geht bisher nicht, wird aber
+   gebraucht. Gehe durch, welche Fragen Sinn machen, um ein Workout weiterzuführen“; auf die
+   Rückfrage gewählt: Ja/Nein · Auswahl, eine Antwort · Auswahl, mehrere Antworten — und zu
+   mehreren getroffenen Wegen: „Person wählt“):
+   - **Drei Arten** (`core.ablauf.Frage.art`, Blatt „Frage ändern“: Skala · Ja/Nein ·
+     Auswahl): die **Skala** wie bisher; **Ja/Nein** mit zwei festen Antworten; die
+     **Auswahl** mit bis zu acht eigenen Antworten — genau eine, oder mit „Mehrere Antworten
+     ankreuzen“ (`Frage.mehrfach`) mehrere. Eine Auswahl mit einer Antwort („Weiter“) ist ein
+     Hinweis, den man bestätigt. Nicht gebaut: eine Zahl zum Eintippen (bis 21 Stufen reicht
+     die Skala) und Fragen aus Messwerten (nie — `docs/recht/00_zweckbestimmung.md`).
+   - **Die Wege** tragen, bei welchen Antworten sie gelten (`Kante.ausloeser = "antwort"`,
+     `Kante.antworten` mit dem Wortlaut): in Leiste und Blatt je Antwort ein Chip — ein Weg
+     darf bei mehreren gelten —, dazu „jede andere“ (der freie Weg). Ein **neuer Weg** aus
+     einer solchen Frage bekommt die nächste Antwort, die noch kein Weg hat — der erste „Ja“,
+     der zweite „Nein“ (`core.ablauf.weg_neu`). Wird die **Art** der Frage geändert, bekommen
+     ihre Wege der Reihe nach diese Vorgabe; Ziel, Beschriftung und „nur vorschlagen“ bleiben.
+     Wird eine Antwort umbenannt, ziehen die Wege mit, eine gestrichene fällt am Weg weg
+     (`core.ablauf.frage_ersetzen`). Im Bild steht die Antwort am Weg, auch am Stummel („Ende ·
+     „Nein““), unter der Frage ihre Antworten.
+   - **Im Workout** (`views/workout.antwort_auswahl`): je Antwort ein Knopf, ein Tipp ist die
+     Antwort. Bei „mehrere“ wird angekreuzt, „Weiter“ antwortet (ohne Kreuz: „Nichts davon —
+     weiter“). Führt die Antwort zu **einem** Weg, wird er gegangen — oder, mit „nur
+     vorschlagen“, vorgeschlagen („Bei „schwer“ schlägt der Plan vor:“). Führt sie zu
+     **mehreren** (zwei Kreuze, je ein anderer Weg), geht nichts von selbst: „Deine Antwort
+     führt zu mehreren Wegen — wähle einen:“, die getroffenen betont, der Rest unter „Oder:“
+     (`core.ablauf.antwort_wege`, `PlanAblaufBaustein.antwort_geben`, `antwort_waehlt`). Trifft
+     sie keinen Weg, gilt „jede andere“; gibt es auch den nicht, bleibt die Frage stehen und
+     sagt es. Die Skala geht weiter den ersten getroffenen Weg — kein Plan von früher ändert
+     sich. In der Zeitleiste steht `plan/antwort` mit ``antwort`` (der Wortlaut, mehrere mit
+     Komma).
+   - **Warnung beim Bauen:** „Frage „…“: Bei „Nein“ führt kein Weg weiter — dort bliebe das
+     Workout stehen“ (`core.ablauf.ohne_weg`, in `warnungen` und `pruefung`), solange eine
+     Antwort weder einen eigenen Weg noch „jede andere“ hat.
+   - **Pakete:** Formatversion 7 für Pläne, die so eine Frage haben
+     (`core.pakete.nutzt_antworten`) — eine ältere App läse die Frage als Skala und ginge bei
+     jeder Antwort den ersten Weg; sie lehnt das Paket ab.
+
+10. **Der Punkt bleibt beim Knoten — auch neben „Ende“** (Ben, 17.11.2026, Befund N183: „von
+    einer Frage kann man ein Ende setzen. Daneben kann man aber nicht, wenn das Ende gesetzt
+    ist, noch einen weiteren Weg aufrufen“). Nachgestellt am Web-Foto: Der Punkt der Frage lag
+    am Stummel „Ende“ und sah aus wie dessen Marke; ziehen ließ er sich, nur erkannte man ihn
+    nicht. Jetzt liegt der Punkt eines Knotens nur dann am Griff seines einen Wegs, wenn der
+    **abwärts** führt; bei „Ende“, „◀ zurück“, „noch einmal“ und einem Rückweg steht er als
+    Ring unter dem Knoten (`Geometrie.punkte`).
+
+11. **Gleichwertige Wege sehen gleich aus** (Ben, 17.11.2026, Katalog P222: „Mehrere
+    gleichwertige Wege sollen auch als solche dargestellt werden, nicht rot unterbrochen
+    liniert“). Bisher galt nur der **erste** Weg eines Knotens als „der Ablauf“; alles hinter
+    einem zweiten war „bei Bedarf“ — gestrichelt, in der dritten Farbe, mit „bei Bedarf“ unter
+    der Übung und im Workout unter „BEI BEDARF“. Seit „mehrere gleichwertige Wege — erst
+    fragen“ (9.11.2026) stimmt das nicht mehr. Jetzt (`core.ablauf.gleichwertige`,
+    `von_selbst`, `bedarf`): Ist der erste Weg frei, zählen **alle freien** Wege der Übung zum
+    Ablauf, aus einer Frage alle ihre Wege. „Bei Bedarf“ bleibt, was nur über einen Weg mit
+    Auslöser **neben** dem regulären erreichbar ist (Skala ≥ 7 → Dehnung) — oder gar nicht.
+    Am Lauf des Workouts ändert sich nichts.
+
 **Offen / nur am Gerät:** Ziehen mit dem Finger in den leeren Platz und auf „Start“ (im
 Browser mit der Maus geprüft), Treffen des einen Punkts mit dem Finger, „2×“ neben dem Rand der
 Kachel bei großer Schrift — zu T98.

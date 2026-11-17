@@ -142,8 +142,9 @@ class Geometrie:
     x_min: float
     #: **der Punkt** je gezeichnetem Knoten — an ihm beginnen seine Wege, an ihm zieht man
     #: einen neuen (Ben, 16.11.2026): bei mehreren Wegen der Abzweig, bei genau einem dessen
-    #: Griff — außer der eine Weg ist ein Rückweg (sein Griff läge weit weg): dann der Austritt
-    #: unter dem Knoten —, ohne gezeichneten Weg die Stelle knapp unter der Beschriftung
+    #: Griff, wenn er **abwärts** führt — bei einem Rückweg (sein Griff läge weit weg), einem
+    #: Stummel („Ende“, „◀ zurück“) oder „noch einmal“ der Austritt unter dem Knoten —, ohne
+    #: gezeichneten Weg die Stelle knapp unter der Beschriftung
     punkte: dict[str, Punkt]
 
 
@@ -207,6 +208,14 @@ def geometrie(
     >>> g = geometrie(Ablauf(True, "p", (Kante("p", "k"),)), {"p": Lage(0, 0), "k": Lage(0, 1)})
     >>> g.punkte["p"] == g.wege[0].griff
     True
+
+    Führt der eine Weg zum **Ende** (oder „◀ zurück“, „noch einmal“), bleibt der Punkt unter dem
+    Knoten — am Stummel steht nur „Ende“:
+
+    >>> from trainingsapp.core.bedingung import ENDE as zum_ende
+    >>> g = geometrie(Ablauf(True, "p", (Kante("p", zum_ende),)), {"p": Lage(0, 0)})
+    >>> g.punkte["p"] == g.austritte["p"], g.punkte["p"] == g.wege[0].griff
+    (True, False)
     """
     text_h = dict(beschriftung or {})
     fragen = {f.id for f in ablauf.fragen}
@@ -380,7 +389,11 @@ def geometrie(
     # weit weg in der Gasse: Dann ist der Punkt des Knotens sein Austritt, direkt unter ihm
     # (Ben, 17.11.2026, am Foto: „Nach der Frage ist es nicht möglich ein Ende zu setzen“ —
     # unter der Frage stand nichts zum Ziehen)
-    griffe = {w.kante.von: w.griff for w in wege if anzahl[w.kante.von] == 1 and w.art != RUECK}
+    # — und ebenso bei einem **Stummel** („Ende“, „◀ zurück“) oder „noch einmal“: Sein Griff ist
+    # das Ende, nicht der Knoten — wer von dort einen zweiten Weg ziehen wollte, fand unter der
+    # Frage nichts (Ben, 17.11.2026: „Daneben kann man aber nicht, wenn das Ende gesetzt ist,
+    # noch einen weiteren Weg aufrufen“). Am Griff liegt der Punkt nur bei einem Weg **abwärts**
+    griffe = {w.kante.von: w.griff for w in wege if anzahl[w.kante.von] == 1 and w.art == AB}
     punkte = {
         kn: abzweige.get(kn) or griffe.get(kn) or austritte.get(kn) or (mitten[kn][0], unter(kn)[1])
         for kn in mitten

@@ -74,6 +74,29 @@ def _knopf(c, text: str):
     raise AssertionError(f"kein Knopf {text!r}")
 
 
+def _geltung(blatt, wert: str) -> None:
+    """Die Geltung des Uhr-Blatts umschalten: „jetzt“, „plan“ oder „uebung“."""
+    segment = next(x for x in _alle(blatt) if isinstance(x, ft.SegmentedButton))
+    segment.selected = [wert]
+    segment.on_change(SimpleNamespace(control=segment))
+
+
+def _uhr_zeile(blatt, profil_id: str):
+    """Die Zeile einer Uhr im Uhr-Blatt (``data = ("uhr", <ID>)``)."""
+    return next(
+        x for x in _alle(blatt) if isinstance(x, ft.Container) and x.data == ("uhr", profil_id)
+    )
+
+
+def _uhr_ids(blatt) -> list[str]:
+    """Was das Uhr-Blatt gerade zur Wahl stellt, in seiner Reihenfolge."""
+    return [
+        x.data[1]
+        for x in _alle(blatt)
+        if isinstance(x, ft.Container) and isinstance(x.data, tuple) and x.data[:1] == ("uhr",)
+    ]
+
+
 async def _aklick(handler, *args) -> None:
     ergebnis = handler(*args)
     if inspect.isawaitable(ergebnis):
@@ -175,8 +198,9 @@ async def test_uhr_zeile_menue_und_fokus_schalter(umgebung) -> None:
 
 async def test_uhr_blatt_geltung_plan_uebung_und_neuer_timer(umgebung) -> None:
     """F3: Geltung In „Rumpf“ schreibt die Planübung, Übung die Übung (der gewählte Timer wird
-    ihre Vorgabe); „Neuer Timer — nur in …“ öffnet gleich den Editor der Planübung."""
-    from trainingsapp.ui.components.uhr_blatt import PLAN, UEBUNG, uhr_blatt
+    ihre Vorgabe); „Neuer Timer — nur in …“ öffnet gleich den Editor der Planübung. Beim Üben
+    ist „Für jetzt“ die Vorgabe (Ben, 17.11.2026)."""
+    from trainingsapp.ui.components.uhr_blatt import JETZT, PLAN, UEBUNG, uhr_blatt
 
     state, _, _ = umgebung
     u = _seitstuetz(state)
@@ -185,9 +209,10 @@ async def test_uhr_blatt_geltung_plan_uebung_und_neuer_timer(umgebung) -> None:
     seite = Seite()
     blatt = uhr_blatt(seite, state, uebung=u, plan=plan, item=item, basis=f"/plan/{plan.id}")
     segment = next(x for x in _alle(blatt) if isinstance(x, ft.SegmentedButton))
-    assert segment.selected == [PLAN]
+    assert segment.selected == [JETZT]
     assert [s.value for s in segment.segments] == ["jetzt", PLAN, UEBUNG]
     # Ohne Uhr — nur in diesem Plan
+    _geltung(blatt, PLAN)
     zeile = next(
         x for x in _alle(blatt) if isinstance(x, ft.Container) and x.data == ("uhr", OHNE_UHR)
     )
@@ -209,6 +234,7 @@ async def test_uhr_blatt_geltung_plan_uebung_und_neuer_timer(umgebung) -> None:
     assert [p.id for p in profile_der_uebung(state.uebungen.laden(u.id))] == ["seiten", "halten"]
     # Neuer Timer — nur in „Rumpf“: in den Editor der Planübung
     blatt = uhr_blatt(seite, state, uebung=u, plan=plan, item=item, basis=f"/plan/{plan.id}")
+    _geltung(blatt, PLAN)
     await _aklick(_knopf(blatt, "Neuer Timer — nur in „Rumpf“").on_click)
     await blatt.on_dismiss(None)
     assert seite.route == f"/plan/{plan.id}/timer/uebung/{u.id}/{item.id}/bearbeiten"
@@ -404,7 +430,7 @@ async def test_fuer_jetzt_mit_abschnitten(umgebung) -> None:
     Editor stellt die Uhr für jetzt, nichts kommt in die Übung; nur „Als Timer der Übung
     speichern …“ hängt sie mit Namen an."""
     from trainingsapp.core.timer import EINMAL
-    from trainingsapp.ui.components.uhr_blatt import JETZT, uhr_blatt
+    from trainingsapp.ui.components.uhr_blatt import JETZT, STELLEN, uhr_blatt
     from trainingsapp.ui.views.timer import timer_bearbeiten_view
     from trainingsapp.ui.views.uebung_timer import jetzt_profilziel
 
@@ -416,9 +442,10 @@ async def test_fuer_jetzt_mit_abschnitten(umgebung) -> None:
     seite = Seite()
     blatt = uhr_blatt(seite, state, uebung=u, plan=plan, item=item, basis=basis)
     segment = next(x for x in _alle(blatt) if isinstance(x, ft.SegmentedButton))
-    segment.selected = [JETZT]
-    segment.on_change(SimpleNamespace(control=segment))
-    await _aklick(_knopf(blatt, "Zeit stellen …").on_click)
+    assert segment.selected == [JETZT]  # beim Üben die Vorgabe
+    # kein Knopf mehr unter der Liste — „Timer stellen …“ steht in ihr, hinter der Stoppuhr
+    assert "Zeit stellen …" not in _texte(blatt)
+    await _aklick(_uhr_zeile(blatt, STELLEN).on_click)
     await _aklick(blatt.on_dismiss, None)
     zeit = seite.dialoge[-1]
     weiter = next(
@@ -483,6 +510,7 @@ async def test_eigener_timer_der_planuebung_bleibt_in_der_bibliothek(umgebung) -
     item = plan.items[0]
     assert "nur-hier" not in [p.id for p in state.timer_profile()]
     blatt = uhr_blatt(Seite(), state, uebung=u, plan=plan, item=item, basis=f"/plan/{plan.id}")
+    _geltung(blatt, "plan")
     zeile = next(
         x for x in _alle(blatt) if isinstance(x, ft.Container) and x.data == ("uhr", "seiten")
     )
@@ -490,3 +518,123 @@ async def test_eigener_timer_der_planuebung_bleibt_in_der_bibliothek(umgebung) -
     _knopf(blatt, "Übernehmen").on_click()
     assert TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer).eigen is None
     assert "nur-hier" in [p.id for p in state.timer_profile()]
+
+
+async def test_uhr_blatt_fuer_jetzt_ist_vorgabe_und_timer_stellen_steht_in_der_liste(
+    umgebung,
+) -> None:
+    """Ben, 17.11.2026: „Setze standardmäßig den Button ‚Für jetzt‘ aktiv und dort zwischen
+    Stoppuhr und ‚Ohne Uhr‘ bei Für jetzt den Button, um den Timer einzustellen.“ — die Zeile
+    „Timer stellen …“ steht hinter der Stoppuhr, öffnet die Räder, und die gestellte Zeit ist
+    danach gewählt. „Übernehmen“ ohne Änderung schreibt nichts fest."""
+    from trainingsapp.core.timer import EINMAL, STOPPUHR
+    from trainingsapp.ui.components.uhr_blatt import JETZT, PLAN, STELLEN, UEBUNG, uhr_blatt
+
+    state, _, _ = umgebung
+    u = _seitstuetz(state)
+    plan = _plan(state, u)
+    item = plan.items[0]
+    basis = f"/plan/{plan.id}"
+    seite = Seite()
+    blatt = uhr_blatt(seite, state, uebung=u, plan=plan, item=item, basis=basis)
+    segment = next(x for x in _alle(blatt) if isinstance(x, ft.SegmentedButton))
+    assert segment.selected == [JETZT]
+    ids = _uhr_ids(blatt)
+    assert ids[:2] == [STOPPUHR, STELLEN] and ids[-1] == OHNE_UHR
+    assert "Timer stellen …" in _texte(blatt)
+    # Nur bei „Für jetzt“: In „Plan“ und Übung steht dafür „Neuer Timer …“ unter der Liste
+    for g in (PLAN, UEBUNG):
+        _geltung(blatt, g)
+        assert STELLEN not in _uhr_ids(blatt)
+    _geltung(blatt, JETZT)
+
+    # Ohne Änderung übernommen: nichts gilt „für jetzt“, die Planübung bleibt ohne Wahl
+    _knopf(blatt, "Übernehmen").on_click()
+    assert item.id not in state.uhr_wahl and item.id not in state.uhr_zaehlt
+    assert state.plaene.item_laden(item.id).timer == {}
+
+    # Timer stellen: die Räder, 90 s — gilt für jetzt und ist gewählt
+    blatt = uhr_blatt(seite, state, uebung=u, plan=plan, item=item, basis=basis)
+    await _aklick(_uhr_zeile(blatt, STELLEN).on_click)
+    await _aklick(blatt.on_dismiss, None)
+    zeit = seite.dialoge[-1]
+    feld = next(x for x in _alle(zeit) if isinstance(x, ft.TextField))
+    feld.value = "1:30"
+    await _aklick(_knopf(zeit, "Übernehmen").on_click)
+    await _aklick(zeit.on_dismiss, None)
+    assert state.uhr_einmal[item.id].gesamt_s() == 90 and state.uhr_wahl[item.id] == EINMAL
+    assert state.plaene.item_laden(item.id).timer == {}  # gespeichert wird nichts
+
+    # Wieder geöffnet: an derselben Stelle die gestellte Zeit, gewählt — mit dem Weg zum Ändern
+    blatt = uhr_blatt(seite, state, uebung=u, plan=plan, item=item, basis=basis)
+    ids = _uhr_ids(blatt)
+    assert ids[:2] == [STOPPUHR, EINMAL] and STELLEN not in ids
+    zeile = _uhr_zeile(blatt, EINMAL)
+    assert zeile.bgcolor == ft.Colors.SECONDARY_CONTAINER
+    neu = next(
+        x for x in _alle(zeile) if isinstance(x, ft.IconButton) and x.data == "zeit_neu_stellen"
+    )
+    await _aklick(neu.on_click)
+    await _aklick(blatt.on_dismiss, None)
+    zeit = seite.dialoge[-1]
+    # die Räder beginnen bei der gestellten Zeit
+    assert next(x for x in _alle(zeit) if isinstance(x, ft.TextField)).value == "1:30"
+
+
+async def test_timer_einer_planuebung_steht_den_anderen_im_plan_zur_wahl(umgebung) -> None:
+    """Ben, 17.11.2026: „Wenn man einen Timer setzt im Bereich ‚In Plan‘, wird dieser Timer den
+    anderen Übungen im Timereditor des Plans nicht zur Verfügung gestellt.“ — nachgestellt:
+    Der „nur hier“-Timer der ersten Planübung stand an der zweiten nicht zur Wahl. Jetzt steht
+    er unter „In Plan“ in der Liste; gewählt wird er **zugeordnet**, nicht kopiert: Er kommt in
+    die Bibliothek, beide Planübungen verweisen darauf."""
+    from trainingsapp.ui.components.uhr_blatt import PLAN, UEBUNG, uhr_blatt
+
+    state, _, _ = umgebung
+    u = _seitstuetz(state)
+    v = Exercise(name="Brücke", result_spec=ResultSpec(Layout.SINGLE, [vorrat_feld("hold")]))
+    state.uebungen.speichern(v)
+    plan = _plan(state, u, v)
+    erste, zweite = plan.items
+    eigen = TimerProfil(id="nur-hier", name="Im Plan 40/20", abschnitte=[Abschnitt("H", 40)])
+    state.plaene.timer_setzen(erste.id, TimerWahl("", eigen).als_dict())
+    # die zweite hat schon einen eigenen — er darf mit der neuen Wahl nicht verschwinden (N71)
+    alt = TimerProfil(id="alt-hier", name="Alt 30", abschnitte=[Abschnitt("H", 30)])
+    state.plaene.timer_setzen(zweite.id, TimerWahl("", alt).als_dict())
+    plan = state.plaene.laden(plan.id)
+    erste, zweite = plan.items
+    basis = f"/plan/{plan.id}"
+
+    def blatt_der_zweiten(**mehr):
+        return uhr_blatt(Seite(), state, uebung=v, plan=plan, item=zweite, basis=basis, **mehr)
+
+    # Für jetzt und Übung: nicht dabei; unter „In Plan“ mit der Herkunft
+    blatt = blatt_der_zweiten()
+    assert "nur-hier" not in _uhr_ids(blatt)
+    _geltung(blatt, UEBUNG)
+    assert "nur-hier" not in _uhr_ids(blatt)
+    _geltung(blatt, PLAN)
+    assert "nur-hier" in _uhr_ids(blatt)
+    assert "in diesem Plan · bei Seitstütz" in _texte(_uhr_zeile(blatt, "nur-hier"))
+    # im Editor des Plans (Uhrenplan, „Im Plan einstellen“) ebenso
+    assert "nur-hier" in _uhr_ids(blatt_der_zweiten(im_editor=True, jetzt_grund="nur beim Üben"))
+    # an der Planübung selbst steht er einmal — als ihr eigener
+    eigenes = uhr_blatt(Seite(), state, uebung=u, plan=plan, item=erste, basis=basis)
+    _geltung(eigenes, PLAN)
+    assert _uhr_ids(eigenes).count("nur-hier") == 1
+
+    # gewählt und übernommen: ein gemeinsamer Timer, beide verweisen
+    assert "nur-hier" not in [p.id for p in state.timer_profile()]
+    next(x for x in _alle(_uhr_zeile(blatt, "nur-hier")) if isinstance(x, ft.IconButton)).on_click()
+    _knopf(blatt, "Übernehmen").on_click()
+    bibliothek = [p.id for p in state.timer_profile()]
+    assert "nur-hier" in bibliothek and "alt-hier" in bibliothek
+    for it in (erste, zweite):
+        wahl = TimerWahl.aus_dict(state.plaene.item_laden(it.id).timer)
+        assert wahl.eigen is not None and wahl.eigen.id == "nur-hier"
+        assert wahl.eigen.bibliothek == "nur-hier"
+    # in der Datenbank steht an beiden ein Verweis, keine Kopie
+    roh = [
+        r[0]
+        for r in state.con.execute("SELECT timer_json FROM plan_item WHERE plan_id = ?", (plan.id,))
+    ]
+    assert all('"ref"' in (x or "") for x in roh)

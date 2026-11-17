@@ -101,7 +101,7 @@ def test_beispiel_bauen_lesen_gleich(tmp_path) -> None:
     quelle = seed_inhalt(datei)
     pfad = bauen(datei, tmp_path / "dist")
     roh = json.loads(pfad.read_text("utf-8"))
-    assert roh["version"] == 6 == FORMAT_VERSION
+    assert roh["version"] == 6 <= FORMAT_VERSION
     gebaut = paket_lesen(pfad.read_bytes())
     (kurs,) = gebaut.kurse
     assert kurs.kursplan == Kursplan("Rumpf", [0, 2, 4])
@@ -204,7 +204,7 @@ def test_version_6_nur_mit_kursplan_oder_baustein() -> None:
     assert nutzt_kursplan(mit_plan) and nutzt_kursplan(mit_stein)
     assert paket_bauen(paket, [u], kurse=[ohne, mit_plan])["version"] == 6
     assert paket_bauen(paket, [u], kurse=[mit_stein], plaene=[plan])["version"] == 6
-    assert noetige_version([u], [ohne, mit_plan], [plan]) == 6 == FORMAT_VERSION
+    assert noetige_version([u], [ohne, mit_plan], [plan]) == 6 <= FORMAT_VERSION
 
 
 def test_version_6_auch_fuer_einen_test_der_die_gewaehlte_misst() -> None:
@@ -286,7 +286,7 @@ def test_aeltere_app_lehnt_version_6_ab(monkeypatch) -> None:
     assert roh["version"] == 6
     assert paket_lesen(roh).kurse[0].kursplan is not None
     with pytest.raises(PaketFehler, match="neuer als diese App — bitte die App aktualisieren"):
-        paket_lesen({**roh, "version": 7})
+        paket_lesen({**roh, "version": FORMAT_VERSION + 1})
     monkeypatch.setattr(pakete, "FORMAT_VERSION", 5)  # der Stand vor dem Kursplan
     with pytest.raises(PaketFehler, match="neuer als diese App — bitte die App aktualisieren"):
         paket_lesen(roh)

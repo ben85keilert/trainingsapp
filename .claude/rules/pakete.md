@@ -80,7 +80,11 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   `docs/plan_kurs_ablauf.md` §17); **Bausteine brauchen eine feste
   `id`** (sie ist die Marke der Planübung), Verweise zeigen nur auf Bausteine davor —
   `trainingsapp-paket pruefen` (`kursplan_pruefen`) meldet es; eine ältere App lehnt das Paket
-  ab (`docs/uebungspakete.md` „Kursplan und Bausteine“). Paketmanager: Jede
+  ab (`docs/uebungspakete.md` „Kursplan und Bausteine“). **Fragen mit Antworten im Ablauf**
+  (Ben, 17.11.2026, Formatversion 7 — nur für Pakete, die sie nutzen,
+  `core.pakete.nutzt_antworten`): `fragen[].art` (`ja_nein`, `auswahl` mit `antworten`,
+  `mehrfach`) und `kanten[].antworten` bei `ausloeser = "antwort"`; eine ältere App läse die
+  Frage als Skala und lehnt das Paket darum ab. Paketmanager: Jede
   Paketübung trägt ihren Paketstand (`package_standard_json`) für „Auf Paketstand setzen“;
   Entfernen legt die Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück;
   **Deaktivieren** (Migration 017) versteckt alles, ohne zu löschen; was beim Update aus

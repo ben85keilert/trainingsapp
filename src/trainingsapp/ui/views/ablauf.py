@@ -13,18 +13,24 @@ gebaut**: bei Änderungen tauscht sie nur Inhalte, so bleiben Zoom und Lage der 
 die Knoten liegen fest, bis jemand **„Neu anordnen“** tippt (dann richtet sich auch die Ansicht
 neu aus — Ben: „Ansicht neu ausrichten nur mit dem Button“).
 
-- **Palette**: ein **Vorrat an Übungen** (Ben, 16.11.2026) — eine Kachel je Übung des Plans,
-  „2×“, „3×“, wenn sie mehrfach im Plan steht, „frei“, solange keine ihrer Planübungen im Bild
-  ist. Ziehen oder Tippen setzt eine **Planübung** dieser Übung ins Bild: zuerst eine freie;
-  gibt es keine, entsteht eine neue Planübung derselben Übung am Ende der Liste
+- **Palette**: ein **Vorrat an Übungen** (Ben, 16.11.2026) — eine Kachel je Übung, „2×“, „3×“,
+  wenn sie mehrfach im Plan steht, „frei“, solange keine ihrer Planübungen im Bild ist. **Zur
+  Wahl stehen alle Übungen** (Ben, 17.11.2026: „Ersetze das Suchfeld und das Plus … durch die
+  Übungen aller Kataloge und den Filter (dort, wo das Plus steht), so dass dieser Bereich so
+  wirkt wie die View, wenn man jetzt das Plus drückt“): zuerst die des Plans, hinter einem
+  Strich der übrige Katalog — Suchfeld und Filter (Typ · Region · Paket,
+  `components/uebungsfilter.FilterLeiste`, derselbe Stand wie in „Übung hinzufügen“) wirken
+  auf beide; höchstens `KACHELN_HOECHSTENS` Kacheln, dahinter „+ n weitere“. Ziehen oder Tippen
+  setzt eine **Planübung** dieser Übung ins Bild: zuerst eine freie; gibt es keine — oder
+  steht die Übung noch gar nicht im Plan —, entsteht eine neue Planübung am Ende der Liste
   (`core.ablauf.vorrat`). **Eine Kachel bringt immer einen neuen Knoten** (Ben, 16.11.2026:
   „Ich brauche das einheitlich, neue Übung erstellen“) — hinter den gewählten, **auf eine
   Übung im Bild gezogen** hinter diese, oder auf „Start“. Nach dem Antippen ist der neue Knoten
-  gewählt: Kachel für Kachel entsteht eine Kette. Am Ende der Leiste steht die Kachel
+  gewählt: Kachel für Kachel entsteht eine Kette. Rechts neben der Reihe steht fest die Kachel
   **„Frage“** — eine Frage hinter die gewählte bzw. getroffene Übung. Im Bild ist jede
   Planübung ein eigener Knoten mit ihrer Nummer (Frage 5: die Stelle in der Liste, ein Alias
-  der festen ID). „+“ daneben fügt eine weitere Übung hinzu (wie im Reiter „Plan“), „i“ erklärt
-  alles Übrige. Waagerecht scrollt die Palette, nach unten zieht man eine Kachel ins Bild.
+  der festen ID). „i“ erklärt alles Übrige. Waagerecht scrollt die Palette, nach unten zieht
+  man eine Kachel ins Bild.
 - **Im Bild bedienen** (Ben, 16.11.2026: „Alles, was sich auslagern lässt vom Routingmenü in
   die Grafik, wird ausgelagert … möglichst ohne die Blätter schon viel machen“;
   `components/ablaufbild.py`):
@@ -68,8 +74,9 @@ import flet as ft
 
 from trainingsapp.core import ablauf as ab
 from trainingsapp.core.ablauf import Ablauf, Frage, Kante
-from trainingsapp.core.models import Plan
+from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.core.uebung_timer import timer_fuer
+from trainingsapp.core.uebungsfilter import paket_wahl
 from trainingsapp.ui.components import ablaufbild as abbild
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -79,13 +86,19 @@ from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.plan_reiter import plan_reiter
 from trainingsapp.ui.components.uebungsbild import uebungsbild
+from trainingsapp.ui.components.uebungsfilter import FilterLeiste
 from trainingsapp.ui.components.wege_form import weg_leiste, wege_karte, ziel_name
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.timer import timer_knopf
 
 LINEAR, VERZWEIGT = "linear", "verzweigt"
-#: Was die Kachel „Frage“ am Ende der Leiste trägt (``data`` ihres Draggable) — keine Übung
+#: Was die Kachel „Frage“ rechts neben der Leiste trägt (``data`` ihres Draggable) — keine Übung
 FRAGE_KACHEL = "__frage__"
+#: So viele Kacheln zeigt die Leiste höchstens (die Übungen des Plans immer alle) — dahinter
+#: steht „+ n weitere“: Suche und Filter engen ein (Ben, 17.11.2026: der ganze Katalog)
+KACHELN_HOECHSTENS = 40
+#: Luft über jeder Kachel der Leiste: Die Marke „2×“ ragt über ihr Bild hinaus
+KACHEL_OBEN = ft.Padding.only(top=6)
 #: Unter dem Bild, solange nichts gewählt ist: die Gesten
 GESTEN = (
     "Zieh den Punkt unter einer Übung auf eine andere: ein Weg — auf dieselbe: noch einmal. "
@@ -523,6 +536,28 @@ def warn_karte(warnungen: list[str], knoepfe: Sequence[ft.Control] = ()) -> ft.C
     )
 
 
+#: Was das Blatt „Frage ändern“ zu jeder Art sagt (Ben, 17.11.2026)
+FRAGE_ERKLAERT: dict[str, str] = {
+    ab.F_SKALA: (
+        "Die Frage fragt nach einer Skala; ihre Wege gelten je für einen Bereich (0–6, 7–10). "
+        "Zieh den Punkt unter der Frage auf eine Übung oder auf „Ende“ und stell am Weg ein: "
+        "den Bereich, was der Plan bei dieser Antwort sagt — und ob es von selbst weitergeht "
+        "oder der Weg nur vorgeschlagen wird. Eine Frage kann beides."
+    ),
+    ab.F_JA_NEIN: (
+        "Zwei Antworten zum Antippen. Zieh den Punkt unter der Frage auf eine Übung oder auf "
+        "„Ende“: Der erste Weg gilt bei „Ja“, der zweite bei „Nein“ — am Weg lässt sich das "
+        "ändern, auch ob es von selbst weitergeht oder der Weg nur vorgeschlagen wird."
+    ),
+    ab.F_AUSWAHL: (
+        "Eigene Antworten zum Antippen — genau eine, oder mehrere zum Ankreuzen. Jeder Weg der "
+        "Frage gilt bei einer oder mehreren Antworten, ein Weg „jede andere“ fängt den Rest. "
+        "Führen angekreuzte Antworten zu verschiedenen Wegen, wählt die Person im Workout "
+        "einen davon. Mit nur einer Antwort („Weiter“) ist die Frage ein Hinweis."
+    ),
+}
+
+
 # -- Die Ansicht -----------------------------------------------------------------------------
 
 
@@ -566,42 +601,68 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         state.ablauf_menue[plan.id] = None
 
     # -- Palette ------------------------------------------------------------------------------
-    reihe = ft.Row(spacing=6, scroll=ft.ScrollMode.AUTO)
+    # Oben bündig — Namen brechen verschieden um; `KACHEL_OBEN` lässt Platz für „2×“
+    reihe = ft.Row(
+        spacing=6,
+        scroll=ft.ScrollMode.AUTO,
+        expand=True,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+    )
 
-    def gesucht(e: ft.Event[ft.TextField]) -> None:
-        lokal["suche"] = (e.control.value or "").strip().casefold()
+    def treffer() -> list[Exercise]:
+        """Was Suche und Filter aus **allen** Übungen übrig lassen — wie in „Übung hinzufügen“
+        (`views/plan_hinzufuegen.py`), in der Reihenfolge des Katalogs."""
+        return [
+            u for u in state.uebungen.suchen(lokal["suche"]) if state.hinzufuegen_filter.passt(u)
+        ]
+
+    def palette_zeigen() -> None:
         palette_fuellen(frisch())
         with contextlib.suppress(Exception):
-            reihe.update()
+            page.update()
 
-    async def hinzufuegen(_e: Any = None) -> None:
-        # Unter dem Ablauf (Ben, 9.11.2026): Zurück führt wieder hierher, nicht in „Plan“
-        await page.push_route(f"{route}/hinzufuegen")
+    def gesucht(e: ft.Event[ft.TextField]) -> None:
+        lokal["suche"] = (e.control.value or "").strip()
+        palette_zeigen()
 
+    #: Was `suchen` liefern kann — eine Übung des Plans außerhalb davon (archiviert, ihr Paket
+    #: ausgeschaltet) bleibt in der Leiste, solange Name und Filter passen
+    aktive = state.uebungen.alle()
+    aktiv = {u.id for u in aktive}
+    # Typ · Region · Paket wie im Katalog und in „Übung hinzufügen“ — derselbe Stand
+    # (`AppState.hinzufuegen_filter`): Was dort gewählt ist, wirkt auch hier
+    leiste = FilterLeiste(
+        page,
+        state.hinzufuegen_filter,
+        state.uebungen.typen(),
+        state.uebungen.regionen(),
+        paket_wahl(aktive, [pk for pk, _ in state.pakete.alle()]),
+        on_change=palette_zeigen,
+        zaehlen=lambda: len(palette_wahl(frisch())[0]),
+    )
+    leiste.labels.padding = None  # die Ansicht hat ihren Rand schon
+    suchzeile = leiste.suchzeile(
+        ft.TextField(
+            hint_text="Übung suchen",
+            dense=True,
+            prefix_icon=ft.Icons.SEARCH,
+            on_change=gesucht,
+        )
+    )
+    suchzeile.controls.append(hilfe_knopf(page, thema="ablauf"))
+    # Die Kachel „Frage“ steht fest rechts neben der Reihe — hinter dem ganzen Katalog fände
+    # sie niemand (einmal gebaut: Die Reihe daneben tauscht nur ihre Kacheln)
+    frage_platz = ft.Container()
     palette = ft.Column(
         spacing=6,
         controls=[
+            suchzeile,
+            leiste.labels,  # nur, wenn ein Filter wirkt
             ft.Row(
-                spacing=4,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.TextField(
-                        hint_text="Übungen des Plans suchen",
-                        dense=True,
-                        expand=True,
-                        prefix_icon=ft.Icons.SEARCH,
-                        on_submit=gesucht,
-                        on_blur=gesucht,
-                    ),
-                    ft.IconButton(
-                        ft.Icons.ADD_CIRCLE_OUTLINE,
-                        tooltip="Übung hinzufügen",
-                        on_click=hinzufuegen,
-                    ),
-                    hilfe_knopf(page, thema="ablauf"),
-                ],
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+                controls=[reihe, frage_platz],
             ),
-            reihe,
         ],
     )
 
@@ -612,119 +673,184 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             v.uebung: v for v in ab.vorrat(p.ablauf, [(it.id, it.exercise_id) for it in p.items])
         }
 
+    def palette_wahl(p: Plan) -> tuple[list[tuple[Exercise, ab.Vorrat | None]], int]:
+        """Was Suche und Filter übrig lassen, in der Reihenfolge der Leiste: **zuerst die
+        Übungen des Plans** (mit ihrem `Vorrat`), dann der übrige Katalog (``None``) — und wie
+        viele davon zum Plan gehören."""
+        gefunden = treffer()
+        for u in gefunden:
+            katalog.setdefault(u.id, u)
+        ids = {u.id for u in gefunden}
+        suche = lokal["suche"].casefold()
+        wahl: list[tuple[Exercise, ab.Vorrat | None]] = []
+        im_plan = vorrat_jetzt(p)
+        for v in im_plan.values():
+            im = katalog.get(v.uebung)
+            if im is None:
+                continue
+            abseits = (
+                im.id not in aktiv
+                and (not suche or suche in im.name.casefold())
+                and state.hinzufuegen_filter.passt(im)
+            )
+            if im.id in ids or abseits:
+                wahl.append((im, v))
+        n_plan = len(wahl)
+        wahl.extend((u, None) for u in gefunden if u.id not in im_plan)
+        return wahl, n_plan
+
+    def kachel(u: Exercise, v: ab.Vorrat | None, beiname: dict[str, str]) -> ft.Control:
+        """Die Kachel einer Übung — ``v``: ihr Vorrat im Plan, ``None``, wenn sie (noch) nicht
+        im Plan steht: dann legt Tippen oder Ziehen ihre erste Planübung an (`ins_bild`)."""
+        frei = v is not None and v.ganz_frei
+        # Der Beiname gehört der Planübung: an der Kachel nur, solange es genau eine gibt —
+        # sonst steht er am Knoten im Bild
+        zusatz = beiname.get(v.planuebungen[0], "") if v is not None and v.anzahl == 1 else ""
+        bild = ft.Stack(
+            width=56,
+            height=56,
+            clip_behavior=ft.ClipBehavior.NONE,
+            controls=[
+                ft.Container(
+                    width=56,
+                    height=56,
+                    border_radius=12,
+                    # Im Plan: gefüllt; aus dem Katalog: nur umrandet — so sieht man, was
+                    # schon da ist
+                    bgcolor=ft.Colors.PRIMARY_CONTAINER if v is not None else None,
+                    border=ft.Border.all(2, ft.Colors.OUTLINE)
+                    if frei
+                    else ft.Border.all(1, ft.Colors.OUTLINE_VARIANT)
+                    if v is None
+                    else None,
+                    alignment=ft.Alignment.CENTER,
+                    content=uebungsbild(state, u.icon_key, u.image_path, groesse=30),
+                ),
+                *(
+                    [
+                        ft.Container(
+                            right=-6,
+                            top=-6,
+                            height=20,
+                            padding=ft.Padding.symmetric(horizontal=5),
+                            border_radius=10,
+                            bgcolor=ft.Colors.PRIMARY,
+                            alignment=ft.Alignment.CENTER,
+                            data=("mehrfach", u.id),
+                            content=ft.Text(
+                                f"{v.anzahl}×",
+                                size=10,
+                                weight=ft.FontWeight.BOLD,
+                                color=ft.Colors.ON_PRIMARY,
+                            ),
+                        )
+                    ]
+                    if v is not None and v.anzahl > 1
+                    else []
+                ),
+            ],
+        )
+        return ft.Draggable(
+            group=abbild.GRUPPE_KACHEL,
+            # die Übung, nicht eine Planübung — welche ins Bild kommt, entscheidet sich
+            # beim Ablegen (`ins_bild`)
+            data=u.id,
+            # Waagerecht scrollt die Palette, nach unten greift man die Übung
+            affinity=ft.Axis.VERTICAL,
+            content=ft.Container(
+                width=70,
+                padding=KACHEL_OBEN,
+                on_click=lambda _e, i=u.id: palette_getippt(i),
+                # Gedrückt halten nimmt sie aus dem Plan (Ben, 9.11.2026) — mit Rückfrage;
+                # nur, wenn sie dort steht
+                on_long_press=(lambda _e, i=u.id: aus_dem_plan(i)) if v is not None else None,
+                tooltip="Tippen oder auf eine Übung im Bild ziehen: in den Ablauf · "
+                "gedrückt halten: aus dem Plan"
+                if v is not None
+                else "Tippen oder auf eine Übung im Bild ziehen: kommt in den Plan und in "
+                "den Ablauf",
+                content=ft.Column(
+                    spacing=3,
+                    tight=True,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        bild,
+                        ft.Text(
+                            u.name + (f" · {zusatz}" if zusatz else ""),
+                            size=10,
+                            text_align=ft.TextAlign.CENTER,
+                            max_lines=2,
+                            width=68,
+                        ),
+                        *([ft.Text("frei", size=9, opacity=0.6)] if frei else []),
+                    ],
+                ),
+            ),
+            content_feedback=ft.Container(
+                width=56,
+                height=56,
+                border_radius=12,
+                bgcolor=ft.Colors.PRIMARY,
+                alignment=ft.Alignment.CENTER,
+                content=uebungsbild(
+                    state, u.icon_key, u.image_path, groesse=30, color=ft.Colors.ON_PRIMARY
+                ),
+            ),
+        )
+
     def palette_fuellen(p: Plan) -> None:
         """Eine Kachel je **Übung** (Ben, 16.11.2026): „2×“, „3×“, wenn sie mehrfach im Plan
         steht, „frei“, solange keine ihrer Planübungen im Bild ist. Die Listennummer steht nur
-        noch am Knoten im Bild — dort ist jede Planübung für sich."""
-        suche = lokal["suche"]
+        noch am Knoten im Bild — dort ist jede Planübung für sich. **Zuerst die Übungen des
+        Plans, hinter einem Strich der übrige Katalog** (Ben, 17.11.2026) — beides, soweit
+        Suche und Filter es lassen; der Katalog nur, bis `KACHELN_HOECHSTENS` Kacheln stehen."""
+        wahl, n_plan = palette_wahl(p)
         beiname = {it.id: it.beiname for it in p.items}
+        gezeigt = wahl[: max(n_plan, KACHELN_HOECHSTENS)]
         kacheln: list[ft.Control] = []
-        for v in vorrat_jetzt(p).values():
-            u = katalog.get(v.uebung)
-            if u is None or (suche and suche not in u.name.casefold()):
-                continue
-            frei = v.ganz_frei
-            # Der Beiname gehört der Planübung: an der Kachel nur, solange es genau eine gibt —
-            # sonst steht er am Knoten im Bild
-            zusatz = beiname.get(v.planuebungen[0], "") if v.anzahl == 1 else ""
-            bild = ft.Stack(
-                width=56,
-                height=56,
-                clip_behavior=ft.ClipBehavior.NONE,
-                controls=[
+        for n, (u, v) in enumerate(gezeigt):
+            if n == n_plan and n_plan:
+                kacheln.append(
                     ft.Container(
-                        width=56,
+                        width=1,
                         height=56,
-                        border_radius=12,
-                        bgcolor=ft.Colors.PRIMARY_CONTAINER,
-                        border=ft.Border.all(2, ft.Colors.OUTLINE) if frei else None,
-                        alignment=ft.Alignment.CENTER,
-                        content=uebungsbild(state, u.icon_key, u.image_path, groesse=30),
-                    ),
-                    *(
-                        [
-                            ft.Container(
-                                right=-6,
-                                top=-6,
-                                height=20,
-                                padding=ft.Padding.symmetric(horizontal=5),
-                                border_radius=10,
-                                bgcolor=ft.Colors.PRIMARY,
-                                alignment=ft.Alignment.CENTER,
-                                data=("mehrfach", v.uebung),
-                                content=ft.Text(
-                                    f"{v.anzahl}×",
-                                    size=10,
-                                    weight=ft.FontWeight.BOLD,
-                                    color=ft.Colors.ON_PRIMARY,
-                                ),
-                            )
-                        ]
-                        if v.anzahl > 1
-                        else []
-                    ),
-                ],
-            )
+                        margin=ft.Margin.only(top=KACHEL_OBEN.top),
+                        bgcolor=ft.Colors.OUTLINE_VARIANT,
+                        data=("palette_strich",),
+                    )
+                )
+            kacheln.append(kachel(u, v, beiname))
+        if rest := len(wahl) - len(gezeigt):
             kacheln.append(
-                ft.Draggable(
-                    group=abbild.GRUPPE_KACHEL,
-                    # die Übung, nicht eine Planübung — welche ins Bild kommt, entscheidet sich
-                    # beim Ablegen (`ins_bild`)
-                    data=v.uebung,
-                    # Waagerecht scrollt die Palette, nach unten greift man die Übung
-                    affinity=ft.Axis.VERTICAL,
-                    content=ft.Container(
-                        width=70,
-                        on_click=lambda _e, i=v.uebung: palette_getippt(i),
-                        # Gedrückt halten nimmt sie aus dem Plan (Ben, 9.11.2026) — mit Rückfrage
-                        on_long_press=lambda _e, i=v.uebung: aus_dem_plan(i),
-                        tooltip="Tippen oder auf eine Übung im Bild ziehen: in den Ablauf · "
-                        "gedrückt halten: aus dem Plan",
-                        content=ft.Column(
-                            spacing=3,
-                            tight=True,
-                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                            controls=[
-                                bild,
-                                ft.Text(
-                                    u.name + (f" · {zusatz}" if zusatz else ""),
-                                    size=10,
-                                    text_align=ft.TextAlign.CENTER,
-                                    max_lines=2,
-                                    width=68,
-                                ),
-                                *([ft.Text("frei", size=9, opacity=0.6)] if frei else []),
-                            ],
-                        ),
-                    ),
-                    content_feedback=ft.Container(
-                        width=56,
-                        height=56,
-                        border_radius=12,
-                        bgcolor=ft.Colors.PRIMARY,
-                        alignment=ft.Alignment.CENTER,
-                        content=uebungsbild(
-                            state, u.icon_key, u.image_path, groesse=30, color=ft.Colors.ON_PRIMARY
-                        ),
+                ft.Container(
+                    width=70,
+                    height=56,
+                    margin=ft.Margin.only(top=KACHEL_OBEN.top),
+                    alignment=ft.Alignment.CENTER,
+                    data=("palette_weitere", rest),
+                    content=ft.Text(
+                        f"+ {rest} weitere — Suche oder Filter",
+                        size=10,
+                        opacity=0.65,
+                        text_align=ft.TextAlign.CENTER,
                     ),
                 )
             )
         if not kacheln:
             kacheln.append(
-                ft.Text(
-                    "Keine Übung passt." if suche else "Noch keine Übung — „+“ fügt eine hinzu.",
-                    size=12,
-                    opacity=0.6,
+                ft.Container(
+                    height=56,
+                    margin=ft.Margin.only(top=KACHEL_OBEN.top),
+                    alignment=ft.Alignment.CENTER_LEFT,
+                    content=ft.Text("Keine Übung passt zu Suche und Filter.", size=12, opacity=0.6),
                 )
             )
-        else:
-            kacheln.append(frage_kachel())
         reihe.controls = kacheln
 
     def frage_kachel() -> ft.Control:
-        """Die Kachel **„Frage“** am Ende der Leiste (vorher „Routing → Frage dahinter“):
-        antippen — mit gewählter Übung im Bild — oder auf eine Übung ziehen setzt eine Frage
-        dahinter; danach öffnet ihr Blatt."""
+        """Die Kachel **„Frage“** fest rechts neben der Leiste (vorher an ihrem Ende, davor
+        „Routing → Frage dahinter“): antippen — mit gewählter Übung im Bild — oder auf eine
+        Übung ziehen setzt eine Frage dahinter; danach öffnet ihr Blatt."""
 
         def bild(flaeche: str, zeichen: str) -> ft.Control:
             return ft.Container(
@@ -742,6 +868,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             affinity=ft.Axis.VERTICAL,
             content=ft.Container(
                 width=70,
+                padding=KACHEL_OBEN,
                 on_click=lambda _e: frage_getippt(),
                 tooltip="Tippen oder auf eine Übung im Bild ziehen: eine Frage dahinter",
                 content=ft.Column(
@@ -756,6 +883,8 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             ),
             content_feedback=bild(ft.Colors.SECONDARY, ft.Colors.ON_SECONDARY),
         )
+
+    frage_platz.content = frage_kachel()
 
     def aus_dem_plan(uebung_id: str) -> None:
         """Gedrückt halten an einer Kachel: **eine** Planübung dieser Übung aus dem Plan nehmen
@@ -803,17 +932,19 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         """Eine Kachel kommt ins Bild (Ben, 16.11.2026): zuerst eine Planübung dieser Übung, die
         noch nicht dort steht; gibt es keine freie, entsteht eine **neue Planübung derselben
         Übung** am Ende der Liste (sie folgt der Übung, P79) — so muss niemand die Übung vorher
-        zwei-, dreimal in den Plan laden. ``aendern(ablauf, planuebung)`` setzt sie ein. Zurück:
-        die Planübung und ob sie neu ist; ``("", False)``, wenn die Übung nicht im Plan steht.
+        zwei-, dreimal in den Plan laden. **Steht die Übung noch nicht im Plan** (eine Kachel
+        aus dem Katalog; Ben, 17.11.2026), ist es ihre erste Planübung. ``aendern(ablauf,
+        planuebung)`` setzt sie ein. Zurück: die Planübung und ob sie neu ist; ``("", False)``,
+        wenn es die Übung nicht gibt.
 
         Der Ablauf, in den sie kommt, ist der von **vor** dem Hinzufügen: Folgte er der Liste,
         hängt die neue Planübung nicht von selbst hinten an — sie kommt dorthin, wohin die
         Person sie gesetzt hat."""
         p = frisch()
         v = vorrat_jetzt(p).get(uebung_id)
-        if v is None:
+        if v is None and uebung_id not in katalog:
             return "", False
-        item_id = v.naechste
+        item_id = v.naechste if v is not None else None
         neu = item_id is None
         if item_id is None:
             item_id = state.plaene.uebung_hinzufuegen(plan.id, uebung_id).id
@@ -827,7 +958,8 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         einheitlich, neue Übung erstellen“). **Die Wahl geht auf den neuen Knoten** — Kachel für
         Kachel entsteht so eine Kette; für einen Abzweig wählt man die Übung noch einmal oder
         zieht die Kachel auf sie."""
-        item_id, neu = ins_bild(uebung_id, lambda a, i: a.mit_kante(Kante(von, i)))
+        # aus einer Frage mit Antworten: gleich mit der nächsten freien Antwort (`weg_neu`)
+        item_id, neu = ins_bild(uebung_id, lambda a, i: a.mit_kante(ab.weg_neu(a, von, i)))
         if not item_id:
             return
         namen = knoten_namen(state, frisch())
@@ -1445,6 +1577,10 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             page.show_dialog(blatt)
 
     def frage_blatt(f: Frage | None) -> None:
+        """„Frage ändern“: der Wortlaut und **wie geantwortet wird** (Ben, 17.11.2026: „Eine
+        Frage lässt bisher nur Skala von x bis y zu. Mehrfachauswahl, Ja/Nein usw. geht bisher
+        nicht, wird aber gebraucht“) — Skala · Ja/Nein · Auswahl (eigene Antworten, wahlweise
+        mehrere zum Ankreuzen). Die Wege der Frage ziehen mit (`core.ablauf.frage_ersetzen`)."""
         if f is None:
             return
         text = ft.TextField(value=f.text, label="Frage", hint_text="Wie fühlt es sich an?")
@@ -1454,23 +1590,130 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         hi = ft.TextField(
             value=str(f.max), label="bis", width=80, keyboard_type=ft.KeyboardType.NUMBER
         )
+        wie: dict[str, Any] = {"art": f.art, "mehrfach": f.mehrfach}
+        # Je Antwort eine Zeile, einmal gebaut — ein Textfeld, das den Elternteil wechselt,
+        # nähme keine Eingaben mehr an. Dazu ihr Wortlaut von vorher (für die Wege)
+        zeilen: list[tuple[str, ft.TextField, ft.Row]] = []
+        mitte = ft.Column(
+            spacing=10, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH
+        )
         nachher = Nachher()
         blatt: ft.BottomSheet
 
+        def antwort_zeile(vorher: str) -> None:
+            feld = ft.TextField(
+                value=vorher,
+                label="Antwort",
+                dense=True,
+                expand=True,
+                data="frage_antwort",
+            )
+            zeile = ft.Row(spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+            zeile.controls = [
+                feld,
+                ft.IconButton(
+                    ft.Icons.DELETE_OUTLINE,
+                    icon_size=18,
+                    tooltip="Antwort entfernen",
+                    on_click=lambda _e: antwort_weg(zeile),
+                    data="frage_antwort_weg",
+                ),
+            ]
+            zeilen.append((vorher, feld, zeile))
+
+        def antwort_weg(zeile: ft.Row) -> None:
+            zeilen[:] = [z for z in zeilen if z[2] is not zeile]
+            fuellen(True)
+
+        def antwort_dazu(_e: Any = None) -> None:
+            if len(zeilen) < ab.ANTWORTEN_MAX:
+                antwort_zeile("")
+                fuellen(True)
+
+        def art_gewaehlt(e: Any) -> None:
+            wie["art"] = e.control.selected[0] if e.control.selected else wie["art"]
+            if wie["art"] == ab.F_AUSWAHL and not zeilen:
+                antwort_zeile("")
+                antwort_zeile("")
+            fuellen(True)
+
+        def fuellen(zeigen: bool = False) -> None:
+            art = wie["art"]
+            if art == ab.F_SKALA:
+                teile: list[ft.Control] = [
+                    ft.Row(spacing=8, controls=[lo, hi, ft.Text("Skala", size=13, opacity=0.7)])
+                ]
+            elif art == ab.F_JA_NEIN:
+                teile = [ft.Text("Antworten: Ja · Nein", size=13, data="frage_ja_nein")]
+            else:
+                teile = [
+                    *(z[2] for z in zeilen),
+                    ft.Row(
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.TextButton(
+                                "Antwort",
+                                icon=ft.Icons.ADD,
+                                disabled=len(zeilen) >= ab.ANTWORTEN_MAX,
+                                on_click=antwort_dazu,
+                                data="frage_antwort_dazu",
+                            ),
+                        ],
+                    ),
+                    ft.Switch(
+                        label="Mehrere Antworten ankreuzen",
+                        value=bool(wie["mehrfach"]),
+                        on_change=lambda e: wie.__setitem__("mehrfach", bool(e.control.value)),
+                        data="frage_mehrfach",
+                    ),
+                ]
+            mitte.controls = [
+                ft.Text(FRAGE_ERKLAERT[art], size=12, opacity=0.7, data="frage_erklaert"),
+                *teile,
+            ]
+            if zeigen:
+                with contextlib.suppress(Exception):
+                    mitte.update()
+
         def uebernehmen(_e: Any = None) -> None:
             p = frisch()
-            try:
-                a, b = int(lo.value or 0), int(hi.value or 10)
-            except ValueError:
-                a, b = f.min, f.max
-            if b <= a or b - a > 20:
-                a, b = ab.FRAGE_MIN, ab.FRAGE_MAX
-            neu = Frage(f.id, (text.value or "").strip() or f.text, a, b)
-            fragen = tuple(neu if x.id == f.id else x for x in p.ablauf.fragen)
-            speichern(replace(p.ablauf, fragen=fragen))
+            wortlaut = (text.value or "").strip() or f.text
+            art = wie["art"]
+            umbenannt: dict[str, str] = {}
+            if art == ab.F_SKALA:
+                try:
+                    a, b = int(lo.value or 0), int(hi.value or 10)
+                except ValueError:
+                    a, b = f.min, f.max
+                if b <= a or b - a > 20:
+                    a, b = ab.FRAGE_MIN, ab.FRAGE_MAX
+                neu = Frage(f.id, wortlaut, a, b)
+            elif art == ab.F_JA_NEIN:
+                neu = Frage(f.id, wortlaut, f.min, f.max, ab.F_JA_NEIN)
+            else:
+                paare = [(vorher, (feld.value or "").strip()) for vorher, feld, _z in zeilen]
+                antworten = tuple(dict.fromkeys(jetzt for _v, jetzt in paare if jetzt))
+                if not antworten:
+                    # nichts von selbst einsetzen (Ben, 16.11.2026) — die Person trägt ein
+                    if not zeilen:
+                        antwort_zeile("")
+                        fuellen(True)
+                    zeilen[0][1].error = "Mindestens eine Antwort"
+                    with contextlib.suppress(Exception):
+                        zeilen[0][1].update()
+                    return
+                umbenannt = {v: j for v, j in paare if v and j and v != j}
+                neu = Frage(
+                    f.id, wortlaut, f.min, f.max, ab.F_AUSWAHL, antworten, bool(wie["mehrfach"])
+                )
+            speichern(ab.frage_ersetzen(p.ablauf, neu, umbenannt))
             nachher.danach(neu_zeichnen)
             schliessen(blatt)
 
+        for antwort in f.antworten:
+            antwort_zeile(antwort)
+        fuellen()
         blatt = ft.BottomSheet(
             show_drag_handle=True,
             scrollable=True,
@@ -1478,28 +1721,32 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             content=blatt_spalte(
                 [
                     ft.Text("Frage", size=18, weight=ft.FontWeight.W_600),
-                    ft.Text(
-                        "Die Frage fragt nach einer Skala; ihre Wege gelten je für einen "
-                        "Bereich (0–6, 7–10). Zieh den Punkt unter der Frage auf eine Übung "
-                        "oder auf „Ende“ und stell am Weg ein: den Bereich, was der Plan bei "
-                        "dieser Antwort sagt — und ob es von selbst weitergeht oder der Weg "
-                        "nur vorgeschlagen wird. Eine Frage kann beides.",
-                        size=12,
-                        opacity=0.7,
-                    ),
                     text,
-                    ft.Row(spacing=8, controls=[lo, hi, ft.Text("Skala", size=13, opacity=0.7)]),
+                    ft.SegmentedButton(
+                        segments=[
+                            ft.Segment(value=art, label=ft.Text(name))
+                            for art, name in ab.FRAGE_ART_TEXT.items()
+                        ],
+                        selected=[wie["art"]],
+                        allow_empty_selection=False,
+                        show_selected_icon=False,
+                        on_change=art_gewaehlt,
+                        data="frage_art",
+                    ),
+                    mitte,
                 ],
                 [
                     ft.Row(
                         alignment=ft.MainAxisAlignment.END,
                         controls=[
                             ft.TextButton("Abbrechen", on_click=lambda _e: schliessen(blatt)),
-                            ft.FilledButton("Übernehmen", on_click=uebernehmen),
+                            ft.FilledButton(
+                                "Übernehmen", on_click=uebernehmen, data="frage_uebernehmen"
+                            ),
                         ],
                     )
                 ],
-                geschaetzt=320,
+                geschaetzt=460,
             ),
         )
         with contextlib.suppress(Exception):

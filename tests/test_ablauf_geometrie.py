@@ -168,7 +168,9 @@ def test_jeder_knoten_hat_seinen_punkt() -> None:
     assert g.punkte["a"] == g.abzweige["a"]
     griff = {w.kante.von: w.griff for w in g.wege}
     assert g.punkte["b"] == griff["b"] and g.punkte["c"] == griff["c"]
-    assert g.punkte["f"] == griff["f"]  # der Stummel „Ende“ der Frage
+    # Der eine Weg der Frage ist der Stummel „Ende“: Ihr Punkt bleibt unter ihr — am Stummel
+    # steht nur „Ende“ (Ben, 17.11.2026: Von dort zog niemand einen zweiten Weg)
+    assert g.punkte["f"] == g.austritte["f"] != griff["f"]
     # „d“ hat keinen Weg: der Punkt liegt mittig unter Bild und Beschriftung — so tief, wie
     # der Austritt läge; einen Stamm dorthin gibt es nicht
     x, y = g.mitten["d"]

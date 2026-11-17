@@ -134,7 +134,20 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   vor:“, `core.ablauf.vorschlag_text` — nennt die Regel, deutet die Zahl nie), die Person
   tippt; ohne den Vermerk wird der Weg sofort gegangen, kein Plan von früher ändert sich. In
   der Weg-Leiste steht „Entfernen“ ausgeschrieben (Ben: „mach aus x --> entfernen“), im Blatt
-  der Papierkorb.
+  der Papierkorb. **Fragearten** (Ben, 17.11.2026, §8.13 Punkt 9): `Frage.art` Skala · Ja/Nein ·
+  Auswahl (`antworten`, `mehrfach`); Wege daraus mit `ausloeser = "antwort"` und
+  `Kante.antworten` (Wortlaut), frei = „jede andere“. Neue Wege nur über `core.ablauf.weg_neu`
+  (nächste freie Antwort), eine geänderte Frage nur über `frage_ersetzen` (die Wege ziehen
+  mit). **Führt eine Antwort zu mehreren Wegen, wählt die Person** (`antwort_wege`,
+  `PlanAblaufBaustein.antwort_geben`/`antwort_waehlt`) — die Skala geht wie bisher den ersten.
+  Eine Antwort ohne Weg warnt beim Bauen (`ohne_weg`). Was angekreuzt ist, liegt am Baustein
+  (`kreuze`) und im Aufbau-Schlüssel der Workout-Ansicht — sonst antwortet „Weiter“ mit dem
+  Stand vom Aufbau. **Die Leiste zeigt den ganzen Katalog** (Punkt 8): Suche, Filter
+  (`state.hinzufuegen_filter`), Plan vor Katalog, Deckel 40; eine Katalog-Kachel legt die
+  Planübung an (`ins_bild`). **Der Punkt eines Knotens** liegt nur bei einem Weg abwärts an
+  dessen Griff, sonst unter dem Knoten (Punkt 10). **Gleichwertige Wege** (Punkt 11,
+  `core.ablauf.gleichwertige`): mehrere freie Wege und alle Wege einer Frage gehören zum
+  Ablauf — „bei Bedarf“ ist nur, was allein ein Weg mit Auslöser neben dem regulären erreicht.
 
 - **Neue Ereignisse der Zeitleiste** (Ben, 16.11.2026): Wer eines plant, sieht **vorher** in
   `core/einheit.py` nach — `ARTEN` und `DATEN_SCHLUESSEL` sind eine feste Liste, alles andere

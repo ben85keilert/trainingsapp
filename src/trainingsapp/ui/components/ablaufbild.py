@@ -173,13 +173,20 @@ def etikett_text(k: Kante, zaehlung: Counter[tuple[str, str]] | None = None) -> 
     ('', 'Skala ≥ 7 · Rücken')
     >>> etikett_text(Kante("a", ab.ZURUECK, wiederholen=True))
     '◀ zurück · noch einmal'
+
+    Auch am Stummel steht, wann der Weg gilt — an einer Frage sieht man sonst nicht, welche
+    Antwort zum Ende führt (Ben, 17.11.2026):
+
+    >>> etikett_text(Kante("f", ab.ENDE, ab.ANTWORT, antworten=("Nein",)))
+    'Ende · „Nein“'
     """
+    wann = [k.ausloeser_text()] if k.ausloeser != ab.FREI else []
     if k.zurueck:
-        teile = ["◀ zurück"] + (["noch einmal"] if k.wiederholen else [])
+        teile = ["◀ zurück"] + (["noch einmal"] if k.wiederholen else []) + wann
     elif k.zum_ende:
-        teile = ["Ende"]
+        teile = ["Ende", *wann]
     else:
-        teile = [k.ausloeser_text()] if k.ausloeser != ab.FREI else []
+        teile = wann
     if k.text:
         teile.append(k.text)
     if k.pflicht:
@@ -764,7 +771,13 @@ def zeichnung(
                             ),
                         ],
                     ),
-                    ft.Text(f"Skala {f.min}–{f.max}", size=10, opacity=0.65),
+                    ft.Text(
+                        f.kurz(),
+                        size=10,
+                        opacity=0.65,
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
                 ],
             ),
         )

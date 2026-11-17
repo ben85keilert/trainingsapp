@@ -86,9 +86,11 @@ from .zaehlen import SensorWahl
 FORMAT = "trainingsapp-uebungspaket"
 #: Höchste Formatversion, die diese App liest — 2 seit es Kurse gibt (``kurse``), 3 mit
 #: Plänen, 4 mit Dateien (ZIP, U3), 5 mit Ergänzungen (U5), 6 mit Kursplan und Bausteinen
-#: (``kurse[].kursplan``, ``plan_*``-Blöcke). Geschrieben wird immer die kleinste, die der
-#: Inhalt braucht (`noetige_version`): eine Datei ohne Kurse weiter als Version 1
-FORMAT_VERSION = 6
+#: (``kurse[].kursplan``, ``plan_*``-Blöcke), 7 mit Fragen, die Antworten zum Antippen haben
+#: (``ablauf.fragen[].art``: Ja/Nein, Auswahl — Ben, 17.11.2026). Geschrieben wird immer die
+#: kleinste, die der Inhalt braucht (`noetige_version`): eine Datei ohne Kurse weiter als
+#: Version 1
+FORMAT_VERSION = 7
 
 #: Namensraum der UUIDv5-IDs — derselbe wie für den Seed vor den Paketen.
 #: Einmal gewählt, nie ändern, sonst bekäme jede Übung eine neue ID.
@@ -1470,6 +1472,19 @@ def nutzt_kursplan(kurs: Kurs) -> bool:
     )
 
 
+def nutzt_antworten(kurse: Iterable[Kurs], plaene: Iterable[PaketPlan]) -> bool:
+    """Steht in einem Plan des Pakets — oder in einer Plan-Vorlage eines Kurses (Kapitelplan,
+    Vorlage des Kursplans) — ein Ablauf mit einer Frage, die Antworten zum Antippen hat
+    (`core.ablauf.braucht_antworten`)?"""
+    kurse = list(kurse)
+    vorlagen = [
+        *(p.vorlage for p in plaene),
+        *(v for k in kurse for kap in k.kapitel for v in kap.plaene),
+        *(k.kursplan.vorlage for k in kurse if k.kursplan is not None and k.kursplan.vorlage),
+    ]
+    return any(ab.braucht_antworten(v.ablauf) for v in vorlagen)
+
+
 def noetige_version(
     uebungen: Iterable[Exercise] = (),
     kurse: Iterable[Kurs] = (),
@@ -1479,11 +1494,13 @@ def noetige_version(
     """Die kleinste Formatversion, die dieser Inhalt braucht — mit ihr wird die Datei
     geschrieben, damit ältere Apps alles weiter lesen, was sie verstehen: 1 nur Übungen ·
     2 Kurse · 3 Pläne · 4 Dateien aus dem Paket (ZIP, U3) · 5 Ergänzungen (U5) · 6 ein Kurs
-    mit Kursplan oder Bausteinen (`nutzt_kursplan`). Das Höchste zählt.
+    mit Kursplan oder Bausteinen (`nutzt_kursplan`) · 7 ein Ablauf mit einer Frage, die
+    Antworten zum Antippen hat (`nutzt_antworten`). Das Höchste zählt.
 
     Version 6 ist mit Absicht eine Schranke: Eine App, die den Kursplan nicht kennt, zeigte
     den Kurs sonst ohne seinen Plan — sie lehnt die Datei ab („… neuer als diese App“,
-    `paket_lesen`).
+    `paket_lesen`). Ebenso Version 7: Eine App, die nur die Skala kennt, ginge bei „Ja“ wie
+    bei „Nein“ den ersten Weg.
 
     >>> k = Kurs(name="HRV", kapitel=[Kapitel(titel="A")])
     >>> noetige_version(), noetige_version(kurse=[k])
@@ -1491,8 +1508,14 @@ def noetige_version(
     >>> k.kursplan = Kursplan("Rumpf")
     >>> noetige_version(kurse=[k]), noetige_version(kurse=[k]) <= FORMAT_VERSION
     (6, True)
+    >>> frage = {"fragen": [{"id": "?1", "art": "ja_nein"}]}
+    >>> plan = PaketPlan("p", PlanVorlage("Runde", ablauf=frage))
+    >>> noetige_version(plaene=[plan]) == 7 == FORMAT_VERSION
+    True
     """
     kurse, plaene = list(kurse), list(plaene)
+    if nutzt_antworten(kurse, plaene):
+        return 7
     if any(nutzt_kursplan(k) for k in kurse):
         return 6
     if list(ergaenzungen):
@@ -1625,6 +1648,7 @@ __all__ = [
     "kurs_stand",
     "name_pruefen",
     "noetige_version",
+    "nutzt_antworten",
     "nutzt_kursplan",
     "paket_bauen",
     "paket_id",

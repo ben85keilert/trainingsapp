@@ -325,6 +325,111 @@ async def test_frage_geht_von_selbst_weiter_oder_schlaegt_nur_vor(umgebung) -> N
     assert "Workout fertig" in _texte(workout_view(seite, state, plan, route=route))
 
 
+async def test_frage_mit_antworten_zum_antippen_und_wahl_unter_mehreren_wegen(umgebung) -> None:
+    """Ben, 17.11.2026: „Mehrfachauswahl, Ja/Nein usw. geht bisher nicht, wird aber gebraucht.“
+    Ja/Nein: je Antwort ein Knopf, ein Tipp geht den Weg. Mehrere Antworten: ankreuzen, dann
+    „Weiter“ — führt das Angekreuzte zu verschiedenen Wegen, wählt die Person („Person
+    wählt“): die getroffenen Wege stehen betont unter dem Satz, der Rest unter „Oder“."""
+    state, uhr, gurt = umgebung
+    w = _uebung(state, "Planke", None)
+    k = _uebung(state, "Kniebeuge", None)
+    plan = Plan(name="Fragen", subject_id=state.profil.id)
+    plan.items = [PlanItem(exercise_id=w.id), PlanItem(exercise_id=k.id)]
+    iw, ik = (i.id for i in plan.items)
+    runde = Frage(text="Noch eine Runde?", art=ab.F_JA_NEIN)
+    schwer = Frage(
+        text="Was war schwer?", art=ab.F_AUSWAHL, antworten=("Kraft", "Balance"), mehrfach=True
+    )
+    plan.ablauf = Ablauf(
+        True,
+        iw,
+        (
+            Kante(iw, runde.id),
+            Kante(runde.id, iw, ab.ANTWORT, antworten=(ab.JA,)),
+            Kante(runde.id, schwer.id, ab.ANTWORT, antworten=(ab.NEIN,)),
+            Kante(schwer.id, iw, ab.ANTWORT, antworten=("Kraft",), text="Planke kürzer"),
+            Kante(schwer.id, ik, ab.ANTWORT, antworten=("Balance",)),
+            Kante(schwer.id, ab.ENDE),
+        ),
+        (runde, schwer),
+    )
+    state.plaene.speichern(plan)
+    plan = state.plaene.laden(plan.id)
+    seite = Seite()
+    route = f"/plan/{plan.id}/workout"
+
+    def bild():
+        return workout_view(seite, state, plan, route=route)
+
+    def mit(daten):
+        return next(c for c in _alle(bild()) if getattr(c, "data", None) == daten)
+
+    def wege(b) -> list[tuple[str, bool, bool]]:
+        return [
+            (x.data[1], isinstance(x, ft.FilledButton), bool(x.disabled))
+            for x in _alle(b)
+            if isinstance(x, ft.FilledButton | ft.FilledTonalButton)
+            and isinstance(x.data, tuple)
+            and x.data[:1] == ("weg",)
+        ]
+
+    _knoepfe(bild())["Workout starten"].on_click()
+    teil = plan_ablauf.laufender(state, plan.id)[1]
+
+    async def zur_runde() -> None:
+        await _sekunden(state, uhr, gurt, 3)
+        _knoepfe(bild())["Fertig"].on_click()
+        await _sekunden(state, uhr, gurt, 1)
+        assert teil.schritt.frage == runde
+
+    await zur_runde()
+    # Ja/Nein: zwei Knöpfe, keine Skala
+    b = bild()
+    assert not [c for c in _alle(b) if isinstance(c, ft.Chip)]
+    antworten = [c for c in _alle(b) if isinstance(getattr(c, "data", None), tuple)]
+    assert [c.data for c in antworten if c.data[:1] == ("antwort",)] == [
+        ("antwort", "Ja"),
+        ("antwort", "Nein"),
+    ]
+    mit(("antwort", "Ja")).on_click(None)
+    await _sekunden(state, uhr, gurt, 1)
+    assert teil.schritt.name == "Planke" and teil.durchlauf == 2
+    await zur_runde()
+    mit(("antwort", "Nein")).on_click(None)
+    await _sekunden(state, uhr, gurt, 1)
+    assert teil.schritt.frage == schwer
+    # Mehrere: ankreuzen ändert noch nichts — erst „Weiter“ antwortet
+    # — in derselben Ansicht: Jedes Kreuz baut sie neu, der Knopf heißt dann „Weiter“ (am
+    # Web-Foto blieb er „Nichts davon — weiter“ und antwortete mit dem Stand vom Aufbau)
+    ansicht = bild()
+    assert "Nichts davon — weiter" in _knoepfe(ansicht)
+    for antwort in ("Kraft", "Balance"):
+        next(
+            c for c in _alle(ansicht) if getattr(c, "data", None) == ("antwort", antwort)
+        ).on_select(None)
+    assert teil.antwort is None and teil.kreuze == {"Kraft", "Balance"}
+    assert "Weiter" in _knoepfe(ansicht) and "Nichts davon — weiter" not in _knoepfe(ansicht)
+    assert [c.data[1] for c in _alle(bild()) if isinstance(c, ft.Chip) and c.selected] == [
+        "Kraft",
+        "Balance",
+    ]
+    mit("antwort_weiter").on_click(None)
+    await _sekunden(state, uhr, gurt, 2)
+    # zwei getroffene Wege: nichts geht von selbst, die Person wählt
+    assert teil.schritt.frage == schwer and teil.antwort_waehlt
+    b = bild()
+    texte = _texte(b)
+    satz = "Deine Antwort führt zu mehreren Wegen — wähle einen:"
+    assert satz in texte and texte.index(satz) < texte.index("Oder:")
+    assert wege(b) == [(iw, True, False), (ik, True, False), (ab.ENDE, False, False)]
+    assert not [t for t in texte if "schlägt der Plan vor" in t]
+    _knoepfe(b)["Weiter: Kniebeuge"].on_click()
+    await _sekunden(state, uhr, gurt, 1)
+    assert teil.schritt.name == "Kniebeuge"
+    gegeben = [x for x in state.einheit.ereignisse if (x.quelle, x.art) == ("plan", "antwort")]
+    assert [x.daten["antwort"] for x in gegeben] == ["Ja", "Nein", "Kraft, Balance"]
+
+
 def test_ablaufbild_zeichnet_knoten_etiketten_und_nebel(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("TRAININGSAPP_DATA_DIR", str(tmp_path))
     state = AppState.starten(tmp_path / "app.db")

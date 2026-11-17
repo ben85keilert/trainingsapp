@@ -51,6 +51,9 @@ AUSLOESER_KURZ: dict[str, str] = {
 ANTWORT_KURZ: dict[str, str] = {ab.SKALA: "Bereich", ab.FREI: "jede andere"}
 ANTWORT_TEXT: dict[str, str] = {ab.SKALA: "Bereich der Skala", ab.FREI: "Jede andere Antwort"}
 BEI_ANTWORT = "Bei welcher Antwort?"
+#: … an einer Frage mit mehreren Antworten zum Ankreuzen (`Frage.mehrere`)
+BEI_KREUZ = "Wenn eine davon angekreuzt ist:"
+JEDE_ANDERE = "jede andere"
 #: Hinweis im Feld der Beschriftung eines Wegs aus einer Frage — der Satz, den der Plan sagt
 ANTWORT_HINWEIS = "Für heute reicht es"
 #: Je Weg einer Frage (Ben, 17.11.2026: „Frage soll beides können, von selbst weiter + Weg
@@ -131,12 +134,13 @@ def wege_karte(
         nach = ids[ids.index(knoten) + 1] if knoten in ids[:-1] else ENDE
         if jetzt.frage(nach) is not None:
             nach = ENDE
-        setzen(jetzt.mit_kante(Kante(knoten, nach)))
+        setzen(jetzt.mit_kante(ab.weg_neu(jetzt, knoten, nach)))
         neu_zeichnen()
 
     def herkunft_dazu(von: str) -> Callable[[Any], None]:
         def handler(_e: Any = None) -> None:
-            setzen(lesen().mit_kante(Kante(von, knoten)))
+            jetzt = lesen()
+            setzen(jetzt.mit_kante(ab.weg_neu(jetzt, von, knoten)))
             neu_zeichnen()
 
         return handler
@@ -372,6 +376,47 @@ def _marke(n: int) -> ft.Control:
     )
 
 
+def _bei_titel(frage: ab.Frage | None) -> str:
+    """Der Titel über der Wahl, wann ein Weg gilt."""
+    if frage is None:
+        return "Wann geht es weiter?"
+    return BEI_KREUZ if frage.mehrere else BEI_ANTWORT
+
+
+def _antwort_chips(
+    k: Kante, frage: ab.Frage, setzen: Callable[[Kante], Any], *, kompakt: bool
+) -> list[ft.Control]:
+    """Ein Weg aus einer Frage mit **Antworten zum Antippen** (Ja/Nein, Auswahl; Ben,
+    17.11.2026): je Antwort ein Chip — der Weg gilt bei jeder gewählten —, dazu „jede andere“
+    (frei). Was aus dem Weg wird, rechnet `core.ablauf.antwort_umschalten`; ``setzen`` nimmt
+    ihn. ``kompakt``: in der Leiste unter dem Bild."""
+    gewaehlt = set(k.antworten) if k.ausloeser == ab.ANTWORT else set()
+
+    def chip(text: str, an: bool, antwort: str, daten: tuple[str, str], tipp: str) -> ft.Control:
+        return ft.Chip(
+            label=ft.Text(text, size=12 if kompakt else None),
+            selected=an,
+            show_checkmark=True,
+            selected_color=ft.Colors.PRIMARY_CONTAINER,
+            visual_density=ft.VisualDensity.COMPACT if kompakt else None,
+            label_padding=ft.Padding.symmetric(horizontal=2) if kompakt else None,
+            tooltip=tipp,
+            on_select=lambda _e: setzen(ab.antwort_umschalten(k, frage, antwort)),
+            data=daten,
+        )
+
+    return [
+        *(chip(a, a in gewaehlt, a, ("antwort", a), f"Der Weg gilt bei „{a}“") for a in frage.wahl),
+        chip(
+            JEDE_ANDERE,
+            k.ausloeser == ab.FREI,
+            "",
+            ("ausloeser", ab.FREI),
+            "Jede Antwort, die kein anderer Weg trifft",
+        ),
+    ]
+
+
 def _wechseln(
     aendern: Callable[..., None], i: int, k: Kante, art: str, ablauf: Ablauf | None = None
 ) -> None:
@@ -529,12 +574,7 @@ def weg_leiste(
             spacing=6,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
-                ft.Container(
-                    content=_zeilentitel(
-                        BEI_ANTWORT if frage is not None else "Wann geht es weiter?"
-                    ),
-                    expand=True,
-                ),
+                ft.Container(content=_zeilentitel(_bei_titel(frage)), expand=True),
                 vorschlagen if frage is not None else pflicht,
             ],
         ),
@@ -542,7 +582,9 @@ def weg_leiste(
         ft.Row(
             spacing=6,
             scroll=ft.ScrollMode.AUTO,
-            controls=[
+            controls=_antwort_chips(k, frage, aendern, kompakt=True)
+            if frage is not None and frage.wahl
+            else [
                 ft.Chip(
                     label=ft.Text(text, size=12),
                     selected=k.ausloeser == art,
@@ -720,12 +762,26 @@ def _weg(
             options=ziele,
             on_select=lambda e: aendern(i, zeichnen=True, nach=str(e.control.value or ENDE)),
         ),
-        _zeilentitel(BEI_ANTWORT if frage is not None else "Wann geht es weiter?"),
+        _zeilentitel(_bei_titel(frage)),
         ft.Row(
             wrap=True,
             spacing=6,
             run_spacing=6,
-            controls=[
+            controls=_antwort_chips(
+                k,
+                frage,
+                lambda neu: aendern(
+                    i,
+                    zeichnen=True,
+                    ausloeser=neu.ausloeser,
+                    n=0,
+                    bis=None,
+                    antworten=neu.antworten,
+                ),
+                kompakt=False,
+            )
+            if frage is not None and frage.wahl
+            else [
                 ft.Chip(
                     label=ft.Text(text),
                     selected=k.ausloeser == art,

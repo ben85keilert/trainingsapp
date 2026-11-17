@@ -338,7 +338,9 @@ JSON, UTF-8. Version 1 (Übungen); **Version 2** fügt `kurse[]` hinzu, **Versio
 `plaene[]` (Ben, 28.10.2026), **Version 4** Dateien (nur in einer ZIP, Abschnitt oben),
 **Version 5** `ergaenzungen[]`, **Version 6** den Kursplan (`kurse[].kursplan`, die
 Bausteine `plan_*` und Tests mit `aus`, Ben 16.11.2026 — Abschnitt
-[Kursplan und Bausteine](#kursplan-und-bausteine-formatversion-6-ben-16112026)). Geschrieben wird
+[Kursplan und Bausteine](#kursplan-und-bausteine-formatversion-6-ben-16112026)), **Version 7**
+Fragen mit Antworten zum Antippen im Ablauf eines Plans (`fragen[].art`, Ben 17.11.2026).
+Geschrieben wird
 immer die **kleinste Version, die der Inhalt braucht** (`core.pakete.noetige_version`, das
 Höchste zählt): eine Datei ohne Kurse und Pläne weiter als Version 1, ohne Pläne als
 Version 2 — ältere Apps lesen sie. Eine Datei mit höherer Version, als die App kennt, lehnt
@@ -484,6 +486,17 @@ weiter; er steht als Vorschlag des Plans da (mit seinem `text`), die Person tipp
 Schlüssel wird der Weg sofort gegangen, wie bisher — eine Frage kann Wege beider Art haben.
 Eine App vor dieser Fassung kennt den Schlüssel nicht und geht den Weg sofort. Kein neuer
 Stand der Formatversion.
+**Fragen mit Antworten zum Antippen** (Ben, 17.11.2026, `docs/plan_verzweigungen.md` §8.13
+Punkt 9, **Formatversion 7**): `fragen[].art = "skala"` (Vorgabe, darf fehlen) · `"ja_nein"` ·
+`"auswahl"`; bei `auswahl` dazu `antworten = ["leicht", "passend", "schwer"]` (höchstens acht,
+ohne Antworten gilt die eine Antwort „Weiter“) und wahlweise `mehrfach = true` (mehrere
+ankreuzen). Ein Weg aus einer solchen Frage nennt, bei welchen Antworten er gilt:
+`ausloeser = "antwort"`, `antworten = ["Ja"]` — der Wortlaut der Antwort, bei Ja/Nein „Ja“ und
+„Nein“; ein freier Weg gilt bei jeder anderen. `trainingsapp-paket pruefen` gibt einen Hinweis
+bei einer unbekannten Art, einer Auswahl ohne Antworten, einem Weg ohne `antworten` (dann gilt
+„frei“) und einer Antwort, die die Frage nicht kennt. Ein Paket mit so einer Frage wird als
+Version 7 geschrieben: Eine ältere App läse sie als Skala und ginge bei jeder Antwort den
+ersten Weg — sie lehnt die Datei ab.
 
 **Anweisungen je Planübung** (U2, Ben 9.11.2026, `docs/plan_paketinhalte.md` §9, F6) — in
 `plaene[].uebungen[]` und in Kurskapiteln: `beschreibung` (ein Text mit `## Name`-Zeilen wie die

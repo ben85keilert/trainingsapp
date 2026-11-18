@@ -1,6 +1,6 @@
 """Paketverweise V4 (`docs/plan_paketverweise.md`, Ben 17.11.2026, F3: „von selbst“): Fehlt beim
 Import das Paket, auf dessen Übungen Pläne und Kapitel verweisen, warten die Übungen — die App
-sagt, woher sie kämen (``braucht`` bleibt am installierten Paket, Migration 069). Kommt das
+sagt, woher sie kämen (``braucht`` bleibt am installierten Paket, Migration 070). Kommt das
 Paket, trägt der Import sie in die Paketpläne und Kapitelpläne nach; was die Person am Plan
 geändert oder herausgenommen hat, bleibt."""
 
@@ -136,7 +136,7 @@ def test_ein_plan_im_papierkorb_bleibt_wie_er_ist(con, profil) -> None:
 
 
 def test_braucht_bleibt_am_paket_und_faellt_mit_der_naechsten_fassung(con) -> None:
-    """Migration 069: Was die Datei braucht, gilt bis zur nächsten Fassung — eine Fassung ohne
+    """Migration 070: Was die Datei braucht, gilt bis zur nächsten Fassung — eine Fassung ohne
     ``braucht`` räumt es weg."""
     pakete = PaketRepo(con)
     roh = _paket_b()

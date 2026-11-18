@@ -201,7 +201,8 @@ class Paket:
     fuer: str = ""
     #: Der Code eines privaten Pakets (U7, Migration 050) — ``None`` = öffentlich
     zugangscode: str | None = None
-    #: Pakete, auf deren Übungen dieses verweist (V3) — nur aus der Datei, nicht gespeichert
+    #: Pakete, auf deren Übungen dieses verweist (V3) — aus der Datei; am installierten Paket
+    #: gemerkt (``package.requires_json``, Migration 070, V4)
     braucht: list[Voraussetzung] = field(default_factory=list)
 
     @property

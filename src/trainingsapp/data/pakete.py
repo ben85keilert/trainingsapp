@@ -1932,7 +1932,7 @@ class PaketRepo:
         )
         if plaene_json is not None:  # nur, wenn das Paket Pläne bringt (Migration 033)
             self.con.execute("UPDATE package SET plans_json = ? WHERE id = ?", (plaene_json, p.id))
-        if installieren:  # was die Datei braucht (V4, Migration 069) — auch: nichts mehr
+        if installieren:  # was die Datei braucht (V4, Migration 070) — auch: nichts mehr
             braucht = [v.als_dict() for v in p.braucht if v.id != p.id]
             self.con.execute(
                 "UPDATE package SET requires_json = ? WHERE id = ?",
@@ -1964,7 +1964,7 @@ class PaketRepo:
 
 
 def _braucht_lesen(roh: str | None) -> list[Voraussetzung]:
-    """``package.requires_json`` (Migration 069) — Unlesbares heißt: nichts.
+    """``package.requires_json`` (Migration 070) — Unlesbares heißt: nichts.
 
     >>> [v.name for v in _braucht_lesen('[{"id": "s", "name": "Standard"}]')], _braucht_lesen("x")
     (['Standard'], [])

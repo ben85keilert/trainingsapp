@@ -2,7 +2,7 @@
 
 Ein Plan oder Kapitel kann Übungen eines anderen Pakets nennen (V1). Fehlt dieses Paket, lässt
 die App die Übungen nicht mehr still weg: Kapitel und Plan sagen, wie viele fehlen und woher sie
-kämen — aus ``braucht`` des installierten Pakets (Migration 069) —, mit „… laden“, wenn die
+kämen — aus ``braucht`` des installierten Pakets (Migration 070) —, mit „… laden“, wenn die
 Voraussetzung eine Adresse nennt (V6; ein privates Paket fragt dort nach seinem Code, P220).
 Kommt das Paket, trägt der Import die Übungen von selbst nach (`PaketRepo.fehlendes_nachtragen`)
 — Ben, 17.11.2026, F3: „von selbst“.

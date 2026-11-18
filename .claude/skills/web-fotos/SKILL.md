@@ -67,8 +67,14 @@ Messung 257, Verlauf 360); Reiter einer Ansicht bei y ≈ 78; Zahnrad oben recht
 - **Reagiert die Seite nicht mehr** („Receive loop error“ in `$W/server.log`): ein Invoke
   traf ein ersetztes Control — das ist ein Befund an der App, nicht am Werkzeug
   (`ui/flet_absicherung.py`).
-- **Schrift** kann kopflos leicht anders umbrechen als am Handy; Dateipfade zeigt `ft.Image`
-  im Browser nicht (Bytes schon). Kamera: Chromium läuft mit Fake-Kamera.
+- **Schrift** kann kopflos leicht anders umbrechen als am Handy. Kamera: Chromium läuft mit
+  Fake-Kamera.
+- **Lokale Dateien bleiben leer:** Paketmedien (Symbol, Bildfolge), eigene Fotos und alles,
+  was die App als Dateipfad an `ft.Image` gibt, liefert der Flet-Web-Server nicht aus — die
+  Stelle ist auf dem Foto leer (Bytes zeigt er). Das ist kein Befund an der App. Wie so ein Bild
+  aussieht (Einfärben eines SVG, Zuschnitt), zeigt eine kleine eigene Flet-Seite im Scratchpad,
+  die die Datei aus ihrem `assets_dir` lädt (18.11.2026: das Paketsymbol blieb leer, eine Runde
+  ging an die Suche).
 - **Eigene Erweiterungen** (flet_ble, flet_hochladen, …) gibt es im Browser nicht — dafür im
   Scratchpad ein eigenes Startskript nach dem Muster von `server.py`, das den Dienst im
   `AppState` durch einen Nachbau ersetzt.

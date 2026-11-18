@@ -861,7 +861,16 @@ uv run --project ../trainingsapp trainingsapp-paket einlesen ~/Downloads/<export
   pakete/<neu>.toml [--privat --fuer "A."] [--probe]   # eigenes Paket vom Handy → neue TOML
 uv run --project ../trainingsapp trainingsapp-paket verlinken pakete/<x>.toml \
   medien/<x>/<datei> https://… [--pruefen]           # eine Datei des Pakets → Link
+uv run --project ../trainingsapp trainingsapp-paket verkleinern ~/Downloads/<export>.zip \
+  [--vorlage klein|mittel|gross] [--alle] [--probe]  # große Videos mit ffmpeg → verkleinert/
 ```
+
+`verkleinern` (P225, `docs/plan_medien_reiter.md` §5) liest eine ZIP aus dem Export der App,
+verkleinert jedes **große** Video (über „Mittel“ mit einem Viertel Spielraum; mit `--alle`
+jedes) nach der Vorlage und schreibt eine **neue** ZIP nach `verkleinert/` neben der alten —
+bereinigt, nach Prüfsumme benannt, alle Verweise gezogen; das Original bleibt. ffmpeg muss
+installiert sein, das Werkzeug ruft es nur auf. Die Version bleibt — vor dem Veröffentlichen
+anheben. Ein TOML nennt seine Dateien erst beim Bauen: erst `bauen`, dann die ZIP verkleinern.
 
 `pruefen` wendet die Regeln des Standardpakets an (Schlüssel, Beschreibung, Variante,
 Symbol — Symbole nur mit flet); Typen und Regionen außerhalb des Standardpakets sind

@@ -2587,6 +2587,17 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--privat", action="store_true", help="privates Paket ([privat])")
     e.add_argument("--fuer", default="", help="für wen (Vorname oder Kürzel) — macht es privat")
     e.add_argument("--probe", action="store_true", help="nur zeigen, nichts schreiben")
+    k = sub.add_parser(
+        "verkleinern",
+        help="große Videos einer Paketdatei (ZIP) mit ffmpeg verkleinern — neue Datei daneben",
+    )
+    k.add_argument("quelle", type=Path, help="die Paketdatei (ZIP aus dem Export der App)")
+    k.add_argument(
+        "--ordner", type=Path, help="wohin die neue Datei kommt (Vorgabe: verkleinert/ daneben)"
+    )
+    k.add_argument("--vorlage", default="mittel", help="klein, mittel (Vorgabe) oder gross")
+    k.add_argument("--alle", action="store_true", help="auch Videos, die nicht groß sind")
+    k.add_argument("--probe", action="store_true", help="nur zeigen, nichts schreiben")
     args = parser.parse_args(argv)
 
     if args.befehl == "pruefen":
@@ -2692,6 +2703,25 @@ def main(argv: list[str] | None = None) -> int:
             fuer=args.fuer,
             schreiben=not args.probe,
         )
+        for z in zeilen:
+            print(z)
+        for f in fehler:
+            print(f"FEHLER: {f}")
+        return 1 if fehler else 0
+    if args.befehl == "verkleinern":
+        # P225 Stufe 3, `docs/plan_medien_reiter.md` §5 — das Original bleibt
+        from trainingsapp.paket_verkleinern import verkleinern
+
+        try:
+            zeilen, fehler = verkleinern(
+                args.quelle,
+                args.ordner or args.quelle.parent / "verkleinert",
+                vorlage=args.vorlage,
+                alle=args.alle,
+                schreiben=not args.probe,
+            )
+        except (PaketFehler, RuntimeError, OSError) as abbruch:
+            zeilen, fehler = [], [str(abbruch)]
         for z in zeilen:
             print(z)
         for f in fehler:

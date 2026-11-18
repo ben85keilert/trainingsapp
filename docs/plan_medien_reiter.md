@@ -23,7 +23,7 @@ Ben, 17.11.2026, in mehreren Schritten:
 
 **Stand:** Stufe 0 gebaut (17.11.2026), Stufe 1 gebaut (17.11.2026, Gerätetest T148), Stufe 2
 gebaut (18.11.2026, Gerätetest T149), Stufe 3 gebaut für Rechner und Android (18.11.2026,
-Gerätetest T150; iPhone und Paketwerkzeug offen, §5). Gebaut auf dem Zweig
+Gerätetest T150; dazu der Werkzeugschritt `trainingsapp-paket verkleinern`; iPhone offen, §5). Gebaut auf dem Zweig
 `worktree-medien-reiter` (eigener Worktree, `CLAUDE.md` „Große Änderungen im eigenen
 Worktree“). Skizzen:
 <https://claude.ai/artifact/CvfAkLSzXyQfip8BMftrWD>. Katalog **P225**.
@@ -279,13 +279,20 @@ neue Fassung ohne „groß“; die Ansicht der neuen Datei nennt das Original (3
 wieder nehmen“ und „Original löschen“, Mittel und Groß „wäre nicht kleiner“. Der Spieler bleibt im
 kopflosen Browser schwarz (kein Video-Dekoder) — abspielen ist Gerätetest.
 
+**Nachgezogen am 18.11.2026 (Ben: „mach weiter“): der Werkzeugschritt**
+`trainingsapp-paket verkleinern <export>.zip [--vorlage …] [--alle] [--probe]`
+(`paket_verkleinern.py`, eingehängt in `paket_werkzeug.main` neben `einlesen`): liest die ZIP aus
+dem Export der App, verkleinert jedes große Video mit ffmpeg und schreibt eine **neue** ZIP nach
+`verkleinert/` — derselbe Weg wie der Export der App (`export_schreiben`: bereinigt, nach
+Prüfsumme benannt, alle Verweise gezogen); das Original bleibt, die Version auch (vor dem
+Veröffentlichen anheben). Ein TOML nennt seine Dateien erst beim Bauen: erst `bauen`, dann die
+ZIP verkleinern. Tests: `tests/test_paket_verkleinern.py` (mit echtem ffmpeg, in der CI
+übersprungen).
+
 **Noch nicht gebaut:**
 
 - **iPhone (3c):** ein Swift-Teil von `flet_hochladen` mit demselben Vertrag; hier weder baubar
   noch prüfbar. Bis dahin steht auf Apple-Geräten statt „Erstellen“ ein Satz dazu.
-- **Paketwerkzeug** (`trainingsapp-paket verkleinern`): am Rechner geht es heute über die App
-  selbst (`flet run`, ffmpeg). Ein Werkzeugschritt käme in `paket_werkzeug.py`, an dem die
-  Sitzung „Rückweg vom Handy“ gerade arbeitet — darum nicht in dieser Nacht.
 - **Nach „Datei wählen …“ fragen:** Die Formulare halten ihre Medien bis zum Speichern selbst;
   ein Ersetzen darunter ginge verloren. Verkleinert wird darum aus der Übersicht.
 - **Bilder** verkleinern (die Fotoauswahl tut es schon) — auf Wunsch.

@@ -1534,7 +1534,14 @@ def plan_view(
             controls=[
                 *griff,
                 *nummer,
-                uebungsbild(state, uebung.icon_key, uebung.image_path, groesse=24, opacity=0.8),
+                uebungsbild(
+                    state,
+                    uebung.icon_key,
+                    uebung.image_path,
+                    groesse=24,
+                    opacity=0.8,
+                    medien=uebung.media,
+                ),
                 ft.Column(
                     spacing=0,
                     expand=True,
@@ -2365,7 +2372,14 @@ def plan_view(
         rechts = [fokus_schalter()] if t.uhr.zeile is not None else []
         einzel_kopf.content = einzel_seite.fester_kopf(
             einzel_seite.kopf(
-                uebungsbild(state, uebung.icon_key, uebung.image_path, groesse=32, opacity=0.85),
+                uebungsbild(
+                    state,
+                    uebung.icon_key,
+                    uebung.image_path,
+                    groesse=32,
+                    opacity=0.85,
+                    medien=uebung.media,
+                ),
                 uebung.name,
                 untertitel,
                 rechts,
@@ -2722,7 +2736,9 @@ def plan_view(
                         item.id,
                         u.name,
                         gesperrt=plan_ablauf_ui.frei_nach(plan, sperre[item.id], namen_im_plan()),
-                        bild=uebungsbild(state, u.icon_key, u.image_path, groesse=28),
+                        bild=uebungsbild(
+                            state, u.icon_key, u.image_path, groesse=28, medien=u.media
+                        ),
                     )
                 )
                 continue
@@ -2737,7 +2753,7 @@ def plan_view(
                     erledigt=item.id in fertig_ids,
                     uhr_laeuft=e is not None and e.timer is not None,
                     zaehlt=laeuft_hier(state, u, item),
-                    bild=uebungsbild(state, u.icon_key, u.image_path, groesse=28),
+                    bild=uebungsbild(state, u.icon_key, u.image_path, groesse=28, medien=u.media),
                 )
             )
         page.show_dialog(

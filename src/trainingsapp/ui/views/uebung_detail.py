@@ -540,6 +540,7 @@ def _kopf(state: AppState, uebung: Exercise) -> ft.Control:
                     uebung.icon_key,
                     uebung.image_path,
                     groesse=KOPF_BILD if mit_bild else KOPF_BILD * 0.55,
+                    medien=uebung.media,
                 ),
             ),
             ft.Column(

@@ -131,7 +131,7 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
         )
         blatt = zl.blatt_oeffner(page, u.name, "", weitere, hauptziel=haupt)
         return ft.ListTile(
-            leading=uebungsbild(state, u.icon_key, u.image_path),
+            leading=uebungsbild(state, u.icon_key, u.image_path, medien=u.media),
             title=ft.Text(u.name),
             subtitle=_untertitel(u),
             trailing=ft.Row(

@@ -2,8 +2,10 @@
 
 Unter jedem Link und jeder Datei in „Übung bearbeiten“ und „Im Plan einstellen“:
 
-- **Erklärung | Begleitung** — eine Erklärung sieht man an und hakt sie ab, eine Begleitung
-  läuft beim Üben mit (`core.material`);
+- **Erklärung | Begleitung | Bewegung** — eine Erklärung sieht man an und hakt sie ab, eine
+  Begleitung läuft beim Üben mit (`core.material`), eine Bewegung zeigt der Fokus als Animation
+  (nur bei einer Bilddatei aus dem Paket, M2, 18.11.2026); ein **Symbol** aus dem Paket wird nur
+  genannt, nicht gewählt;
 - **Beim ersten Mal von selbst zeigen** — nur bei einer Erklärung;
 - **Ersetzt** — ein anderes Stück, das hier nicht mehr angeboten wird: an der Planübung eines
   der Übung, an der Übung ein anderes der Übung (die Erweiterung ersetzt das Standard-Video).
@@ -20,7 +22,7 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.models import BEGLEITUNG, Media
+from trainingsapp.core.models import BEGLEITUNG, BEWEGUNG, ROLLEN, SYMBOL, Media
 
 ERKLAERUNG = "erklaerung"
 NICHTS = ""
@@ -44,11 +46,14 @@ def gelesen(werte: dict[str, Any]) -> dict[str, Any]:
 
     >>> gelesen({"rolle": "begleitung", "zeigen": True, "ersetzt": ""})
     {'rolle': 'begleitung', 'zeigen': False, 'ersetzt': ''}
+    >>> gelesen({"rolle": "symbol"})["rolle"], gelesen({"rolle": "tanz"})["rolle"]
+    ('symbol', '')
     """
-    begleitung = werte.get("rolle") == BEGLEITUNG
+    rolle = str(werte.get("rolle") or "")
+    rolle = rolle if rolle in ROLLEN else ""
     return {
-        "rolle": BEGLEITUNG if begleitung else "",
-        "zeigen": bool(werte.get("zeigen")) and not begleitung,
+        "rolle": rolle,
+        "zeigen": bool(werte.get("zeigen")) and not rolle,
         "ersetzt": str(werte.get("ersetzt") or ""),
     }
 
@@ -58,11 +63,17 @@ def rollen_zeile(
     *,
     ersetzbar: Sequence[tuple[str, str]] = (),
     kennung: str = "",
+    bewegung: bool = False,
 ) -> ft.Control:
     """Die Zeilen unter einem Stück. ``ersetzbar``: (Adresse, Titel) der Stücke, die dieses
     ersetzen kann — ohne sie gibt es die Auswahl nicht. ``kennung`` unterscheidet die Zeilen
-    für Tests (``data``)."""
-    begleitung = werte.get("rolle") == BEGLEITUNG
+    für Tests (``data``). ``bewegung``: „Bewegung“ zur Wahl (eine Bilddatei aus dem Paket)."""
+    if werte.get("rolle") == SYMBOL:
+        return ft.Container(
+            padding=ft.Padding.only(left=28, bottom=10),
+            content=ft.Text("Symbol der Übung — kommt aus dem Paket", size=12, opacity=0.7),
+        )
+    bewegung = bewegung or werte.get("rolle") == BEWEGUNG
 
     def zeigen_umgestellt(e: ft.Event[ft.Switch]) -> None:
         werte["zeigen"] = bool(e.control.value)
@@ -70,23 +81,25 @@ def rollen_zeile(
     zeigen = ft.Switch(
         label="Beim ersten Mal von selbst zeigen",
         value=bool(werte.get("zeigen")),
-        visible=not begleitung,
+        visible=not werte.get("rolle"),
         on_change=zeigen_umgestellt,
         data=("material_zeigen", kennung),
     )
     hinweis = ft.Text(size=12, opacity=0.7)
 
     def hinweis_setzen() -> None:
-        hinweis.value = (
-            "Läuft beim Üben mit, die Uhr läuft weiter."
-            if werte.get("rolle") == BEGLEITUNG
-            else "Ansehen und abhaken — danach liegt es still hinter „Medien“."
+        hinweis.value = {
+            BEGLEITUNG: "Läuft beim Üben mit, die Uhr läuft weiter.",
+            BEWEGUNG: "Im Fokus als Bewegung: eine Bildfolge im Takt, ein GIF als Schleife.",
+        }.get(
+            str(werte.get("rolle") or ""),
+            "Ansehen und abhaken — danach liegt es still hinter „Medien“.",
         )
 
     def rolle_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
         wahl = str(e.control.selected[0]) if e.control.selected else ERKLAERUNG
-        werte["rolle"] = BEGLEITUNG if wahl == BEGLEITUNG else ""
-        zeigen.visible = wahl != BEGLEITUNG
+        werte["rolle"] = wahl if wahl in (BEGLEITUNG, BEWEGUNG) else ""
+        zeigen.visible = not werte["rolle"]
         hinweis_setzen()
         with contextlib.suppress(Exception):
             spalte.update()
@@ -94,11 +107,12 @@ def rollen_zeile(
     hinweis_setzen()
     teile: list[ft.Control] = [
         ft.SegmentedButton(
-            selected=[BEGLEITUNG if begleitung else ERKLAERUNG],
+            selected=[str(werte.get("rolle") or "") or ERKLAERUNG],
             show_selected_icon=False,
             segments=[
                 ft.Segment(value=ERKLAERUNG, label=ft.Text("Erklärung")),
                 ft.Segment(value=BEGLEITUNG, label=ft.Text("Begleitung")),
+                *([ft.Segment(value=BEWEGUNG, label=ft.Text("Bewegung"))] if bewegung else []),
             ],
             on_change=rolle_gewaehlt,
             data=("material_rolle", kennung),

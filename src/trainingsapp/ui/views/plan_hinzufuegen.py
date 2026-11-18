@@ -58,7 +58,7 @@ def plan_hinzufuegen_view(
     def zeichnen() -> None:
         liste.controls = [
             ft.ListTile(
-                leading=uebungsbild(state, u.icon_key, u.image_path),
+                leading=uebungsbild(state, u.icon_key, u.image_path, medien=u.media),
                 title=ft.Text(u.name),
                 subtitle=ft.Text(was, size=12) if (was := _einordnung(u)) else None,
                 trailing=_anzahl_marke(enthalten[u.id]),

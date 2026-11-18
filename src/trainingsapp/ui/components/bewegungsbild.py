@@ -8,6 +8,8 @@
 - `Bildfolge` und `bewegung_im_fokus` (7.11.2026) — im Fokus: ein Streifen quadratischer Bilder
   (der Hinweg, `core.bewegungsbild`) läuft im Takt vor und zurück, ein GIF als Schleife; ohne
   eigenes Bild die mitgelieferte Folge zur Sensor-Vorlage (`ASSETS`, Kniebeuge).
+- `Bewegungswahl` (M2, 18.11.2026) — mehrere Bewegungen (Planübung, eigenes Bild, Paket): eine
+  ist zu sehen, „1/2 ›“ blättert weiter.
 - `bewegungsbild_blatt` — das Blatt „Bild der Bewegung“ in „Übung bearbeiten“: „Foto
   hochladen“ und „Foto aufnehmen“ (dieselben Wege wie beim Symbol, `Ziel.fuer_bewegung`), die
   **Ablage** ``Medien/Bewegung/`` als Kacheln (Tipp wählt, ✕ löscht — Rückfrage, wenn eine andere
@@ -27,13 +29,14 @@ import flet as ft
 from trainingsapp.core import zaehlen as zl
 from trainingsapp.core.bewegungsbild import (
     EINGEBAUT,
+    bewegungen,
     bewegungsbild,
     bild_fuer_lage,
     bild_fuer_zeit,
     bilder_in,
     png_masse,
 )
-from trainingsapp.core.models import Exercise, PlanItem
+from trainingsapp.core.models import Exercise, MediaSource, PlanItem
 from trainingsapp.core.takt import Lage, Takt
 from trainingsapp.data.uebungsbilder import Uebungsbild
 from trainingsapp.ui.components.blatt import blatt_spalte
@@ -114,41 +117,106 @@ class Bildfolge:
             self.zeigen(bild_fuer_zeit(self.anzahl, t_s))
 
 
-def bewegung_im_fokus(
-    state: AppState,
-    uebung: Exercise,
-    item: PlanItem | None = None,
-    *,
-    hoehe: float = HOEHE_WAEHREND,
-) -> tuple[ft.Control, Bildfolge | None] | None:
-    """Was der Fokus als Bewegung zeigt: die eigene Bildfolge (Streifen) mit `Bildfolge`, ein
-    eigenes GIF als Schleife, sonst die mitgelieferte Folge zur Sensor-Vorlage (Kniebeuge) —
-    ``None`` ohne alles. Zweites Glied: die Folge zum Nachziehen, ``None`` bei einer Schleife."""
-    pfad = bewegungsbild_pfad(state, uebung)
-    if pfad is None:
-        vorlage = zl.wirksame_wahl(uebung, item).vorlage
-        datei = EINGEBAUT.get(vorlage)
-        if datei is None or not (ASSETS / datei).is_file():
-            return None
-        pfad = str(ASSETS / datei)
+def _bewegung_control(pfad: str, hoehe: float) -> tuple[ft.Control, Bildfolge | None]:
+    """Eine Datei als Bewegung: ein Streifen als `Bildfolge`, sonst das Bild (ein GIF läuft von
+    selbst als Schleife)."""
     anzahl = 1
     with contextlib.suppress(OSError):
         with open(pfad, "rb") as f:
             masse = png_masse(f.read(64 * 1024))
         if masse is not None:
             anzahl = bilder_in(*masse)
-    if anzahl < 2:
-        c = bewegungsbild_control(state, uebung, hoehe=hoehe)
-        if c is None:  # eingebaute Datei ohne Streifen: einfach zeigen
-            c = ft.Container(
-                height=hoehe,
-                border_radius=16,
-                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-                content=ft.Image(src=pfad, height=hoehe, fit=ft.BoxFit.CONTAIN),
-            )
-        return c, None
-    folge = Bildfolge(pfad, anzahl, hoehe=hoehe)
-    return folge.control, folge
+    if anzahl >= 2:
+        folge = Bildfolge(pfad, anzahl, hoehe=hoehe)
+        return folge.control, folge
+    return (
+        ft.Container(
+            height=hoehe,
+            border_radius=16,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+            content=ft.Image(src=pfad, height=hoehe, fit=ft.BoxFit.CONTAIN, gapless_playback=True),
+        ),
+        None,
+    )
+
+
+class Bewegungswahl:
+    """Die Bewegungen einer Übung im Fokus (M2, Ben 18.11.2026): zu sehen ist eine — die erste
+    ist die Vorgabe (`core.bewegungsbild.bewegungen`); mit mehreren blättert „1/2 ›“ unten
+    rechts weiter. `nachziehen` geht an die Bildfolge, die gerade zu sehen ist."""
+
+    def __init__(self, pfade: list[str], *, hoehe: float = HOEHE_WAEHREND) -> None:
+        self.pfade, self.hoehe, self.index = pfade, hoehe, 0
+        self.folge: Bildfolge | None = None
+        self.platz = ft.Container()
+        self.zaehler = ft.Text(size=11, weight=ft.FontWeight.W_500)
+        self.knopf = ft.Container(
+            content=ft.Row(
+                [self.zaehler, ft.Icon(ft.Icons.CHEVRON_RIGHT, size=14)],
+                spacing=0,
+                tight=True,
+            ),
+            padding=ft.Padding.only(left=8, right=4, top=2, bottom=2),
+            border_radius=10,
+            bgcolor=ft.Colors.with_opacity(0.85, ft.Colors.SURFACE_CONTAINER_HIGHEST),
+            on_click=self.weiter,
+            tooltip="Nächste Bewegung",
+            visible=len(pfade) > 1,
+            data="bewegung_weiter",
+        )
+        self.control = ft.Stack(
+            controls=[self.platz, ft.Container(content=self.knopf, right=6, bottom=6)]
+        )
+        self._zeigen()
+
+    def _zeigen(self) -> None:
+        self.platz.content, self.folge = _bewegung_control(self.pfade[self.index], self.hoehe)
+        self.zaehler.value = f"{self.index + 1}/{len(self.pfade)}"
+
+    def weiter(self, _e: Any = None) -> None:
+        self.index = (self.index + 1) % len(self.pfade)
+        self._zeigen()
+        with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
+            self.control.update()
+
+    def nachziehen(self, takt: Takt | None, lage: Lage | None, t_s: float) -> None:
+        if self.folge is not None:
+            self.folge.nachziehen(takt, lage, t_s)
+
+
+def bewegungspfade(state: AppState, uebung: Exercise, item: PlanItem | None = None) -> list[str]:
+    """Die Dateien der Bewegungen dieser Übung (in dieser Planübung), die auf dem Gerät liegen —
+    in der Reihenfolge von `core.bewegungsbild.bewegungen`."""
+    ablage = state.pakete.ablage
+    pfade: list[str] = []
+    for m in bewegungen(uebung.media, item.media if item is not None else ()):
+        if m.source == MediaSource.LOCAL:
+            if state.bewegungsbilder.vorhanden(m.uri):
+                pfade.append(str(state.bewegungsbilder.datei(m.uri)))
+        elif ablage is not None and (datei := ablage.pfad(m.uri)) is not None and datei.is_file():
+            pfade.append(str(datei))
+    return pfade
+
+
+def bewegung_im_fokus(
+    state: AppState,
+    uebung: Exercise,
+    item: PlanItem | None = None,
+    *,
+    hoehe: float = HOEHE_WAEHREND,
+) -> tuple[ft.Control, Bewegungswahl] | None:
+    """Was der Fokus als Bewegung zeigt: die Bewegungen der Übung (`bewegungspfade` — aus der
+    Planübung, das eigene Bild, aus dem Paket), sonst die mitgelieferte Folge zur Sensor-Vorlage
+    (Kniebeuge) — ``None`` ohne alles. Eine Bildfolge läuft im Takt, ein GIF als Schleife."""
+    pfade = bewegungspfade(state, uebung, item)
+    if not pfade:
+        vorlage = zl.wirksame_wahl(uebung, item).vorlage
+        datei = EINGEBAUT.get(vorlage)
+        if datei is None or not (ASSETS / datei).is_file():
+            return None
+        pfade = [str(ASSETS / datei)]
+    wahl = Bewegungswahl(pfade, hoehe=hoehe)
+    return wahl.control, wahl
 
 
 def bewegungsbild_blatt(
@@ -326,9 +394,11 @@ def bewegungsbild_blatt(
 __all__ = [
     "HOEHE_WAEHREND",
     "KACHEL",
+    "Bewegungswahl",
     "Bildfolge",
     "bewegung_im_fokus",
     "bewegungsbild_blatt",
     "bewegungsbild_control",
     "bewegungsbild_pfad",
+    "bewegungspfade",
 ]

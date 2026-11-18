@@ -183,8 +183,9 @@ def test_png_und_gif_ohne_metadaten() -> None:
     for kaputt in (GIF[:-1], GIF_KOPF + b"\x99;", GIF_KOPF + b"!\xfe\x40kurz", b"GIF89a"):
         with pytest.raises(NichtBereinigbar):
             gif_ohne_metadaten(kaputt)
-    with pytest.raises(NichtBereinigbar):  # „gif“ bleibt für Pakete gesperrt
-        bereinigen(GIF, "gif")
+    # Seit 18.11.2026 trägt ein Paket GIFs (eine Bewegung als Schleife, P209 b, M2) — über
+    # denselben Bereiniger: Kommentar und XMP mit Ort fallen auch auf dem Weg ins Paket weg
+    assert bereinigen(GIF_MIT_ORT, "gif") == GIF
 
 
 def test_ablagen_speichern_png_und_gif_ohne_ort(tmp_path, con) -> None:

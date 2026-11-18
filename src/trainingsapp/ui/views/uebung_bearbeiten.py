@@ -229,6 +229,7 @@ def uebung_bearbeiten(
             bild_stand["key"],
             bild_stand["bild"],
             groesse=SYMBOL_GROESSE if mit_bild else 40,
+            medien=uebung.media if uebung else (),
         )
         symbol_kachel.bgcolor = None if mit_bild else ft.Colors.SECONDARY_CONTAINER
         with contextlib.suppress(Exception):
@@ -1154,7 +1155,10 @@ def uebung_bearbeiten(
                             ],
                         ),
                         rollen_zeile(
-                            paket_rolle(m), ersetzbar=ersetzbar_ohne(m.uri), kennung=m.uri
+                            paket_rolle(m),
+                            ersetzbar=ersetzbar_ohne(m.uri),
+                            kennung=m.uri,
+                            bewegung=m.kind == MediaKind.IMAGE,
                         ),
                     ],
                 )

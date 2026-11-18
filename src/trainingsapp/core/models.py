@@ -128,7 +128,10 @@ class Media:
     title: str = ""
     license: str = ""
     #: Wozu das Stück beim Üben dient (Ben, 12.11.2026, `core.material`): leer = **Erklärung**
-    #: (ansehen, abhaken), ``"begleitung"`` = läuft beim Üben mit, die Uhr läuft weiter
+    #: (ansehen, abhaken), ``"begleitung"`` = läuft beim Üben mit, die Uhr läuft weiter;
+    #: ``"bewegung"`` = die Animation im Fokus (`core.bewegungsbild`), ``"symbol"`` = das
+    #: Symbol der Übung (`ui/components/uebungsbild.py`) — beide nicht im Material (M1/M2,
+    #: Ben 18.11.2026, `docs/plan_medienrollen.md`)
     rolle: str = ""
     #: Eine Erklärung beim ersten Mal von selbst zeigen — bis sie als gesehen abgehakt ist
     zeigen: bool = False
@@ -173,6 +176,15 @@ class Media:
 
 #: Die Rolle „läuft beim Üben mit“ (`Media.rolle`); leer = Erklärung
 BEGLEITUNG = "begleitung"
+#: Die Animation der Übung im Fokus: eine Bildfolge (Streifen), ein GIF oder ein Bild aus dem
+#: Paket (`core.bewegungsbild.bewegungen`)
+BEWEGUNG = "bewegung"
+#: Das Symbol der Übung als Datei aus dem Paket (SVG wird eingefärbt, PNG bleibt, wie es ist)
+SYMBOL = "symbol"
+#: Die Rollen, die ein Medium tragen kann — eine andere liest die App als Erklärung
+ROLLEN = frozenset({BEGLEITUNG, BEWEGUNG, SYMBOL})
+#: Stücke mit diesen Rollen zeigt die App an ihrem eigenen Platz, nicht unter „Material“
+NICHT_MATERIAL = frozenset({BEWEGUNG, SYMBOL})
 
 
 def medien_zusatz(roh: Any) -> dict[str, Any]:
@@ -182,13 +194,15 @@ def medien_zusatz(roh: Any) -> dict[str, Any]:
     {'rolle': 'begleitung', 'zeigen': True, 'ersetzt': 'https://x.org/alt'}
     >>> medien_zusatz({"rolle": "tanz"})
     {'rolle': '', 'zeigen': False, 'ersetzt': ''}
+    >>> medien_zusatz({"rolle": "bewegung"})["rolle"], medien_zusatz({"rolle": "symbol"})["rolle"]
+    ('bewegung', 'symbol')
     """
     hat = getattr(roh, "get", None)
     if hat is None:
         return {}
     rolle = str(hat("rolle") or "")
     return {
-        "rolle": rolle if rolle == BEGLEITUNG else "",
+        "rolle": rolle if rolle in ROLLEN else "",
         "zeigen": bool(hat("zeigen")),
         "ersetzt": str(hat("ersetzt") or "").strip(),
     }
@@ -709,6 +723,10 @@ class Strecke:
 
 __all__ = [
     "BEGLEITUNG",
+    "BEWEGUNG",
+    "NICHT_MATERIAL",
+    "ROLLEN",
+    "SYMBOL",
     "Exercise",
     "HrvRecording",
     "HrvTitel",

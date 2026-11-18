@@ -17,6 +17,15 @@ Bildbibliothek:
   weiter. Ein Video mit **Metadatenspur** (zeitgesteuerte Ortsangaben) lässt sich so nicht
   bereinigen und wird abgelehnt.
 - **MP3:** ID3v2 vorn und ID3v1 hinten fallen weg; APE- und Lyrics-Blöcke → abgelehnt.
+- **GIF** (eine Bewegung als Schleife, M2): Kommentare, Text- und Anwendungsblöcke (XMP) fallen
+  weg (`gif_ohne_metadaten`, wie beim eigenen Bild der Bewegung).
+- **SVG** (ein Symbol, Ben 18.11.2026): ein Text, kein Bild — es kann Verweise und Programme
+  tragen. Darum: kein DTD (keine Entitäten), nur Elemente und Attribute aus SVG; Metadaten,
+  Titel, Beschreibung, Kommentare und Fremdes (Affinity, Inkscape) fallen weg; **abgelehnt**
+  wird ein SVG mit Programm (``script``, ``on…``), Fremdinhalt (``foreignObject``), Animation,
+  eingebettetem oder verlinktem Bild (``image``) und jedem Verweis, der nicht im Dokument bleibt
+  (``href`` ≠ ``#…``, ``url(…)`` ohne ``#``, ``@import``). Die App prüft ein SVG beim Import
+  noch einmal (`svg_pruefen`).
 - **PDF:** Eingebettete JPEG-Bilder (aus Handyfotos oder Scan-Apps) tragen ihr Exif mit —
   ihre APP1/APP13-Blöcke werden **an Ort und Stelle** mit Nullen überschrieben (gleiche Länge,
   alle Verweise im Dokument stimmen weiter, wie bei MP4). Ein verschlüsseltes PDF lässt sich
@@ -38,6 +47,7 @@ from __future__ import annotations
 import io
 import re
 import shutil
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import BinaryIO, Final
 
@@ -513,11 +523,142 @@ def _pdf(d: bytes) -> bytes:
     return bytes(aus)
 
 
+#: Ein Symbol ist klein — mehr als das ist kein Symbol
+MAX_SVG_BYTES: Final = 1_000_000
+_SVG: Final = "http://www.w3.org/2000/svg"
+_XLINK: Final = "http://www.w3.org/1999/xlink"
+_XML: Final = "http://www.w3.org/XML/1998/namespace"
+#: Elemente, die ein SVG ablehnen lassen: Programme, Fremdinhalt, Bilder, Animation
+_SVG_VERBOTEN: Final = frozenset(
+    {
+        "script",
+        "foreignObject",
+        "image",
+        "feImage",
+        "iframe",
+        "embed",
+        "object",
+        "audio",
+        "video",
+        "animate",
+        "animateMotion",
+        "animateTransform",
+        "set",
+        "discard",
+    }
+)
+#: Elemente, die still wegfallen — sie zeichnen nichts und können Namen tragen
+_SVG_WEG: Final = frozenset({"metadata", "title", "desc"})
+#: ``url(`` mit etwas anderem als ``#…`` dahinter, ``@import`` — ein Verweis nach außen
+_SVG_AUSSEN: Final = re.compile(r"url\(\s*(?!['\"]?\s*#)|@import", re.IGNORECASE)
+
+
+def _lokal(name: str) -> tuple[str, str]:
+    """``(Namensraum, Name)`` aus ``{ns}name``."""
+    if name.startswith("{"):
+        ns, _, lokal = name[1:].partition("}")
+        return ns, lokal
+    return "", name
+
+
+def _svg_element(el: ET.Element) -> None:
+    _ns, name = _lokal(el.tag)
+    if name in _SVG_VERBOTEN:
+        raise NichtBereinigbar(f"SVG mit „{name}“ geht nicht in ein Paket")
+    for schluessel in list(el.attrib):
+        a_ns, a_name = _lokal(schluessel)
+        wert = el.attrib[schluessel]
+        if a_name.lower().startswith("on"):
+            raise NichtBereinigbar(f"SVG mit „{a_name}“ (Programm) geht nicht in ein Paket")
+        if a_ns not in ("", _XLINK, _XML):
+            del el.attrib[schluessel]  # Fremdes von Affinity, Inkscape …
+            continue
+        if a_name == "href" and not wert.strip().startswith("#"):
+            raise NichtBereinigbar("SVG mit einem Verweis nach außen geht nicht in ein Paket")
+        if _SVG_AUSSEN.search(wert):
+            raise NichtBereinigbar("SVG mit einem Verweis nach außen geht nicht in ein Paket")
+    if name == "style" and _SVG_AUSSEN.search("".join(el.itertext())):
+        raise NichtBereinigbar("SVG mit einem Verweis nach außen geht nicht in ein Paket")
+    for kind in list(el):
+        k_ns, k_name = _lokal(kind.tag) if isinstance(kind.tag, str) else ("?", "")
+        if k_ns != _SVG or k_name in _SVG_WEG:
+            if k_name in _SVG_VERBOTEN:
+                raise NichtBereinigbar(f"SVG mit „{k_name}“ geht nicht in ein Paket")
+            el.remove(kind)
+            continue
+        _svg_element(kind)
+
+
+def _svg(d: bytes) -> bytes:
+    r"""Ein SVG ohne Metadaten und Fremdes — abgelehnt mit Programm, Bild oder Verweis nach außen.
+
+    >>> svg = (b'<?xml version="1.0"?><!-- Affinity -->'
+    ...        b'<svg xmlns="http://www.w3.org/2000/svg" xmlns:serif="http://www.serif.com/" '
+    ...        b'viewBox="0 0 24 24"><title>Ben</title><metadata>Ort</metadata>'
+    ...        b'<path serif:id="Kopf" d="M2 2h20v20H2z" fill="#000"/></svg>')
+    >>> print(_svg(svg).decode().replace("><", ">\n<"))
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+    <path d="M2 2h20v20H2z" fill="#000" />
+    </svg>
+    >>> _svg(_svg(svg)) == _svg(svg)
+    True
+    >>> for boese in (b'<svg xmlns="http://www.w3.org/2000/svg"><script>x()</script></svg>',
+    ...               b'<svg xmlns="http://www.w3.org/2000/svg" onload="x()"/>',
+    ...               b'<svg xmlns="http://www.w3.org/2000/svg"><use href="a.svg#x"/></svg>',
+    ...               b'<svg xmlns="http://www.w3.org/2000/svg"><path fill="url(https://x)"/></svg>',
+    ...               b'<!DOCTYPE svg [<!ENTITY a "b">]><svg xmlns="http://www.w3.org/2000/svg"/>',
+    ...               b'<html/>'):
+    ...     try:
+    ...         _svg(boese)
+    ...     except NichtBereinigbar as e:
+    ...         print(e)
+    SVG mit „script“ geht nicht in ein Paket
+    SVG mit „onload“ (Programm) geht nicht in ein Paket
+    SVG mit einem Verweis nach außen geht nicht in ein Paket
+    SVG mit einem Verweis nach außen geht nicht in ein Paket
+    SVG mit DTD geht nicht in ein Paket
+    kein SVG
+    >>> kopf = b'<svg xmlns="http://www.w3.org/2000/svg">'
+    >>> tief = kopf + b"<g>" * 5000 + b"</g>" * 5000 + b"</svg>"
+    >>> try:
+    ...     _svg(tief)
+    ... except NichtBereinigbar as e:
+    ...     print(e)
+    SVG zu tief verschachtelt
+    >>> _svg(b'<svg xmlns="http://www.w3.org/2000/svg"><path fill="url(#v)"/></svg>')[-29:]
+    b'<path fill="url(#v)" /></svg>'
+    """
+    if len(d) > MAX_SVG_BYTES:
+        raise NichtBereinigbar("SVG zu groß für ein Symbol")
+    if re.search(rb"<!(DOCTYPE|ENTITY)", d, re.IGNORECASE):
+        raise NichtBereinigbar("SVG mit DTD geht nicht in ein Paket")
+    try:
+        wurzel = ET.fromstring(d)
+    except ET.ParseError:
+        raise NichtBereinigbar("SVG unlesbar") from None
+    if wurzel.tag != f"{{{_SVG}}}svg":
+        raise NichtBereinigbar("kein SVG")
+    try:
+        _svg_element(wurzel)
+    except RecursionError:  # tausendfach verschachtelt — kein Symbol, kein Absturz im Import
+        raise NichtBereinigbar("SVG zu tief verschachtelt") from None
+    ET.register_namespace("", _SVG)
+    ET.register_namespace("xlink", _XLINK)
+    return ET.tostring(wurzel, encoding="utf-8")
+
+
+def svg_pruefen(d: bytes) -> None:
+    """Ob ein SVG aus einem Paket taugt (die App beim Import) — wirft `NichtBereinigbar`."""
+    _svg(d)
+
+
 _IM_SPEICHER: Final = {
     "jpg": _jpeg,
     "jpeg": _jpeg,
     "png": _png,
     "webp": _webp,
+    "gif": gif_ohne_metadaten,
+    "svg": _svg,
     "mp3": _mp3,
     "pdf": _pdf,
     "mp4": _bmff,
@@ -534,10 +675,10 @@ def bereinigen(daten: bytes, endung: str) -> bytes:
     >>> bereinigen(b"%PDF-1.7 ...", "pdf")[:8]
     b'%PDF-1.7'
     >>> try:
-    ...     bereinigen(b"GIF89a", "gif")
+    ...     bereinigen(b"MZ", "exe")
     ... except NichtBereinigbar as e:
     ...     print(e)
-    Dateiart „gif“ kann nicht bereinigt werden
+    Dateiart „exe“ kann nicht bereinigt werden
     """
     tun = _IM_SPEICHER.get(endung.lower())
     if tun is None:
@@ -563,4 +704,11 @@ def datei_bereinigen(quelle: Path, ziel: Path, endung: str) -> None:
         raise
 
 
-__all__ = ["NichtBereinigbar", "bereinigen", "datei_bereinigen", "gif_ohne_metadaten"]
+__all__ = [
+    "MAX_SVG_BYTES",
+    "NichtBereinigbar",
+    "bereinigen",
+    "datei_bereinigen",
+    "gif_ohne_metadaten",
+    "svg_pruefen",
+]

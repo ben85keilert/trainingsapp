@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, Final
 
+from .bereinigen import NichtBereinigbar, svg_pruefen
 from .models import Media, MediaKind, MediaSource, jetzt, lokaler_tag, medien_zusatz
 
 #: Der Ordner der Medien in der ZIP-Datei
@@ -34,6 +35,9 @@ ENDUNGEN: Final[dict[str, MediaKind]] = {
     "jpeg": MediaKind.IMAGE,
     "png": MediaKind.IMAGE,
     "webp": MediaKind.IMAGE,
+    # eine Bewegung als Schleife und ein Symbol (Rollen, M1/M2, Ben 18.11.2026)
+    "gif": MediaKind.IMAGE,
+    "svg": MediaKind.IMAGE,
     "mp4": MediaKind.VIDEO,
     "m4v": MediaKind.VIDEO,
     "mov": MediaKind.VIDEO,
@@ -47,6 +51,8 @@ MIME: Final[dict[str, str]] = {
     "jpeg": "image/jpeg",
     "png": "image/png",
     "webp": "image/webp",
+    "gif": "image/gif",
+    "svg": "image/svg+xml",
     "mp4": "video/mp4",
     "m4v": "video/mp4",
     "mov": "video/quicktime",
@@ -221,6 +227,11 @@ class Paketmedium:
                     aus.write(block)
             if h.hexdigest() != self.sha256:
                 raise MediumFehler(f"{self.name}: Prüfsumme stimmt nicht")
+            if self.name.endswith(".svg"):  # ein Text, der Verweise tragen kann — noch einmal
+                try:
+                    svg_pruefen(teil.read_bytes())
+                except NichtBereinigbar as f:
+                    raise MediumFehler(f"{self.name}: {f}") from None
             teil.replace(ziel)
         except BaseException:
             teil.unlink(missing_ok=True)

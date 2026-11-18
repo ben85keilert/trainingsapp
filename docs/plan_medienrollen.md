@@ -7,7 +7,9 @@ Medienabschnitten.“ Kurz darauf: „**Vergiss das Hintergrundbanner.** Kostet 
 bringt nicht viel. Die Animation, die abgespielt werden kann beim Üben, müssen wir nur noch
 einmal durchgehen.“
 
-**Stand: nichts gebaut.** Dieses Papier ordnet, was es gibt (§1), schlägt **eine**
+**Stand 18.11.2026: M1 und M2 gebaut, ohne Video als Bewegung; dazu das Symbol aus dem Paket**
+(Ben, 18.11.2026: „mache das so, wie vorgeschlagen“ — Designbereich im Inhalte-Repo,
+`pakete_design/`). Was gebaut ist, steht in §4 bei M1/M2. Ursprünglich: **nichts gebaut.** Dieses Papier ordnet, was es gibt (§1), schlägt **eine**
 Kennzeichnung vor (§2) und geht die Animation durch (§3). Fragen an Ben: Katalog **P209**; es
 führt den älteren Vorschlag **P94** (`plan_planblock.md` §C) mit dem am 12.11. Gebauten (P200)
 zusammen.
@@ -251,6 +253,7 @@ oder Sync.
 |---|---|---|
 | M1 | Wortliste zusammenführen: `rolle = "bewegung"` lesen und schreiben; P94 im Katalog schließen; `uebungspakete.md` nachführen | a: **ja** |
 | M2 | Animation im Paket: Bildfolge (Werkzeug prüft „Breite = n × Höhe“), Video, GIF; **mehrere je Übung** mit Blättern im Fokus; Bereinigen; Vorrang | a, b: **ja**; Vorgabe je Planübung (§6 Nr. 4) |
+| — | **Gebaut 18.11.2026 (M1, M2):** `BEWEGUNG`/`SYMBOL`/`ROLLEN` in `core/models.py`, beide nicht im Material (`core/material.py`); `bewegungen` in `core/bewegungsbild.py` (Vorrang: Planübung · eigenes Bild · Übung, die eingebaute Folge nur ohne alles); `Bewegungswahl` im Fokus mit „1/2 ›“ (`ui/components/bewegungsbild.py`); „Bewegung“ als Rolle im Editor für Bilddateien (`material_rolle.py`); GIF und SVG im Paket mit Bereinigen (`core/bereinigen.py`), SVG beim Import noch einmal geprüft (`Paketmedium.kopieren`); `rollen_pruefen` im Werkzeug. **Nicht gebaut:** Video als Bewegung (Regel „kein Video startet von selbst“ §5 und Probe am Gerät — `pruefen` meldet es als Fehler), mehrere **eigene** Bilder je Übung (die private Ablage hält weiter eines, M3). **Symbol aus dem Paket** (§2.2 „nur auf Wunsch“ — Bens Wunsch 18.11.2026): `rolle = "symbol"`, SVG eingefärbt, PNG wie es ist, eigenes Foto geht vor (`ui/components/uebungsbild.py`). Tests: `tests/test_medienrollen.py`, `tests/test_ui_medienrollen.py`. | — |
 | M3 | **Zugehörigkeit** (§2.3): übergeben aus der privaten Ablage, Kurs als Ziel, Marke der Variante, Rückfall an die Übung; Regeln in CLAUDE.md umformulieren; Werkzeugschritt „Datei → Link“ | a, d: **ja**; §6 Nr. 1–3: ja |
 | M4 | Gerät: Streifen und GIF durch die Fotoauswahl (§3.2 Nr. 1); kurzes Video als Animation aufnehmen | c: Rechner + kurzes Video |
 | M5 | Begleitung im Fokus nach den Skizzen V2–V6 (Uhr-Zeile, Fläche, Vollbild mit Uhr-Ecke, Ton-Zeile) — erst nach einer Probe mit `flet-video` am Gerät | e: **ja**; Rückmeldung zu den Skizzen |

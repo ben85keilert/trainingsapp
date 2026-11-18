@@ -185,8 +185,10 @@ def test_mitgelieferte_kniebeuge_ohne_eigenes_bild(tmp_path, monkeypatch) -> Non
         u = _kniebeuge(state, bild=False)
         paar = bewegung_im_fokus(state, u)
         assert paar is not None
-        _control, folge = paar
+        _control, wahl = paar
+        folge = wahl.folge
         assert isinstance(folge, Bildfolge) and folge.anzahl == 12
+        assert wahl.knopf.visible is False  # nur eine — nichts zu blättern
         assert folge.bild.src.endswith("kniebeuge.png")
         ohne = Exercise(name="Planke")
         assert bewegung_im_fokus(state, ohne) is None

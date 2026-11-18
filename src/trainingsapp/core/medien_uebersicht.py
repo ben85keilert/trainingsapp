@@ -37,7 +37,7 @@ from .bewegungsbild import EINGEBAUT, bewegungsbild
 from .kursbloecke import MEDIUM, PLAN_WEG, TEXT, ZU_ENDE, Block, bloecke_von
 from .kurse import Kapitel
 from .material import BILD, LINK, PDF, TON, VIDEO, art, material_von
-from .models import BEGLEITUNG, Exercise, Media, MediaSource, Plan, PlanItem
+from .models import BEGLEITUNG, BEWEGUNG, SYMBOL, Exercise, Media, MediaSource, Plan, PlanItem
 from .paketmedien import groesse_text, ist_paketmedium
 from .videoinfo import Videoinfo
 from .zaehlen import wirksame_wahl
@@ -259,6 +259,10 @@ def _zustand(m: Media, gesehen: Collection[str]) -> list[str]:
     """Rolle und Zustand: „Erklärung · zeigt sich beim ersten Mal“, „Begleitung“."""
     if m.rolle == BEGLEITUNG:
         return ["Begleitung"]
+    if m.rolle == BEWEGUNG:
+        return ["Bewegung"]
+    if m.rolle == SYMBOL:
+        return ["Symbol"]
     teile = ["Erklärung"]
     if m.uri in gesehen:
         teile.append("gesehen")

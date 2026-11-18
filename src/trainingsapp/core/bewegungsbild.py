@@ -21,6 +21,11 @@ der Zeit (`bild_fuer_zeit`). Ein GIF bleibt eine Schleife mit eigenem Tempo. Mit
 die Folge **Kniebeuge** (`EINGEBAUT`, `ui/assets/bewegung/`, aus
 `scripts/bewegung_kniebeuge.py`) — sie gilt für Übungen mit der Sensor-Vorlage „kniebeuge“,
 die kein eigenes Bild haben.
+
+**Bewegung aus dem Paket** (M1/M2, Ben 18.11.2026, `docs/plan_medienrollen.md` §3.3): ein
+Medium mit ``rolle = "bewegung"`` und ``source = "paket"`` — eine Bildfolge, ein GIF oder ein
+Bild. Eine Übung kann mehrere haben; `bewegungen` ordnet sie, der Fokus zeigt die erste und
+blättert weiter. Ein Video als Bewegung zeigt die App noch nicht (Probe am Gerät, Stufe M4/M5).
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Final
 
-from .models import Media, MediaKind, MediaSource
+from .models import BEWEGUNG, Media, MediaKind, MediaSource
 from .takt import ART_AB, ART_AUF, ART_AUS, ART_EIN, ART_HALTEN, Lage, Takt
 
 #: Mitgelieferte Bildfolgen je Sensor-Vorlage (`core.zaehlen.VORLAGEN_ANGEBOT`): Datei unter
@@ -160,6 +165,47 @@ def bewegungsbild(media: Iterable[Media]) -> str | None:
     return next((m.uri for m in media if ist_bewegungsbild(m)), None)
 
 
+def ist_bewegung_aus_paket(m: Media) -> bool:
+    """Ob ein Medium eine Bewegung aus einem Paket ist — ein Bild (Folge, GIF), kein Video.
+
+    >>> ist_bewegung_aus_paket(Media(kind=MediaKind.IMAGE, source=MediaSource.PAKET,
+    ...                              uri="medien/a.png", rolle="bewegung"))
+    True
+    >>> ist_bewegung_aus_paket(Media(kind=MediaKind.VIDEO, source=MediaSource.PAKET,
+    ...                              uri="medien/a.mp4", rolle="bewegung"))
+    False
+    """
+    return m.rolle == BEWEGUNG and m.source == MediaSource.PAKET and m.kind == MediaKind.IMAGE
+
+
+def bewegungen(uebung: Iterable[Media], planuebung: Iterable[Media] = ()) -> list[Media]:
+    """Die Bewegungen einer Übung in der Reihenfolge, in der der Fokus sie zeigt — die erste ist
+    die **Vorgabe**: die der Planübung (so stellt ein Kurs die Vorgabe um, P209 Nr. 4), dann das
+    eigene Bild (die Person hat es gewählt), dann die aus dem Paket der Übung. Dieselbe Datei
+    nur einmal.
+
+    >>> def paket(name):
+    ...     return Media(kind=MediaKind.IMAGE, source=MediaSource.PAKET, uri=f"medien/{name}",
+    ...                  rolle="bewegung")
+    >>> eigen = Media(kind=MediaKind.IMAGE, source=MediaSource.LOCAL, uri="Bewegung/b.gif")
+    >>> erklaerung = Media(kind=MediaKind.IMAGE, source=MediaSource.PAKET, uri="medien/e.png")
+    >>> [m.uri for m in bewegungen([erklaerung, paket("seite.png"), eigen, paket("vorn.png")])]
+    ['Bewegung/b.gif', 'medien/seite.png', 'medien/vorn.png']
+    >>> [m.uri for m in bewegungen([paket("seite.png")], [paket("stufe.png"), paket("seite.png")])]
+    ['medien/stufe.png', 'medien/seite.png']
+    """
+    plan = [m for m in planuebung if ist_bewegung_aus_paket(m)]
+    eigene = [m for m in uebung if ist_bewegungsbild(m)][:1]
+    paket = [m for m in uebung if ist_bewegung_aus_paket(m)]
+    out: list[Media] = []
+    schon: set[str] = set()
+    for m in (*plan, *eigene, *paket):
+        if m.uri not in schon:
+            schon.add(m.uri)
+            out.append(m)
+    return out
+
+
 def mit_bewegungsbild(media: Iterable[Media], pfad: str | None) -> list[Media]:
     """Die Medienliste mit diesem Bild der Bewegung (``None`` = ohne) — ein vorhandenes wird
     ersetzt, die übrigen Medien (Videos, Links) bleiben in ihrer Reihenfolge.
@@ -184,10 +230,12 @@ __all__ = [
     "ORDNER",
     "PENDEL_S",
     "TITEL",
+    "bewegungen",
     "bewegungsbild",
     "bild_fuer_lage",
     "bild_fuer_zeit",
     "bilder_in",
+    "ist_bewegung_aus_paket",
     "ist_bewegungsbild",
     "mit_bewegungsbild",
     "png_masse",

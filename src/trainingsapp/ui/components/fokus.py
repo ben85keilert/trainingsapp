@@ -31,7 +31,7 @@ from trainingsapp.core.timer_eintrag import gelaufene_zeiten
 from trainingsapp.devices.einheit import Einheitslauf
 from trainingsapp.devices.zaehlen import ZaehlBaustein
 from trainingsapp.ui.components import zaehl_stand
-from trainingsapp.ui.components.bewegungsbild import Bildfolge, bewegung_im_fokus
+from trainingsapp.ui.components.bewegungsbild import Bewegungswahl, bewegung_im_fokus
 from trainingsapp.ui.components.karte import hinweis
 from trainingsapp.ui.components.kurve import Reihe, kurve
 from trainingsapp.ui.components.takt_anzeige import ZeitMitTakt, takt_gross
@@ -226,7 +226,7 @@ class Fokus:
         self.ebenen = state.fokus_ebenen()
         self.kurven = state.fokus_kurven()
         self.bild_platz = ft.Container()
-        self.bildfolge: Bildfolge | None = None
+        self.bildfolge: Bewegungswahl | None = None
         self.hf_wert = ft.Text("—", size=28, weight=ft.FontWeight.W_600)
         self.hf_unten = ft.Text("kein Gurt", size=11, opacity=0.65)
         self.hf_karte = ft.Container(

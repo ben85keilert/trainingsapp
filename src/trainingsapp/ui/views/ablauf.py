@@ -825,7 +825,9 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                     if v is None
                     else None,
                     alignment=ft.Alignment.CENTER,
-                    content=uebungsbild(state, u.icon_key, u.image_path, groesse=30),
+                    content=uebungsbild(
+                        state, u.icon_key, u.image_path, groesse=30, medien=u.media
+                    ),
                 ),
                 *(
                     [
@@ -907,7 +909,12 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                 bgcolor=ft.Colors.PRIMARY,
                 alignment=ft.Alignment.CENTER,
                 content=uebungsbild(
-                    state, u.icon_key, u.image_path, groesse=30, color=ft.Colors.ON_PRIMARY
+                    state,
+                    u.icon_key,
+                    u.image_path,
+                    groesse=30,
+                    color=ft.Colors.ON_PRIMARY,
+                    medien=u.media,
                 ),
             ),
         )

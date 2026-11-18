@@ -689,6 +689,7 @@ def zeichnung(
                 u.icon_key if u else None,
                 u.image_path if u else None,
                 groesse=34,
+                medien=u.media if u else (),
                 color=ft.Colors.TERTIARY if ist_bedarf else ft.Colors.PRIMARY,
             ),
         )

@@ -51,6 +51,7 @@ from typing import Any
 from trainingsapp.core.abgleich import Hinweis, abgleichen
 from trainingsapp.core.ablauf import ablauf_pruefen
 from trainingsapp.core.bedingung import bedingung_pruefen
+from trainingsapp.core.bewegungsbild import bilder_in, png_masse
 from trainingsapp.core.ergaenzungen import ERGAENZBAR
 from trainingsapp.core.gps_wahl import gps_pruefen
 from trainingsapp.core.kursbloecke import (
@@ -75,7 +76,7 @@ from trainingsapp.core.kurse import Kapitel, Kurs, PlanVorlage, VorlageItem
 from trainingsapp.core.kursplan import GRUNDLAGE
 from trainingsapp.core.links import erlaubt as links_erlaubt
 from trainingsapp.core.linkvideos import direkt, mit_pruefsumme, nennt_pruefsumme, pruefsumme
-from trainingsapp.core.models import Exercise, MediaSource, Plan
+from trainingsapp.core.models import BEGLEITUNG, BEWEGUNG, ROLLEN, Exercise, MediaSource, Plan
 from trainingsapp.core.paketdatei import (
     PAKET_JSON,
     dateien_einbinden,
@@ -421,6 +422,9 @@ def pruefen(
                     f"Medium „{e.get('title') or uri}“: Prüfsumme am Link unlesbar "
                     "(#sha256= und 64 Zeichen 0–9, a–f)"
                 )
+    f_rollen, h_rollen = rollen_pruefen(roh, datei.parent)  # vor dem Einbinden (nimmt `datei`)
+    fehler.extend(f_rollen)
+    hinweise.extend(h_rollen)
     if datei.suffix == ".toml" and _nennt_dateien(roh):
         with tempfile.TemporaryDirectory() as arbeit:
             try:
@@ -606,6 +610,96 @@ def verweise_pruefen(
 
 #: Eine ID (UUID) statt eines Schlüssels
 _UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+
+
+#: Endungen einer Bewegung: ein Streifen (PNG, JPEG), ein GIF; WebP zeigt die App als Standbild
+_BEWEGUNG_ENDUNGEN = frozenset({"png", "jpg", "jpeg", "gif", "webp"})
+#: Endungen eines Symbols: SVG (eingefärbt) oder PNG (wie es ist)
+_SYMBOL_ENDUNGEN = frozenset({"svg", "png"})
+
+
+def rollen_pruefen(roh: Mapping[str, Any], ordner: Path) -> tuple[list[str], list[str]]:
+    """``(Fehler, Hinweise)`` zu den Rollen der Medien (M1/M2, Ben 18.11.2026,
+    `docs/plan_medienrollen.md`): Eine **Bewegung** ist eine Bilddatei des Pakets — ein Streifen
+    (Breite ein Vielfaches der Höhe, sonst ein Standbild: Hinweis) oder ein GIF; ein Link oder ein
+    Video zeigt die App als Bewegung nicht (Fehler). Ein **Symbol** ist ein SVG oder PNG an der
+    Übung, höchstens eines. Eine unbekannte Rolle liest die App als Erklärung (Hinweis).
+    ``ordner``: wo die Dateien liegen (neben der TOML) — für die Maße eines Streifens.
+
+    >>> roh = {"exercises": [{"name": "Kniebeuge", "media": [
+    ...     {"datei": "medien/k.gif", "rolle": "bewegung"},
+    ...     {"uri": "https://x.org/k.mp4", "rolle": "bewegung"},
+    ...     {"datei": "medien/k.svg", "rolle": "symbol"},
+    ...     {"datei": "medien/k2.svg", "rolle": "symbol"},
+    ...     {"uri": "https://x.org/a", "rolle": "tanz"}]}],
+    ...     "plaene": [{"uebungen": [{"medien": [{"datei": "x.svg", "rolle": "symbol"}]}]}]}
+    >>> f, h = rollen_pruefen(roh, Path("."))
+    >>> for zeile in f + h:
+    ...     print(zeile[:70])
+    Übung „Kniebeuge“: Medium „https://x.org/k.mp4“: eine Bewegung ist ein
+    Übung „Kniebeuge“: 2 Symbole — höchstens eines
+    Medien: „x.svg“: ein Symbol gehört an die Übung
+    Übung „Kniebeuge“: Medium „https://x.org/a“: Rolle „tanz“ kennt die Ap
+    """
+    fehler: list[str] = []
+    hinweise: list[str] = []
+
+    def stueck(wo: str, e: Mapping[str, Any], an_uebung: bool) -> int:
+        """Ein Medium prüfen — 1, wenn es ein Symbol ist."""
+        rolle = str(e.get("rolle") or "")
+        if not rolle or rolle == BEGLEITUNG:
+            return 0
+        datei = str(e.get("datei") or "")
+        name = str(e.get("title") or datei or e.get("uri") or "?")
+        if rolle not in ROLLEN:
+            hinweise.append(
+                f"{wo}: Medium „{name}“: Rolle „{rolle}“ kennt die App nicht — sie zeigt es als "
+                "Erklärung"
+            )
+            return 0
+        ist_datei = bool(datei) or e.get("source") == "paket"
+        endung = Path(datei or str(e.get("uri") or "")).suffix.lower().lstrip(".")
+        if rolle == BEWEGUNG:
+            if not ist_datei or endung not in _BEWEGUNG_ENDUNGEN:
+                was = "ein Link" if not ist_datei else f"„.{endung}“"
+                fehler.append(
+                    f"{wo}: Medium „{name}“: eine Bewegung ist eine Bilddatei des Pakets "
+                    f"(Bildfolge als PNG oder JPEG, GIF) — {was} zeigt die App nicht"
+                )
+            elif endung == "webp":
+                hinweise.append(
+                    f"{wo}: Medium „{name}“: WebP zeigt die App als Standbild, nicht als Bildfolge"
+                )
+            elif datei and endung != "gif" and (ordner / datei).is_file():
+                with (ordner / datei).open("rb") as f:
+                    masse = png_masse(f.read(64 * 1024))
+                if masse is not None and bilder_in(*masse) < 2:
+                    hinweise.append(
+                        f"{wo}: Medium „{name}“: {masse[0]} × {masse[1]} ist kein Streifen (Breite "
+                        "kein Vielfaches der Höhe) — die App zeigt ein Standbild"
+                    )
+            return 0
+        if not an_uebung:
+            fehler.append(f"{wo}: „{name}“: ein Symbol gehört an die Übung")
+        elif not ist_datei or endung not in _SYMBOL_ENDUNGEN:
+            fehler.append(f"{wo}: Medium „{name}“: ein Symbol ist eine Datei, SVG oder PNG")
+        return 1
+
+    an_uebungen: set[int] = set()
+    for e in roh.get("exercises") or []:
+        if not isinstance(e, dict) or not isinstance(e.get("media"), list):
+            continue
+        an_uebungen.add(id(e["media"]))
+        wo = f"Übung „{e.get('name', e.get('key', '?'))}“"
+        n = sum(stueck(wo, m, True) for m in e["media"] if isinstance(m, dict))
+        if n > 1:
+            fehler.append(f"{wo}: {n} Symbole — höchstens eines")
+    for liste in medienlisten(roh):
+        if id(liste) not in an_uebungen:
+            for m in liste:
+                if isinstance(m, dict):
+                    stueck("Medien", m, False)
+    return fehler, hinweise
 
 
 def _nennt_dateien(roh: dict[str, Any]) -> bool:

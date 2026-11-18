@@ -71,7 +71,7 @@ def archiv_view(page: ft.Page, state: AppState) -> ft.View:
 
     zeilen: list[ft.Control] = [
         ft.ListTile(
-            leading=uebungsbild(state, u.icon_key, u.image_path),
+            leading=uebungsbild(state, u.icon_key, u.image_path, medien=u.media),
             title=ft.Text(u.name),
             subtitle=ft.Text(", ".join(u.typen), size=12),
             on_click=_uebung_oeffner(page, u.id),
@@ -269,7 +269,7 @@ def papierkorb_view(page: ft.Page, state: AppState) -> ft.View:
         zeilen.append(_ueberschrift("Übungen"))
         zeilen.extend(
             ft.ListTile(
-                leading=uebungsbild(state, u.icon_key, u.image_path, opacity=0.6),
+                leading=uebungsbild(state, u.icon_key, u.image_path, opacity=0.6, medien=u.media),
                 title=ft.Text(u.name),
                 subtitle=ft.Text(frist(u.deleted_at), size=12),
                 on_click=_uebung_oeffner(page, u.id),

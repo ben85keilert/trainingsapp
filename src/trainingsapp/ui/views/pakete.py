@@ -943,6 +943,7 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
                     z.uebung.icon_key,
                     z.uebung.image_path,
                     opacity=0.5 if z.ort != KATALOG else 1.0,
+                    medien=z.uebung.media,
                 ),
                 ft.Container(
                     expand=True,

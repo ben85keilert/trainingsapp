@@ -7,7 +7,8 @@ kann aber manuell wieder gestartet werden.“
 Material sind die **Anweisungen der Planübung** — ihre Abschnitte und Medien, aus dem Paketplan
 oder selbst geschrieben (`PlanItem.description`, `PlanItem.media`) — und die **Videos und Links
 der Übung**. Die Beschreibung der Übung bleibt im „i“; das Bild der Bewegung (lokal, T6) ist kein
-Material. Was die Oberfläche daraus macht (Knopf, Blatt, Uhr anhalten), steht in
+Material, ebenso Stücke mit der Rolle Bewegung oder Symbol (M1/M2, 18.11.2026) — sie haben ihren
+eigenen Platz. Was die Oberfläche daraus macht (Knopf, Blatt, Uhr anhalten), steht in
 `ui/components/material.py`.
 
 Dieses Modul kennt kein flet.
@@ -20,7 +21,16 @@ from dataclasses import dataclass, replace
 from typing import Final
 
 from .beschreibung import Abschnitt, abschnitte
-from .models import BEGLEITUNG, Exercise, Media, MediaKind, MediaSource, Plan, PlanItem
+from .models import (
+    BEGLEITUNG,
+    NICHT_MATERIAL,
+    Exercise,
+    Media,
+    MediaKind,
+    MediaSource,
+    Plan,
+    PlanItem,
+)
 
 VIDEO: Final = "video"
 PDF: Final = "pdf"
@@ -124,7 +134,7 @@ class Material:
 
 def material_von(uebung: Exercise | None, item: PlanItem | None) -> Material:
     """Das Material zu einer Übung, in einem Plan zu ihrer Planübung — dieselbe Adresse nur
-    einmal, lokale Medien (das Bild der Bewegung) nie.
+    einmal, lokale Medien (das Bild der Bewegung) nie, ebenso keine Bewegung und kein Symbol.
 
     >>> u = Exercise(name="Baum", description="## Ausführung\\nstehen",
     ...              media=[Media(uri="https://x.org/v")])
@@ -137,6 +147,10 @@ def material_von(uebung: Exercise | None, item: PlanItem | None) -> Material:
     'Video'
     >>> bild = Media(kind=MediaKind.IMAGE, source=MediaSource.LOCAL, uri="Medien/b.webp")
     >>> material_von(Exercise(name="leer", media=[bild]), PlanItem()).leer
+    True
+    >>> folge = Media(kind=MediaKind.IMAGE, source=MediaSource.PAKET, uri="medien/a.png",
+    ...               rolle="bewegung")
+    >>> material_von(Exercise(name="Kniebeuge", media=[folge]), None).leer
     True
 
     Ein Stück der Planübung (oder einer Ergänzung) kann eines der Übung **ersetzen**:
@@ -154,6 +168,8 @@ def material_von(uebung: Exercise | None, item: PlanItem | None) -> Material:
     schon: set[str] = set()
     for m in alle:
         if not m.uri or m.source == MediaSource.LOCAL or m.uri in schon:
+            continue
+        if m.rolle in NICHT_MATERIAL:
             continue
         schon.add(m.uri)
         (ersetzt if m.uri in weg else medien).append(m)
@@ -180,7 +196,8 @@ def plan_material(plan: Plan) -> Material:
         if not m.uri or m.source == MediaSource.LOCAL or m.uri in schon:
             continue
         schon.add(m.uri)
-        medien.append(replace(m, rolle="") if m.rolle == BEGLEITUNG else m)
+        # am Plan selbst: keine Begleitung (es läuft keine Übung daneben), auch keine Bewegung
+        medien.append(replace(m, rolle="") if m.rolle else m)
     return Material(teile, tuple(medien))
 
 

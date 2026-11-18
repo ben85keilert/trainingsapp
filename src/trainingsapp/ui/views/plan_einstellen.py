@@ -52,6 +52,8 @@ from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.links import erlaubt as link_erlaubt
 from trainingsapp.core.models import (
     BEGLEITUNG,
+    BEWEGUNG,
+    SYMBOL,
     Exercise,
     Media,
     MediaKind,
@@ -120,6 +122,9 @@ from trainingsapp.ui.views.anhang_hochladen import hochladen_route
 
 #: Die Karte eines Parameters
 KARTE = ft.Colors.SURFACE_CONTAINER_HIGHEST
+
+#: Wie die Rolle eines Stücks der Übung heißt (leer = Erklärung)
+ROLLEN_WORT = {BEGLEITUNG: "Begleitung", BEWEGUNG: "Bewegung", SYMBOL: "Symbol"}
 
 
 def _titel(f: FieldSpec) -> str:
@@ -326,7 +331,14 @@ def plan_einstellen(
                         ],
                     )
                 )
-                zeilen.append(rollen_zeile(z["zusatz"], ersetzbar=ersetzbar, kennung=z["id"]))
+                zeilen.append(
+                    rollen_zeile(
+                        z["zusatz"],
+                        ersetzbar=ersetzbar,
+                        kennung=z["id"],
+                        bewegung=medium.kind == MediaKind.IMAGE,
+                    )
+                )
                 continue
 
             def titel_aendern(e: Any, z: dict[str, Any] = z) -> None:
@@ -489,7 +501,7 @@ def plan_einstellen(
             if not m.uri or m.source == MediaSource.LOCAL:
                 continue
             ersetzt = m.uri in weg
-            rolle = "Begleitung" if m.rolle == BEGLEITUNG else "Erklärung"
+            rolle = ROLLEN_WORT.get(m.rolle, "Erklärung")
             zeilen.append(
                 ft.Row(
                     spacing=8,

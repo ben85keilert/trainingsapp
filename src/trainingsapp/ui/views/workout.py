@@ -291,7 +291,11 @@ def workout_view(
                     *vorn,
                     ft.Text(str(nummern.get(s.item_id, n)), size=12, opacity=0.55, width=18),
                     uebungsbild(
-                        state, u.icon_key if u else None, u.image_path if u else None, groesse=28
+                        state,
+                        u.icon_key if u else None,
+                        u.image_path if u else None,
+                        groesse=28,
+                        medien=u.media if u else (),
                     ),
                     ft.Column(
                         spacing=0,

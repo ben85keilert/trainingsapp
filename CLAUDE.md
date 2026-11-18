@@ -75,13 +75,26 @@ er nicht (Variablen, Skripte).
 der Rückweg vom Handy, Stufen 6–8: fertig auf einem Zweig, aber `git merge --ff-only` im
 Hauptordner brach an der unkommitteten Arbeit einer anderen Sitzung ab): Mehrere Stufen,
 Migrationen oder viele Dateien baut eine Sitzung in einem eigenen `git worktree` auf einem Zweig
-(hrv-core und hrv-watch auf dem Stand der `.ref` daneben, wie oben), committet dort je Stufe nach
-grünen Tests. Zusammengeführt wird erst, wenn der Hauptordner keine fremde unkommittete Arbeit
-mehr hat: Zweig auf den aktuellen `main` rebasen (auch auf lokale, noch nicht gepushte Commits
-der anderen), voller Testlauf, dann `main` per Fast-Forward nachziehen und pushen. Nie an einer
-laufenden Sitzung vorbei auf `origin/main` pushen; nie über fremde Änderungen im Hauptordner
-mergen. Migrationsnummern vor dem Zusammenführen gegen `main` prüfen (zwei Zweige mit derselben
-Nummer); Tests vergleichen mit `data.db.letzte_migration()`, nie mit einer festen Zahl.
+(hrv-core und hrv-watch auf dem Stand der `.ref` daneben, wie oben), committet dort je Stufe.
+Zusammengeführt wird, wenn der Hauptordner keine fremde unkommittete Arbeit mehr hat: Zweig auf
+den aktuellen `main` rebasen (auch auf lokale, noch nicht gepushte Commits der anderen), voller
+Testlauf, dann `main` per Fast-Forward nachziehen und pushen. Nie an einer laufenden Sitzung
+vorbei auf `origin/main` pushen; nie über fremde Änderungen im Hauptordner mergen — liegt dort
+fremde Arbeit, geht der Zweig als `claude/<name>` hinaus (die CI läuft auch dort) und wird später
+zusammengeführt. Migrationsnummern vor dem Zusammenführen gegen `main` prüfen (zwei Zweige mit
+derselben Nummer; `tests/test_migrationen.py` fängt es); wer zuletzt zusammenführt, nummeriert um.
+Tests vergleichen mit `data.db.letzte_migration()`, nie mit einer festen Zahl.
+
+**Commit und Push ohne Rückfrage, auch bei Rot** (Ben, 18.11.2026: „ändere die Freigabe für
+commit und pushe. Mach das auch bei rotem testrun, einfach, dass der Code abgeschickt ist. Lässt
+sich ja umkehren“): Ist eine Arbeit oder Stufe fertig, committet und pusht die Sitzung, ohne zu
+fragen — die eigenen Dateien einzeln, die Tests wie oben vorher gelaufen und ihr Ergebnis gelesen
+(nie in einer Befehlskette mit dem Commit). Rote Tests halten Commit und Push nicht auf; die
+Meldung an Ben nennt sie (Datei, Test), und fertig ist der Auftrag weiter erst mit grüner CI.
+Umkehrbar ist es, weil ein Push nur die CI startet (`.github/workflows/ci.yml`; das APK baut erst
+ein Tag, `apk.yml`) — zurück mit `git revert`, nie mit Force-Push. Bleibt: kein Tag ohne grüne
+CI des Commits, nie über fremde Änderungen mergen, kein Push an einer laufenden Sitzung vorbei
+auf `origin/main` (dann `claude/<name>`, oben).
 
 **APK über GitHub bauen** (Ben, 9.11.2026: „ab jetzt wieder git build automatisch“; hier
 eingetragen 10.11.2026): Nach einem Versions-Commit (Version in `pyproject.toml` und `uv.lock`

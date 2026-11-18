@@ -35,7 +35,7 @@ import tomllib
 from pathlib import Path
 
 from ..core.models import Exercise
-from ..core.paketdatei import nachbar_namen, paket_oeffnen, toml_oeffnen
+from ..core.paketdatei import nachbar_namen, paket_oeffnen, paketdateien, toml_oeffnen
 from ..core.pakete import (
     GRUNDAUSSTATTUNG,
     NAMENSRAUM,
@@ -44,7 +44,6 @@ from ..core.pakete import (
     paket_lesen,
     uebung_id,
 )
-from ..core.privat import zugangsdatei
 from ..core.result_spec import VORLAGEN, ResultSpec
 from .db import transaktion
 from .pakete import PaketRepo, Status
@@ -121,8 +120,9 @@ def pakete_aus_ordner(
 ) -> list[str]:
     """Entwicklungs-Loader (``TRAININGSAPP_PAKETE``, `config.paketordner`).
 
-    Jede ``.toml``/``.json``/``.zip`` im Ordner (außer ``<name>.zugang.json``) wird beim
-    Start wie ein Import eingespielt —
+    Jede ``.toml``/``.json``/``.zip`` im Ordner und seinen Unterordnern (`paketdateien`: ohne
+    ``medien/``, ``einlesen/`` und ``<name>.zugang.json``) wird beim Start wie ein Import
+    eingespielt —
     immer auf den Stand der Datei, auch das Paket „Standard“. So startet das
     Inhalte-Repo die App direkt mit seinen Paketen. Entfernte und deaktivierte
     Pakete bleiben unangetastet; was aus einer Datei fiel, wird markiert wie bei
@@ -137,12 +137,9 @@ def pakete_aus_ordner(
         return [f"Paketordner nicht gefunden: {ordner}"]
     pakete = PaketRepo(con, ablage)
     meldungen: list[str] = []
-    # Die Zugangsdatei eines privaten Pakets (``<name>.zugang.json``, U7) ist kein Paket
-    dateien = sorted(
-        p
-        for p in ordner.iterdir()
-        if p.is_file() and p.suffix in (".toml", ".json", ".zip") and not zugangsdatei(p)
-    )
+    # Auch in Unterordnern (je Paket einer, Ben 18.11.2026) — ohne ``medien/``, ``einlesen/``
+    # und die Zugangsdatei eines privaten Pakets (``<name>.zugang.json``, U7): keine Pakete
+    dateien = paketdateien(ordner, (".toml", ".json", ".zip"))
     for datei in dateien:
         # Mit Ablage nimmt eine TOML ihre Dateien mit (``datei = "…"``, bereinigt — U3)
         with tempfile.TemporaryDirectory() as arbeit:

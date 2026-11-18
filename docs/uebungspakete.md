@@ -473,7 +473,9 @@ bleibt ihre). Ältere Apps übergehen das Feld (keine neue Formatversion).
 Kursplan, an Bedingungen und Blöcken; in einer Marke `<block>:<Paket>/<schlüssel>`
 (`"dazu:Standard/kniebeuge"`). `paket` ist Name oder ID; „Standard“ (oder leer bei
 Ergänzungen) ist das Grundpaket. Liegt das genannte Paket als TOML daneben, gilt die ID aus
-seinem Kopf (`core.paketdatei.nachbar_namen`) — sonst die aus dem Namen. Aufgelöst beim Lesen
+seinem Kopf (`core.paketdatei.nachbar_namen`) — sonst die aus dem Namen. „Daneben“ heißt unter
+einem Ordner `pakete/`: jede TOML darunter, auch in anderen Unterordnern
+(`core.paketdatei.nachbar_tomls`, siehe „Inhalte pflegen“). Aufgelöst beim Lesen
 (`core.pakete.verweise_aufloesen`): Die gebaute JSON trägt die ID wie bisher, keine neue
 Formatversion.
 
@@ -836,7 +838,18 @@ Eigene Pakete entstehen im privaten Repo `trainingsapp-inhalte` als TOML wie
 Umgebungsvariable `TRAININGSAPP_PAKETE=<ordner>` spielt jeder Start alle `.toml`/`.json`
 darin wie einen Import ein (die Zugangsdatei eines privaten Pakets, `<name>.zugang.json`,
 bleibt aus) — immer auf den Stand der Datei, auch für die ID von
-„Standard“ (`data/seed.pakete_aus_ordner`). Entfernte und deaktivierte Pakete bleiben
+„Standard“ (`data/seed.pakete_aus_ordner`).
+
+**Unterordner** (Ben, 18.11.2026): Unter `pakete/` darf jedes Paket einen eigenen Ordner haben
+(`pakete/qigong/qigong_basis.toml` neben `pakete/standard.toml`); die Begleitdateien liegen
+neben der TOML (`<name>.zugang.json`, `einlesen/<name>.json`, `medien/<name>/`). Der Lader
+liest alle Ebenen (`core.paketdatei.paketdateien`), nur `medien/`, `einlesen/`, Verstecktes und
+Zugangsdateien nicht. Verweise auf andere Pakete, `braucht`, `einlesen` und `uebernehmen`
+suchen die übrigen TOML unter dem nächsten Ordner namens `pakete` über der Datei (nicht über die
+Wurzel des git-Repos hinaus, `paketwurzel`); gibt es keinen, nur im selben Ordner. Die Basis aus
+der git-Geschichte folgt einem `git mv` (`log --follow`). Auf dem Server ändert der Ordner
+nichts: Der Dateiname dort kommt aus dem Paketnamen, bei privaten aus der Zugangsdatei — die
+darum mit der TOML umziehen muss (sonst neuer Link und Code). Entfernte und deaktivierte Pakete bleiben
 unangetastet; was aus einer Datei fiel, fragt der Start wie bei jedem Update. Ging eine
 Datei nicht (Tippfehler), steht die Meldung mit Zeile oben auf „Heute“.
 

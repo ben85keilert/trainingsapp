@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import secrets
 import shutil
 import tempfile
@@ -62,6 +63,7 @@ from .privat import (
     datei_entschluesseln,
     entschluesseln,
     ist_privat,
+    zugangsdatei,
 )
 
 #: Der Paketinhalt in der ZIP
@@ -399,12 +401,65 @@ def dateien_einbinden(roh: dict[str, Any], basis: Path, arbeit: Path) -> dict[st
     return dateien
 
 
+#: So heißt der Ordner, unter dem die Pakete eines Inhalte-Repos liegen — auch in Unterordnern,
+#: je Paket einer (``pakete/qigong/qigong_basis.toml``, Ben 18.11.2026)
+PAKETORDNER: Final = "pakete"
+#: Unterordner ohne Pakete: die Mediendateien (``medien/<paket>/``, nie im git) und die
+#: Merkdateien von ``einlesen`` (``einlesen/<paket>.json``) — beides liegt neben den TOML
+KEINE_PAKETE: Final = frozenset({"medien", "einlesen"})
+
+
+def paketwurzel(pfad: Path) -> Path | None:
+    """Der Ordner `PAKETORDNER`, unter dem ``pfad`` liegt — der nächste über der Datei, nie
+    über die Wurzel eines git-Repos hinaus; ``None``, wenn es keinen gibt.
+
+    >>> paketwurzel(Path("/x/pakete/qigong/qigong_basis.toml")).as_posix()
+    '/x/pakete'
+    >>> paketwurzel(Path("/x/pakete/standard.toml")).as_posix()
+    '/x/pakete'
+    >>> paketwurzel(Path("/x/entwuerfe/vorlage.toml")) is None
+    True
+    """
+    ordner = pfad.absolute().parent
+    for kandidat in (ordner, *ordner.parents):
+        if kandidat.name == PAKETORDNER:
+            return kandidat
+        if (kandidat / ".git").exists():
+            break
+    return None
+
+
+def paketdateien(ordner: Path, endungen: Iterable[str] = (".toml",)) -> list[Path]:
+    """Die Paketdateien unter ``ordner``, auch in Unterordnern — ohne `KEINE_PAKETE`, ohne
+    Verstecktes und ohne Zugangsdateien privater Pakete (``<name>.zugang.json``); sortiert."""
+    erlaubt = tuple(endungen)
+    out: list[Path] = []
+    for wurzel, unterordner, dateien in os.walk(ordner):
+        unterordner[:] = [u for u in unterordner if u not in KEINE_PAKETE and u[:1] != "."]
+        for name in dateien:
+            datei = Path(wurzel) / name
+            if datei.suffix in erlaubt and name[:1] != "." and not zugangsdatei(datei):
+                out.append(datei)
+    return sorted(out)
+
+
+def nachbar_tomls(pfad: Path) -> list[Path]:
+    """Die TOML-Pakete neben ``pfad`` (mit ``pfad`` selbst): alle unter seiner `paketwurzel`,
+    auch in anderen Unterordnern — so findet ``pakete/qigong/…`` das Paket in
+    ``pakete/standard.toml``. Ohne `PAKETORDNER` darüber nur die im selben Ordner (ein
+    ``pruefen ~/Downloads/x.toml`` durchsucht nicht den ganzen Downloads-Ordner)."""
+    wurzel = paketwurzel(pfad)
+    if wurzel is None:
+        return sorted(pfad.parent.glob("*.toml"))
+    return paketdateien(wurzel)
+
+
 def nachbar_namen(pfad: Path) -> dict[str, str]:
-    """Name (klein) → ID der Pakete, die als TOML neben ``pfad`` liegen (auch ``pfad`` selbst;
-    `core.pakete.paket_namen`) — damit ein Verweis ``paket = "Qigong Basis"`` (V1) die ID aus
-    dem Kopf jener Datei findet. Unlesbares zählt nicht."""
+    """Name (klein) → ID der Pakete, die als TOML neben ``pfad`` liegen (`nachbar_tomls`, auch
+    ``pfad`` selbst; `core.pakete.paket_namen`) — damit ein Verweis ``paket = "Qigong Basis"``
+    (V1) die ID aus dem Kopf jener Datei findet. Unlesbares zählt nicht."""
     koepfe: list[Mapping[str, Any]] = []
-    for datei in sorted(pfad.parent.glob("*.toml")):
+    for datei in nachbar_tomls(pfad):
         try:
             kopf = tomllib.loads(datei.read_text(encoding="utf-8")).get("paket")
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
@@ -618,7 +673,9 @@ def paket_zip(ziel: Path, json_daten: bytes, medien: Mapping[str, Path]) -> None
 
 __all__ = [
     "GELADEN",
+    "KEINE_PAKETE",
     "KLARTEXT",
+    "PAKETORDNER",
     "PAKET_JSON",
     "ZIP_KOPF",
     "CodeNoetig",
@@ -628,8 +685,11 @@ __all__ = [
     "medien_fuer_export",
     "medien_umbenennen",
     "medienlisten",
+    "nachbar_tomls",
     "paket_oeffnen",
     "paket_zip",
+    "paketdateien",
+    "paketwurzel",
     "sha256_datei",
     "toml_oeffnen",
 ]

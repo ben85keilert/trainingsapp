@@ -39,7 +39,13 @@ from pathlib import Path
 from typing import Any
 
 from trainingsapp.core.models import MediaSource
-from trainingsapp.core.paketdatei import PAKET_JSON, medienlisten, paket_oeffnen
+from trainingsapp.core.paketdatei import (
+    PAKET_JSON,
+    medienlisten,
+    nachbar_tomls,
+    paket_oeffnen,
+    paketwurzel,
+)
 from trainingsapp.core.pakete import (
     MARKENFELDER,
     PaketFehler,
@@ -84,9 +90,10 @@ def _kopf(roh: Mapping[str, Any]) -> dict[str, Any]:
 def nachbar_schluessel(ziel: Path) -> dict[str, tuple[str, str]]:
     """Übungs-ID → ``(Paketname, Schlüssel)`` der TOML-Pakete neben ``ziel`` — so wird aus der
     ID einer Standard-Übung im Export wieder ``uebung = "kniebeuge", paket = "Standard"``.
-    Die ID rechnet wie der Leser: eine eigene ``id`` vor dem Schlüssel."""
+    Die ID rechnet wie der Leser: eine eigene ``id`` vor dem Schlüssel. Neben heißt
+    `nachbar_tomls`: unter ``pakete/`` auch in anderen Unterordnern."""
     out: dict[str, tuple[str, str]] = {}
-    for datei in sorted(ziel.parent.glob("*.toml")):
+    for datei in nachbar_tomls(ziel):
         if datei.resolve() == ziel.resolve():
             continue
         try:
@@ -438,8 +445,10 @@ def _merk_schreiben(ziel: Path, merk: Mapping[str, Any]) -> None:
     pfad.write_text(json.dumps(merk, ensure_ascii=False, indent=2, sort_keys=True) + "\n", "utf-8")
 
 
-def eigenes_ziel(quelle: Path, ordner: Path) -> Path | None:
-    """Die TOML, in die ein früherer Export desselben eigenen Pakets eingelesen wurde."""
+def eigenes_ziel(quelle: Path, ziel: Path) -> Path | None:
+    """Die TOML, in die ein früherer Export desselben eigenen Pakets eingelesen wurde — gesucht
+    in den Merkdateien unter ``pakete/`` (`paketwurzel`, auch die anderer Unterordner), ohne
+    einen solchen Ordner nur in denen neben ``ziel``."""
     try:
         roh = _roh_lesen(quelle)
     except (OSError, ValueError, KeyError, zipfile.BadZipFile, PaketFehler):
@@ -448,10 +457,16 @@ def eigenes_ziel(quelle: Path, ordner: Path) -> Path | None:
     pid = str(kopf.get("id") or "")
     if not pid:
         return None
-    for merk in sorted((ordner / MERK_ORDNER).glob("*.json")):
+    wurzel = paketwurzel(ziel)
+    merkdateien = (
+        wurzel.rglob(f"{MERK_ORDNER}/*.json")
+        if wurzel is not None
+        else (ziel.parent / MERK_ORDNER).glob("*.json")
+    )
+    for merk in sorted(merkdateien):
         try:
             if json.loads(merk.read_text("utf-8")).get("eigenes_paket") == pid:
-                return ordner / f"{merk.stem}.toml"
+                return merk.parent.parent / f"{merk.stem}.toml"
         except (OSError, ValueError, AttributeError):
             continue
     return None
@@ -471,12 +486,14 @@ def einlesen(
     Export des installierten Pakets — wie `uebernehmen`."""
     from trainingsapp.paket_werkzeug import uebernehmen
 
-    bisher = eigenes_ziel(quelle, ziel.parent)
+    bisher = eigenes_ziel(quelle, ziel)
     if not ziel.exists():
         if bisher is not None:
+            # unter ``pakete/`` absolut gefunden — gezeigt wie eingegeben, relativ zum Ordner
+            zeigen = bisher.relative_to(Path.cwd()) if bisher.is_relative_to(Path.cwd()) else bisher
             return [], [
                 f"Dieser Entwurf wurde schon nach {bisher.name} eingelesen — "
-                f"`einlesen {quelle.name} {bisher}` gleicht ab"
+                f"`einlesen {quelle.name} {zeigen}` gleicht ab"
             ]
         return neu_einlesen(quelle, ziel, name=name, privat=privat, fuer=fuer, schreiben=schreiben)
     if bisher is not None and bisher.resolve() == ziel.resolve():

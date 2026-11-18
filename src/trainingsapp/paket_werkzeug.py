@@ -81,6 +81,7 @@ from trainingsapp.core.paketdatei import (
     dateien_einbinden,
     medienlisten,
     nachbar_namen,
+    nachbar_tomls,
     paket_oeffnen,
     paket_zip,
     sha256_datei,
@@ -542,9 +543,10 @@ def _uebungsverweise(roh: Mapping[str, Any]) -> list[tuple[str, str, str]]:
 
 
 def _nachbar_uebungen(datei: Path) -> dict[str, tuple[str, set[str]]]:
-    """Paket-ID → ``(Name, IDs der Übungen)`` der TOML-Pakete neben ``datei``."""
+    """Paket-ID → ``(Name, IDs der Übungen)`` der TOML-Pakete neben ``datei``
+    (`nachbar_tomls`: unter ``pakete/`` auch in anderen Unterordnern)."""
     out: dict[str, tuple[str, set[str]]] = {}
-    for anderes in sorted(datei.parent.glob("*.toml")):
+    for anderes in nachbar_tomls(datei):
         if anderes.resolve() == datei.resolve():
             continue
         try:
@@ -1340,7 +1342,7 @@ def voraussetzungen(
     if not verwiesen:
         return []
     out: list[Voraussetzung] = []
-    for anderes in sorted(datei.parent.glob("*.toml")):
+    for anderes in nachbar_tomls(datei):
         if anderes.resolve() == datei.resolve():
             continue
         try:
@@ -1755,17 +1757,29 @@ def _basis_aus_git(
     try:
         wurzel = Path(_git(datei.parent, "rev-parse", "--show-toplevel").strip())
         rel = datei.resolve().relative_to(wurzel.resolve()).as_posix()
-        log = _git(wurzel, "log", "--format=%H %ct", "--", rel)
+        # --follow: auch über ein Umziehen hinweg (``pakete/x.toml`` → ``pakete/x/x.toml``,
+        # Ben 18.11.2026) — je Commit mit dem Pfad, den die Datei damals hatte
+        log = _git(
+            wurzel,
+            *("-c", "core.quotePath=false", "log", "--follow", "--name-only"),
+            *("--format=%x00%H %ct", "--", rel),
+        )
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
+    staende: list[tuple[str, str, str]] = []
     for zeile in log.splitlines():
-        commit, _, zeit = zeile.partition(" ")
+        if zeile.startswith("\x00"):
+            commit, _, zeit = zeile[1:].partition(" ")
+            staende.append((commit, zeit, rel))
+        elif zeile and staende:
+            staende[-1] = (*staende[-1][:2], zeile)
+    for commit, zeit, damals in staende:
         if not commit or not zeit.isdigit():
             continue
         if bis is not None and int(zeit) > bis.timestamp():
             continue
         try:
-            roh = tomllib.loads(_git(wurzel, "show", f"{commit}:{rel}"))
+            roh = tomllib.loads(_git(wurzel, "show", f"{commit}:{damals}"))
             kopf = roh.get("paket")
             if version_zahl(kopf.get("version") if isinstance(kopf, dict) else None) != version:
                 continue

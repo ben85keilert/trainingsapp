@@ -76,6 +76,10 @@ der Rückweg vom Handy, Stufen 6–8: fertig auf einem Zweig, aber `git merge --
 Hauptordner brach an der unkommitteten Arbeit einer anderen Sitzung ab): Mehrere Stufen,
 Migrationen oder viele Dateien baut eine Sitzung in einem eigenen `git worktree` auf einem Zweig
 (hrv-core und hrv-watch auf dem Stand der `.ref` daneben, wie oben), committet dort je Stufe.
+Anlegen und Wegräumen mit `scripts/worktree.sh anlegen|entfernen <zweig>` (Ben, 18.11.2026 —
+von Hand landeten die Worktrees einmal mitten in den Repos: `git -C <repo> worktree add wt/x`
+legt relativ zum Repo an): `../wt/<zweig>/` mit allen dreien, absolute Pfade, `uv sync`;
+`entfernen` nimmt nur saubere Worktrees und den Zweig nur, wenn er in `main` steckt.
 Zusammengeführt wird, wenn der Hauptordner keine fremde unkommittete Arbeit mehr hat: Zweig auf
 den aktuellen `main` rebasen (auch auf lokale, noch nicht gepushte Commits der anderen), voller
 Testlauf, dann `main` per Fast-Forward nachziehen und pushen. Nie an einer laufenden Sitzung

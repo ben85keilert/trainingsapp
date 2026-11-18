@@ -18,6 +18,7 @@ from trainingsapp.core.paketmedien import MIME, ORDNER, art_fuer, dateiname, nam
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.tonspieler import Tonspieler
+from trainingsapp.ui.components.videospieler import Videospieler
 from trainingsapp.ui.components.weitergeben import datei_weitergeben
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
@@ -77,15 +78,8 @@ def paketmedium_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         )
     elif art == MediaKind.VIDEO:
         try:
-            import flet_video as fv
-
-            inhalt = fv.Video(
-                playlist=[fv.VideoMedia(str(pfad))],
-                autoplay=False,
-                fit=ft.BoxFit.CONTAIN,
-                expand=True,
-                wakelock=True,
-            )
+            # Knöpfe unter dem Bild, die stehen bleiben (Ben, 18.11.2026)
+            inhalt = Videospieler([str(pfad)]).control
         except ImportError:
             inhalt = ft.Text("Video-Erweiterung fehlt in diesem Build.", opacity=0.7)
     elif art == MediaKind.IMAGE:

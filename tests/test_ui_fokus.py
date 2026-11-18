@@ -13,14 +13,21 @@ ft = pytest.importorskip("flet")
 
 from attrappen import Gurt, Seite, Uhr, ruhe  # noqa: E402
 from trainingsapp.core.bewegungsbild import mit_bewegungsbild  # noqa: E402
-from trainingsapp.core.models import Exercise  # noqa: E402
+from trainingsapp.core.models import (  # noqa: E402
+    BEGLEITUNG,
+    Exercise,
+    Media,
+    MediaKind,
+    MediaSource,
+)
+from trainingsapp.core.paketmedien import name_fuer  # noqa: E402
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld  # noqa: E402
 from trainingsapp.core.takt import VORLAGEN  # noqa: E402
 from trainingsapp.core.timer import Abschnitt, TimerProfil  # noqa: E402
 from trainingsapp.core.zaehlen import SensorWahl  # noqa: E402
 from trainingsapp.devices.messlauf import Messlauf  # noqa: E402
 from trainingsapp.ui.components.bewegungsbild import Bildfolge, bewegung_im_fokus  # noqa: E402
-from trainingsapp.ui.state import FOKUS_HF, AppState  # noqa: E402
+from trainingsapp.ui.state import FOKUS_HF, FOKUS_VIDEO, OHNE_VIDEO, AppState  # noqa: E402
 from trainingsapp.ui.views.uebung_timer import uebung_timer_view  # noqa: E402
 
 #: Ein kleines PNG mit Kopf für 4 quadratische Bilder (1024 × 256)
@@ -79,6 +86,23 @@ def _knopf(c, text: str):
     raise AssertionError(f"kein Knopf {text!r}")
 
 
+def _ebene_text(eintrag) -> str:
+    """Der Name eines Eintrags im Ebenen-Menü (Haken · Name)."""
+    return eintrag.content.content.controls[1].value
+
+
+def _ebene_an(eintrag) -> bool:
+    return eintrag.content.content.controls[0].icon == ft.Icons.CHECK_BOX
+
+
+def _ebenen_menue(ansicht):
+    return next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.PopupMenuButton) and x.icon == ft.Icons.LAYERS_OUTLINED
+    )
+
+
 def _kniebeuge(state, *, bild: bool) -> Exercise:
     """Eine Kniebeuge mit Takt (ab · halten · auf) und Timer — mit eigener Bildfolge oder nur
     der Sensor-Vorlage (dann gilt die mitgelieferte)."""
@@ -123,8 +147,13 @@ async def test_fokus_chips_hf_und_bildfolge_im_takt(umgebung) -> None:
         for x in _alle(fokus)
         if isinstance(x, ft.PopupMenuButton) and x.icon == ft.Icons.LAYERS_OUTLINED
     )
-    assert [i.content.value for i in ebenen.items] == ["Takt", "Bewegung", "HF", "Kurve"]
-    assert all(i.checked for i in ebenen.items)
+    # „Video“ steht nur da, wenn die Übung ein Begleitvideo hat
+    assert [_ebene_text(i) for i in ebenen.items] == ["Takt", "Bewegung", "HF", "Kurve"]
+    assert all(_ebene_an(i) for i in ebenen.items)
+    # Das Menü bleibt beim Umschalten offen (Ben, 18.11.2026): Den Tipp bekommt ein Container im
+    # Eintrag, nie der Eintrag selbst — der schlösse das Menü
+    assert all(i.on_click is None and i.content.on_click is not None for i in ebenen.items)
+    assert all(i.padding == ft.Padding.all(0) for i in ebenen.items)
     # Ohne den Chip „zählt“ im Kopf (P148) — der ist Anzeige, keine Kurve
     chips = [
         c
@@ -155,13 +184,133 @@ async def test_fokus_chips_hf_und_bildfolge_im_takt(umgebung) -> None:
     ]
     assert streifen and streifen[0].controls[0].width == 4 * streifen[0].controls[0].height
     # „HF“ im Ebenen-Menü nimmt die Kachel weg — gemerkt, der Haken geht mit
-    hf = next(i for i in ebenen.items if i.content.value == "HF")
-    hf.on_click(None)
-    assert FOKUS_HF not in state.fokus_ebenen() and hf.checked is False
+    hf = next(i for i in ebenen.items if _ebene_text(i) == "HF")
+    hf.content.on_click(None)
+    assert FOKUS_HF not in state.fokus_ebenen() and not _ebene_an(hf)
     karte = next(x for x in _alle(fokus) if isinstance(x, ft.Container) and "HF" in _texte(x)[:1])
     assert karte.visible is False
     state.einheit.timer.lauf.abbrechen()
     await _sekunden(state, uhr, gurt, 2)
+
+
+def _begleitvideo(state, u: Exercise) -> str:
+    """Ein Begleitvideo aus dem Paket an der Übung — die Datei liegt in der Ablage wie nach
+    einem Import."""
+    name = name_fuer("b" * 64, "mp4")
+    pfad = state.pakete.ablage.pfad(name)
+    pfad.parent.mkdir(parents=True, exist_ok=True)
+    pfad.write_bytes(b"kein echtes Video")
+    u.media = [
+        *u.media,
+        Media(kind=MediaKind.VIDEO, source=MediaSource.PAKET, uri=name, rolle=BEGLEITUNG),
+    ]
+    state.uebungen.speichern(u)
+    return str(pfad)
+
+
+def _spieler(ansicht):
+    """Der Videospieler im Fokus (`components/videospieler.py`) — sein Container und das Video."""
+    fv = pytest.importorskip("flet_video")
+    huelle = next(x for x in _alle(ansicht) if getattr(x, "data", None) == "videospieler")
+    video = next(x for x in _alle(huelle) if isinstance(x, fv.Video))
+    return huelle, video
+
+
+def _sichtbar(ansicht, ziel) -> bool:
+    """Ist ``ziel`` zu sehen — es selbst und alle Container darüber?"""
+
+    def weg(c, oben):
+        if c is ziel:
+            return [*oben, c]
+        for name in ("content", "controls"):
+            kind = getattr(c, name, None)
+            for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
+                if isinstance(k, ft.Control) and (w := weg(k, [*oben, c])) is not None:
+                    return w
+        return None
+
+    kette = weg(ansicht, [])
+    assert kette is not None, "nicht im Baum"
+    return all(getattr(c, "visible", True) is not False for c in kette)
+
+
+async def test_begleitvideo_im_fokus_laeuft_mit_der_uhr_statt_der_bewegung(umgebung) -> None:
+    """Ben, 18.11.2026: „Begleitvideos werden noch nicht automatisch im Fokusmodus abgespielt
+    … nicht in voller Bildbreite, aber groß genug … mit Steuerungsbuttons. Überlegen, ob
+    daneben die Animation Sinn macht, eigentlich entweder oder?“"""
+    state, uhr, gurt = umgebung
+    u = _kniebeuge(state, bild=True)
+    pfad = _begleitvideo(state, u)
+    seite = Seite()
+    basis = f"/uebung/{u.id}"
+    _knopf(uebung_timer_view(seite, state, basis, u), "Starten").on_click()
+    await _sekunden(state, uhr, gurt, 2)
+    fokus = uebung_timer_view(seite, state, basis, u)
+    huelle, video = _spieler(fokus)
+    # Es läuft von selbst, in einer Fläche — nicht über die ganze Breite
+    assert video.autoplay is True and [m.resource for m in video.playlist] == [pfad]
+    assert huelle.width == 320 and _sichtbar(fokus, huelle)
+    # Die Knöpfe stehen unter dem Bild, nicht darüber (die von media_kit gehen nach 3 s weg)
+    assert {"video_zurueck", "video_spielen", "video_vor", "video_vollbild"} <= {
+        getattr(x, "data", None) for x in _alle(huelle)
+    }
+    # Entweder oder: die Bewegung tritt zurück, solange das Video da ist
+    streifen = next(
+        x
+        for x in _alle(fokus)
+        if isinstance(x, ft.Stack) and x.controls and isinstance(x.controls[0], ft.Image)
+    )
+    assert not _sichtbar(fokus, streifen)
+    menue = _ebenen_menue(fokus)
+    assert [_ebene_text(i) for i in menue.items] == ["Takt", "Bewegung", "Video", "HF", "Kurve"]
+
+    # Die Uhr hält an — das Video auch; sie läuft weiter — das Video auch
+    knopf = next(x for x in _alle(huelle) if getattr(x, "data", None) == "video_spielen")
+    state.einheit.timer.lauf.pause()
+    state.timer_beobachter["uebung"]()
+    await ruhe()
+    assert knopf.icon == ft.Icons.PLAY_ARROW
+    state.einheit.timer.lauf.fortsetzen()
+    state.timer_beobachter["uebung"]()
+    await ruhe()
+    assert knopf.icon == ft.Icons.PAUSE
+    # Von Hand angehalten bleibt es stehen, auch wenn die Uhr anhält und weiterläuft
+    await knopf.on_click(None)
+    assert knopf.icon == ft.Icons.PLAY_ARROW
+    state.einheit.timer.lauf.pause()
+    state.timer_beobachter["uebung"]()
+    state.einheit.timer.lauf.fortsetzen()
+    state.timer_beobachter["uebung"]()
+    await ruhe()
+    assert knopf.icon == ft.Icons.PLAY_ARROW
+
+    # „Video“ abwählen: die Bewegung kommt zurück — gemerkt je Gerät
+    video_eintrag = next(i for i in menue.items if _ebene_text(i) == "Video")
+    video_eintrag.content.on_click(None)
+    assert FOKUS_VIDEO not in state.fokus_ebenen()
+    assert not _sichtbar(fokus, huelle) and _sichtbar(fokus, streifen)
+    # wieder an: es beginnt neu — die Uhr läuft, aber das ⏸ von Hand gilt weiter
+    video_eintrag.content.on_click(None)
+    assert _sichtbar(fokus, huelle) and video.autoplay is False
+    state.einheit.timer.lauf.abbrechen()
+    await _sekunden(state, uhr, gurt, 2)
+
+
+def test_ebene_video_ist_an_bis_man_sie_abwaehlt(tmp_path, monkeypatch) -> None:
+    """Eine gespeicherte Liste von vor der Ebene „Video“ lässt das Video an."""
+    monkeypatch.setenv("TRAININGSAPP_DATA_DIR", str(tmp_path))
+    state = AppState.starten(tmp_path / "app.db")
+    try:
+        assert FOKUS_VIDEO in state.fokus_ebenen()
+        state.einstellungen.setzen("fokus_ebenen", "takt,hf")  # so schrieb es die App bisher
+        assert state.fokus_ebenen() == {"takt", "hf", FOKUS_VIDEO}
+        state.fokus_ebenen_setzen({"takt"})
+        assert state.einstellungen.lesen("fokus_ebenen") == f"takt,{OHNE_VIDEO}"
+        assert state.fokus_ebenen() == {"takt"}
+        state.fokus_ebenen_setzen(set())
+        assert state.fokus_ebenen() == set()
+    finally:
+        state.schliessen()
 
 
 def test_bildfolge_waehlt_das_bild_nach_takt_und_zeit() -> None:

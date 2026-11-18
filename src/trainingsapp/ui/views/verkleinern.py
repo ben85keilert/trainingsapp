@@ -342,19 +342,10 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         if datei is None or not datei.is_file():
             return ft.Text("Die Datei fehlt.", opacity=0.7)
         try:
-            import flet_video as fv
+            from trainingsapp.ui.components.videospieler import Videospieler
 
-            return ft.Container(
-                height=220,
-                border_radius=12,
-                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-                content=fv.Video(
-                    playlist=[fv.VideoMedia(str(datei))],
-                    autoplay=False,
-                    fit=ft.BoxFit.CONTAIN,
-                    expand=True,
-                ),
-            )
+            # Knöpfe unter dem Bild, die stehen bleiben (Ben, 18.11.2026)
+            return Videospieler([str(datei)], hoehe=220).control
         except ImportError:
             return ft.Text("Video-Erweiterung fehlt in diesem Build.", opacity=0.7)
 

@@ -34,6 +34,36 @@ from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.medienliste import medium_zeile
 
 
+def begleitvideos(
+    state: Any, uebung: Exercise, item: PlanItem | None
+) -> tuple[list[str], list[Media]]:
+    """Die Begleitvideos der Übung für den Fokus (Ben, 18.11.2026): die Dateien, die auf dem
+    Gerät liegen (Paketdateien, geladene Links), und die Videolinks, die erst geladen werden
+    müssen — in der Web-Fassung keine Links (`config.WEB`: ``link_videos``)."""
+    from trainingsapp.config import ist_aktiv
+    from trainingsapp.core.paketmedien import ist_paketmedium
+
+    ablage = getattr(getattr(state, "pakete", None), "ablage", None)
+    if ablage is None:
+        return [], []
+    pfade: list[str] = []
+    offen: list[Media] = []
+    for m in material_von(uebung, item).begleitvideos:
+        if ist_paketmedium(m):
+            pfad = ablage.pfad(m.uri)
+        elif ist_aktiv("link_videos"):
+            name = ablage.link_datei(m.uri)
+            if name is None:
+                offen.append(m)
+                continue
+            pfad = ablage.pfad(name)
+        else:
+            continue
+        if pfad is not None and pfad.is_file():
+            pfade.append(str(pfad))
+    return pfade, offen
+
+
 def gesehen(state: Any) -> set[str]:
     """Was das Profil abgehakt hat — ohne Datenbank (Attrappe im Test) nichts."""
     try:
@@ -382,6 +412,7 @@ def plan_blatt(
 
 
 __all__ = [
+    "begleitvideos",
     "gesehen",
     "gesehen_setzen",
     "material_blatt",

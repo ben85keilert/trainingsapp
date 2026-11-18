@@ -196,7 +196,21 @@ async def video_oeffnen(
         if dienst is not None:
             await link_oeffnen(page, dienst, medium.uri)
 
-    async def laden_und_spielen() -> None:
+    if ablage is None or not direkt(medium.uri):
+        await browser_oeffnen()
+        return
+    await link_laden(page, state, medium, abspielen)
+
+
+async def link_laden(
+    page: Any, state: Any, medium: Media, danach: Callable[[str], Awaitable[None]]
+) -> None:
+    """Ein Videolink auf das Gerät — nur im WLAN (oder erlaubt), beim ersten Mal von einem
+    Server erst nach der Rückfrage; ``danach`` bekommt den Namen der Datei in der Ablage. Für
+    `video_oeffnen` und das Begleitvideo im Fokus (`components/fokus.py`)."""
+    titel = medium.title or "Video"
+
+    async def los() -> None:
         if not await netz_frei(state):
             _melden(
                 page,
@@ -208,15 +222,12 @@ async def video_oeffnen(
         if fehler_texte:
             _melden(page, _fehler_text(fehler_texte))
         if fertig:
-            await abspielen(fertig[0])
+            await danach(fertig[0])
 
-    if ablage is None or not direkt(medium.uri):
-        await browser_oeffnen()
-        return
     if state.link_server_erlaubt(server(medium.uri)):
-        await laden_und_spielen()
+        await los()
         return
-    _server_fragen(page, state, [server(medium.uri)], lambda: page.run_task(laden_und_spielen))
+    _server_fragen(page, state, [server(medium.uri)], lambda: page.run_task(los))
 
 
 def videolinks(medien: Iterable[Media]) -> list[Media]:
@@ -265,4 +276,4 @@ def alle_laden(page: Any, state: Any, medien: Iterable[Media]) -> None:
         page.run_task(los)
 
 
-__all__ = ["HINWEIS", "alle_laden", "netz_frei", "video_oeffnen", "videolinks"]
+__all__ = ["HINWEIS", "alle_laden", "link_laden", "netz_frei", "video_oeffnen", "videolinks"]

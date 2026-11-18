@@ -26,6 +26,7 @@ import flet as ft
 from hrv_core.trends import KENNZAHLEN, verlauf
 
 from trainingsapp.core.hf_profil import bereich_von, bereiche_fuer
+from trainingsapp.core.models import Media
 from trainingsapp.core.timer import Abschnitt, dauer_text
 from trainingsapp.core.timer_eintrag import gelaufene_zeiten
 from trainingsapp.devices.einheit import Einheitslauf
@@ -36,6 +37,7 @@ from trainingsapp.ui.components.karte import hinweis
 from trainingsapp.ui.components.kurve import Reihe, kurve
 from trainingsapp.ui.components.takt_anzeige import ZeitMitTakt, takt_gross
 from trainingsapp.ui.components.takt_blatt import TempoRegler
+from trainingsapp.ui.components.videospieler import Videospieler
 from trainingsapp.ui.farben import FARBEN
 from trainingsapp.ui.state import (
     FOKUS_BEWEGUNG,
@@ -44,6 +46,7 @@ from trainingsapp.ui.state import (
     FOKUS_KURVE,
     FOKUS_KURVEN,
     FOKUS_TAKT,
+    FOKUS_VIDEO,
     AppState,
 )
 
@@ -227,6 +230,17 @@ class Fokus:
         self.kurven = state.fokus_kurven()
         self.bild_platz = ft.Container()
         self.bildfolge: Bewegungswahl | None = None
+        #: Das Begleitvideo (Ben, 18.11.2026: „sollte automatisch abgespielt sein, nicht in
+        #: voller Bildbreite, aber groß genug … mit Steuerungsbuttons“) — dieselbe Fläche wie die
+        #: Bewegung, es geht ihr vor („entweder oder“); läuft und steht mit der Uhr
+        self.video_platz = ft.Container()
+        self.spieler: Videospieler | None = None
+        #: Lief die Uhr beim letzten Nachziehen — das Video folgt nur einem Wechsel
+        self._uhr_lief: bool | None = None
+        #: Die Person hat das Video mit ⏸ angehalten — die Uhr startet es dann nicht wieder
+        self._video_von_hand_aus = False
+        #: Die Haken im Ebenen-Menü
+        self._haken: dict[str, ft.Icon] = {}
         self.hf_wert = ft.Text("—", size=28, weight=ft.FontWeight.W_600)
         self.hf_unten = ft.Text("kein Gurt", size=11, opacity=0.65)
         self.hf_karte = ft.Container(
@@ -277,10 +291,18 @@ class Fokus:
     def ebenen_anwenden(self) -> None:
         self.takt_platz.visible = FOKUS_TAKT in self.ebenen
         self.tempo_platz.visible = FOKUS_TAKT in self.ebenen
-        for name, eintrag in self._ebenen_eintraege.items():
-            eintrag.checked = name in self.ebenen
+        for name, haken in self._haken.items():
+            an = name in self.ebenen
+            haken.icon = ft.Icons.CHECK_BOX if an else ft.Icons.CHECK_BOX_OUTLINE_BLANK
+        # Video und Bewegung teilen sich die Fläche — das Video geht vor (Ben, 18.11.2026:
+        # „eigentlich entweder oder?“); wer die Bewegung sehen will, wählt „Video“ ab
+        self.video_platz.visible = (
+            FOKUS_VIDEO in self.ebenen and self.video_platz.content is not None
+        )
         self.bild_platz.visible = (
-            FOKUS_BEWEGUNG in self.ebenen and self.bild_platz.content is not None
+            FOKUS_BEWEGUNG in self.ebenen
+            and self.bild_platz.content is not None
+            and not (self.video_platz.visible and self.spieler is not None)
         )
         self.hf_karte.visible = FOKUS_HF in self.ebenen
         self.kurven_karte.visible = FOKUS_KURVE in self.ebenen
@@ -292,6 +314,14 @@ class Fokus:
             else:
                 self.ebenen.add(name)
             self.state.fokus_ebenen_setzen(self.ebenen)
+            if name == FOKUS_VIDEO and self.spieler is not None:
+                # Unsichtbar fällt der Spieler aus dem Bild (Flutter baut ihn ab) — sichtbar
+                # beginnt er neu: mit der Uhr, außer die Person hatte ihn angehalten
+                self.spieler.neu_beginnen(
+                    FOKUS_VIDEO in self.ebenen
+                    and bool(self._uhr_lief)
+                    and not self._video_von_hand_aus
+                )
             self.ebenen_anwenden()
             if name == FOKUS_KURVE:
                 self._kurven_zuletzt = 0.0
@@ -299,23 +329,120 @@ class Fokus:
 
         return handler
 
-    def ebenen_knopf(self) -> ft.Control:
-        """Was der Fokus zeigt — Takt · Bewegung · HF · Kurve — als ein Knopf neben der Zeit
-        (Ben, 8.11.2026 spät: „Die Buttons Takt-Bewegung … in einen Button auslagern, der in die
-        gleiche Zeile wie die Zeit kommt“); gemerkt je Gerät."""
-        self._ebenen_eintraege = {
-            name: ft.PopupMenuItem(
-                content=ft.Text(text),
-                checked=name in self.ebenen,
+    def _ebene_eintrag(self, name: str, text: str) -> ft.PopupMenuItem:
+        """Ein Eintrag des Ebenen-Menüs, der das Menü **offen lässt** (Ben, 18.11.2026: „Das
+        Menü … nicht schließen nach dem ersten Klick“). Flutter schließt ein Menü, wenn der
+        Eintrag selbst den Tipp bekommt (`PopupMenuItem.handleTap`; Flet setzt nur dessen
+        ``onTap``, `flet/lib/src/utils/popup_menu.dart`). Hier fängt ein Container mit eigenem
+        Tipp ihn vorher ab — er füllt den Eintrag, der Eintrag hat keinen Rand. Der Haken ist ein
+        Symbol, das der Tipp umstellt: Das offene Menü zeichnet seine Controls nach, den
+        ``checked`` eines Eintrags dagegen nur beim Öffnen."""
+        haken = ft.Icon(
+            ft.Icons.CHECK_BOX if name in self.ebenen else ft.Icons.CHECK_BOX_OUTLINE_BLANK,
+            color=ft.Colors.PRIMARY,
+            size=22,
+        )
+        self._haken[name] = haken
+        return ft.PopupMenuItem(
+            padding=ft.Padding.all(0),
+            content=ft.Container(
+                width=200,
+                padding=ft.Padding.symmetric(horizontal=16, vertical=12),
                 on_click=self._ebene_umschalten(name),
-            )
+                content=ft.Row(spacing=12, controls=[haken, ft.Text(text)]),
+                data=("ebene", name),
+            ),
+        )
+
+    def ebenen_knopf(self) -> ft.Control:
+        """Was der Fokus zeigt — Takt · Bewegung · Video · HF · Kurve — als ein Knopf neben der
+        Zeit (Ben, 8.11.2026 spät: „Die Buttons Takt-Bewegung … in einen Button auslagern, der in
+        die gleiche Zeile wie die Zeit kommt“); gemerkt je Gerät. „Video“ nur, wenn die Übung ein
+        Begleitvideo hat. Das Menü bleibt beim Umschalten offen (`_ebene_eintrag`)."""
+        self._haken = {}
+        self._ebenen_eintraege = {
+            name: self._ebene_eintrag(name, text)
             for name, text in FOKUS_EBENEN.items()
+            if name != FOKUS_VIDEO or self.video_platz.content is not None
         }
         return ft.PopupMenuButton(
             icon=ft.Icons.LAYERS_OUTLINED,
-            tooltip="Was der Fokus zeigt: Takt · Bewegung · HF · Kurve",
+            tooltip="Was der Fokus zeigt: "
+            + " · ".join(FOKUS_EBENEN[n] for n in self._ebenen_eintraege),
             items=list(self._ebenen_eintraege.values()),
         )
+
+    # -- Begleitvideo ------------------------------------------------------------------------
+
+    def _video_einsetzen(self, pfade: list[str], spielen: bool) -> None:
+        """Den Spieler in die Fläche — 320 × 180, nicht über die ganze Breite (Ben)."""
+        try:
+            self.spieler = Videospieler(
+                pfade, autoplay=spielen, hoehe=180, breite=320, beim_spielen=self._video_getippt
+            )
+        except ImportError:  # ein Build ohne flet-video: das Video bleibt im Blatt
+            self.spieler = None
+            return
+        self.video_platz.content = self.spieler.control
+
+    def _video_getippt(self, spielt: bool) -> None:
+        self._video_von_hand_aus = not spielt
+
+    def _video_laden_zeile(self, offen: list[Media]) -> ft.Control:
+        """Ein Begleitvideo hinter einem Link, das noch nicht auf dem Gerät liegt: ein Knopf
+        lädt es (WLAN, Rückfrage je Server wie überall, `components/linkvideo.py`), danach
+        steht der Spieler an seiner Stelle."""
+        from trainingsapp.core.linkvideos import server
+        from trainingsapp.ui.components.linkvideo import link_laden
+
+        medium = offen[0]
+
+        async def danach(_name: str) -> None:
+            from trainingsapp.ui.components.material import begleitvideos
+
+            pfade, _ = begleitvideos(self.state, self.uebung, self.item)
+            if not pfade:
+                return
+            self._video_einsetzen(pfade, bool(self._uhr_lief))
+            self.ebenen_anwenden()
+            self.neu_zeichnen()
+
+        async def laden(_e: Any = None) -> None:
+            await link_laden(self.page, self.state, medium, danach)
+
+        return ft.Container(
+            width=320,
+            padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            border_radius=12,
+            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            content=ft.Row(
+                spacing=8,
+                controls=[
+                    ft.Icon(ft.Icons.PLAY_CIRCLE_OUTLINE),
+                    ft.Text(
+                        f"{medium.title or 'Begleitvideo'} · von {server(medium.uri)}",
+                        size=13,
+                        expand=True,
+                    ),
+                    ft.TextButton("Laden", icon=ft.Icons.DOWNLOAD, on_click=laden),
+                ],
+            ),
+            data="video_laden",
+        )
+
+    def _video_nachziehen(self, laeuft: bool) -> None:
+        """Das Video läuft mit der Uhr (Ben: „automatisch abgespielt“) und steht mit ihr — nur
+        bei einem Wechsel, damit ein ⏸ von Hand nicht je Tick überstimmt wird."""
+        if laeuft == self._uhr_lief:
+            return
+        self._uhr_lief = laeuft
+        spieler = self.spieler
+        if spieler is None or not self.video_platz.visible:
+            return
+        if laeuft and self._video_von_hand_aus:
+            return
+        with contextlib.suppress(Exception):  # ohne Ereignisschleife (Test): nichts
+            self.page.run_task(spieler.spielen if laeuft else spieler.anhalten)
 
     def _kurve_umschalten(self, k: str) -> Callable[[ft.Event[ft.Chip]], None]:
         def handler(_e: ft.Event[ft.Chip]) -> None:
@@ -355,12 +482,20 @@ class Fokus:
         `saetze_karte` — der Aufrufer setzt sie hinter seine Karte „Eintragen“."""
         from trainingsapp.ui.components import zaehlen
         from trainingsapp.ui.components.karte import karte
-        from trainingsapp.ui.components.material import material_knopf
+        from trainingsapp.ui.components.material import begleitvideos, material_knopf
 
         self.tempo_platz.content = TempoRegler(self.state, self.key, lauf).control
         self._zonen_laden()
         bewegung = bewegung_im_fokus(self.state, self.uebung, self.item)
         self.bild_platz.content, self.bildfolge = bewegung if bewegung is not None else (None, None)
+        if self.spieler is None and self.video_platz.content is None:
+            # Das Begleitvideo startet mit der Uhr (Ben, 18.11.2026) — nicht, wenn sie steht
+            pfade, offen = begleitvideos(self.state, self.uebung, self.item)
+            self._uhr_lief = _uhr_laeuft(lauf)
+            if pfade:
+                self._video_einsetzen(pfade, self._uhr_lief and FOKUS_VIDEO in self.ebenen)
+            elif offen:
+                self.video_platz.content = self._video_laden_zeile(offen)
         self.ebenen_anwenden()
         self.nachziehen(e, lauf)
         zaehl = zaehlen.neben_der_uhr(
@@ -390,7 +525,7 @@ class Fokus:
                 spacing=12,
                 run_spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[self.bild_platz, self.hf_karte],
+                controls=[self.video_platz, self.bild_platz, self.hf_karte],
             ),
             self.kurven_karte,
             *([karte(*zaehl, abstand=4, padding=10)] if zaehl else []),
@@ -442,6 +577,7 @@ class Fokus:
         self.halt_knopf.icon = ft.Icons.PLAY_ARROW if not stand.laeuft else ft.Icons.PAUSE
         self.halt_knopf.tooltip = "Weiter" if not stand.laeuft else "Pause"
         self.halt_knopf.disabled = (stand.fertig and ueber <= 0) or lauf.abgebrochen
+        self._video_nachziehen(_uhr_laeuft(lauf))
         # „Ohne Uhr — nur Fokus“ (P146): keine Zeit, keine Pause — Kurven und Eintragen bleiben
         ohne = bool(getattr(lauf.profil, "ohne_uhr", False))
         self.zeit_text.visible = not ohne
@@ -627,6 +763,14 @@ class Fokus:
         self.saetze_spalte.controls = zeilen or [
             hinweis("Kein Abschnitt zählt — eingetragen wird „gemacht“.")
         ]
+
+
+def _uhr_laeuft(lauf: Any) -> bool:
+    """Läuft die Uhr — auch in der Überzeit des Workouts (man trainiert nach): Dann läuft das
+    Begleitvideo mit."""
+    stand = lauf.stand()
+    ueber = lauf.ueber_s() if hasattr(lauf, "ueber_s") else 0.0
+    return (bool(stand.laeuft) and not stand.fertig) or ueber > 0
 
 
 def _seit_dem_schritt(ereignisse: Sequence[Any]) -> Sequence[Any]:

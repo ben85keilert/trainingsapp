@@ -68,3 +68,15 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   dieses Plans** (Ben, 17.11.2026, §8; `core.uebung_timer.timer_im_plan`) — gewählt wird
   zugeordnet, nie kopiert: ein „nur hier“-Timer kommt dafür in die Bibliothek, erst mit
   „Übernehmen“; keiner mit Ausführung je Abschnitt (P174).
+
+## Begleitvideo im Fokus (Ben, 18.11.2026, `docs/plan_medienrollen.md` M5)
+
+- Eine Begleitung, die die App selbst abspielt (`core.material.Material.begleitvideos`), läuft im
+  Fokus als Fläche (`Fokus.video_platz`) und **folgt der Uhr** — nur bei einem Wechsel
+  (`_video_nachziehen`), damit ein ⏸ von Hand nicht je Tick überstimmt wird. Video und Bewegung
+  teilen sich die Fläche, das Video geht vor; Ebene `FOKUS_VIDEO`, gespeichert „aus“ als
+  `OHNE_VIDEO` (alte Listen ohne beides: an).
+- Videos immer über `components/videospieler.Videospieler` (Knöpfe unter dem Bild, nicht die
+  von media_kit, die nach 3 s gehen) — nie `on_position_change` abonnieren (ein Ereignis je Bild).
+- Das Ebenen-Menü bleibt offen: Den Tipp bekommt ein Container im `PopupMenuItem`, nie der Eintrag
+  (`on_click` am Eintrag schließt das Menü); der Haken ist ein `ft.Icon`, nicht `checked`.

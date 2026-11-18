@@ -21,6 +21,7 @@ from dataclasses import dataclass, replace
 from typing import Final
 
 from .beschreibung import Abschnitt, abschnitte
+from .linkvideos import direkt
 from .models import (
     BEGLEITUNG,
     NICHT_MATERIAL,
@@ -31,6 +32,7 @@ from .models import (
     Plan,
     PlanItem,
 )
+from .paketmedien import ist_paketmedium
 
 VIDEO: Final = "video"
 PDF: Final = "pdf"
@@ -92,6 +94,29 @@ class Material:
     def begleitungen(self) -> tuple[Media, ...]:
         """Was beim Üben mitläuft — die Uhr läuft weiter."""
         return tuple(m for m in self.medien if m.rolle == BEGLEITUNG)
+
+    @property
+    def begleitvideos(self) -> tuple[Media, ...]:
+        """Begleitungen, die die App selbst abspielt — eine Videodatei aus dem Paket oder ein
+        Link auf eine Videodatei (`core.linkvideos.direkt`). Sie laufen im Fokus mit (Ben,
+        18.11.2026); ein anderer Link (eine Videoseite) bleibt im Blatt.
+
+        >>> m = Material(medien=(
+        ...     Media(uri="https://x.org/mit.mp4", rolle=BEGLEITUNG),
+        ...     Media(uri="https://youtu.be/abc", rolle=BEGLEITUNG),
+        ...     Media(uri="https://x.org/erklaert.mp4"),
+        ...     Media(kind=MediaKind.AUDIO, source=MediaSource.PAKET, uri="medien/"
+        ...           + "a" * 64 + ".m4a", rolle=BEGLEITUNG),
+        ... ))
+        >>> [x.uri for x in m.begleitvideos]
+        ['https://x.org/mit.mp4']
+        """
+        return tuple(
+            m
+            for m in self.begleitungen
+            if (ist_paketmedium(m) and m.kind == MediaKind.VIDEO)
+            or (m.source != MediaSource.PAKET and direkt(m.uri))
+        )
 
     @property
     def erklaerungen(self) -> tuple[Media, ...]:

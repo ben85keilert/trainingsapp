@@ -242,15 +242,10 @@ def anhang_view(page: Any, state: AppState, basis: str, anhang: Anhang) -> ft.Vi
         )
     elif anhang.ist_video:
         try:
-            import flet_video as fv
+            from trainingsapp.ui.components.videospieler import Videospieler
 
-            inhalt = fv.Video(
-                playlist=[fv.VideoMedia(str(datei))],
-                autoplay=False,
-                fit=ft.BoxFit.CONTAIN,
-                expand=True,
-                wakelock=True,
-            )
+            # Knöpfe unter dem Bild, die stehen bleiben (Ben, 18.11.2026)
+            inhalt = Videospieler([str(datei)]).control
         except ImportError:
             inhalt = ft.Text("Video-Erweiterung fehlt in diesem Build.", opacity=0.7)
     else:

@@ -160,6 +160,12 @@ FOKUS_TAKT = "takt"
 FOKUS_BEWEGUNG = "bewegung"
 FOKUS_HF = "hf"
 FOKUS_KURVE = "kurve"
+#: Das Begleitvideo im Fokus (Ben, 18.11.2026) — teilt sich die Fläche mit der Bewegung und geht
+#: ihr vor; im Menü nur, wenn die Übung eins hat
+FOKUS_VIDEO = "video"
+#: So steht „Video aus“ in der gespeicherten Liste — eine Liste ohne beides stammt von vor der
+#: Ebene, dort ist das Video an
+OHNE_VIDEO = "ohne_video"
 #: Schlüssel der Einstellung `<das>:<profil-id>`: je Paketübung die gewählte Stellung (JSON)
 STELLUNGEN = "stellungen"
 #: Schlüssel der Einstellung `<das>:<profil-id>`: je Übung die Ansichten ihres Verlaufs (JSON)
@@ -168,6 +174,7 @@ VERLAUF_ANSICHTEN = "verlauf_ansichten"
 FOKUS_EBENEN: dict[str, str] = {
     FOKUS_TAKT: "Takt",
     FOKUS_BEWEGUNG: "Bewegung",
+    FOKUS_VIDEO: "Video",
     FOKUS_HF: "HF",
     FOKUS_KURVE: "Kurve",
 }
@@ -964,12 +971,17 @@ class AppState:
         roh = self.einstellungen.lesen(SettingRepo.FOKUS_EBENEN, "")
         if not roh:
             return set(FOKUS_EBENEN)
-        return {e for e in roh.split(",") if e in FOKUS_EBENEN}
+        teile = roh.split(",")
+        ebenen = {e for e in teile if e in FOKUS_EBENEN}
+        if OHNE_VIDEO not in teile:  # „Video“ ist an, bis man es abwählt — auch in alten Listen
+            ebenen.add(FOKUS_VIDEO)
+        return ebenen
 
     def fokus_ebenen_setzen(self, ebenen: set[str]) -> None:
-        self.einstellungen.setzen(
-            SettingRepo.FOKUS_EBENEN, ",".join(e for e in FOKUS_EBENEN if e in ebenen) or "-"
-        )
+        teile = [e for e in FOKUS_EBENEN if e in ebenen]
+        if FOKUS_VIDEO not in ebenen:
+            teile.append(OHNE_VIDEO)
+        self.einstellungen.setzen(SettingRepo.FOKUS_EBENEN, ",".join(teile) or "-")
 
     def fokus_kurven(self) -> list[str]:
         """Welche Reihen die Kurven-Einblendung im Fokus zeigt (`FOKUS_KURVEN`), in deren

@@ -257,6 +257,7 @@ oder Sync.
 | M3 | **Zugehörigkeit** (§2.3): übergeben aus der privaten Ablage, Kurs als Ziel, Marke der Variante, Rückfall an die Übung; Regeln in CLAUDE.md umformulieren; Werkzeugschritt „Datei → Link“ | a, d: **ja**; §6 Nr. 1–3: ja |
 | M4 | Gerät: Streifen und GIF durch die Fotoauswahl (§3.2 Nr. 1); kurzes Video als Animation aufnehmen | c: Rechner + kurzes Video |
 | M5 | Begleitung im Fokus nach den Skizzen V2–V6 (Uhr-Zeile, Fläche, Vollbild mit Uhr-Ecke, Ton-Zeile) — erst nach einer Probe mit `flet-video` am Gerät | e: **ja**; Rückmeldung zu den Skizzen |
+| — | **Zum Teil gebaut 18.11.2026** (Ben: „Begleitvideos werden noch nicht automatisch im Fokusmodus abgespielt … sollte automatisch abgespielt sein, nicht in voller Bildbreite, aber groß genug, dass man es sehen kann. Mit Steuerungsbuttons. Überlegen, ob daneben die Animation Sinn macht, eigentlich entweder oder?“): eine Begleitung, die die App selbst abspielt (Videodatei aus dem Paket, geladener Videolink — `Material.begleitvideos`), läuft im Fokus als **Fläche 320 × 180** mit Knöpfen darunter (`components/videospieler.py`); sie **startet und hält mit der Uhr**, ein ⏸ von Hand gilt, bis man ▶ tippt. Ebene **„Video“** im Ebenen-Menü (nur mit Begleitvideo, gemerkt je Gerät, an bis abgewählt); **Video und Bewegung teilen sich die Fläche, das Video geht vor** (Frage e). Ein Videolink, der noch nicht geladen ist, steht als Zeile „Laden“ da (WLAN, Rückfrage je Server wie überall). **Noch nicht:** die Uhr kleiner (V2), Vollbild mit Uhr-Ecke (V3–V5 — heute das Vollbild von media_kit ohne Uhr), Hoch-/Querformat, Ton-Zeile (V6). Tests: `tests/test_ui_fokus.py`, `tests/test_ui_videospieler.py`; Gerätetest **T151**. | — |
 | später | Ansage, Video als Uhr, Bild je Phase | — |
 
 ## 5. Regeln, die gelten
@@ -265,7 +266,8 @@ oder Sync.
   das gebaut ist, gilt der heutige Wortlaut in CLAUDE.md („nie in Paket, Export oder Sync“).
 - Was im Paket reist, ist bereinigt (ohne Ortsangaben) und trägt eine Lizenz
   (`.claude/rules/pakete.md`).
-- Kein Video startet von selbst.
+- Kein Video startet von selbst — **außer der Begleitung im Fokus** (Ben, 18.11.2026: „sollte
+  automatisch abgespielt sein“): Sie läuft mit der Uhr an und steht mit ihr.
 - „gesehen“ bleibt auf dem Gerät; die Rolle reist im Paket (Ben, 12.11.2026).
 - Keine neue Netzverbindung (Videos laden: P202, getrennt) — seit 17.11.2026 entschieden und gebaut
   in `docs/plan_rueckweg_handy.md` Stufe 7 (Videos hinter Links: je Server nach Rückfrage, nur im

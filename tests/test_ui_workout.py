@@ -61,7 +61,8 @@ def _ebenen(ansicht) -> list[str]:
         for x in _alle(ansicht)
         if isinstance(x, ft.PopupMenuButton) and x.icon == ft.Icons.LAYERS_OUTLINED
     )
-    return [i.content.value for i in knopf.items]
+    # je Eintrag Haken · Name in einem Container (das Menü bleibt offen, 18.11.2026)
+    return [i.content.content.controls[1].value for i in knopf.items]
 
 
 def _knopf(c, text: str):

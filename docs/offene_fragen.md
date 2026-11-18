@@ -1336,6 +1336,42 @@ Web-Build löste ihn auf, eine APK ist aus diesem Stand noch nicht gebaut) und m
 (Paket entfernen), T113 (privates Paket per Link und Code), T137, T138 (erste APK nach
 v0.3.91), T139 (Web-Fassung, kein Teil der APK).
 
+## 13. Durchsicht vor dem Release 0.3.97 (18.11.2026, Opus 5.5)
+
+Schmale Durchsicht (Skill `release-durchsicht`), Anlass: Ben „git build“. Bereich
+`v0.3.96..765b017` (24 Commits): Rückweg vom Handy Stufen 1–7 (Werkzeug, Paketpläne, Kurs-Kopie,
+Videos hinter Links; Migrationen 067, 068), Paketverweise V3–V6 (`braucht`, Migration 070),
+Prüfsumme am Videolink, Reiter „Medien“ und Verkleinern (P225, Migration 069), Material im
+Workout von selbst. `hrv-core.ref` und `hrv-watch.ref` unverändert.
+
+Geprüft: ganz gelesen `core/linkvideos.py`, `ui/components/linkvideo.py`, `core/netz.py`; als
+Diff `data/eigene_pakete.py` (V5: ein privates Paket nennt keine Adresse, `_voraussetzung`),
+`core/pakete.py` (`voraussetzungen_lesen`: Quelle nur https), `ui/components/wartet.py` mit
+`paket_link.link_importieren` (Laden nur auf Tipp, über `url_pruefen` und die Paketquelle, dann
+die Import-Rückfrage), `core/paketdatei.py`, `ui/state.py` und `ui/views/updates.py` (Server-Liste,
+„mobile Daten“ Vorgabe aus), `config.py` (Schalter `link_videos`, im Web aus), die Nachträge zur
+neuen Verbindung in `docs/recht/40_toms.md`, `80_store_freigaben.md`, `build/solo.toml` (da),
+Migrationen 067–070 (nur hinzufügend). Die P225-Teile hat am selben Tag eine eigene Prüfrunde
+gelesen (acht Befunde, behoben; `docs/plan_medien_reiter.md` §5). Suche im Bereich nach `eval`,
+`exec`, `pickle`, `shell=True` und SQL ohne Platzhalter: keine Treffer; `subprocess` nur mit Liste
+(`core/verkleinern.py` am Rechner, Werkzeug). Workflows und `pyproject.toml` unverändert.
+`trainingsapp-inhalte` seit dem Tag: `veroeffentlichen.sh` prüft die Version gegen den öffentlichen
+Index und gibt nur Hinweis- und Fehlerzeilen aus; Mediendateien sind von git ausgenommen. Homepage
+(`infra/Caddyfile`) unverändert. CI zu `765b017` grün (Python 3.12 und 3.13); voller Lauf lokal
+auf diesem Stand: 2508 bestanden; Dependabot: 0 offene Warnungen.
+
+| # | Stelle | Befund | Schwere |
+|---|---|---|---|
+| K47 | `ui/components/linkvideo.py:113-121` (`_laden_mit_fortschritt`) | **Scheitert das Laden eines Videos, bleibt der Dialog „Video laden“ stehen.** Bei einem Fehler zeigt die Stelle eine Meldung (SnackBar), während der modale Dialog offen ist; am Ende schließt `page.pop_dialog()` den obersten Eintrag — die Meldung, nicht den Dialog. Nachgestellt im Browser (Web-Fotos, Link auf einen Port ohne Dienst, Ablehnung nach 0,01 s): Der Dialog stand nach 10 s noch, „Abbrechen“ tat nichts, die Fehlermeldung war nie zu sehen. Trifft jeden Fehler — kein Netz, Webseite statt Video, andere Prüfsumme, zu groß —, auch „Videos laden“ für Kurs oder Plan. Am Handy schließt die Zurück-Geste den Dialog wahrscheinlich (Flet 1.0.5 zeigt ihn mit `showDialog` ohne `PopScope`), am Gerät ungeprüft. Vorschlag: `dialoge.schliessen(fort.dialog)` und die Meldungen erst danach (Regel „keine SnackBar, solange ein Dialog offen ist“); ebenso `_server_fragen`. | mittel — **behoben 18.11.2026** vor dem Tag (Ben: „Erst beheben“): `dialoge.schliessen` für beide Dialoge, die Meldung erst danach und eine für alle Fehler (`tests/test_linkvideos.py::test_scheitert_das_laden_geht_der_dialog_zu_und_die_meldung_kommt_danach`, Seite wie Flet: `pop_dialog` nimmt den obersten Eintrag) |
+| S35 | `core/linkvideos.py:187` (`laden`) | **Eine Umleitung auf http:// wird erst nach dem Abruf abgelehnt.** `laden` nimmt `urllib.request.urlopen`, das Umleitungen auch nach http:// folgt; die Prüfung `ziel_url.startswith("https://")` greift danach — das Video wird verworfen, die Anfrage (Adresse, IP) ist aber unverschlüsselt hinausgegangen. `core/netz.py` hat dafür den Öffner `NurHttps` (S8/A9), den Update-Prüfung und Paketquellen nehmen; `docs/recht/40_toms.md` sagt „Nur https, auch nach Umleitungen“. Nicht ausprobiert (braucht einen https-Server mit Umleitung); belegt durch `netz.py` und das dokumentierte Verhalten von `urllib`. | niedrig — **behoben 18.11.2026** vor dem Tag: `OEFFNER.open` in `linkvideos.laden` und ebenso im Werkzeug (`paket_werkzeug.link_laden`, `verlinken --pruefen`, dasselbe Muster); Tests `test_laden_geht_ueber_den_https_oeffner` (`tests/test_linkvideos.py`) und `test_link_laden_geht_ueber_den_https_oeffner` (`tests/test_paket_werkzeug.py`) |
+
+Ungeprüft: `paket_einlesen.py` und `paket_werkzeug.py` (Werkzeug am Rechner) nur auf Shell-Aufrufe
+angesehen; `data/pakete.py` (V4 nachtragen) und `data/kurse.py` als Diff nur auf SQL-Platzhalter;
+der Android-Teil von `flet_hochladen` (Kotlin gegen Transcoder 0.10.5 kompiliert, `flutter
+analyze` ohne Befund, am Gerät nicht). Gerätetests zum Bereich, Datenschutz zuerst: T146 (Rückweg
+vom Handy — privates Paket, Videolinks mit Prüfsumme), T150 (Verkleinern, erst mit dieser APK),
+T149, T148 (Reiter „Medien“), T147 (Material im Workout).
+
 ## Entschieden
 
 | Datum | Frage | Entscheidung |

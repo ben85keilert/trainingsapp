@@ -2409,13 +2409,16 @@ LINK_MAX_BYTES = 2_000_000_000
 
 def link_laden(url: str, grenze: int = LINK_MAX_BYTES) -> tuple[str, str, int]:
     """``(SHA-256, Content-Type, Bytes)`` dessen, was hinter ``url`` liegt — gestreamt, nur
-    https (auch nach Umleitungen), höchstens ``grenze`` Bytes. Wirft `OSError`/`ValueError`."""
+    https (auch nach Umleitungen: `netz.OEFFNER` bricht vor einer http-Anfrage ab, S35),
+    höchstens ``grenze`` Bytes. Wirft `OSError`/`ValueError`."""
     import urllib.request
+
+    from trainingsapp.core.netz import OEFFNER
 
     if not url.startswith("https://"):
         raise ValueError("nur https-Adressen")
     anfrage = urllib.request.Request(url, headers={"User-Agent": "trainingsapp-paket"})
-    with urllib.request.urlopen(anfrage, timeout=60) as antwort:  # https geprüft (oben)
+    with OEFFNER.open(anfrage, timeout=60) as antwort:
         if not str(antwort.geturl()).startswith("https://"):
             raise ValueError(f"umgeleitet auf {antwort.geturl()} — nicht https")
         art = str(antwort.headers.get("Content-Type") or "")

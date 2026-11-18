@@ -28,6 +28,7 @@ import flet as ft
 from trainingsapp.core.linkvideos import LinkFehler, direkt, laden, server
 from trainingsapp.core.models import Media
 from trainingsapp.core.paketmedien import dateiname, groesse_text
+from trainingsapp.ui.components.dialoge import schliessen
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
 
 #: Der Satz, der beim ersten Laden von einem Server steht
@@ -88,12 +89,15 @@ class _Fortschritt:
 
 async def _laden_mit_fortschritt(
     page: Any, state: Any, eintraege: list[tuple[str, str]]
-) -> list[str]:
-    """Lädt ``(url, titel)`` eins nach dem anderen — die Namen der geladenen Dateien."""
+) -> tuple[list[str], list[str]]:
+    """Lädt ``(url, titel)`` eins nach dem anderen — ``(Namen der geladenen Dateien,
+    Fehlertexte)``. Gemeldet wird erst, wenn der Dialog zu ist: Eine Meldung über ihm nähme
+    `page.pop_dialog` statt seiner, er bliebe stehen (K47, Release-Durchsicht 18.11.2026)."""
     ablage = state.pakete.ablage
     if ablage is None:
-        return []
+        return [], []
     fertig: list[str] = []
+    fehler_texte: list[str] = []
     fort = _Fortschritt(page, "")
     page.show_dialog(fort.dialog)
     try:
@@ -112,14 +116,25 @@ async def _laden_mit_fortschritt(
                 name, groesse = aufgabe.result()
             except LinkFehler as fehler:
                 if not fort.abbruch.is_set():
-                    _melden(page, f"„{titel or url}“: {fehler}")
+                    fehler_texte.append(f"„{titel or url}“: {fehler}")
                 continue
             ablage.link_merken(url, name, titel, groesse)
             fertig.append(name)
     finally:
-        with contextlib.suppress(Exception):
-            page.pop_dialog()
-    return fertig
+        schliessen(fort.dialog)  # genau diesen — nie den obersten Eintrag
+    return fertig, fehler_texte
+
+
+def _fehler_text(fehler_texte: list[str]) -> str:
+    """Ein Satz für alle Fehler — eine Meldung, nicht eine je Video.
+
+    >>> _fehler_text(["„A“: zu groß"]), _fehler_text(["„A“: x", "„B“: y", "„C“: z"])
+    ('„A“: zu groß', '„A“: x (und 2 weitere)')
+    """
+    if not fehler_texte:
+        return ""
+    rest = len(fehler_texte) - 1
+    return fehler_texte[0] + (f" (und {rest} weitere)" if rest else "")
 
 
 def _server_fragen(
@@ -130,20 +145,19 @@ def _server_fragen(
     def laden_(_e: Any = None) -> None:
         for s in server_neu:
             state.link_server_erlauben(s)
-        page.pop_dialog()
+        schliessen(dialog)
         weiter()
 
-    page.show_dialog(
-        ft.AlertDialog(
-            modal=True,
-            title=ft.Text("Video in der App laden?"),
-            content=ft.Text(HINWEIS.format(server=", ".join(server_neu)), data="server_hinweis"),
-            actions=[
-                ft.TextButton("Abbrechen", on_click=lambda _e=None: page.pop_dialog()),
-                ft.FilledButton("Laden", icon=ft.Icons.DOWNLOAD, on_click=laden_),
-            ],
-        )
+    dialog: ft.AlertDialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Video in der App laden?"),
+        content=ft.Text(HINWEIS.format(server=", ".join(server_neu)), data="server_hinweis"),
+        actions=[
+            ft.TextButton("Abbrechen", on_click=lambda _e=None: schliessen(dialog)),
+            ft.FilledButton("Laden", icon=ft.Icons.DOWNLOAD, on_click=laden_),
+        ],
     )
+    page.show_dialog(dialog)
 
 
 async def video_oeffnen(
@@ -190,7 +204,9 @@ async def video_oeffnen(
                 "(„Videos auch über mobile Daten“).",
             )
             return
-        fertig = await _laden_mit_fortschritt(page, state, [(medium.uri, titel)])
+        fertig, fehler_texte = await _laden_mit_fortschritt(page, state, [(medium.uri, titel)])
+        if fehler_texte:
+            _melden(page, _fehler_text(fehler_texte))
         if fertig:
             await abspielen(fertig[0])
 
@@ -234,8 +250,13 @@ def alle_laden(page: Any, state: Any, medien: Iterable[Media]) -> None:
                 page, "Videos lädt die App nur im WLAN — umstellen unter Einstellungen → Updates."
             )
             return
-        fertig = await _laden_mit_fortschritt(page, state, [(m.uri, m.title) for m in offen])
-        _melden(page, f"{len(fertig)} von {len(offen)} Video(s) auf dem Gerät.")
+        fertig, fehler_texte = await _laden_mit_fortschritt(
+            page, state, [(m.uri, m.title) for m in offen]
+        )
+        text = f"{len(fertig)} von {len(offen)} Video(s) auf dem Gerät."
+        if fehler_texte:
+            text += f" Nicht geladen: {_fehler_text(fehler_texte)}"
+        _melden(page, text)
 
     neu = sorted({server(m.uri) for m in offen} - set(state.link_server()))
     if neu:

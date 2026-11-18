@@ -36,6 +36,7 @@ from typing import Any, Final
 from urllib.parse import parse_qs, urlsplit
 
 from .models import MediaKind
+from .netz import OEFFNER
 from .paketmedien import ENDUNGEN, MIME, name_fuer
 
 #: Größte Datei, die die App von einem Link lädt (ein langes Video in 1080p passt)
@@ -173,8 +174,9 @@ def laden(
 ) -> tuple[str, int]:
     """Lädt das Video hinter ``url`` nach ``ordner`` — ``(Name in der Ablage, Bytes)``. Wirft
     `LinkFehler` (Webseite statt Datei, zu groß, keine https-Umleitung, Netz, eine andere
-    Datei als die Prüfsumme am Link sagt). ``oeffnen``: für Tests statt
-    `urllib.request.urlopen`."""
+    Datei als die Prüfsumme am Link sagt). Geöffnet wird mit `netz.OEFFNER`: Eine Umleitung
+    auf http:// bricht ab, bevor die Anfrage unverschlüsselt hinausgeht (S35, wie S8 beim
+    Update). ``oeffnen``: für Tests statt dessen."""
     if not url.startswith("https://"):
         raise LinkFehler("nur https-Adressen")
     soll = pruefsumme(url)
@@ -184,7 +186,7 @@ def laden(
     ordner.mkdir(parents=True, exist_ok=True)
     teil = ordner / f"{secrets.token_hex(8)}.teil"
     try:
-        antwort = (oeffnen or (lambda r: urllib.request.urlopen(r, timeout=60)))(anfrage)
+        antwort = (oeffnen or (lambda r: OEFFNER.open(r, timeout=60)))(anfrage)
         with antwort as quelle:
             ziel_url = str(quelle.geturl())
             if not ziel_url.startswith("https://"):

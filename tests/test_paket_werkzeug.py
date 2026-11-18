@@ -1093,3 +1093,35 @@ def test_bauen_schreibt_was_das_paket_braucht(tmp_path) -> None:
     qigong = next(v for v in kopf.braucht if v.name == "Qigong Basis")
     assert qigong.quelle == f"{basis}/p/geheim123/paket.json"
     assert "ABCDEFGH" not in pfad.read_bytes().decode("latin-1")
+
+
+def test_link_laden_geht_ueber_den_https_oeffner(monkeypatch) -> None:
+    """S35 (Release-Durchsicht 18.11.2026): Auch das Werkzeug (`verlinken --pruefen`) folgt
+    Umleitungen nur auf https:// — `netz.OEFFNER`, nie `urlopen`."""
+    import io
+    import urllib.request
+
+    import pytest
+
+    from trainingsapp.core import netz
+    from trainingsapp.paket_werkzeug import link_laden
+
+    class Antwort(io.BytesIO):
+        def __init__(self, daten: bytes) -> None:
+            super().__init__(daten)
+            self.headers = {"Content-Type": "video/mp4"}
+
+        def geturl(self) -> str:
+            return "https://x.invalid/v.mp4"
+
+    gesehen: list[str] = []
+
+    class Oeffner:
+        def open(self, anfrage, timeout=None):
+            gesehen.append(anfrage.full_url)
+            return Antwort(b"abc")
+
+    monkeypatch.setattr(netz, "OEFFNER", Oeffner())
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("urlopen umgangen"))
+    _sha, art, n = link_laden("https://x.invalid/v.mp4")
+    assert (art, n, gesehen) == ("video/mp4", 3, ["https://x.invalid/v.mp4"])

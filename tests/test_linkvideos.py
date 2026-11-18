@@ -211,3 +211,78 @@ def test_einstellungen_zeigen_server_und_geladene_videos(state) -> None:
     zeile.trailing.on_click()
     assert ablage.links() == [] and not ablage.vorhanden(name), "nur die Kopie geht"
     assert state.uebungen.laden(u.id).media[0].uri == url, "der Link bleibt"
+
+
+def test_scheitert_das_laden_geht_der_dialog_zu_und_die_meldung_kommt_danach(
+    state, monkeypatch
+) -> None:
+    """K47 (Release-Durchsicht 18.11.2026): Scheitert das Laden, schließt genau der Dialog
+    „Video laden“, und die Meldung kommt erst danach. Die Seite verhält sich wie Flet:
+    ``show_dialog`` legt oben auf, ``pop_dialog`` nimmt den obersten Eintrag — auch eine
+    Meldung. Vorher nahm es die Meldung, der Dialog blieb stehen, die Meldung sah niemand."""
+    from trainingsapp.ui.components import linkvideo as lv
+
+    stapel: list = []
+    gezeigt: list = []
+    dialog_offen_beim_melden: list[bool] = []
+
+    def zeigen(d) -> None:
+        if isinstance(d, ft.SnackBar):
+            dialog_offen_beim_melden.append(
+                any(isinstance(x, ft.AlertDialog) and x.open for x in stapel)
+            )
+        d.open = True
+        stapel.append(d)
+        gezeigt.append(d)
+
+    def oberster_zu() -> None:
+        if stapel:
+            stapel.pop().open = False
+
+    wege: list[str] = []
+
+    async def push_route(route: str) -> None:
+        wege.append(route)
+
+    seite = SimpleNamespace(
+        route="/uebung/u1",
+        views=[],
+        update=lambda: None,
+        show_dialog=zeigen,
+        pop_dialog=oberster_zu,
+        push_route=push_route,
+    )
+
+    def scheitert(*_a, **_k):
+        raise LinkFehler("Der Link zeigt auf eine Webseite, nicht auf eine Videodatei.")
+
+    monkeypatch.setattr(lv, "laden", scheitert)
+    state.link_server_erlauben("x.invalid")
+    medium = Media(kind=MediaKind.VIDEO, uri="https://x.invalid/v.mp4", title="Clip")
+    asyncio.run(lv.video_oeffnen(seite, state, medium))
+    (dialog,) = [d for d in gezeigt if isinstance(d, ft.AlertDialog)]
+    assert dialog.open is False, "der Dialog „Video laden“ ist zu"
+    assert isinstance(gezeigt[-1], ft.SnackBar) and "„Clip“: Der Link" in gezeigt[-1].content.value
+    assert dialog_offen_beim_melden == [False], "gemeldet erst nach dem Schließen"
+    assert wege == []
+
+
+def test_laden_geht_ueber_den_https_oeffner(tmp_path, monkeypatch) -> None:
+    """S35 (Release-Durchsicht 18.11.2026): Ohne ``oeffnen`` lädt `laden` über `netz.OEFFNER`
+    (eine Umleitung auf http:// bricht dort ab, bevor die Anfrage hinausgeht), nie über
+    `urlopen`, das ihr folgte."""
+    import urllib.request
+
+    from trainingsapp.core import linkvideos
+
+    gesehen: list[tuple[str, float | None]] = []
+
+    class Oeffner:
+        def open(self, anfrage, timeout=None):
+            gesehen.append((anfrage.full_url, timeout))
+            return _Antwort(VIDEO, anfrage.full_url, "video/mp4")
+
+    monkeypatch.setattr(linkvideos, "OEFFNER", Oeffner())
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("urlopen umgangen"))
+    _name, n = linkvideos.laden("https://x.invalid/v.mp4", tmp_path)
+    assert n == len(VIDEO) and gesehen == [("https://x.invalid/v.mp4", 60)]

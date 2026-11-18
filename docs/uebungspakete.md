@@ -841,7 +841,7 @@ bleibt aus) — immer auf den Stand der Datei, auch für die ID von
 „Standard“ (`data/seed.pakete_aus_ordner`).
 
 **Unterordner** (Ben, 18.11.2026): Unter `pakete/` darf jedes Paket einen eigenen Ordner haben
-(`pakete/qigong/qigong_basis.toml` neben `pakete/standard.toml`); die Begleitdateien liegen
+(`pakete/qigong/qigong_basis.toml`, `pakete/standard/standard.toml`); die Begleitdateien liegen
 neben der TOML (`<name>.zugang.json`, `einlesen/<name>.json`, `medien/<name>/`). Der Lader
 liest alle Ebenen (`core.paketdatei.paketdateien`), nur `medien/`, `einlesen/`, Verstecktes und
 Zugangsdateien nicht. Verweise auf andere Pakete, `braucht`, `einlesen` und `uebernehmen`
@@ -864,15 +864,15 @@ Fürs Handy und für Paketquellen braucht es JSON — das Werkzeug `trainingsapp
 Inhalte-Repo (öffentliche Repos hängen nie von privaten ab, umgekehrt schon):
 
 ```bash
-uv run --project ../trainingsapp trainingsapp-paket pruefen pakete/*.toml
-uv run --project ../trainingsapp trainingsapp-paket bauen pakete/*.toml --ziel dist/
+uv run --project ../trainingsapp trainingsapp-paket pruefen pakete/*/*.toml
+uv run --project ../trainingsapp trainingsapp-paket bauen pakete/*/*.toml --ziel dist/
 uv run --project ../trainingsapp trainingsapp-paket index dist/*.json \
   --ziel dist/index.json --basis-url https://…/pakete/ --quelle "Praxis Ebert"
 uv run --project ../trainingsapp trainingsapp-paket uebernehmen .daten/trainingsapp.db \
-  pakete/standard.toml [--probe]          # oder ein Export der App (JSON oder ZIP)
+  pakete/standard/standard.toml [--probe] # oder ein Export der App (JSON oder ZIP)
 uv run --project ../trainingsapp trainingsapp-paket einlesen ~/Downloads/<export>.zip \
-  pakete/<neu>.toml [--privat --fuer "A."] [--probe]   # eigenes Paket vom Handy → neue TOML
-uv run --project ../trainingsapp trainingsapp-paket verlinken pakete/<x>.toml \
+  pakete/<neu>/<neu>.toml [--privat --fuer "A."] [--probe]   # eigenes Paket vom Handy → neue TOML
+uv run --project ../trainingsapp trainingsapp-paket verlinken pakete/<x>/<x>.toml \
   medien/<x>/<datei> https://… [--pruefen]           # eine Datei des Pakets → Link
 uv run --project ../trainingsapp trainingsapp-paket verkleinern ~/Downloads/<export>.zip \
   [--vorlage klein|mittel|gross] [--alle] [--probe]  # große Videos mit ffmpeg → verkleinert/

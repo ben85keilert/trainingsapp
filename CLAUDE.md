@@ -82,8 +82,11 @@ legt relativ zum Repo an): `../wt/<zweig>/` mit allen dreien, absolute Pfade, `u
 `entfernen` nimmt nur saubere Worktrees und den Zweig nur, wenn er in `main` steckt.
 Zusammengeführt wird, wenn der Hauptordner keine fremde unkommittete Arbeit mehr hat: Zweig auf
 den aktuellen `main` rebasen (auch auf lokale, noch nicht gepushte Commits der anderen), voller
-Testlauf, dann `main` per Fast-Forward nachziehen und pushen. Nie an einer laufenden Sitzung
-vorbei auf `origin/main` pushen; nie über fremde Änderungen im Hauptordner mergen — liegt dort
+Testlauf, dann `main` per Fast-Forward nachziehen und pushen. **Ist der jüngste Commit auf `main`
+ein Versions-Commit ohne Tag** (`git ls-remote --tags origin v<Version>` leer), wartet das
+Zusammenführen, bis der Tag gesetzt ist (Ben, 18.11.2026 — sonst trifft ein `git tag` der anderen
+Sitzung den eigenen Commit; beim Umzug der Pakete in Ordner je Paket wartete `0.3.97` noch auf
+CI und Tag). Nie an einer laufenden Sitzung vorbei auf `origin/main` pushen; nie über fremde Änderungen im Hauptordner mergen — liegt dort
 fremde Arbeit, geht der Zweig als `claude/<name>` hinaus (die CI läuft auch dort) und wird später
 zusammengeführt. Migrationsnummern vor dem Zusammenführen gegen `main` prüfen (zwei Zweige mit
 derselben Nummer; `tests/test_migrationen.py` fängt es); wer zuletzt zusammenführt, nummeriert um.

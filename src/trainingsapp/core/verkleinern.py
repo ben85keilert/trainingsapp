@@ -25,8 +25,10 @@ Dieses Modul kennt kein flet.
 
 from __future__ import annotations
 
+import queue
 import shutil
 import subprocess
+import tempfile
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -311,33 +313,79 @@ def mit_ffmpeg(
 ) -> None:
     """Verkleinert ``quelle`` nach ``ziel_pfad`` — blockiert (im Thread aufrufen). Wirft
     `Abgebrochen` oder `RuntimeError` (mit der letzten Zeile von ffmpeg); die halbe Datei
-    bleibt nie liegen."""
+    bleibt nie liegen.
+
+    Der Abbruch gilt bis zuletzt, auch im zweiten Durchgang (``+faststart``), in dem ffmpeg
+    keine Fortschrittszeilen mehr schreibt. Die Fehlerausgabe geht in eine Datei: Über eine
+    Leitung, die erst am Ende gelesen wird, hingen ffmpeg und die App bei einem kaputten Video
+    beide, sobald 64 KB Meldungen zusammenkommen (Prüfrunde 18.11.2026).
+    """
     programm = programm or ffmpeg()
     if programm is None:
         raise RuntimeError("ffmpeg ist nicht installiert")
     befehl = ffmpeg_befehl(quelle, ziel_pfad, z, programm)
+
+    def abgebrochen() -> bool:
+        return abbruch is not None and abbruch.is_set()
+
     try:
-        with subprocess.Popen(
-            befehl,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        ) as proc:
-            assert proc.stdout is not None and proc.stderr is not None
-            for zeile in proc.stdout:
-                if abbruch is not None and abbruch.is_set():
-                    proc.terminate()
-                    proc.wait()
+        with (
+            tempfile.TemporaryFile() as meldungen,
+            subprocess.Popen(
+                befehl,
+                stdout=subprocess.PIPE,
+                stderr=meldungen,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            ) as proc,
+        ):
+            zeilen: queue.SimpleQueue[str | None] = queue.SimpleQueue()
+
+            def lesen() -> None:
+                assert proc.stdout is not None
+                for zeile in proc.stdout:
+                    zeilen.put(zeile)
+                zeilen.put(None)
+
+            leser = threading.Thread(target=lesen, name="ffmpeg-fortschritt", daemon=True)
+            leser.start()
+            try:
+                while True:
+                    if abgebrochen():
+                        raise Abgebrochen
+                    try:
+                        zeile = zeilen.get(timeout=0.2)
+                    except queue.Empty:
+                        continue
+                    if zeile is None:
+                        break
+                    anteil = fortschritt_aus(zeile, dauer_s)
+                    if anteil is not None and fortschritt is not None:
+                        fortschritt(anteil)
+                while True:  # die Ausgabe ist zu — ffmpeg schreibt vielleicht noch die Datei
+                    try:
+                        code = proc.wait(timeout=0.2)
+                        break
+                    except subprocess.TimeoutExpired:
+                        if abgebrochen():
+                            raise Abgebrochen from None
+                if abgebrochen():
                     raise Abgebrochen
-                anteil = fortschritt_aus(zeile, dauer_s)
-                if anteil is not None and fortschritt is not None:
-                    fortschritt(anteil)
-            fehler = proc.stderr.read()
-            if proc.wait() != 0:
-                letzte = [z for z in fehler.splitlines() if z.strip()]
-                raise RuntimeError(letzte[-1] if letzte else "ffmpeg brach ab")
+                if code != 0:
+                    meldungen.seek(0)
+                    text = meldungen.read().decode("utf-8", errors="replace")
+                    letzte = [x for x in text.splitlines() if x.strip()]
+                    raise RuntimeError(letzte[-1] if letzte else "ffmpeg brach ab")
+            finally:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
+                leser.join(timeout=5)
     except BaseException:
         ziel_pfad.unlink(missing_ok=True)
         raise

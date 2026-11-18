@@ -1079,8 +1079,8 @@ class KursRepo:
 
     def _aus_vorlage(self, alt: Plan, kapitel: Kapitel, vorlage: PlanVorlage, hart: bool) -> Plan:
         """Der Kapitelplan neu aus seiner Vorlage — ``hart``: ganz wie im Kapitel; sonst kommt
-        zurück, was fehlt, und Eigenes bleibt. IDs, Aktiv, Beschreibung und Timer des Plans
-        bleiben."""
+        zurück, was fehlt, und Eigenes bleibt. IDs, Aktiv, Beschreibung, Medien und Timer des
+        Plans bleiben — die Vorlage eines Kapitels kennt sie nicht (Medien am Plan: P225)."""
         if not hart:
             nutzer = plan_stand(paketplan_aus(alt, "kapitel"))
             soll = plan_stand(PaketPlan("kapitel", vorlage))
@@ -1091,6 +1091,7 @@ class KursRepo:
         )
         neu.id, neu.created_at, neu.aktiv = alt.id, alt.created_at, alt.aktiv
         neu.description, neu.timer = alt.description, alt.timer
+        neu.media = list(alt.media)  # sonst fiele, was im Reiter „Medien“ am Plan steht, still weg
         neu.weiter_automatisch, neu.pause_ohne_timer = alt.weiter_automatisch, alt.pause_ohne_timer
         if not hart:
             eigenes_uebernehmen(neu, alt)  # K35: Timer, Chips, Takt … kennt die Vorlage nicht

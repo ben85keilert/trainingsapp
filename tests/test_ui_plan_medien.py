@@ -252,3 +252,52 @@ def test_medien_des_plans_vor_dem_ersten_start(page, state) -> None:
     state.material_angeboten = set()  # neue Sitzung: abgehakt kommt nicht wieder
     assert material.plan_neu_zeigen(page, state, plan) is False
     assert material.plan_knopf(page, state, plan).icon == ft.Icons.MENU_BOOK_OUTLINED
+
+
+def test_weg_mit_geladenem_video_schliesst_erst_das_blatt(page, state) -> None:
+    """„Öffnen“ im Textblatt eines Wegs: Ein geladenes Video hat eine eigene Ansicht — erst geht
+    das Blatt zu, dann die Ansicht auf; sonst verwaiste das Blatt über dem Neuaufbau
+    (Prüfrunde 18.11.2026, Befund 5)."""
+    from trainingsapp.core.ablauf import Ablauf, Kante
+    from trainingsapp.core.bedingung import Inhalt
+
+    _u, plan = _plan(state)
+    clip = "https://x.org/clip.mp4"
+    state.pakete.ablage.link_merken(clip, FILM, "Clip", 84_000_000)
+    item = plan.items[0]
+    weg = Kante(item.id, item.id, text="Noch einmal", inhalt=Inhalt("Lockerer", clip))
+    state.plaene.ablauf_setzen(plan.id, Ablauf(an=True, start=item.id, kanten=(weg,)))
+    plan = state.plaene.laden(plan.id)
+    basis = f"/plaene/{plan.id}"
+    page.route = f"{basis}/medien"
+    ansicht = plan_medien_view(page, state, plan, basis)
+    _daten(ansicht, ("medien_zeile", "Noch einmal")).on_click(None)
+    blatt = page.dialoge[-1]
+    blatt.open = True
+    vorher = list(page.wege)
+    asyncio.run(_daten(blatt, ("medien_link", clip)).on_click(None))
+    assert blatt.open is False and page.wege == vorher  # erst zu …
+    asyncio.run(blatt.on_dismiss(None))
+    assert page.wege[-1] == f"{basis}/medien/paketmedium/{'c' * 64}.mp4"  # … dann auf
+
+
+def test_geaenderte_adresse_wird_kein_doppel(page, state) -> None:
+    """Ändert man die Adresse eines Links auf eine, die schon am Plan steht, bleibt die alte —
+    zwei Stücke mit einer Adresse nähme „Herausnehmen“ beide (Prüfrunde 18.11.2026, Befund 6).
+    Titel und Schalter gelten trotzdem."""
+    _u, plan = _plan(state)
+    basis = f"/plaene/{plan.id}"
+    state.plaene.medien_setzen(
+        plan.id, [Media(uri="https://x.org/a", title="A"), Media(uri="https://x.org/b", title="B")]
+    )
+    ansicht = plan_medien_view(page, state, state.plaene.laden(plan.id), basis)
+    _daten(ansicht, ("medien_aendern", "B")).on_click(None)
+    blatt = page.dialoge[-1]
+    _daten(blatt, "plan_adresse").value = "https://x.org/a"
+    _daten(blatt, "plan_titel").value = "B neu"
+    asyncio.run(blatt.on_dismiss(None))
+    assert [(m.uri, m.title) for m in state.plaene.laden(plan.id).media] == [
+        ("https://x.org/a", "A"),
+        ("https://x.org/b", "B neu"),
+    ]
+    assert isinstance(page.dialoge[-1], ft.SnackBar)

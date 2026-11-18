@@ -14,8 +14,12 @@
 - **Womit** (`ui/verkleinern.py`): ffmpeg am Rechner, der Umwandler auf Android; sonst fehlt
   „Erstellen“ mit einem Satz dazu (iPhone, Browser).
 
-Ein Entwurf (die Kopie vor „Übernehmen“) überlebt den Neuaufbau der Ansicht (`_ENTWUERFE`); nennt
-ihn nichts, räumt die Ablage ihn beim nächsten Start weg.
+Ein Entwurf (die Kopie vor „Übernehmen“) und ein laufendes „Erstellen“ überleben den Neuaufbau der
+Ansicht (`_ENTWUERFE`, `_LAEUFE`): Wer zurückkommt, sieht den Balken oder das Ergebnis, und für
+dieselbe Datei startet kein zweiter Lauf. Die Ablage lässt einen Entwurf liegen, solange die App
+läuft (`Paketablage.entwurf_merken`), beim nächsten Start geht er; fehlt er doch, verschwindet er
+hier und „Übernehmen“ ändert nichts. Nennt ein Paket das Original noch (Paketstand), bleibt es
+auf dem Gerät — dann gibt es „Original wieder nehmen“, aber kein „Original löschen“.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -80,6 +85,64 @@ class Entwurf:
 _ENTWUERFE: dict[str, Entwurf] = {}
 
 
+@dataclass(slots=True)
+class Lauf:
+    """Ein laufendes „Erstellen“ — gezeichnet von der Ansicht, die gerade zu sehen ist."""
+
+    abbruch: threading.Event
+    anteil: float = 0.0
+    zeichnen: Callable[[], None] | None = None
+    balken: Callable[[float], None] | None = None
+
+
+#: Laufende „Erstellen“ je Original — wie die Entwürfe über den Neuaufbau der Ansicht hinweg
+_LAEUFE: dict[str, Lauf] = {}
+
+
+async def _auftrag(
+    state: AppState, uri: str, pfad: Any, z: Ziel, info: videoinfo.Videoinfo, lauf: Lauf
+) -> str | None:
+    """Erstellt den Entwurf zu ``uri`` (`_ENTWUERFE`) — eine Meldung, wenn es nicht ging,
+    sonst ``None`` (auch nach „Abbrechen“)."""
+    ablage = state.pakete.ablage
+    tmp = state.anhaenge.hochladen_ordner() / f"verkleinern_{new_id()}.mp4"
+
+    def fortschritt(anteil: float) -> None:
+        lauf.anteil = anteil
+
+    auftrag = asyncio.ensure_future(
+        weg_.ausfuehren(
+            state, pfad, tmp, z, dauer_s=info.dauer_s, fortschritt=fortschritt, abbruch=lauf.abbruch
+        )
+    )
+    while not auftrag.done():
+        await asyncio.sleep(0.3)
+        if lauf.balken is not None:
+            lauf.balken(lauf.anteil)
+    try:
+        fertig = auftrag.result()
+    except Exception as fehler:
+        tmp.unlink(missing_ok=True)
+        return f"Verkleinern ging nicht: {fehler}"
+    if not fertig:
+        tmp.unlink(missing_ok=True)
+        return None
+    try:
+        name = await paketdatei.ablegen(state, tmp, "mp4")
+    except (NichtBereinigbar, OSError) as fehler:
+        return f"Nicht übernommen: {fehler}"
+    finally:
+        tmp.unlink(missing_ok=True)
+    neu_pfad = None
+    if ablage is not None:
+        ablage.entwurf_merken(name)
+        neu_pfad = ablage.pfad(name)
+    neu_info = await asyncio.to_thread(videoinfo.lesen, neu_pfad) if neu_pfad else None
+    n = neu_pfad.stat().st_size if neu_pfad is not None and neu_pfad.is_file() else 0
+    _ENTWUERFE[uri] = Entwurf(name, z, n, neu_info)
+    return None
+
+
 def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) -> ft.View:
     """Die Ansicht für die Paketdatei ``datei_name``."""
     uri = ORDNER + datei_name
@@ -91,6 +154,8 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
     info = videoinfo.lesen(pfad) if da and pfad is not None else None
     titel = state.paketmedium_titel.get(datei_name) or "Video"
     original = ablage.original(uri) if ablage is not None else None
+    # Nennt ein Paketstand das Original, bliebe es auch nach „Original löschen“ liegen
+    gebunden = original is not None and ablage is not None and ablage.original_gebunden(uri)
     seiten, raten, hat_ton = wahl(info)
     womit = weg_.weg(state)
 
@@ -107,9 +172,6 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         "vorlage": VORGABE,
         "schema": eingepasst(VORLAGEN[VORGABE]),
         "genauer": False,
-        "laeuft": False,
-        "anteil": 0.0,
-        "abbruch": None,
         "zeigen": "neu",
     }
 
@@ -343,7 +405,8 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
             ft.Text(
                 "Übernommen zeigt jedes Stück, das dieses Video nennt, auf die neue Fassung. Das "
                 "Original bleibt auf dem Gerät, reist aber nicht mit. Kommt die Übung aus einem "
-                "Paket, gilt die neue Fassung als deine Änderung und bleibt bei Updates.",
+                "Paket, gilt die neue Fassung als deine Änderung und bleibt bei Updates; das "
+                "Original bleibt dann, solange das Paket es nennt.",
                 size=12,
                 opacity=0.65,
             ),
@@ -351,7 +414,11 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
 
     def zeichnen() -> None:
         z = jetzt()
+        lauf = _LAEUFE.get(uri)
         entwurf = _ENTWUERFE.get(uri)
+        if entwurf is not None and ablage is not None and not ablage.vorhanden(entwurf.neu):
+            _ENTWUERFE.pop(uri, None)  # weggeräumt — dann eben neu erstellen
+            entwurf = None
         vorlagen_spalte.controls = [vorlage_zeile(k) for k in VORLAGEN]
         genauer_spalte.visible = bool(stand["genauer"])
         genauer_spalte.controls = genauer_teile() if stand["genauer"] else []
@@ -359,10 +426,10 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         schaetzung_text.value = schaetzung(z)
         schaetzung_text.color = ft.Colors.ERROR if z.nicht_kleiner else None
         erstellen_knopf.disabled = (
-            womit is None or not da or z.nicht_kleiner or bool(stand["laeuft"]) or info is None
+            womit is None or not da or z.nicht_kleiner or lauf is not None or info is None
         )
-        balken.visible = abbrechen_knopf.visible = bool(stand["laeuft"])
-        balken.value = stand["anteil"]
+        balken.visible = abbrechen_knopf.visible = lauf is not None
+        balken.value = lauf.anteil if lauf is not None else 0
         einstellen_spalte.visible = entwurf is None
         ergebnis_spalte.visible = entwurf is not None
         ergebnis_spalte.controls = ergebnis_teile(entwurf) if entwurf is not None else []
@@ -375,65 +442,31 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
 
     genauer_knopf.on_click = genauer_umschalten
 
+    def balken_zeigen(anteil: float) -> None:
+        balken.value = anteil
+        with contextlib.suppress(Exception):
+            balken.update()
+
     async def erstellen(_e: Any = None) -> None:
         z = jetzt()
-        if stand["laeuft"] or womit is None or pfad is None or z.nicht_kleiner or info is None:
+        if uri in _LAEUFE or womit is None or pfad is None or z.nicht_kleiner or info is None:
             return
-        ordner = state.anhaenge.hochladen_ordner()
-        tmp = ordner / f"verkleinern_{new_id()}.mp4"
-        abbruch = threading.Event()
-        stand.update(laeuft=True, anteil=0.0, abbruch=abbruch)
+        lauf = Lauf(threading.Event(), zeichnen=zeichnen, balken=balken_zeigen)
+        _LAEUFE[uri] = lauf
         zeichnen()
-
-        def fortschritt(anteil: float) -> None:
-            stand["anteil"] = anteil
-
-        auftrag = asyncio.ensure_future(
-            weg_.ausfuehren(
-                state,
-                pfad,
-                tmp,
-                z,
-                dauer_s=info.dauer_s,
-                fortschritt=fortschritt,
-                abbruch=abbruch,
-            )
-        )
-        while not auftrag.done():
-            await asyncio.sleep(0.3)
-            balken.value = stand["anteil"]
-            with contextlib.suppress(Exception):
-                balken.update()
-        stand["laeuft"] = False
         try:
-            fertig = auftrag.result()
-        except Exception as fehler:
-            tmp.unlink(missing_ok=True)
-            zeichnen()
-            melden(f"Verkleinern ging nicht: {fehler}")
-            return
-        if not fertig:
-            tmp.unlink(missing_ok=True)
-            zeichnen()
-            return
-        try:
-            name = await paketdatei.ablegen(state, tmp, "mp4")
-        except (NichtBereinigbar, OSError) as fehler:
-            zeichnen()
-            melden(f"Nicht übernommen: {fehler}")
-            return
+            meldung = await _auftrag(state, uri, pfad, z, info, lauf)
         finally:
-            tmp.unlink(missing_ok=True)
-        neu_pfad = ablage.pfad(name) if ablage is not None else None
-        neu_info = await asyncio.to_thread(videoinfo.lesen, neu_pfad) if neu_pfad else None
-        n = neu_pfad.stat().st_size if neu_pfad is not None and neu_pfad.is_file() else 0
-        _ENTWUERFE[uri] = Entwurf(name, z, n, neu_info)
+            _LAEUFE.pop(uri, None)
         stand["zeigen"] = "neu"
-        zeichnen()
+        if lauf.zeichnen is not None:
+            lauf.zeichnen()  # die Ansicht, die jetzt zu sehen ist — vielleicht eine neue
+        if meldung:
+            melden(meldung)
 
     async def abbrechen(_e: Any = None) -> None:
-        if stand["abbruch"] is not None:
-            await weg_.abbrechen(state, stand["abbruch"])
+        if (lauf := _LAEUFE.get(uri)) is not None:
+            await weg_.abbrechen(state, lauf.abbruch)
 
     erstellen_knopf.on_click = erstellen
     abbrechen_knopf.on_click = abbrechen
@@ -449,7 +482,12 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         entwurf = _ENTWUERFE.pop(uri, None)
         if entwurf is None or ablage is None:
             return
-        ablage.ersetzen(uri, entwurf.neu)
+        try:
+            ablage.ersetzen(uri, entwurf.neu)
+        except FileNotFoundError:  # weggeräumt — nichts hat sich geändert
+            zeichnen()
+            melden("Die neue Fassung ist nicht mehr da — bitte noch einmal erstellen.")
+            return
         state.paketmedium_titel[dateiname(entwurf.neu) or ""] = titel
         melden("Übernommen — das Original bleibt auf dem Gerät.")
         await page.push_route(zurueck_ziel(page, ansicht))
@@ -469,9 +507,12 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
             schliessen(dialog)
 
         def loeschen_jetzt() -> None:
-            if ablage is not None:
-                ablage.original_vergessen(uri)
-            melden("Original gelöscht.")
+            weg = ablage.original_vergessen(uri) if ablage is not None else False
+            melden(
+                "Original gelöscht."
+                if weg
+                else "Das Original bleibt — ein Paket oder eine Kursvorlage nennt es noch."
+            )
             page.run_task(page.push_route, zurueck_ziel(page, ansicht))
 
         dialog: ft.AlertDialog = ft.AlertDialog(
@@ -503,32 +544,39 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         ),
     ]
     if original is not None and ablage is not None:
+        knoepfe: list[ft.Control] = [
+            ft.TextButton(
+                "Original wieder nehmen",
+                icon=ft.Icons.UNDO,
+                on_click=original_nehmen,
+                data="verkleinern_original_nehmen",
+            )
+        ]
+        if not gebunden:
+            knoepfe.append(
+                ft.TextButton(
+                    "Original löschen",
+                    icon=ft.Icons.DELETE_OUTLINE,
+                    style=ft.ButtonStyle(color=ft.Colors.ERROR),
+                    on_click=original_loeschen_fragen,
+                    data="verkleinern_original_loeschen",
+                )
+            )
         kopf.append(
             karte(
                 ft.Text(
                     f"Verkleinert aus einem Original ({groesse_text(ablage.groesse(original))}),"
-                    " das noch auf dem Gerät liegt.",
+                    " das noch auf dem Gerät liegt."
+                    + (
+                        " Ein Paket nennt es noch (für „Auf Paketstand“ und Updates) — es bleibt,"
+                        " solange das so ist."
+                        if gebunden
+                        else ""
+                    ),
                     size=13,
+                    data="verkleinern_original_text",
                 ),
-                ft.Row(
-                    wrap=True,
-                    spacing=8,
-                    controls=[
-                        ft.TextButton(
-                            "Original wieder nehmen",
-                            icon=ft.Icons.UNDO,
-                            on_click=original_nehmen,
-                            data="verkleinern_original_nehmen",
-                        ),
-                        ft.TextButton(
-                            "Original löschen",
-                            icon=ft.Icons.DELETE_OUTLINE,
-                            style=ft.ButtonStyle(color=ft.Colors.ERROR),
-                            on_click=original_loeschen_fragen,
-                            data="verkleinern_original_loeschen",
-                        ),
-                    ],
-                ),
+                ft.Row(wrap=True, spacing=8, controls=knoepfe),
                 padding=10,
                 abstand=6,
             )
@@ -556,6 +604,8 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         expand=True,
         controls=[*kopf, einstellen_spalte, ergebnis_spalte],
     )
+    if (lauf := _LAEUFE.get(uri)) is not None:
+        lauf.zeichnen, lauf.balken = zeichnen, balken_zeigen  # diese Ansicht zeigt den Lauf
     zeichnen()
     ansicht = ft.View(
         route=route,

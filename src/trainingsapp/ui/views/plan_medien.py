@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import functools
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -52,7 +53,7 @@ from trainingsapp.core.paketmedien import dateiname, groesse_text, ist_paketmedi
 from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components import editor_reiter as er
 from trainingsapp.ui.components.blatt import blatt_spalte
-from trainingsapp.ui.components.dialoge import schliessen
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import PLAN_MEDIEN_MD
 from trainingsapp.ui.components.karte import info_knopf, karte
 from trainingsapp.ui.components.material import gesehen
@@ -263,6 +264,11 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
                     else Media(uri=ziel, title=name, zeigen=bool(zeigen.value))
                 )
                 if alt is not None:
+                    if ziel != alt.uri and any(m.uri == ziel for m in medien):
+                        # Zwei Stücke mit einer Adresse: „Herausnehmen“ nähme beide, der Stift
+                        # träfe nur das erste — die Adresse bleibt, Titel und Schalter gelten
+                        stueck = replace(stueck, uri=alt.uri)
+                        melden("Diesen Link gibt es am Plan schon — die Adresse bleibt.")
                     neu = [stueck if m.uri == uri else m for m in medien]
                 elif all(m.uri != ziel for m in medien):
                     neu = [*medien, stueck]
@@ -416,8 +422,19 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
                     teile.append(ft.Text(a.text, selectable=True))
             inhalt = ft.Column(spacing=6, tight=True, controls=teile)
         unten: list[ft.Control] = []
+        nachher = Nachher()
+
+        def uebergeben(gehen: Callable[[], Awaitable[None]]) -> None:
+            """Eine Paketdatei oder ein geladenes Video hat eine eigene Ansicht: erst das Blatt
+            zu — über einem Neuaufbau verwaiste es (Geister-Dialog)."""
+            nachher.danach(gehen)
+            schliessen(blatt)
+
         # Ein Weg mit Text und Link: der Text hier, der Link als Knopf darunter
-        if z.medium is not None and (oeffnen := oeffner(page, state, z.medium)) is not None:
+        if (
+            z.medium is not None
+            and (oeffnen := oeffner(page, state, z.medium, uebergeben=uebergeben)) is not None
+        ):
             unten.append(
                 ft.TextButton(
                     z.medium.title if z.medium.title and z.medium.title != z.titel else "Öffnen",
@@ -428,6 +445,7 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
             )
         blatt: ft.BottomSheet = ft.BottomSheet(
             scrollable=True,
+            on_dismiss=nachher.bei_schliessen,
             content=blatt_spalte(
                 [
                     ft.Text(z.titel, size=18, weight=ft.FontWeight.W_600),

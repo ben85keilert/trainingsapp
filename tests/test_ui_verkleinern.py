@@ -31,6 +31,7 @@ def state(tmp_path, monkeypatch):
     s.neu_zeichnen = lambda: None
     yield s
     vk._ENTWUERFE.clear()
+    vk._LAEUFE.clear()
     s.schliessen()
 
 
@@ -236,3 +237,106 @@ def test_einstieg_auf_der_uebungsseite_auch_ohne_plan(page, state) -> None:
     asyncio.run(knoepfe[0].on_click(None))
     assert page.wege[-1] == f"/uebung/{u.id}/verkleinern/{dateiname(name)}"
     assert state.paketmedium_titel[dateiname(name)] == "Seitlich"
+
+
+def _gross(state: AppState) -> str:
+    """Ein großes Video (1080p, 2:10, 84 MB) als Paketdatei."""
+    kopf = mp4(spur(b"vide", breite=1920, hoehe=1080, dauer_s=130, bilder=3900), dauer_s=130)
+    return _ablegen(state, kopf + bytes(84_000_000 - len(kopf)))
+
+
+def test_original_aus_einem_paket_hat_kein_loeschen(page, state) -> None:
+    """Nennt ein Paketstand das Original, bleibt es auch nach „Original löschen“ liegen — der
+    Knopf fehlt dann, ein Satz sagt warum; ohne Paketstand löscht er wirklich
+    (Prüfrunde 18.11.2026, Befund 3)."""
+    import json
+
+    ablage = state.pakete.ablage
+    name = _gross(state)
+    u, _plan = _plan_mit_video(state, name)
+    state.con.execute(
+        "UPDATE exercise SET package_standard_json = ? WHERE id = ?",
+        (json.dumps({"media": [{"uri": name}]}), u.id),
+    )
+    klein = _ablegen(state, b"klein" * 100)
+    ablage.ersetzen(name, klein)
+    ansicht = vk.verkleinern_view(page, state, "/plaene/p/medien", dateiname(klein))
+    assert _daten(ansicht, "verkleinern_original_nehmen") is not None
+    assert all(getattr(x, "data", None) != "verkleinern_original_loeschen" for x in _alle(ansicht))
+    assert "Ein Paket nennt es noch" in _daten(ansicht, "verkleinern_original_text").value
+    # Ohne Paketstand: „Original löschen“ löscht wirklich
+    state.con.execute("UPDATE exercise SET package_standard_json = NULL WHERE id = ?", (u.id,))
+    seite = SimpleNamespace(**{**vars(page), "run_task": lambda f, *a: None})
+    vorher = ft.View(route="/plaene/p/medien")
+    ansicht = vk.verkleinern_view(seite, state, "/plaene/p/medien", dateiname(klein))
+    seite.views = [vorher, ansicht]
+    _daten(ansicht, "verkleinern_original_loeschen").on_click(None)
+    dialog = seite.dialoge[-1]
+    dialog.open = True
+    dialog.actions[1].on_click(None)  # „Löschen“
+    assert dialog.open is False
+    asyncio.run(dialog.on_dismiss(None))
+    assert not ablage.vorhanden(name) and ablage.vorhanden(klein)
+    assert seite.dialoge[-1].content.value == "Original gelöscht."
+
+
+def test_entwurf_der_fehlt_aendert_nichts(page, state) -> None:
+    """Ein Entwurf, dessen Datei weg ist: „Übernehmen“ ändert nichts und sagt es; beim nächsten
+    Aufbau ist er verschwunden (Prüfrunde 18.11.2026, Befund 2)."""
+    from trainingsapp.core.verkleinern import VORLAGEN, ziel
+
+    ablage = state.pakete.ablage
+    name = _gross(state)
+    u, _plan = _plan_mit_video(state, name)
+    klein = _ablegen(state, b"klein" * 100)
+    vk._ENTWUERFE[name] = vk.Entwurf(klein, ziel(VORLAGEN["mittel"]), 500, None)
+    ablage.entwurf_merken(klein)
+    ansicht = vk.verkleinern_view(page, state, "/plaene/p/medien", dateiname(name))
+    uebernehmen = _daten(ansicht, "verkleinern_uebernehmen")
+    ablage.pfad(klein).unlink()  # weggeräumt, während die Ansicht offen ist
+    asyncio.run(uebernehmen.on_click(None))
+    assert [m.uri for m in state.uebungen.laden(u.id).media] == [name]
+    assert isinstance(page.dialoge[-1], ft.SnackBar) and page.wege == []
+    vk._ENTWUERFE[name] = vk.Entwurf(klein, ziel(VORLAGEN["mittel"]), 500, None)
+    ansicht = vk.verkleinern_view(page, state, "/plaene/p/medien", dateiname(name))
+    assert name not in vk._ENTWUERFE
+    assert all(getattr(x, "data", None) != "verkleinern_uebernehmen" for x in _alle(ansicht))
+
+
+async def test_lauf_uebersteht_zurueck_und_wieder_hinein(page, state, monkeypatch) -> None:
+    """Zurück und wieder hinein, während „Erstellen“ läuft: Die neue Ansicht zeigt Balken und
+    „Abbrechen“, ein zweiter Lauf startet nicht, und das Ende zeichnet die neue Ansicht
+    (Prüfrunde 18.11.2026, Befund 8: am Rechner liefen sonst zwei ffmpeg)."""
+    name = _gross(state)
+    _plan_mit_video(state, name)
+    weiter = asyncio.Event()
+    auftraege: list[object] = []
+
+    async def ausfuehren(_s, _quelle, _ziel, _z, *, dauer_s, fortschritt, abbruch):
+        auftraege.append(abbruch)
+        fortschritt(0.4)
+        await weiter.wait()
+        return True
+
+    async def ablegen(s, _tmp, _endung):
+        return _ablegen(s, b"klein" * 100)
+
+    monkeypatch.setattr(weg, "weg", lambda _s: "ffmpeg")
+    monkeypatch.setattr(weg, "ausfuehren", ausfuehren)
+    monkeypatch.setattr(vk.paketdatei, "ablegen", ablegen)
+    erste = vk.verkleinern_view(page, state, "/plaene/p/medien", dateiname(name))
+    lauf = asyncio.ensure_future(_daten(erste, "verkleinern_erstellen").on_click(None))
+    while not auftraege:
+        await asyncio.sleep(0.01)
+    zweite = vk.verkleinern_view(page, state, "/plaene/p/medien", dateiname(name))
+    assert _daten(zweite, "verkleinern_erstellen").disabled is True
+    assert _daten(zweite, "verkleinern_abbrechen").visible is True
+    await _daten(zweite, "verkleinern_erstellen").on_click(None)  # kein zweiter Lauf
+    assert len(auftraege) == 1
+    weiter.set()
+    await lauf
+    assert name not in vk._LAEUFE and name in vk._ENTWUERFE
+    assert any(getattr(x, "data", None) == "verkleinern_uebernehmen" for x in _alle(zweite))
+    # Der Entwurf ist vor dem Aufräumen sicher, bis er übernommen oder verworfen ist
+    state.pakete.ablage.aufraeumen()
+    assert state.pakete.ablage.vorhanden(vk._ENTWUERFE[name].neu)

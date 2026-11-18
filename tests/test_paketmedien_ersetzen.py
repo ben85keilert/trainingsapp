@@ -6,6 +6,7 @@ es löscht oder wieder nimmt."""
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import replace
 
 import pytest
@@ -91,6 +92,68 @@ def test_original_loeschen_und_verwerfen(umgebung) -> None:
     ablage.aufraeumen()
     assert not ablage.vorhanden(klein) and ablage.vorhanden(gross)
     # Original löschen: weg, sobald es nichts mehr nennt
-    ablage.original_vergessen(kleiner)
+    assert not ablage.original_gebunden(kleiner)
+    assert ablage.original_vergessen(kleiner) is True
     assert ablage.original(kleiner) is None and not ablage.vorhanden(gross)
     assert ablage.vorhanden(kleiner)
+
+
+def test_vermerk_und_original_gehen_mit_der_neuen_datei(umgebung) -> None:
+    """Nennt die verkleinerte Datei nichts mehr (herausgenommen), räumt die Ablage sie, ihren
+    Vermerk und das Original weg — der Vermerk allein hielt beide sonst für immer
+    (Prüfrunde 18.11.2026, Befund 4)."""
+    con, ablage, ich = umgebung
+    gross = _datei(ablage, b"gross" * 100)
+    klein = _datei(ablage, b"klein")
+    plaene = PlanRepo(con)
+    plan = Plan(name="Beine", subject_id=ich.id, media=[_video(gross)])
+    plaene.speichern(plan)
+    ablage.ersetzen(gross, klein)
+    ablage.aufraeumen()
+    assert ablage.vorhanden(gross) and ablage.vorhanden(klein)  # solange „klein“ genannt ist
+    plaene.medien_setzen(plan.id, [])  # im Reiter „Medien“ herausgenommen
+    ablage.aufraeumen()
+    assert not ablage.vorhanden(klein) and not ablage.vorhanden(gross)
+    assert ablage.originale() == {}
+
+
+def test_original_aus_einem_paket_bleibt_samt_vermerk(umgebung) -> None:
+    """Nennt ein Paketstand das Original („Auf Paketstand“, Updates), kann „Original löschen“ es
+    nicht löschen — dann bleibt auch der Vermerk und mit ihm „Original wieder nehmen“
+    (Prüfrunde 18.11.2026, Befund 3: die Meldung sagte „gelöscht“, die Datei blieb)."""
+    con, ablage, _ich = umgebung
+    gross = _datei(ablage, b"gross" * 100)
+    klein = _datei(ablage, b"klein")
+    uebung = Exercise(name="Planke", media=[_video(gross)])
+    ExerciseRepo(con).speichern(uebung)
+    con.execute(
+        "UPDATE exercise SET package_standard_json = ? WHERE id = ?",
+        (json.dumps({"media": [{"uri": gross}]}), uebung.id),
+    )
+    ablage.ersetzen(gross, klein)
+    assert ablage.original_gebunden(klein)
+    assert ablage.original_vergessen(klein) is False
+    assert ablage.original(klein) == gross and ablage.vorhanden(gross)
+    ablage.ersetzen(klein, gross, original_behalten=False)  # „Original wieder nehmen“
+    assert [m.uri for m in ExerciseRepo(con).laden(uebung.id).media] == [gross]
+    assert not ablage.vorhanden(klein) and ablage.originale() == {}
+
+
+def test_entwurf_uebersteht_das_aufraeumen_und_ersetzen_braucht_die_datei(umgebung) -> None:
+    """Ein Entwurf, den noch nichts nennt, bleibt beim Aufräumen liegen (ein Import mittendrin)
+    — und fehlt die neue Datei doch, ändert `ersetzen` nichts (Prüfrunde 18.11.2026, Befund 2:
+    sonst zeigte jedes Stück auf eine fehlende Datei)."""
+    con, ablage, _ich = umgebung
+    gross = _datei(ablage, b"gross" * 100)
+    uebung = Exercise(name="Planke", media=[_video(gross)])
+    ExerciseRepo(con).speichern(uebung)
+    entwurf = _datei(ablage, b"entwurf")
+    ablage.entwurf_merken(entwurf)
+    ablage.aufraeumen()
+    assert ablage.vorhanden(entwurf)
+    ablage.verwerfen(entwurf)
+    assert not ablage.vorhanden(entwurf)
+    with pytest.raises(FileNotFoundError):
+        ablage.ersetzen(gross, entwurf)
+    assert [m.uri for m in ExerciseRepo(con).laden(uebung.id).media] == [gross]
+    assert ablage.originale() == {}

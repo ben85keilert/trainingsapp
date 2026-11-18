@@ -279,6 +279,26 @@ neue Fassung ohne „groß“; die Ansicht der neuen Datei nennt das Original (3
 wieder nehmen“ und „Original löschen“, Mittel und Groß „wäre nicht kleiner“. Der Spieler bleibt im
 kopflosen Browser schwarz (kein Video-Dekoder) — abspielen ist Gerätetest.
 
+**Prüfrunde 18.11.2026** (ein Subagent hat die Commits e509498…c2825cb nur gelesen; acht Befunde,
+alle nachgestellt und behoben, je mit Test):
+
+| Befund | Behoben |
+|---|---|
+| „Neu laden …“ am Kapitelplan (Fehlendes zurückholen, Wie im Kapitel, Kurs neu laden) warf die Medien am Plan still weg — die Datei danach mit | Sie bleiben wie Beschreibung und Timer (`data/kurse._aus_vorlage`) |
+| Ein Entwurf lag unbenannt in der Ablage; ein Import mittendrin räumte ihn weg, „Übernehmen“ ließ dann jedes Stück auf eine fehlende Datei zeigen | `Paketablage.entwurf_merken` (bleibt bis Übernehmen/Verwerfen, längstens bis zum Neustart); `ersetzen` verlangt die neue Datei (`FileNotFoundError`, nichts ändert sich); die Ansicht vergisst einen Entwurf ohne Datei |
+| „Original löschen“ an einem Paketvideo: der Paketstand nennt das Original, die Datei blieb, die Meldung sagte „gelöscht“, der Vermerk war weg | `original_gebunden`: dann kein „Original löschen“, ein Satz sagt warum, „Original wieder nehmen“ bleibt; `original_vergessen` gibt zurück, ob die Datei weg ist |
+| Der Vermerk schützte neue Datei und Original für immer, auch wenn die neue nichts mehr nannte | Der Vermerk ist kein Verweis mehr: `aufraeumen` streicht ihn mit seiner neuen Datei, das Original geht mit, wenn sonst nichts es nennt |
+| „Öffnen“ im Textblatt eines Wegs ging bei einem geladenen Video zur Ansicht, während das Blatt offen war (Geister-Dialog) | Erst das Blatt zu, dann die Ansicht (`Nachher`, wie im Medienblatt beim Üben) |
+| Eine geänderte Adresse konnte einen Link doppeln („Herausnehmen“ nahm beide) | Die Adresse bleibt, Titel und Schalter gelten, eine Meldung sagt es |
+| ffmpeg: Abbruch im zweiten Durchgang (`+faststart`) wirkte nicht; die Fehlerausgabe wurde erst am Ende gelesen — ab 64 KB Meldungen hingen beide | Fehlerausgabe in eine Datei, Fortschritt in einem eigenen Faden, Abbruch bis zum Ende des Prozesses (Tests mit einem Ersatzprogramm, laufen auch in der CI) |
+| Laufzustand je Ansicht: zurück und wieder hinein gab „Erstellen“ frei — zwei ffmpeg am Rechner, „belegt“ auf Android | `_LAEUFE` wie `_ENTWUERFE`: Balken und „Abbrechen“ in der neuen Ansicht, kein zweiter Lauf, das Ende zeichnet die Ansicht, die zu sehen ist |
+
+**Was das für Paketvideos heißt:** Verkleinert man auf dem Gerät ein Video aus einem
+installierten Paket, wird nichts frei — das Original bleibt für „Auf Paketstand“ und Updates,
+die kleine Fassung kommt dazu. Gewinn bringt das Verkleinern dort, wo die Datei weitergeht (ein
+eigenes Paket exportieren) und bei eigenen Dateien; Paketvideos verkleinert man besser an der
+Quelle (Werkzeugschritt unten).
+
 **Nachgezogen am 18.11.2026 (Ben: „mach weiter“): der Werkzeugschritt**
 `trainingsapp-paket verkleinern <export>.zip [--vorlage …] [--alle] [--probe]`
 (`paket_verkleinern.py`, eingehängt in `paket_werkzeug.main` neben `einlesen`): liest die ZIP aus

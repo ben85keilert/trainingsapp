@@ -561,7 +561,8 @@ ein Video mehr als etwa 8 MB je Minute, ein Bild mehr als 900 Pixel an der kürz
 **Verkleinern:** Tippen auf die Größe eines Videos öffnet „Verkleinern“ — Klein, Mittel oder
 Groß, unter „Genauer …“ Auflösung, Bilder je Sekunde, Bildqualität und Ton, die neue Größe
 steht vorher da. „Erstellen“ macht eine Kopie; du siehst dir Jetzt und Neu an, erstellst sie
-anders, verwirfst oder übernimmst sie. Das Original bleibt auf dem Gerät, bis du es löschst. Am
+anders, verwirfst oder übernimmst sie. Das Original bleibt auf dem Gerät, bis du es löschst —
+kommt es aus einem Paket, bleibt es, solange das Paket es nennt („Auf Paketstand“, Updates). Am
 Rechner geht das mit ffmpeg, auf Android mit dem Telefon; auf dem iPhone folgt es.
 """
 

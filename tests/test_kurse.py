@@ -559,6 +559,28 @@ def test_kapitelplan_neu_laden(con, profil) -> None:
     assert repo.staende(profil.id, k.id)[lesen.id].abgeschlossen is not None  # Fortschritt
 
 
+def test_neu_laden_behaelt_die_medien_des_plans(con, profil) -> None:
+    """Medien am Plan selbst (P225, Migration 069) kennt die Vorlage eines Kapitels nicht — sie
+    bleiben wie Beschreibung und Timer, bei „Fehlendes zurückholen“, „Wie im Kapitel“ und „Kurs
+    neu laden“ (Prüfrunde 18.11.2026: sie fielen still weg, ihre Datei danach mit)."""
+    repo, plaene = KursRepo(con), PlanRepo(con)
+    k = kurs_mit_plan(seed_id("liegestuetzen"))
+    repo.speichern(k)
+    lesen, ueben, _ende = k.kapitel
+    repo.starten(k, profil.id)
+    repo.kapitel_abschliessen(k, lesen, profil.id)
+    (plan,) = repo.kapitel_plaene(ueben.id, profil.id)
+    plaene.medien_setzen(plan.id, [Media(uri="https://x.org/plan", title="Zum Plan", zeigen=True)])
+    assert repo.kapitelplan_vorschau(plan.id) == ([], False)
+    for hart in (False, True):
+        repo.kapitelplan_neu_laden(plan.id, hart=hart)
+        assert [(m.uri, m.title, m.zeigen) for m in plaene.laden(plan.id).media] == [
+            ("https://x.org/plan", "Zum Plan", True)
+        ]
+        repo.kurs_neu_laden(k, profil.id, hart=hart)
+        assert [m.uri for m in plaene.laden(plan.id).media] == ["https://x.org/plan"]
+
+
 def test_kurs_neu_laden_holt_geloeschte_kapitelplaene_zurueck(con, profil) -> None:
     """„Kurs neu laden“ (U2): Pläne erreichter Kapitel — gelöschte entstehen neu (aktiv nur im
     laufenden Kapitel), vorhandene holen Fehlendes zurück; nicht erreichte Kapitel bleiben."""

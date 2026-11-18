@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import threading
+import time
 
 import pytest
 
@@ -144,4 +146,82 @@ def test_abbruch_laesst_keine_halbe_datei(tmp_path) -> None:
     ausgabe = tmp_path / "halb.mp4"
     with pytest.raises(Abgebrochen):
         mit_ffmpeg(quelle, ausgabe, ziel(VORLAGEN["mittel"]), dauer_s=8, abbruch=abbruch)
+    assert not ausgabe.exists()
+
+
+def _ersatz(tmp_path, rumpf: str):
+    """Ein Programm an Stelle von ffmpeg (Python mit Shebang) — es nimmt dieselben Argumente,
+    das letzte ist die Zieldatei."""
+    datei = tmp_path / "ersatz_ffmpeg"
+    datei.write_text(f"#!{sys.executable}\nimport sys, time, pathlib\n{rumpf}\n", "utf-8")
+    datei.chmod(0o755)
+    return str(datei)
+
+
+def _im_faden(ziel_fn):
+    """``ziel_fn`` in einem Faden — ``(fertig?, Ergebnis oder Ausnahme)`` nach höchstens 20 s:
+    hinge `mit_ffmpeg`, hinge sonst der ganze Testlauf."""
+    ergebnis: list[object] = []
+
+    def lauf() -> None:
+        try:
+            ergebnis.append(ziel_fn())
+        except BaseException as fehler:  # der Test sieht sie an
+            ergebnis.append(fehler)
+
+    faden = threading.Thread(target=lauf, daemon=True)
+    faden.start()
+    faden.join(timeout=20)
+    return not faden.is_alive(), ergebnis[0] if ergebnis else None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Shebang")
+def test_viele_meldungen_haengen_nicht(tmp_path) -> None:
+    """Ein kaputtes Video: ffmpeg schreibt mehr Meldungen, als eine Leitung fasst, und bricht
+    ab — der Fehler kommt mit der letzten Zeile, nichts hängt (Prüfrunde 18.11.2026)."""
+    programm = _ersatz(
+        tmp_path,
+        'sys.stderr.write("Fehler im Block 7\\n" * 20000)\n'
+        'print("out_time_us=1000000", flush=True)\n'
+        'sys.stderr.write("Ungültige Daten\\n")\n'
+        "sys.exit(1)",
+    )
+    ausgabe = tmp_path / "neu.mp4"
+    fertig, ergebnis = _im_faden(
+        lambda: mit_ffmpeg(
+            tmp_path / "a.mp4", ausgabe, ziel(VORLAGEN["mittel"]), dauer_s=2, programm=programm
+        )
+    )
+    assert fertig, "mit_ffmpeg hängt"
+    assert isinstance(ergebnis, RuntimeError) and str(ergebnis) == "Ungültige Daten"
+    assert not ausgabe.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Shebang")
+def test_abbruch_auch_nach_der_letzten_fortschrittszeile(tmp_path) -> None:
+    """Im zweiten Durchgang (``+faststart``) schreibt ffmpeg keinen Fortschritt mehr — ein
+    Abbruch dort gilt trotzdem: keine Datei, kein Entwurf (Prüfrunde 18.11.2026)."""
+    programm = _ersatz(
+        tmp_path,
+        'print("out_time_us=2000000", flush=True)\n'
+        'print("progress=end", flush=True)\n'
+        "time.sleep(4)\n"
+        'pathlib.Path(sys.argv[-1]).write_bytes(b"fertig")',
+    )
+    ausgabe = tmp_path / "neu.mp4"
+    abbruch = threading.Event()
+    threading.Timer(0.6, abbruch.set).start()
+    beginn = time.monotonic()
+    fertig, ergebnis = _im_faden(
+        lambda: mit_ffmpeg(
+            tmp_path / "a.mp4",
+            ausgabe,
+            ziel(VORLAGEN["mittel"]),
+            dauer_s=2,
+            abbruch=abbruch,
+            programm=programm,
+        )
+    )
+    assert fertig and isinstance(ergebnis, Abgebrochen)
+    assert time.monotonic() - beginn < 3.5  # nicht erst nach dem Ende des Programms
     assert not ausgabe.exists()

@@ -5,7 +5,8 @@ Jede Datei aus einem Paket liegt **einmal** unter `config.paketmedienverzeichnis
 Der Import legt ein (`einlegen`, mit Prüfsumme); `aufraeumen` löscht, was nichts in der
 Datenbank mehr nennt: weder eine Übung (auch im Papierkorb) noch ein Plan, ein Kurs, ein
 Paketstand oder die Pläne eines Pakets — „Wieder installieren“ findet die Dateien also, solange
-das Paket bekannt ist.
+das Paket bekannt ist. Das Original einer verkleinerten Datei (`ORIGINALE`) bleibt, solange die
+verkleinerte genannt ist; ein Entwurf beim Verkleinern (`entwurf_merken`), solange die App läuft.
 
 Paketdateien gehen nie in Backup oder Sync (wie die Anhänge) — sie kommen wieder mit dem Paket.
 """
@@ -30,7 +31,8 @@ from .db import transaktion
 
 #: Verkleinerte Dateien und ihr Original (Ben, 17.11.2026, `docs/plan_medien_reiter.md` §5) —
 #: Schlüssel in `app_setting`, JSON ``{neu: original}``, gerätelokal: nie in Paket, Export,
-#: Backup oder Sync. Die Ablage räumt ein so vermerktes Original nicht weg.
+#: Backup oder Sync. Die Ablage räumt ein so vermerktes Original nicht weg, solange die neue Datei
+#: genannt ist; nennt sie nichts mehr, gehen Vermerk und Original mit (`aufraeumen`).
 ORIGINALE: Final = "medien_originale"
 
 #: Wo die Datenbank Paketdateien nennen kann — je Spalte eine feste Abfrage
@@ -49,8 +51,6 @@ _ABFRAGEN: Final = (
     "SELECT media_json FROM course_chapter WHERE media_json LIKE '%medien/%'",
     "SELECT plans_json FROM course_chapter WHERE plans_json LIKE '%medien/%'",
     "SELECT blocks_json FROM course_chapter WHERE blocks_json LIKE '%medien/%'",
-    # das Original einer verkleinerten Datei (P225 Stufe 3) — bleibt, bis die Person es löscht
-    "SELECT value FROM app_setting WHERE key = 'medien_originale'",
 )
 _NAME: Final = re.compile(r"medien/[0-9a-f]{64}\.[a-z0-9]{2,4}")
 #: Wo die Datenbank eine **Adresse** nennen kann (Stufe 7: geladene Videos hinter Links) — je
@@ -88,6 +88,10 @@ class Paketablage:
     def __init__(self, con: sqlite3.Connection, ordner: Path) -> None:
         self.con = con
         self.ordner = ordner
+        #: Entwürfe beim Verkleinern (P225 Stufe 3), die noch nichts nennt — `aufraeumen` lässt
+        #: sie liegen, solange die App läuft (ein Import räumte sonst mittendrin auf); beim
+        #: nächsten Start gehen sie
+        self._entwuerfe: set[str] = set()
 
     def pfad(self, uri: str) -> Path | None:
         """Wo die Datei zu ``medien/<sha256>.<endung>`` liegt (liegen würde)."""
@@ -217,7 +221,13 @@ class Paketablage:
         return sorted(n for n in set(namen) if n not in dabei and not self.vorhanden(n))
 
     def benutzte(self) -> set[str]:
-        """Alle Paketdateien, die die Datenbank irgendwo nennt."""
+        """Alle Paketdateien, die die Datenbank irgendwo nennt — dazu das Original jeder
+        verkleinerten Datei, solange diese selbst genannt ist (`ORIGINALE`)."""
+        genannt = self._genannt()
+        return genannt | {o for n, o in self.originale().items() if n in genannt}
+
+    def _genannt(self) -> set[str]:
+        """Alle Paketdateien, die die Datenbank nennt — ohne den Vermerk der Originale."""
         gefunden: set[str] = set()
         for abfrage in _ABFRAGEN:
             try:
@@ -232,11 +242,19 @@ class Paketablage:
         return gefunden
 
     def aufraeumen(self) -> int:
-        """Löscht Dateien, die nichts mehr nennt (und liegen gebliebene ``.teil``) — wie viele."""
+        """Löscht Dateien, die nichts mehr nennt (und liegen gebliebene ``.teil``) — wie viele.
+        Ein Vermerk „verkleinert aus“ geht mit seiner neuen Datei: Nennt sie nichts mehr
+        (herausgenommen, Übung endgültig gelöscht), fällt er weg und das Original mit, wenn es
+        sonst nichts nennt. Entwürfe dieses Laufs (`entwurf_merken`) bleiben."""
         if not self.ordner.is_dir():
             return 0
         self._links_aufraeumen()
-        behalten = {dateiname(n) for n in self.benutzte()}
+        genannt = self._genannt()
+        originale = self.originale()
+        bleiben = {n: o for n, o in originale.items() if n in genannt}
+        if bleiben != originale:
+            self._originale_setzen(bleiben)
+        behalten = {dateiname(n) for n in genannt | set(bleiben.values()) | self._entwuerfe}
         weg = 0
         for datei in self.ordner.iterdir():
             if datei.is_file() and (datei.name not in behalten or datei.suffix == ".teil"):
@@ -272,6 +290,11 @@ class Paketablage:
             (ORIGINALE, json.dumps(werte, sort_keys=True)),
         )
 
+    def entwurf_merken(self, name: str) -> None:
+        """Ein Entwurf beim Verkleinern, den noch nichts nennt: `aufraeumen` lässt ihn liegen,
+        bis er übernommen oder verworfen ist — längstens bis zum nächsten Start."""
+        self._entwuerfe.add(name)
+
     def original(self, neu: str) -> str | None:
         """Das Original, aus dem ``neu`` verkleinert wurde — ``None``, wenn keins (mehr) da ist."""
         original = self.originale().get(neu)
@@ -284,7 +307,15 @@ class Paketablage:
         Original); sonst geht der Vermerk, und eine Datei, die nichts mehr nennt, gleich mit.
         Paketstände bleiben, wie sie sind — gegen sie ist die neue Datei eine Änderung der
         Person (Drei-Wege-Abgleich: sie bleibt bei Updates). Wie viele Übungsmedien sich
-        änderten."""
+        änderten.
+
+        Raises:
+            FileNotFoundError: ``neu`` liegt nicht (mehr) in der Ablage — nichts ändert sich;
+                kein Stück zeigt je auf eine fehlende Datei.
+        """
+        if not self.vorhanden(neu):
+            raise FileNotFoundError(f"Die neue Datei fehlt: {neu}")
+        self._entwuerfe.discard(neu)
         stempel = datetime.now(UTC).isoformat()
         with transaktion(self.con):
             n = self.con.execute(
@@ -350,17 +381,28 @@ class Paketablage:
             if _adressen_ersetzen(wert, alt, neu):
                 self.con.execute(schreiben, (json.dumps(wert, ensure_ascii=False), kennung))
 
-    def original_vergessen(self, neu: str) -> None:
-        """„Original löschen“: der Vermerk weg und die Datei, wenn nichts sie mehr nennt."""
+    def original_gebunden(self, neu: str) -> bool:
+        """Nennt außer dem Vermerk noch etwas das Original von ``neu`` — der Paketstand einer
+        Übung oder eines Plans („Auf Paketstand“, Updates), die Vorlage eines Kurses? Dann
+        bliebe es auch nach „Original löschen“ auf dem Gerät."""
+        original = self.originale().get(neu)
+        return original is not None and original in self._genannt()
+
+    def original_vergessen(self, neu: str) -> bool:
+        """„Original löschen“: der Vermerk weg und die Datei — ``True``, wenn sie weg ist. Ist
+        das Original gebunden (`original_gebunden`), bleibt alles, wie es ist: Der Vermerk hält
+        „Original wieder nehmen“ offen."""
+        if self.original_gebunden(neu):
+            return False
         originale = self.originale()
         original = originale.pop(neu, None)
         self._originale_setzen(originale)
-        if original is not None:
-            self.verwerfen(original)
+        return original is not None and self.verwerfen(original)
 
     def verwerfen(self, name: str) -> bool:
         """Eine Datei gleich löschen, wenn nichts sie nennt (ein verworfener Entwurf) —
         ``True``, wenn sie weg ist."""
+        self._entwuerfe.discard(name)
         if name in self.benutzte():
             return False
         pfad = self.pfad(name)

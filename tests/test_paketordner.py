@@ -7,15 +7,16 @@ from __future__ import annotations
 
 import json
 import subprocess
+import uuid
 
 from trainingsapp.core.paketdatei import nachbar_namen, nachbar_tomls, paketdateien, paketwurzel
-from trainingsapp.core.pakete import GRUNDAUSSTATTUNG, paket_id
+from trainingsapp.core.pakete import GRUNDAUSSTATTUNG, paket_id, uebung_id
 from trainingsapp.core.paketversion import version_zahl
 from trainingsapp.data.db import oeffnen
 from trainingsapp.data.pakete import PaketRepo
 from trainingsapp.data.seed import SEED_DATEI, pakete_aus_ordner
-from trainingsapp.paket_einlesen import eigenes_ziel
-from trainingsapp.paket_werkzeug import _basis_aus_git, bauen, pruefen
+from trainingsapp.paket_einlesen import eigenes_ziel, merkdatei
+from trainingsapp.paket_werkzeug import _basis_aus_git, bauen, main, pruefen
 
 
 def _paket(name: str, version: str = "1.0.0") -> str:
@@ -154,3 +155,38 @@ def test_einlesen_kennt_entwurf_aus_anderem_unterordner(tmp_path) -> None:
     export = tmp_path / "export.json"
     export.write_text(json.dumps({"paket": {"id": "e1f2", "name": "Für A."}}), encoding="utf-8")
     assert eigenes_ziel(export, pakete / "neu" / "neu.toml") == pakete / "fuer_a" / "fuer_a.toml"
+
+
+def test_einlesen_in_einen_neuen_ordner(tmp_path) -> None:
+    """``einlesen <export> pakete/neu/neu.toml`` legt den Ordner an; die Standard-Übung im
+    Export wird ``paket = "Standard"`` aus ``pakete/standard.toml``, die Merkdatei liegt neben
+    der neuen TOML."""
+    pakete = tmp_path / "pakete"
+    pakete.mkdir()
+    (pakete / "standard.toml").write_text(SEED_DATEI.read_text("utf-8"), encoding="utf-8")
+    kranich = str(uuid.uuid4())
+    roh = {
+        "format": "trainingsapp-uebungspaket",
+        "version": 3,
+        "paket": {"id": str(uuid.uuid4()), "name": "Neu", "version": 10000},
+        "exportiert": "2026-11-18T08:00:00+00:00",
+        "exercises": [{"id": kranich, "name": "Kranich", "description": "Auf einem Bein."}],
+        "plaene": [
+            {
+                "key": str(uuid.uuid4()),
+                "name": "Morgens",
+                "uebungen": [
+                    {"uebung": kranich},
+                    {"uebung": uebung_id(GRUNDAUSSTATTUNG, "kniebeuge")},
+                ],
+            }
+        ],
+    }
+    export = tmp_path / "export.json"
+    export.write_text(json.dumps(roh, ensure_ascii=False), encoding="utf-8")
+    ziel = pakete / "neu" / "neu.toml"
+    assert main(["einlesen", str(export), str(ziel)]) == 0
+    text = ziel.read_text("utf-8")
+    assert 'uebung = "kniebeuge"' in text and 'paket = "Standard"' in text
+    assert merkdatei(ziel) == pakete / "neu" / "einlesen" / "neu.json"
+    assert merkdatei(ziel).is_file()

@@ -299,6 +299,8 @@ def neu_einlesen(
         text = _toml_text(roh_neu, kopf)
         if not schreiben:
             return zeilen, []
+        # ein neuer Ordner je Paket (``pakete/<neu>/<neu>.toml``, Ben 18.11.2026)
+        ziel.parent.mkdir(parents=True, exist_ok=True)
         ziel.write_text(text, encoding="utf-8")
         merk["eingelesen"] = jetzt().isoformat(timespec="seconds")
         _merk_schreiben(ziel, merk)

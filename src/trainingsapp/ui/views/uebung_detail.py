@@ -35,11 +35,14 @@ from trainingsapp.core.beschreibung import abschnitte
 from trainingsapp.core.ergaenzungen import herkunft as ergaenzungs_herkunft
 from trainingsapp.core.models import (
     Exercise,
+    Media,
+    MediaKind,
     MediaSource,
     Plan,
     PlanItem,
     new_id,
 )
+from trainingsapp.core.paketmedien import dateiname, ist_paketmedium
 from trainingsapp.core.result_spec import basis_key, format_wert
 from trainingsapp.core.standards import (
     abweichungen,
@@ -71,6 +74,7 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang_verlauf import aufnahmen_raster
 from trainingsapp.ui.views.timer import timer_knopf
 from trainingsapp.ui.views.uebung_timer import uebung_timer_route
+from trainingsapp.ui.views.verkleinern import verkleinern_route
 
 #: Kantenlänge des Übungsbilds im Kopf (Ben, 7.11.2026: „deutlich größer, dass man
 #: Symbole/Grafiken usw. gut erkennen könnte“ — vorher 64)
@@ -712,9 +716,32 @@ def uebung_detail(
         vorgabe = uebung.result_spec.format_shorthand(uebung.default_target)
         verwendungen.append(ft.Text(f"Vorgabe für Pläne: Ziel {vorgabe}", size=12, opacity=0.7))
 
-    # Links und Dateien aus dem Paket (U3) — das Bild der Bewegung (T6, lokal) nicht
+    # Links und Dateien aus dem Paket (U3) — das Bild der Bewegung (T6, lokal) nicht. Ein Video
+    # aus dem Paket lässt sich hier verkleinern (P225 Stufe 3, auch ohne Plan)
+    def verkleinern_knopf(m: Media) -> ft.Control:
+        async def oeffnen(_e: Any = None) -> None:
+            state.paketmedium_titel[dateiname(m.uri) or ""] = m.title or uebung.name
+            await page.push_route(verkleinern_route(route or f"/uebung/{uebung.id}", m.uri))
+
+        return ft.IconButton(
+            ft.Icons.COMPRESS,
+            icon_size=20,
+            tooltip="Verkleinern …",
+            on_click=oeffnen,
+            data=("verkleinern", m.uri),
+        )
+
     videos: list[ft.Control] = [
-        medium_zeile(page, state, m, browser=browser)
+        ft.Row(
+            spacing=0,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Container(expand=True, content=medium_zeile(page, state, m, browser=browser)),
+                verkleinern_knopf(m),
+            ],
+        )
+        if ist_paketmedium(m) and m.kind == MediaKind.VIDEO
+        else medium_zeile(page, state, m, browser=browser)
         for m in uebung.media
         if m.uri and m.source != MediaSource.LOCAL
     ]

@@ -287,7 +287,8 @@ dem Export der App, verkleinert jedes große Video mit ffmpeg und schreibt eine 
 Prüfsumme benannt, alle Verweise gezogen); das Original bleibt, die Version auch (vor dem
 Veröffentlichen anheben). Ein TOML nennt seine Dateien erst beim Bauen: erst `bauen`, dann die
 ZIP verkleinern. Tests: `tests/test_paket_verkleinern.py` (mit echtem ffmpeg, in der CI
-übersprungen).
+übersprungen). Dazu **ein Einstieg auf der Übungsseite** (`views/uebung_detail.py`): neben jedem Video aus
+dem Paket ein Knopf „Verkleinern …“ — so erreicht man auch Übungen, die in keinem Plan stehen.
 
 **Noch nicht gebaut:**
 
@@ -296,8 +297,6 @@ ZIP verkleinern. Tests: `tests/test_paket_verkleinern.py` (mit echtem ffmpeg, in
 - **Nach „Datei wählen …“ fragen:** Die Formulare halten ihre Medien bis zum Speichern selbst;
   ein Ersetzen darunter ginge verloren. Verkleinert wird darum aus der Übersicht.
 - **Bilder** verkleinern (die Fotoauswahl tut es schon) — auf Wunsch.
-- **Übungen ohne Plan** erreicht die Übersicht nicht; ein Einstieg auf der Übungsseite wäre der
-  nächste kleine Schritt.
 
 Gerätetest **T150**.
 

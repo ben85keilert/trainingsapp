@@ -214,3 +214,25 @@ async def test_erstellen_vergleichen_uebernehmen_und_original(page, state, tmp_p
     await _daten(wieder, "verkleinern_original_nehmen").on_click(None)
     assert [m.uri for m in state.uebungen.laden(u.id).media] == [name]
     assert not ablage.vorhanden(neu)
+
+
+def test_einstieg_auf_der_uebungsseite_auch_ohne_plan(page, state) -> None:
+    """Ein Video einer Übung, die in keinem Plan steht, erreicht man über ihre Seite."""
+    from trainingsapp.ui.views.uebung_detail import uebung_detail
+
+    kopf = mp4(spur(b"vide", breite=1920, hoehe=1080, dauer_s=130, bilder=3900), dauer_s=130)
+    name = _ablegen(state, kopf + bytes(84_000_000 - len(kopf)))
+    u = Exercise(
+        name="Planke",
+        media=[
+            Media(kind=MediaKind.VIDEO, source=MediaSource.PAKET, uri=name, title="Seitlich"),
+            Media(uri="https://x.org/link", title="Ein Link"),
+        ],
+    )
+    state.uebungen.speichern(u)
+    ansicht = uebung_detail(page, state, state.uebungen.laden(u.id), None)
+    knoepfe = [x for x in _alle(ansicht) if getattr(x, "data", None) == ("verkleinern", name)]
+    assert len(knoepfe) == 1  # nur am Video aus dem Paket, nicht am Link
+    asyncio.run(knoepfe[0].on_click(None))
+    assert page.wege[-1] == f"/uebung/{u.id}/verkleinern/{dateiname(name)}"
+    assert state.paketmedium_titel[dateiname(name)] == "Seitlich"

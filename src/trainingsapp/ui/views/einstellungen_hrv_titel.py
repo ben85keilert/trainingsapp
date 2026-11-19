@@ -33,6 +33,7 @@ def zuletzt_text(t: Gemerkt, heute: datetime | None = None) -> str:
     """„zuletzt 12.10.2026“, „noch nicht vergeben“ — angeheftet davor.
 
     >>> from datetime import UTC
+    >>> from trainingsapp.core.models import HrvTitel
     >>> zuletzt_text(HrvTitel(name="x"))
     'noch nicht vergeben'
     >>> t = HrvTitel(name="x", angeheftet=True, zuletzt=datetime(2026, 10, 12, 12, tzinfo=UTC))

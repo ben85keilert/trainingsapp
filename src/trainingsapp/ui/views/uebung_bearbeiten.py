@@ -136,6 +136,7 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
 from trainingsapp.ui.views.anhang_hochladen import hochladen_route
 from trainingsapp.ui.views.uebung_timer import formular_profil_route
+from trainingsapp.ui.views.verkleinern import verkleinern_route
 
 #: Die Karte eines Parameters und die Beschreibung
 KARTE = ft.Colors.SURFACE_CONTAINER_LOWEST
@@ -1112,6 +1113,15 @@ def uebung_bearbeiten(
             "als Paket weitergibst; Ortsangaben fallen weg",
         )
 
+    def video_bearbeiten(m: Media) -> Callable[[Any], None]:
+        """Zur Ansicht „Verkleinern“ (Größe · Kürzen · Ausschnitt) — das Formular speichert
+        vorher, beim Zurückkommen entsteht es aus der Datenbank neu."""
+
+        def handler(_e: Any = None) -> None:
+            page.run_task(wechseln, lambda formular: verkleinern_route(formular, m.uri))
+
+        return handler
+
     def paket_entferner(m: Media) -> Callable[[], None]:
         def handler() -> None:
             paket_medien.remove(m)
@@ -1142,6 +1152,20 @@ def uebung_bearbeiten(
                                 ft.Icon(MEDIEN_SYMBOLE.get(m.kind, ft.Icons.ATTACH_FILE), size=20),
                                 ft.Container(content=paket_titelfeld(m), expand=True),
                                 ft.Text("Datei", size=11, opacity=0.6),
+                                *(
+                                    [
+                                        ft.IconButton(
+                                            ft.Icons.COMPRESS,
+                                            icon_size=18,
+                                            tooltip="Verkleinern, kürzen, zuschneiden … "
+                                            "(speichert das Formular)",
+                                            on_click=video_bearbeiten(m),
+                                            data=("medium_bearbeiten", m.uri),
+                                        )
+                                    ]
+                                    if m.kind == MediaKind.VIDEO
+                                    else []
+                                ),
                                 ft.IconButton(
                                     ft.Icons.CLOSE,
                                     tooltip="Aus der Übung nehmen",

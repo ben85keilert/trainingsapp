@@ -60,6 +60,14 @@ def paketmedium_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         await verlassen()
         await page.push_route(zurueck_ziel(page, ansicht))
 
+    async def bearbeiten(_e: Any = None) -> None:
+        """Verkleinern · Kürzen · Ausschnitt (Ben, 19.11.2026: überall erreichbar) — die
+        Ansicht legt sich über die, aus der die Datei geöffnet wurde."""
+        from trainingsapp.ui.views.verkleinern import verkleinern_route
+
+        await verlassen()
+        await page.push_route(verkleinern_route(basis, uri))
+
     async def oeffnen_mit(_e: Any = None) -> None:
         if pfad is not None and teile is not None:
             await datei_weitergeben(
@@ -114,12 +122,24 @@ def paketmedium_view(page: Any, state: AppState, basis: str, datei_name: str) ->
             title=ft.Text(titel),
             leading=ft.IconButton(ft.Icons.ARROW_BACK, on_click=zurueck),
             actions=[
+                *(
+                    [
+                        ft.IconButton(
+                            ft.Icons.COMPRESS,
+                            tooltip="Verkleinern, kürzen, zuschneiden …",
+                            on_click=bearbeiten,
+                            data="paketmedium_bearbeiten",
+                        )
+                    ]
+                    if art == MediaKind.VIDEO and pfad is not None and pfad.is_file()
+                    else []
+                ),
                 ft.IconButton(
                     ft.Icons.SHARE_OUTLINED,
                     tooltip="Öffnen mit … / Teilen",
                     on_click=oeffnen_mit,
                     disabled=pfad is None or not pfad.is_file(),
-                )
+                ),
             ],
         ),
         padding=0,

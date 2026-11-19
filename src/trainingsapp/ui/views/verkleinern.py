@@ -40,6 +40,7 @@ from trainingsapp.core.paketmedien import ORDNER, dateiname, groesse_text
 from trainingsapp.core.verkleinern import (
     BILD,
     BILD_NAMEN,
+    GANZ,
     TON,
     TON_NAMEN,
     VORGABE,
@@ -47,6 +48,7 @@ from trainingsapp.core.verkleinern import (
     VORLAGEN,
     Schema,
     Ziel,
+    ausschnitt,
     schnitt,
     wahl,
     zeit_lesen,
@@ -179,6 +181,8 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         #: Kürzen: Anfang und Ende in Sekunden (0 = von vorn bzw. bis zum Schluss)
         "von": 0.0,
         "bis": 0.0,
+        #: Der Bildausschnitt (Anteile links, oben, rechts, unten) — nur am Rechner
+        "bild": GANZ,
     }
 
     def mit_schnitt(z: Ziel) -> Ziel:
@@ -187,11 +191,11 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         return replace(z, von_s=von, bis_s=bis) if von or bis else z
 
     def jetzt() -> Ziel:
-        return mit_schnitt(ziel(stand["schema"], info, groesse))
+        return mit_schnitt(ziel(stand["schema"], info, groesse, stand["bild"]))
 
     def zu_gross(z: Ziel) -> bool:
-        """Wäre nicht kleiner — gekürzt ist es das immer."""
-        return z.nicht_kleiner and not z.gekuerzt
+        """Wäre nicht kleiner — gekürzt oder zugeschnitten ist es das immer."""
+        return z.nicht_kleiner and not z.gekuerzt and not z.zugeschnitten
 
     def schaetzung(z: Ziel) -> str:
         if info is None or not info.dauer_s:
@@ -254,7 +258,7 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
 
     def vorlage_zeile(key: str) -> ft.Control:
         s = eingepasst(VORLAGEN[key])
-        z = mit_schnitt(ziel(s, info, groesse))
+        z = mit_schnitt(ziel(s, info, groesse, stand["bild"]))
         gewaehlt = stand["vorlage"] == key
         rechts = (
             "wäre nicht kleiner"
@@ -442,7 +446,14 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         erstellen_knopf.disabled = (
             womit is None or not da or zu_gross(z) or lauf is not None or info is None
         )
-        erstellen_knopf.content = "Kürzen und erstellen" if z.gekuerzt else "Erstellen"
+        erstellen_knopf.content = (
+            "Kürzen und erstellen"
+            if z.gekuerzt
+            else "Zuschneiden und erstellen"
+            if z.zugeschnitten
+            else "Erstellen"
+        )
+        ausschnitt_zeichnen()
         von_feld.value = zeit_text(z.von_s) if z.von_s else ""
         bis_feld.value = zeit_text(z.bis_s) if z.bis_s else ""
         ganz_knopf.visible = z.gekuerzt
@@ -558,6 +569,107 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
             ),
         ]
         if info is not None and info.dauer_s
+        else []
+    )
+
+    # -- Bildausschnitt (Ben, 19.11.2026: „komprimiert und gecroppt“, `docs/
+    # plan_medien_einheitlich.md` §2.6): zwei Regler wie beim Dokument (Breite, Höhe), daneben
+    # das Bild als Schema — hell bleibt, dunkel fällt weg. Nur am Rechner: ffmpeg schneidet;
+    # der Umwandler am Telefon kann es nicht -------------------------------------------------
+
+    kann_schneiden = (
+        womit == weg_.FFMPEG and info is not None and bool(info.breite) and bool(info.hoehe)
+    )
+    SCHEMA = 120.0  # längere Seite des Schemas
+    seiten_b = float(info.breite) if info is not None and info.breite else 16.0
+    seiten_h = float(info.hoehe) if info is not None and info.hoehe else 9.0
+    schema_b = SCHEMA * min(1.0, seiten_b / seiten_h)
+    schema_h = SCHEMA * min(1.0, seiten_h / seiten_b)
+    schema_innen = ft.Container(bgcolor=ft.Colors.PRIMARY, border_radius=2, data="ausschnitt_innen")
+    schema_bild = ft.Stack(
+        width=schema_b,
+        height=schema_h,
+        controls=[
+            ft.Container(
+                width=schema_b,
+                height=schema_h,
+                bgcolor=ft.Colors.with_opacity(0.25, ft.Colors.ON_SURFACE),
+                border_radius=4,
+            ),
+            schema_innen,
+        ],
+    )
+    ausschnitt_text = ft.Text("", size=12, opacity=0.75, data="ausschnitt_text")
+    regler_breite = ft.RangeSlider(
+        min=0, max=100, start_value=0, end_value=100, data="ausschnitt_breite"
+    )
+    regler_hoehe = ft.RangeSlider(
+        min=0, max=100, start_value=0, end_value=100, data="ausschnitt_hoehe"
+    )
+    ganzes_bild = ft.TextButton("Ganzes Bild", visible=False, data="ausschnitt_ganz")
+
+    def ausschnitt_zeichnen() -> None:
+        li, ob, re, un = stand["bild"]
+        schema_innen.left, schema_innen.top = schema_b * li, schema_h * ob
+        schema_innen.width, schema_innen.height = schema_b * (re - li), schema_h * (un - ob)
+        regler_breite.start_value, regler_breite.end_value = li * 100, re * 100
+        regler_hoehe.start_value, regler_hoehe.end_value = ob * 100, un * 100
+        ganzes_bild.visible = stand["bild"] != GANZ
+        if info is not None and info.breite and info.hoehe:
+            b, h = round(info.breite * (re - li)), round(info.hoehe * (un - ob))
+            ausschnitt_text.value = (
+                f"Ganzes Bild · {info.breite} × {info.hoehe}"
+                if stand["bild"] == GANZ
+                else f"Ausschnitt {b} × {h} von {info.breite} × {info.hoehe}"
+            )
+
+    def ausschnitt_geaendert(_e: Any = None) -> None:
+        stand["bild"] = ausschnitt(
+            float(regler_breite.start_value or 0) / 100,
+            float(regler_hoehe.start_value or 0) / 100,
+            float(regler_breite.end_value or 100) / 100,
+            float(regler_hoehe.end_value or 100) / 100,
+        )
+        zeichnen()
+
+    def ausschnitt_ganz(_e: Any = None) -> None:
+        stand["bild"] = GANZ
+        zeichnen()
+
+    # erst beim Loslassen rechnen — jede Bewegung zeichnete sonst die ganze Seite neu
+    regler_breite.on_change_end = ausschnitt_geaendert
+    regler_hoehe.on_change_end = ausschnitt_geaendert
+    # `on_change` ohne Arbeit: damit die Werte unterwegs schon bei Python ankommen
+    regler_breite.on_change = lambda _e: None
+    regler_hoehe.on_change = lambda _e: None
+    ganzes_bild.on_click = ausschnitt_ganz
+    ausschnitt_teile: list[ft.Control] = (
+        [
+            ft.Text("BILDAUSSCHNITT", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+            ft.Row(
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Container(width=SCHEMA, alignment=ft.Alignment.CENTER, content=schema_bild),
+                    ft.Column(
+                        spacing=0,
+                        expand=True,
+                        controls=[
+                            ft.Row(
+                                spacing=4,
+                                controls=[
+                                    ft.Text(name, size=12, width=44),
+                                    ft.Container(expand=True, content=c),
+                                ],
+                            )
+                            for name, c in (("Breite", regler_breite), ("Höhe", regler_hoehe))
+                        ],
+                    ),
+                ],
+            ),
+            ft.Row(spacing=8, controls=[ausschnitt_text, ganzes_bild]),
+        ]
+        if kann_schneiden
         else []
     )
 
@@ -708,6 +820,7 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         )
     einstellen_spalte.controls = [
         *kuerzen_teile,
+        *ausschnitt_teile,
         ft.Text("VORLAGE", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
         vorlagen_spalte,
         genauer_knopf,

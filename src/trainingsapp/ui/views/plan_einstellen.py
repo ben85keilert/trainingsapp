@@ -126,6 +126,7 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.timer_bibliothek import in_uebung_speichern
 from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
 from trainingsapp.ui.views.anhang_hochladen import hochladen_route
+from trainingsapp.ui.views.verkleinern import verkleinern_route
 
 #: Die Karte eines Parameters
 KARTE = ft.Colors.SURFACE_CONTAINER_HIGHEST
@@ -333,6 +334,19 @@ def plan_einstellen(
 
         return handler
 
+    def video_bearbeiten(m: Media) -> Callable[[Any], None]:
+        """Zur Ansicht „Verkleinern“ (Größe · Kürzen · Ausschnitt) — die Seite speichert vorher
+        und entsteht beim Zurückkommen aus der Datenbank neu."""
+
+        async def hin() -> None:
+            if sichern() is None:
+                await page.push_route(verkleinern_route(ansicht.route, m.uri))
+
+        def handler(_e: Any = None) -> None:
+            page.run_task(hin)
+
+        return handler
+
     def link_hinzufuegen(_e: Any = None) -> None:
         links_stand.append(
             {"medium": None, "titel": "", "uri": "", "id": new_id(), "zusatz": werte_von(None)}
@@ -365,6 +379,20 @@ def plan_einstellen(
                                 ),
                             ),
                             ft.Text("Datei", size=11, opacity=0.6),
+                            *(
+                                [
+                                    ft.IconButton(
+                                        ft.Icons.COMPRESS,
+                                        icon_size=18,
+                                        tooltip="Verkleinern, kürzen, zuschneiden … "
+                                        "(speichert die Seite)",
+                                        on_click=video_bearbeiten(medium),
+                                        data=("medium_bearbeiten", medium.uri),
+                                    )
+                                ]
+                                if medium.kind == MediaKind.VIDEO
+                                else []
+                            ),
                             ft.IconButton(
                                 ft.Icons.CLOSE,
                                 tooltip="Aus der Planübung nehmen",

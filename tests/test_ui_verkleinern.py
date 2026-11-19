@@ -253,6 +253,37 @@ async def test_kuerzen_anfang_und_ende(page, state, tmp_path) -> None:
     assert (von.value, bis.value) == ("", "") and schaetzung.value == ganz
 
 
+@ffmpeg_da
+async def test_bildausschnitt_am_rechner(page, state, tmp_path, monkeypatch) -> None:
+    """Ben, 19.11.2026 (`docs/plan_medien_einheitlich.md` §2.6): „komprimiert und gecroppt“ —
+    der Bildausschnitt in derselben Ansicht, dieselbe Kopie; nur wo ffmpeg schneidet."""
+    name = _ablegen(state, _echtes_video(tmp_path))  # 1280 × 720
+    _plan_mit_video(state, name)
+    seite = SimpleNamespace(**{**vars(page), "run_task": lambda f, *a: None})
+    ansicht = vk.verkleinern_view(seite, state, "/plaene/p/medien", dateiname(name))
+    seite.views = [ft.View(route="/plaene/p/medien"), ansicht]
+    text = _daten(ansicht, "ausschnitt_text")
+    assert text.value == "Ganzes Bild · 1280 × 720"
+    breite = _daten(ansicht, "ausschnitt_breite")
+    breite.start_value, breite.end_value = 25, 75  # die mittlere Hälfte der Breite
+    breite.on_change_end(None)
+    assert text.value == "Ausschnitt 640 × 720 von 1280 × 720"
+    assert _daten(ansicht, "verkleinern_erstellen").content == "Zuschneiden und erstellen"
+    innen = _daten(ansicht, "ausschnitt_innen")
+    assert innen.left == 30 and innen.width == 60  # das Schema: 120 breit, die Mitte bleibt
+    await _daten(ansicht, "verkleinern_erstellen").on_click(None)
+    entwurf = vk._ENTWUERFE[name]
+    assert entwurf.info is not None
+    assert (entwurf.info.breite, entwurf.info.hoehe) == (640, 720)
+    _daten(ansicht, "verkleinern_verwerfen").on_click(None)
+    _daten(ansicht, "ausschnitt_ganz").on_click(None)
+    assert text.value == "Ganzes Bild · 1280 × 720"
+    # Am Telefon schneidet der Umwandler nicht: kein Abschnitt
+    monkeypatch.setattr(weg, "weg", lambda _s: "android")
+    ohne = vk.verkleinern_view(seite, state, "/plaene/p/medien", dateiname(name))
+    assert not [x for x in _alle(ohne) if getattr(x, "data", None) == "ausschnitt_breite"]
+
+
 def test_einstieg_auf_der_uebungsseite_auch_ohne_plan(page, state) -> None:
     """Ein Video einer Übung, die in keinem Plan steht, erreicht man über ihre Seite."""
     from trainingsapp.ui.views.uebung_detail import uebung_detail

@@ -97,6 +97,32 @@ VORLAGE_NAMEN: Final[dict[str, str]] = {"klein": "Klein", "mittel": "Mittel", "g
 VORGABE: Final = "mittel"
 
 
+#: Der **Bildausschnitt** (Ben, 19.11.2026: „Videos/Fotos sollen überall komprimiert und
+#: gecroppt werden können“, `docs/plan_medien_einheitlich.md` §2.6): Anteile der Bildbreite bzw.
+#: -höhe — links, oben, rechts, unten; das ganze Bild ist `GANZ`
+Ausschnitt = tuple[float, float, float, float]
+GANZ: Final[Ausschnitt] = (0.0, 0.0, 1.0, 1.0)
+#: So viel bleibt je Richtung mindestens stehen (wie beim Dokument, `core.dokument.MIN_REST`)
+MIN_AUSSCHNITT: Final = 0.1
+
+
+def ausschnitt(links: float, oben: float, rechts: float, unten: float) -> Ausschnitt:
+    """Ein gültiger Ausschnitt aus vier Anteilen — innerhalb des Bildes, je Richtung bleiben
+    mindestens 10 %; fast das ganze Bild (jede Kante unter 1 %) *ist* das ganze.
+
+    >>> ausschnitt(0.1, 0.2, 0.9, 0.8), ausschnitt(-1, 0, 2, 1), ausschnitt(0.005, 0, 1, 0.999)
+    ((0.1, 0.2, 0.9, 0.8), (0.0, 0.0, 1.0, 1.0), (0.0, 0.0, 1.0, 1.0))
+    >>> ausschnitt(0.5, 0.5, 0.52, 0.4)
+    (0.5, 0.5, 0.6, 0.6)
+    """
+    li, ob = min(max(links, 0.0), 1 - MIN_AUSSCHNITT), min(max(oben, 0.0), 1 - MIN_AUSSCHNITT)
+    re, un = max(min(rechts, 1.0), li + MIN_AUSSCHNITT), max(min(unten, 1.0), ob + MIN_AUSSCHNITT)
+    a = (round(li, 4), round(ob, 4), round(re, 4), round(un, 4))
+    if a[0] < 0.01 and a[1] < 0.01 and a[2] > 0.99 and a[3] > 0.99:
+        return GANZ
+    return a
+
+
 @dataclass(frozen=True, slots=True)
 class Ziel:
     """Was das Schema aus einem bestimmten Video macht."""
@@ -114,10 +140,16 @@ class Ziel:
     #: Originals; ``bis_s = 0``: bis zum Ende
     von_s: float = 0.0
     bis_s: float = 0.0
+    #: Der Bildausschnitt (`Ausschnitt`) — nur am Rechner (ffmpeg)
+    ausschnitt: Ausschnitt = GANZ
 
     @property
     def gekuerzt(self) -> bool:
         return self.von_s > 0 or self.bis_s > 0
+
+    @property
+    def zugeschnitten(self) -> bool:
+        return self.ausschnitt != GANZ
 
     def dauer(self, dauer_s: float) -> float:
         """Wie lang die Kopie wird.
@@ -238,9 +270,20 @@ def _bildrate_faktor(fps: int) -> float:
     return 1.0
 
 
-def ziel(schema: Schema, original: Videoinfo | None = None, original_bytes: int = 0) -> Ziel:
+def ziel(
+    schema: Schema,
+    original: Videoinfo | None = None,
+    original_bytes: int = 0,
+    bild: Ausschnitt = GANZ,
+) -> Ziel:
     """Was ``schema`` aus dem Video macht — nie größer, schneller oder mit mehr Ton als das
-    Original.
+    Original. ``bild``: der Bildausschnitt — die kurze Seite ist dann höchstens die des
+    Ausschnitts (es wird nie hochgerechnet).
+
+    >>> hoch = Videoinfo(dauer_s=10, breite=1080, hoehe=1920, bildrate=30, ton=True)
+    >>> z = ziel(VORLAGEN["gross"], hoch, 9_000_000, (0.0, 0.25, 1.0, 0.5))
+    >>> z.kurze_seite, z.zugeschnitten
+    (480, True)
 
     >>> v = Videoinfo(dauer_s=130, breite=1920, hoehe=1080, bildrate=60, ton=True)
     >>> z = ziel(VORLAGEN["mittel"], v, 84_000_000)
@@ -262,12 +305,17 @@ def ziel(schema: Schema, original: Videoinfo | None = None, original_bytes: int 
     if original is not None:
         if original.kurze_seite:
             kurz = min(kurz, original.kurze_seite)
+        if bild != GANZ and original.breite and original.hoehe:
+            # die kurze Seite des Ausschnitts, gerade (H.264 mit 4:2:0 braucht gerade Maße)
+            breit = original.breite * (bild[2] - bild[0])
+            hoch = original.hoehe * (bild[3] - bild[1])
+            kurz = min(kurz, max(2, int(min(breit, hoch)) // 2 * 2))
         if original.bildrate:
             fps = min(fps, max(1, round(original.bildrate)))
         if not original.ton:
             ton, kanaele = 0, 0
     video = round(_basis(kurz) * BILD.get(schema.bild, 1.0) * _bildrate_faktor(fps))
-    z = Ziel(kurz, fps, video, ton, kanaele)
+    z = Ziel(kurz, fps, video, ton, kanaele, ausschnitt=bild)
     if original is not None and original.dauer_s and original_bytes:
         z = replace(z, nicht_kleiner=z.bytes(original.dauer_s) >= original_bytes)
     return z
@@ -320,8 +368,21 @@ def ffmpeg_befehl(quelle: Path, ziel_pfad: Path, z: Ziel, programm: str = "ffmpe
     >>> b = ffmpeg_befehl(Path("a.mov"), Path("b.mp4"), Ziel(720, 24, 1, 0, 0, von_s=5, bis_s=20))
     >>> b[b.index("-ss") : b.index("-ss") + 3], b[b.index("-t") + 1]
     (['-ss', '5.000', '-i'], '15.000')
+
+    Mit Bildausschnitt: erst zuschneiden, dann auf die kurze Seite rechnen.
+
+    >>> z = Ziel(480, 30, 1, 0, 0, ausschnitt=(0.1, 0.25, 0.9, 0.75))
+    >>> b = ffmpeg_befehl(Path("a.mov"), Path("b.mp4"), z)
+    >>> b[b.index("-vf") + 1].split(",scale")[0]
+    'crop=iw*0.8000:ih*0.5000:iw*0.1000:ih*0.2500'
     """
     k = z.kurze_seite
+    li, ob, re, un = z.ausschnitt
+    schneiden = (
+        f"crop=iw*{re - li:.4f}:ih*{un - ob:.4f}:iw*{li:.4f}:ih*{ob:.4f},"
+        if z.zugeschnitten
+        else ""
+    )
     befehl = [
         programm,
         "-nostdin",
@@ -339,7 +400,7 @@ def ffmpeg_befehl(quelle: Path, ziel_pfad: Path, z: Ziel, programm: str = "ffmpe
         "0:v:0",
         *(["-map", "0:a:0?"] if z.kanaele else []),
         "-vf",
-        f"scale='if(gt(iw,ih),-2,{k})':'if(gt(iw,ih),{k},-2)',fps={z.bildrate}",
+        f"{schneiden}scale='if(gt(iw,ih),-2,{k})':'if(gt(iw,ih),{k},-2)',fps={z.bildrate}",
         "-c:v",
         "libx264",
         "-preset",
@@ -491,8 +552,10 @@ __all__ = [
     "BILD",
     "BILDRATEN",
     "BILD_NAMEN",
+    "GANZ",
     "GUT",
     "KURZE_SEITEN",
+    "MIN_AUSSCHNITT",
     "NORMAL",
     "OHNE",
     "SCHARF",
@@ -504,8 +567,10 @@ __all__ = [
     "VORLAGEN",
     "VORLAGE_NAMEN",
     "Abgebrochen",
+    "Ausschnitt",
     "Schema",
     "Ziel",
+    "ausschnitt",
     "ffmpeg",
     "ffmpeg_befehl",
     "fortschritt_aus",

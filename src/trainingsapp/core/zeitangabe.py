@@ -23,6 +23,9 @@ from trainingsapp.core.laufend import minuten
 #: Die beiden Schreibweisen (Notizeingabe, Achse)
 DAUER = "dauer"
 UHR = "uhr"
+#: Nur für das Ende eines Abschnitts: die **Länge** ab seinem Anfang (Ben, 19.11.2026: „Bis“
+#: als Uhrzeit, Dauer der Messung oder Länge des Abschnitts)
+LAENGE = "laenge"
 
 #: Sekunden eines Tages — für die Deutung einer Uhrzeit ohne Datum
 _TAG_S = 86400.0
@@ -227,9 +230,49 @@ def stelle_lesen(zb: Zeitbezug, text: str, *, live: bool, modus: str = DAUER) ->
     return x_aus_wand(zb, dauer) if live else dauer
 
 
+def bis_text(
+    zb: Zeitbezug, von: float, bis: float | None, *, live: bool, modus: str = DAUER
+) -> str:
+    """Das Ende eines Abschnitts, wie man es eintippt: als Stelle (`UHR`, `DAUER` — wie
+    `stelle_text`) oder als **Länge** ab ``von`` (`LAENGE`). ``bis=None`` (läuft noch): leer.
+
+    >>> zb = Zeitbezug(lambda: [], None, wand_versatz=0.0)
+    >>> bis_text(zb, 60.0, 1860.0, live=True, modus=LAENGE)
+    '30:00'
+    >>> bis_text(zb, 60.0, 1860.0, live=True), bis_text(zb, 60.0, None, live=True, modus=LAENGE)
+    ('31:00', '')
+    """
+    if bis is None:
+        return ""
+    if modus == LAENGE:
+        return dauer_text(bis - von)
+    return stelle_text(zb, bis, live=live, modus=modus)
+
+
+def bis_lesen(
+    zb: Zeitbezug, text: str, von: float, *, live: bool, modus: str = DAUER
+) -> float | None:
+    """Umkehrung von `bis_text`: bei `LAENGE` ist das Ende ``von`` plus die getippte Länge
+    („30:00“, „90“) — ``None``, wenn der Text sich nicht lesen lässt.
+
+    >>> zb = Zeitbezug(lambda: [], None, wand_versatz=0.0)
+    >>> bis_lesen(zb, "30:00", 60.0, live=True, modus=LAENGE)
+    1860.0
+    >>> bis_lesen(zb, "31:00", 60.0, live=True), bis_lesen(zb, "x", 60.0, live=True, modus=LAENGE)
+    (1860.0, None)
+    """
+    if modus == LAENGE:
+        laenge = dauer_lesen(text)
+        return None if laenge is None else von + laenge
+    return stelle_lesen(zb, text, live=live, modus=modus)
+
+
 __all__ = [
     "DAUER",
+    "LAENGE",
     "UHR",
+    "bis_lesen",
+    "bis_text",
     "breite_lesen",
     "dauer_lesen",
     "dauer_text",

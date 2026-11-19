@@ -209,6 +209,14 @@ so 4–5 Buttons … Favoritenfunktion.“
   bisherigen Überschriften kamen einmalig als gemerkte Namen hinein. Gilt für „Abschnitt:
   Start“, „+“ live und „Mit zwei Zeiten …“ in der Aufzeichnung. Eine erste Fassung mit bis zu
   fünf Favoriten als Knöpfen (☆ in der Zeile) hat Ben am selben Tag verworfen.
+- **Zeiten im Blatt „Abschnitt“ je Feld** (Ben: „‚Von‘: Button/Schalter für Uhrzeit/Dauer
+  direkt neben der Zeit. ‚Bis‘: hier braucht es 3 Möglichkeiten: Uhrzeit, Dauer der Messung,
+  Länge des Abschnittes“): Neben „Von“ ein Knopf ⇄, der die andere Schreibweise nennt
+  (Uhrzeit ⇄ Messdauer); unter „Bis“ die Wahl **Uhrzeit · Messdauer · Länge** — „Länge“ ist
+  das Ende ab „Von“ (`core.zeitangabe.LAENGE`, `bis_text`/`bis_lesen`). Mit „Länge“ rückt das
+  Ende mit, wenn sich „Von“ ändert (getippt oder ±); sonst bleibt es stehen. Ohne Startzeit
+  der Messung gibt es keine Uhrzeit. Die Zeile darunter heißt „Länge 30:00“ (vorher „Dauer“).
+  Der gemeinsame Schalter Uhrzeit/Dauer über beiden Feldern ist weg.
 - **Eine Marke je Augenblick** (`docs/plan_einheit.md` §4): Eine Uhr, die einer Übung später
   beitritt, setzt keine eigene Marke („Kniebeuge: Start“ hat Vorrang); ein Timer allein mit
   Klammer setzt nur „‹Name›: Start“; „Abschnitte in die HRV-Messung“ gilt auch in der Einheit.

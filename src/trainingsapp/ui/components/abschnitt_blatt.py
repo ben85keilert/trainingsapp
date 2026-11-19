@@ -2,8 +2,11 @@
 
 „Das Edit der Abschnitte muss schnell nachträglich möglich sein. Auch die Erstellung eines
 Abschnittes mit zwei Zeiten, um z. B. Belastungen, die im Kalender rückverfolgbar sind.“ —
-ein Blatt für live und Aufzeichnung: Name, Von und Bis als Dauer („12:30“) oder Uhrzeit
-(„14:05“), Schritte ±10 s / ±1 min, Kopf und Endteil, Löschen. Was es speichert, sind die
+ein Blatt für live und Aufzeichnung: Name, Von und Bis, Schritte ±10 s / ±1 min, Kopf und
+Endteil, Löschen. **Je Feld eine Schreibweise** (Ben, 19.11.2026): „Von“ als Uhrzeit („14:05“)
+oder Dauer der Messung („12:30“) — der Knopf daneben schaltet um; „Bis“ dazu als **Länge** des
+Abschnitts ab „Von“ („30:00“, `core.zeitangabe.LAENGE`) — Uhrzeit · Messdauer · Länge darunter.
+Mit „Länge“ rückt das Ende mit, wenn sich „Von“ ändert. Was es speichert, sind die
 Grenz-Notizen „‹Name›: Start“ / „‹Name›: Ende“ (`core.abschnitte`) — das Blatt rechnet
 nichts, der Aufrufer bekommt Name, Grenzen und Ränder.
 """
@@ -18,7 +21,16 @@ import flet as ft
 from hrv_core.ausschnitte import MIN_ABSCHNITT_S
 from hrv_core.ereignisse import Zeitbezug
 
-from trainingsapp.core.zeitangabe import DAUER, UHR, dauer_text, stelle_lesen, stelle_text
+from trainingsapp.core.zeitangabe import (
+    DAUER,
+    LAENGE,
+    UHR,
+    bis_lesen,
+    bis_text,
+    dauer_text,
+    stelle_lesen,
+    stelle_text,
+)
 from trainingsapp.ui.components.abschnitte import rand_zeile
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -26,6 +38,8 @@ from trainingsapp.ui.components.namenwahl import Namenwahl
 
 #: Schritte an Von und Bis (Sekunden)
 SCHRITTE_S: tuple[int, ...] = (-60, -10, 10, 60)
+#: Was „Bis“ in der jeweiligen Schreibweise erwartet — der Hinweis bei Unlesbarem
+BIS_BEISPIEL = {UHR: "z. B. 14:35", DAUER: "z. B. 42:30", LAENGE: "Länge, z. B. 30:00"}
 
 
 def schritt_text(sekunden: int) -> str:
@@ -90,22 +104,30 @@ def abschnitt_blatt(
     wie die Überschrift im Titel-Blatt); ohne eins ein Feld ohne Liste. Leer gilt ``name``."""
     zb = zeitbezug
     laeuft = bis is None
+    beginn = UHR if uhr and zb.start_utc is not None else DAUER
     stand: dict[str, Any] = {
         "von": float(von),
         "bis": None if bis is None else float(bis),
         "kopf": float(kopf_s),
         "endteil": float(endteil_s),
-        "modus": UHR if uhr and zb.start_utc is not None else DAUER,
+        # Je Feld eine Schreibweise (Ben, 19.11.2026): „Von“ Uhrzeit oder Dauer der Messung,
+        # „Bis“ dazu die Länge des Abschnitts
+        "modus_von": beginn,
+        "modus_bis": beginn,
     }
     nachher = Nachher()
     blatt: ft.BottomSheet
     name_feld: ft.TextField
     von_feld: ft.TextField
     bis_feld: ft.TextField
+    von_knopf: ft.TextButton
     dauer: ft.Text
 
-    def text(x: float | None) -> str:
-        return "" if x is None else stelle_text(zb, x, live=live, modus=stand["modus"])
+    def text_von(x: float) -> str:
+        return stelle_text(zb, x, live=live, modus=stand["modus_von"])
+
+    def text_bis() -> str:
+        return bis_text(zb, stand["von"], stand["bis"], live=live, modus=stand["modus_bis"])
 
     def auffrischen(*controls: ft.Control) -> None:
         for c in controls:
@@ -119,44 +141,68 @@ def abschnitt_blatt(
             dauer.value = "läuft noch — „Bis“ leer lassen oder das Ende eintragen"
         else:
             problem = grenzen_pruefen(v, b, *grenzen())
-            dauer.value = problem or f"Dauer {dauer_text(b - v)}"
+            dauer.value = problem or f"Länge {dauer_text(b - v)}"
         dauer.color = ft.Colors.ERROR if problem else None
 
     def zeigen() -> None:
-        von_feld.value, bis_feld.value = text(stand["von"]), text(stand["bis"])
+        von_feld.value, bis_feld.value = text_von(stand["von"]), text_bis()
         von_feld.error = bis_feld.error = None
         dauer_zeigen()
         auffrischen(von_feld, bis_feld, dauer)
 
-    def lesen(feld: ft.TextField, schluessel: str) -> bool:
-        """Das Feld in den Stand übernehmen — ``False``, wenn es sich nicht lesen lässt."""
-        roh = (feld.value or "").strip()
-        if not roh and schluessel == "bis" and laeuft:
-            stand["bis"] = None
-            feld.error = None
+    def von_setzen(x: float) -> None:
+        """Mit „Länge“ rückt das Ende mit dem Anfang — die Länge bleibt, wie sie dasteht."""
+        if stand["modus_bis"] == LAENGE and stand["bis"] is not None:
+            stand["bis"] += x - stand["von"]
+        stand["von"] = x
+
+    def lesen_von() -> bool:
+        """„Von“ in den Stand übernehmen — ``False``, wenn es sich nicht lesen lässt."""
+        roh = (von_feld.value or "").strip()
+        if roh == text_von(stand["von"]):
             return True
-        if roh == text(stand[schluessel]):
-            return True
-        x = stelle_lesen(zb, roh, live=live, modus=stand["modus"])
+        x = stelle_lesen(zb, roh, live=live, modus=stand["modus_von"])
         if x is None:
-            feld.error = "z. B. 14:05" if stand["modus"] == UHR else "z. B. 12:30"
-            auffrischen(feld)
+            von_feld.error = "z. B. 14:05" if stand["modus_von"] == UHR else "z. B. 12:30"
+            auffrischen(von_feld)
             return False
-        stand[schluessel] = x
+        von_setzen(x)
         return True
 
-    def getippt(feld: ft.TextField, schluessel: str) -> None:
-        if lesen(feld, schluessel):
+    def lesen_bis() -> bool:
+        """„Bis“ in den Stand übernehmen — als Stelle oder als Länge ab „Von“."""
+        roh = (bis_feld.value or "").strip()
+        if not roh and laeuft:
+            stand["bis"] = None
+            bis_feld.error = None
+            return True
+        if roh == text_bis():
+            return True
+        x = bis_lesen(zb, roh, stand["von"], live=live, modus=stand["modus_bis"])
+        if x is None:
+            bis_feld.error = BIS_BEISPIEL[stand["modus_bis"]]
+            auffrischen(bis_feld)
+            return False
+        stand["bis"] = x
+        return True
+
+    def lesen() -> bool:
+        return lesen_von() and lesen_bis()  # erst „Von“ — eine Länge rechnet ab ihm
+
+    def getippt(lesen_: Callable[[], bool]) -> None:
+        if lesen_():
             zeigen()
 
     def schritt(schluessel: str, delta: int) -> Callable[[], None]:
         def handler() -> None:
-            feld = von_feld if schluessel == "von" else bis_feld
-            if not lesen(feld, schluessel):
+            if not lesen():
                 return
             lo, hi = grenzen()
-            basis = stand[schluessel] if stand[schluessel] is not None else hi
-            stand[schluessel] = min(max(basis + delta, lo), hi)
+            if schluessel == "von":
+                von_setzen(min(max(stand["von"] + delta, lo), hi))
+            else:
+                basis = stand["bis"] if stand["bis"] is not None else hi
+                stand["bis"] = min(max(basis + delta, lo), hi)
             zeigen()
 
         return handler
@@ -165,16 +211,31 @@ def abschnitt_blatt(
         stand["bis"] = grenzen()[1]
         zeigen()
 
-    def modus_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
+    def von_knopf_zeigen() -> None:
+        uhrzeit = stand["modus_von"] == UHR
+        von_knopf.content = "Messdauer" if uhrzeit else "Uhrzeit"
+        von_knopf.tooltip = "Als Dauer der Messung eingeben" if uhrzeit else "Als Uhrzeit eingeben"
+        auffrischen(von_knopf)
+
+    def von_umschalten() -> None:
+        """Der Knopf neben „Von“: Uhrzeit ⇄ Dauer der Messung — erst in der alten lesen."""
+        if not lesen_von():
+            return
+        stand["modus_von"] = DAUER if stand["modus_von"] == UHR else UHR
+        von_knopf_zeigen()
+        zeigen()
+
+    def bis_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
+        """Uhrzeit · Messdauer · Länge für „Bis“ — erst in der alten Schreibweise lesen."""
         if not e.control.selected:
             return
-        ok = lesen(von_feld, "von") and lesen(bis_feld, "bis")  # erst im alten Modus lesen
-        stand["modus"] = e.control.selected[0]
+        ok = lesen()
+        stand["modus_bis"] = e.control.selected[0]
         if ok:
             zeigen()
 
     def fertig() -> None:
-        if not (lesen(von_feld, "von") and lesen(bis_feld, "bis")):
+        if not lesen():
             return
         problem = grenzen_pruefen(stand["von"], stand["bis"], *grenzen())
         if problem is not None:
@@ -193,9 +254,8 @@ def abschnitt_blatt(
     def bereich_text() -> str:
         if stand["bis"] is None:
             return "rechnet mit"
-        return (
-            f"rechnet {text(stand['von'] - stand['kopf'])}–{text(stand['bis'] + stand['endteil'])}"
-        )
+        von_, bis_ = stand["von"] - stand["kopf"], stand["bis"] + stand["endteil"]
+        return f"rechnet {text_von(von_)}–{text_von(bis_)}"
 
     if wahl is None:
         wahl = Namenwahl(wert=name)
@@ -205,8 +265,8 @@ def abschnitt_blatt(
         dense=True,
         expand=True,
         keyboard_type=ft.KeyboardType.TEXT,
-        on_blur=lambda _: getippt(von_feld, "von"),
-        on_submit=lambda _: getippt(von_feld, "von"),
+        on_blur=lambda _: getippt(lesen_von),
+        on_submit=lambda _: getippt(lesen_von),
     )
     bis_feld = ft.TextField(
         label="Bis",
@@ -214,11 +274,18 @@ def abschnitt_blatt(
         expand=True,
         hint_text="läuft noch" if laeuft else None,
         keyboard_type=ft.KeyboardType.TEXT,
-        on_blur=lambda _: getippt(bis_feld, "bis"),
+        on_blur=lambda _: getippt(lesen),
         on_submit=lambda _: fertig(),
     )
+    von_knopf = ft.TextButton(
+        icon=ft.Icons.SWAP_HORIZ,
+        on_click=lambda _e=None: von_umschalten(),
+        visible=zb.start_utc is not None,
+        data="von_schreibweise",
+    )
+    von_knopf_zeigen()
     dauer = ft.Text(size=13, opacity=0.8)
-    von_feld.value, bis_feld.value = text(stand["von"]), text(stand["bis"])
+    von_feld.value, bis_feld.value = text_von(stand["von"]), text_bis()
     dauer_zeigen()
 
     def schritte(schluessel: str) -> ft.Control:
@@ -234,29 +301,27 @@ def abschnitt_blatt(
             ],
         )
 
-    inhalt: list[ft.Control] = [
-        ft.Text("Neuer Abschnitt" if neu else "Abschnitt", size=20, weight=ft.FontWeight.W_500),
-        wahl.control,
-    ]
-    if zb.start_utc is not None:
-        inhalt.append(
-            ft.SegmentedButton(
-                selected=[stand["modus"]],
-                show_selected_icon=False,
-                segments=[
-                    ft.Segment(value=UHR, label=ft.Text("Uhrzeit")),
-                    ft.Segment(value=DAUER, label=ft.Text("Dauer")),
-                ],
-                on_change=modus_gewaehlt,
-            )
-        )
+    bis_wahl = ft.SegmentedButton(
+        selected=[stand["modus_bis"]],
+        show_selected_icon=False,
+        segments=[
+            *([ft.Segment(value=UHR, label=ft.Text("Uhrzeit"))] if zb.start_utc else []),
+            ft.Segment(value=DAUER, label=ft.Text("Messdauer")),
+            ft.Segment(value=LAENGE, label=ft.Text("Länge")),
+        ],
+        on_change=bis_gewaehlt,
+        data="bis_schreibweise",
+    )
     bis_zeile: list[ft.Control] = [bis_feld]
     if live:
         bis_zeile.append(ft.TextButton("Jetzt", on_click=jetzt))
-    inhalt += [
-        ft.Row(controls=[von_feld]),
+    inhalt: list[ft.Control] = [
+        ft.Text("Neuer Abschnitt" if neu else "Abschnitt", size=20, weight=ft.FontWeight.W_500),
+        wahl.control,
+        ft.Row(vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[von_feld, von_knopf]),
         schritte("von"),
         ft.Row(vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=bis_zeile),
+        bis_wahl,
         schritte("bis"),
         dauer,
         rand_zeile(
@@ -292,4 +357,4 @@ def abschnitt_blatt(
     return blatt
 
 
-__all__ = ["SCHRITTE_S", "abschnitt_blatt", "grenzen_pruefen", "schritt_text"]
+__all__ = ["BIS_BEISPIEL", "SCHRITTE_S", "abschnitt_blatt", "grenzen_pruefen", "schritt_text"]

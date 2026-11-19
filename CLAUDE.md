@@ -110,7 +110,10 @@ setzen und pushen — der Workflow „APK“ baut daraus ein Vorab-Release. Den 
 das Release mit Dateinamen nennen. Den **CI**-Lauf des Commits beobachten (`gh run list` zeigt
 daneben Dependabots „Graph Update“ — der zählt nicht) und ihn über die volle SHA suchen
 (`gh run list --workflow CI --commit "$(git rev-parse HEAD)"` — mit gekürztem Hash findet `gh`
-nichts; Ben, 13.11.2026). Scheitert der APK-Lauf an einem 504 von
+nichts; Ben, 13.11.2026). Läufe mit einer Schleife über
+`gh run view <id> --json status,conclusion` abwarten, nicht mit `gh run watch` — das bricht bei
+einem Netzaussetzer ab, obwohl der Lauf weiterläuft (Ben, 19.11.2026: beim CI-Lauf zu 0.3.98
+„error connecting to api.github.com“, der Lauf war grün). Scheitert der APK-Lauf an einem 504 von
 GitHubs Downloads, reicht `gh run rerun <id> --failed`; kein neuer Tag, keine neue Version.
 **Lokale Builds startet nur Ben.** **Vor dem Tag die offenen Dependabot-Warnungen ansehen** (Ben,
 13.11.2026; `gh api repos/ben85keilert/trainingsapp/dependabot/alerts`): kritische und hohe zu

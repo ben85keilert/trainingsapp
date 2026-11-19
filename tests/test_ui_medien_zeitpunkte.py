@@ -21,6 +21,8 @@ from trainingsapp.core.models import (  # noqa: E402
     Ereignis,
     Exercise,
     Media,
+    MediaKind,
+    MediaSource,
     Plan,
 )
 from trainingsapp.core.pakete import Paket, paket_json, paket_lesen  # noqa: E402
@@ -179,8 +181,10 @@ def test_nachher_an_der_uebung_und_am_plan(page, state) -> None:
     )
     plan = state.plaene.laden(plan.id)
     assert material.plan_neu_zeigen(page, state, plan) is True
-    assert "Hausaufgabe" in _texte(page.dialoge[-1])  # steht im Blatt, unter „Zum Abschluss“
-    assert "ZUM ABSCHLUSS" in _texte(page.dialoge[-1])
+    # Vor dem Start steht nur, was jetzt dran ist — nichts von später (Ben, 19.11.2026)
+    assert "So läuft es" in _texte(page.dialoge[-1])
+    assert "Hausaufgabe" not in _texte(page.dialoge[-1])
+    assert "Knie entlasten" not in _texte(page.dialoge[-1])
     assert material.plan_nachher_zeigen(page, state, plan) is True
     assert "Zum Abschluss" in _texte(page.dialoge[-1])
     assert material.plan_nachher_zeigen(page, state, plan) is True  # jedes Mal
@@ -221,3 +225,46 @@ def test_editor_wann_ereignis_und_abschnitte() -> None:
     assert wann.selected == [NACHHER] and werte["bei_art"] == "antwort"
     # Eine Begleitung hat keinen Zeitpunkt — sie läuft dabei
     assert gelesen({"rolle": "begleitung", "wann": NACHHER, "oft": IMMER})["wann"] == ""
+
+
+def test_faelliges_wird_eingeblendet_und_spaeteres_bleibt_verborgen(page, state) -> None:
+    """Ben, 19.11.2026 (`docs/plan_medien_einheitlich.md` §2.5): Ein fälliges Video auf dem Gerät
+    läuft im Blatt selbst — keine Liste zum Herausklicken; was nachher oder zu einem Ereignis
+    kommt, zeigt weder das Blatt noch das Buch-Symbol im Fokus, bis es dran war."""
+    from trainingsapp.core.material import beim_ueben, material_von
+
+    film = "medien/" + "d" * 64 + ".mp4"
+    pfad = state.pakete.ablage.pfad(film)
+    pfad.parent.mkdir(parents=True, exist_ok=True)
+    pfad.write_bytes(b"\x00" * 16)
+    uebung, _plan, item = _planuebung(
+        state,
+        [
+            Media(
+                kind=MediaKind.VIDEO, source=MediaSource.PAKET, uri=film, title="Vorab", zeigen=True
+            ),
+            Media(uri=NACH, title="Danach", wann=NACHHER, zeigen=True),
+            Media(uri=PAUSE, title="Zur Pause", wann=BEI, bei=Ereignis("abschnitt", name="Pause")),
+        ],
+        [],
+    )
+    assert material.neu_zeigen(page, state, uebung, item) is True
+    blatt = page.dialoge[-1]
+    texte = _texte(blatt)
+    assert "Vorab" in texte and "Danach" not in texte and "Zur Pause" not in texte
+    eingeblendet = [x for x in _alle(blatt) if getattr(x, "data", None) == ("eingeblendet", film)]
+    spieler = [x for x in _alle(blatt) if getattr(x, "data", None) == "videospieler"]
+    assert len(eingeblendet) == 1 and len(spieler) == 1  # das Video selbst, keine Zeile
+    assert not [x for x in _alle(blatt) if getattr(x, "data", None) == ("paketmedium", film)]
+    # Das Buch-Symbol beim Üben: nur was schon dran war
+    m = material_von(uebung, item)
+    assert [x.title for x in beim_ueben(m, set()).medien] == ["Vorab"]
+    assert [x.title for x in beim_ueben(m, {PAUSE}).medien] == ["Vorab", "Zur Pause"]
+    knopf = material.material_knopf(page, state, uebung, item, text=False, dran=lambda: set())
+    knopf.on_click(None)
+    offen = _texte(page.dialoge[-1])
+    assert "Vorab" in offen and "Danach" not in offen and "Zur Pause" not in offen
+    # Nur etwas für nachher: beim Üben kein Knopf
+    nur_nachher, _p, it = _planuebung(state, [Media(uri=NACH, title="Danach", wann=NACHHER)], [])
+    assert material.material_knopf(page, state, nur_nachher, it, dran=lambda: set()) is None
+    assert material.material_knopf(page, state, nur_nachher, it) is not None

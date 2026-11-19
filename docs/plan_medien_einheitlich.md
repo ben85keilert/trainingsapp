@@ -22,7 +22,10 @@ Ben, 19.11.2026 („Zur Bereitstellung der Medien in der App“):
    wird es einfach eingeblendet. Die, die nicht dran sind, sollen nicht gezeigt werden, da es dazu
    verleitet, sich vorzeitig etwas anzuschauen, dem man sowieso begegnet.“
 
-**Stand: nur geplant, nichts gebaut.** Fragen im Katalog als **P227**.
+**Stand 19.11.2026:** Ben: „Empfehlungen a–h gelten, bau E1 und E2. Wenn alles geklappt hat,
+mach den ganzen Rest danach gleich mit, außer es gibt Skizzen mit Alternativen und einer
+erforderlichen Auswahl.“ **Gebaut: E1, E2** — was gebaut ist und wo es abweicht, steht in **§5**.
+Fragen im Katalog als **P227** (a–h entschieden wie empfohlen).
 
 Gesucht im Katalog (Entscheidungszeilen): medien, medium, verkleiner, zuschneid, crop, begleit.
 Gelesen: **P226** (Zeitpunkte, gebaut 19.11.), **P225** (Reiter „Medien“), dazu ganz
@@ -254,3 +257,21 @@ Zuschneiden am Handy.
   Paketdateien, bis man es löscht) oder gleich ersetzen? *Behalten, mit „Original löschen“.*
 - **h)** Marken im Ablauf: die Lage aus §2.3 (oben rechts = vorher, unten rechts = nachher, Griff =
   Weg) — und Zugang zu leeren Stellen über das Menü der Kachel? *Ja; Skizzen vorab.*
+
+## 5. Gebaut — und wo es vom Vorschlag abweicht
+
+| Stufe | Gebaut | Fundstelle |
+|---|---|---|
+| E1 | Der Reiter „Medien“ listet die Beschreibung der Übung nicht mehr; Anweisungen der Planübung, Texte an Wegen, Beschreibung des Plans und Kurs-Blöcke bleiben | `core/medien_uebersicht._aus_uebungen` |
+| E2 | Was fällig ist (vor dem ▶, „bei …“, nach „Fertig“; am Plan vor dem Start, zu einer Antwort, am Ende), steht **selbst** im Blatt: ein Video auf dem Gerät läuft im Spieler, ein Bild steht da — sonst nichts. „Gesehen“ hakt ab, „Später“ schließt nur; was jedes Mal kommt, hat „Weiter“. Das Buch-Symbol im Fokus zeigt nur Abschnitte, Begleitung, Vorher und was „bei …“ in diesem Lauf schon kam | `components/material.py` (`faellig_blatt`, `plan_faellig_blatt`, `_faellig_inhalt`), `core.material.beim_ueben`, `Fokus._ereignis_hinweis` |
+
+**Abweichungen (E2):**
+
+- **Mehrere fällige Stücke stehen untereinander** im selben Blatt (das erste Video läuft von
+  selbst), nicht nacheinander mit „1 von 2“ — ein Spieler, der im offenen Blatt gegen den
+  nächsten getauscht wird, ist in Flet heikel (ersetzte Controls).
+- **Abgehakt wird mit dem Knopf „Gesehen“**, nicht mehr schon beim Öffnen des Stücks — es steht
+  ja offen da.
+- **Was die App nicht selbst abspielt**, bleibt eine Zeile mit einem Tipp: ein Link auf eine Seite,
+  ein Video hinter einem Link, das noch nicht geladen ist, PDF und Ton.
+- Das Blatt „Medien“ außerhalb des Übens (Plan, Übungsseite) zeigt weiter alles.

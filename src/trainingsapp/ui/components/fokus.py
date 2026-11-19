@@ -468,7 +468,7 @@ class Fokus:
         self.ereignis_platz.visible = bool(self.ereignis_platz.controls)
 
     def _ereignis_hinweis(self, m: Any, x: Media) -> ft.Control:
-        from trainingsapp.ui.components.material import material_blatt
+        from trainingsapp.ui.components.material import faellig_blatt
 
         def weg(_e: Any = None) -> None:
             self.ereignis_platz.controls.remove(zeile)
@@ -477,10 +477,9 @@ class Fokus:
 
         def ansehen(_e: Any = None) -> None:
             weg()
+            # das Stück selbst, nicht die Liste (Ben, 19.11.2026)
             self.page.show_dialog(
-                material_blatt(
-                    self.page, self.state, self.uebung, self.item, m, neu=(x,), titel="Jetzt"
-                )
+                faellig_blatt(self.page, self.state, self.uebung, self.item, (x,), titel="Jetzt")
             )
 
         zeile = ft.Container(
@@ -579,7 +578,15 @@ class Fokus:
         )
         knopf = self.ebenen_knopf()
         # Material (U2, F6): nur, wenn es welches gibt — ansehen hält die Uhr an
-        material = material_knopf(self.page, self.state, self.uebung, self.item, text=False)
+        # beim Üben nur, was schon dran war (Ben, 19.11.2026) — nichts von „nachher“ und „bei …“
+        material = material_knopf(
+            self.page,
+            self.state,
+            self.uebung,
+            self.item,
+            text=False,
+            dran=lambda: set(self._bei_schon),
+        )
         self.ebenen_anwenden()
         self.saetze_karte = karte(self.saetze_spalte, abstand=0, padding=10)
         return [

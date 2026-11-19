@@ -147,10 +147,9 @@ def test_erstes_start_zeigt_die_erklaerung_dann_startet_die_uhr(page, state) -> 
     assert "Neu zu dieser Übung" in _texte(blatt)
     # Ohne Haken: beim zweiten ▶ startet die Uhr trotzdem (einmal je Sitzung reicht)
     assert material.neu_zeigen(page, state, uebung, item) is False
-    # Der Haken im Blatt gilt für das Profil
-    haken = _daten(blatt, ("gesehen", NEU))
-    assert haken.value is False
-    haken.on_change(SimpleNamespace(control=SimpleNamespace(value=True)))
+    # Eingeblendet ist nur das Fällige (Ben, 19.11.2026); „Gesehen“ gilt für das Profil
+    assert blatt.data == "faellig_blatt" and material.gesehen(state) == set()
+    _daten(blatt, "faellig_gesehen").on_click(None)
     assert material.gesehen(state) == {NEU}
     assert material.material_knopf(page, state, uebung, item).content == "Medien"
     state.material_angeboten = set()  # neue Sitzung

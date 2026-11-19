@@ -121,10 +121,11 @@ def test_reiter_gruppen_groesse_und_gross(page, state) -> None:
     assert medien_reiter.on_click is None  # der gewählte
     texte = _texte(ansicht)
     assert "AUS DEN ÜBUNGEN" in texte and "AUS DIESEM PLAN" in texte
-    assert _daten(ansicht, "medien_kopf").value == "4 Stücke · 1 Datei · 84 MB"
+    assert _daten(ansicht, "medien_kopf").value == "3 Stücke · 1 Datei · 84 MB"
     assert "Dateien reisen mit, wenn du den Plan als Paket weitergibst; Links nicht." in texte
     assert "Video-Datei · Erklärung · 1080p · 30 fps · 2:10" in texte
-    assert "bei 1 · Kniebeuge" in texte and "im „i“ bei 1 · Kniebeuge" in texte
+    # die Beschreibung der Übung steht nicht mehr hier (Ben, 19.11.2026)
+    assert "bei 1 · Kniebeuge" in texte and "im „i“ bei 1 · Kniebeuge" not in texte
     assert _daten(ansicht, ("medien_groesse", True)).content.value == "84 MB · groß"
 
 
@@ -152,8 +153,6 @@ def test_stift_fuehrt_zum_ort_mit_dem_passenden_reiter(page, state) -> None:
     _daten(ansicht, ("medien_aendern", "Technik")).on_click(None)
     ziel = f"/uebung/{u.id}/bearbeiten"
     assert page.wege[-1] == ziel and er.gemerkt(state, ziel) == er.MATERIAL
-    _daten(ansicht, ("medien_aendern", "Beschreibung · Kniebeuge")).on_click(None)
-    assert er.gemerkt(state, ziel) == er.UEBUNG
     _daten(ansicht, ("medien_aendern", "Im Plan")).on_click(None)
     einstellen = f"{basis}/ziel/{plan.items[0].id}"
     assert page.wege[-1] == einstellen and er.gemerkt(state, einstellen) == er.MATERIAL
@@ -257,8 +256,7 @@ def test_medien_des_plans_vor_dem_ersten_start(page, state) -> None:
     assert "Neu zum Plan" in _texte(blatt) and "Beine" in _texte(blatt)
     # einmal je Sitzung — der nächste Tipp startet
     assert material.plan_neu_zeigen(page, state, plan) is False
-    haken = _daten(blatt, ("gesehen", "https://x.org/einstimmung"))
-    haken.on_change(SimpleNamespace(control=SimpleNamespace(value=True)))
+    _daten(blatt, "faellig_gesehen").on_click(None)
     state.material_angeboten = set()  # neue Sitzung: abgehakt kommt nicht wieder
     assert material.plan_neu_zeigen(page, state, plan) is False
     assert material.plan_knopf(page, state, plan).icon == ft.Icons.MENU_BOOK_OUTLINED

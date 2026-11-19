@@ -20,12 +20,12 @@ gestartet werden.“
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.material import Lage, Material, material_von, plan_material
+from trainingsapp.core.material import Lage, Material, beim_ueben, material_von, plan_material
 from trainingsapp.core.models import (
     BEGLEITUNG,
     BEI,
@@ -123,7 +123,7 @@ def neu_zeigen(
     neu = _neue(state, m.neu(gesehen(state)), immer_wieder)
     if not neu:
         return False
-    page.show_dialog(material_blatt(page, state, uebung, item, m, neu=tuple(neu)))
+    page.show_dialog(faellig_blatt(page, state, uebung, item, neu))
     return True
 
 
@@ -135,20 +135,240 @@ def nachher_zeigen(page: Any, state: Any, uebung: Exercise, item: PlanItem | Non
     neu = _neue(state, m.nachher_neu(gesehen(state)), True)
     if not neu:
         return False
-    page.show_dialog(
-        material_blatt(page, state, uebung, item, m, neu=tuple(neu), titel="Nach der Übung")
-    )
+    page.show_dialog(faellig_blatt(page, state, uebung, item, neu, titel="Nach der Übung"))
     return True
 
 
+# -- Fälliges wird eingeblendet (Ben, 19.11.2026, `docs/plan_medien_einheitlich.md` §2.5) --------
+
+#: Höhe des Spielers bzw. Bilds im Blatt
+EINGEBLENDET_HOEHE = 220
+
+
+def _geraetedatei(state: Any, x: Media) -> Any:
+    """Die Datei zu ``x`` auf dem Gerät — eine Paketdatei oder ein schon geladenes Link-Video;
+    ``None``, wenn es nur einen Link gibt oder die Datei fehlt."""
+    from trainingsapp.config import ist_aktiv
+    from trainingsapp.core.linkvideos import direkt
+    from trainingsapp.core.paketmedien import ist_paketmedium
+
+    ablage = getattr(getattr(state, "pakete", None), "ablage", None)
+    if ablage is None:
+        return None
+    if ist_paketmedium(x):
+        pfad = ablage.pfad(x.uri)
+    elif direkt(x.uri) and ist_aktiv("link_videos"):
+        name = ablage.link_datei(x.uri)
+        pfad = ablage.pfad(name) if name is not None else None
+    else:
+        return None
+    return pfad if pfad is not None and pfad.is_file() else None
+
+
+def _faellig_inhalt(
+    page: Any,
+    state: Any,
+    stuecke: Sequence[Media],
+    uebergeben: Callable[[Callable[[], Awaitable[None]]], None],
+) -> tuple[list[ft.Control], list[Any]]:
+    """Die fälligen Stücke **selbst** statt einer Liste zum Herausklicken (Ben, 19.11.2026:
+    „Wenn ein Video abgespielt werden sollte, wird es einfach eingeblendet“): ein Video auf dem
+    Gerät läuft im Spieler (das erste von selbst), ein Bild steht da; alles andere — ein Link
+    auf eine Seite, ein PDF, Ton, ein Video, das erst geladen werden muss — bleibt eine Zeile
+    mit einem Tipp. Zurück kommen die Controls und die Spieler (beim Schließen anzuhalten)."""
+    from trainingsapp.core.models import MediaKind
+    from trainingsapp.core.paketmedien import ist_paketmedium
+
+    controls: list[ft.Control] = []
+    spieler: list[Any] = []
+    for x in stuecke:
+        pfad = _geraetedatei(state, x)
+        ist_video = pfad is not None and (x.kind == MediaKind.VIDEO or not ist_paketmedium(x))
+        stueck: ft.Control | None = None
+        if ist_video:
+            try:
+                from trainingsapp.ui.components.videospieler import Videospieler
+
+                sp = Videospieler([str(pfad)], autoplay=not spieler, hoehe=EINGEBLENDET_HOEHE)
+                spieler.append(sp)
+                stueck = sp.control
+            except ImportError:  # ohne flet-video: die Zeile, wie bisher
+                stueck = None
+        elif pfad is not None and x.kind == MediaKind.IMAGE:
+            stueck = ft.Container(
+                height=EINGEBLENDET_HOEHE,
+                border_radius=12,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                alignment=ft.Alignment.CENTER,
+                content=ft.Image(src=str(pfad), fit=ft.BoxFit.CONTAIN),
+            )
+        if stueck is None:
+            controls.append(medium_zeile(page, state, x, uebergeben=uebergeben))
+            continue
+        if x.title:
+            controls.append(ft.Text(x.title, size=14, weight=ft.FontWeight.W_600))
+        controls.append(ft.Container(content=stueck, data=("eingeblendet", x.uri)))
+    return controls, spieler
+
+
+def _faellig_blatt(
+    page: Any,
+    state: Any,
+    kopf: list[ft.Control],
+    stuecke: Sequence[Media],
+    *,
+    beim_schliessen: Callable[[], Awaitable[None]] | None = None,
+    uebergeben_vorher: Callable[[], None] | None = None,
+) -> ft.BottomSheet:
+    """Das Blatt nur mit dem, was **jetzt dran** ist — nichts von später (es verleitet, vorzeitig
+    anzusehen, was ohnehin kommt). „Gesehen“ hakt alles Gezeigte ab (es kommt nicht mehr von
+    selbst), „Später“ schließt nur; was jedes Mal kommt, hat nur „Weiter“."""
+    nachher = Nachher()
+
+    def uebergeben(gehen: Callable[[], Awaitable[None]]) -> None:
+        if uebergeben_vorher is not None:
+            uebergeben_vorher()
+        nachher.danach(gehen)
+        schliessen(blatt)
+
+    inhalt, spieler = _faellig_inhalt(page, state, stuecke, uebergeben)
+
+    async def zu(_e: Any = None) -> None:
+        for sp in spieler:
+            with contextlib.suppress(Exception):
+                await sp.anhalten()
+        if beim_schliessen is not None:
+            await beim_schliessen()
+        await nachher.bei_schliessen()
+
+    def gesehen_und_zu(_e: Any = None) -> None:
+        for x in stuecke:
+            gesehen_setzen(state, x.uri, True)
+        schliessen(blatt)
+
+    abhakbar = any(x.oft != IMMER for x in stuecke)
+    knoepfe: list[ft.Control] = (
+        [
+            ft.TextButton(
+                "Später", on_click=lambda _e=None: schliessen(blatt), data="faellig_spaeter"
+            ),
+            ft.FilledButton(
+                "Gesehen", icon=ft.Icons.CHECK, on_click=gesehen_und_zu, data="faellig_gesehen"
+            ),
+        ]
+        if abhakbar
+        else [
+            ft.FilledButton(
+                "Weiter", on_click=lambda _e=None: schliessen(blatt), data="faellig_weiter"
+            )
+        ]
+    )
+    blatt: ft.BottomSheet = ft.BottomSheet(
+        scrollable=True,
+        on_dismiss=zu,
+        content=blatt_spalte(
+            [*kopf, *inhalt], [ft.Row(alignment=ft.MainAxisAlignment.END, controls=knoepfe)]
+        ),
+        data="faellig_blatt",
+    )
+    return blatt
+
+
+def _kopfzeile(titel: str, rechts: str) -> ft.Control:
+    return ft.Row(
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[
+            ft.Icon(ft.Icons.MENU_BOOK_OUTLINED),
+            ft.Text(titel, size=18, weight=ft.FontWeight.W_600, expand=True),
+            ft.Text(rechts, size=13, opacity=0.7),
+        ],
+    )
+
+
+def faellig_blatt(
+    page: Any,
+    state: Any,
+    uebung: Exercise,
+    item: PlanItem | None,
+    stuecke: Sequence[Media],
+    *,
+    titel: str = "",
+) -> ft.BottomSheet:
+    """Was zu dieser Übung **jetzt** dran ist, eingeblendet — die Uhr dieser Übung steht
+    solange (wie beim Blatt „Medien“), „Uhr weiter“ startet sie von Hand."""
+    angehalten = einheit_ui.uhr_fuer_material_anhalten(
+        state, uebung.id, item.id if item is not None else None
+    )
+    stand = {"von_hand": False, "uebergeben": False}
+    uhr_text = ft.Text("Die Uhr steht, solange du hier bist.", size=13, expand=True)
+    uhr_knopf = ft.TextButton("Uhr weiter", icon=ft.Icons.PLAY_ARROW, data="uhr_weiter")
+
+    def uhr_weiter(_e: Any = None) -> None:
+        if angehalten is not None and einheit_ui.uhr_fortsetzen(page, state, angehalten):
+            stand["von_hand"] = True
+            uhr_text.value = "Die Uhr läuft weiter."
+            uhr_knopf.visible = False
+            with contextlib.suppress(Exception):
+                uhr_zeile.update()
+
+    uhr_knopf.on_click = uhr_weiter
+    uhr_zeile = ft.Container(
+        visible=angehalten is not None,
+        padding=ft.Padding.only(left=12, right=4, top=2, bottom=2),
+        border_radius=12,
+        bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.PRIMARY),
+        content=ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[ft.Icon(ft.Icons.PAUSE_CIRCLE_OUTLINE, size=20), uhr_text, uhr_knopf],
+        ),
+    )
+
+    def uebergeben_vorher() -> None:
+        stand["uebergeben"] = True
+        if angehalten is not None and not stand["von_hand"]:
+            state.material_lauf = angehalten
+
+    async def beim_schliessen() -> None:
+        if angehalten is not None and not stand["von_hand"] and not stand["uebergeben"]:
+            einheit_ui.uhr_fortsetzen(page, state, angehalten)
+
+    return _faellig_blatt(
+        page,
+        state,
+        [_kopfzeile(titel or "Neu zu dieser Übung", uebung.name), uhr_zeile],
+        stuecke,
+        beim_schliessen=beim_schliessen,
+        uebergeben_vorher=uebergeben_vorher,
+    )
+
+
+def plan_faellig_blatt(
+    page: Any, state: Any, plan: Plan, stuecke: Sequence[Media], *, titel: str = ""
+) -> ft.BottomSheet:
+    """Was zum **Plan** jetzt dran ist (vor dem Start, zu einer Antwort, am Ende), eingeblendet
+    — ohne Uhr."""
+    return _faellig_blatt(page, state, [_kopfzeile(titel or "Neu zum Plan", plan.name)], stuecke)
+
+
 def material_knopf(
-    page: Any, state: Any, uebung: Exercise, item: PlanItem | None, *, text: bool = True
+    page: Any,
+    state: Any,
+    uebung: Exercise,
+    item: PlanItem | None,
+    *,
+    text: bool = True,
+    dran: Callable[[], Collection[str]] | None = None,
 ) -> ft.Control | None:
     """„Medien“ (bis 17.11.2026 „Material“; Ben: „Medien überall“) — ``None`` ohne Material;
-    ``text=False``: nur das Symbol (Fokus)."""
+    ``text=False``: nur das Symbol (Fokus). ``dran``: beim Üben (Fokus) — das Blatt zeigt nur,
+    was schon dran war (`beim_ueben`), gefragt beim Tipp."""
     m = material_von(uebung, item)
     if m.leer:
         return None
+    if dran is not None and beim_ueben(m, {x.uri for x in m.bei}).leer:
+        return None  # es gibt nur etwas für nachher — beim Üben kein Knopf
     hilfe = f"Medien: {m.kurztext()} — die Uhr steht, solange du sie ansiehst"
     # „neu“ ist, was noch abzuhaken ist — nicht, was ohnehin jedes Mal kommt
     neu = any(x.oft != IMMER for x in m.neu(gesehen(state)))
@@ -158,7 +378,8 @@ def material_knopf(
         hilfe = f"Neu — {hilfe}"
 
     def oeffnen(_e: Any = None) -> None:
-        page.show_dialog(material_blatt(page, state, uebung, item, m))
+        jetzt = beim_ueben(m, dran()) if dran is not None else m
+        page.show_dialog(material_blatt(page, state, uebung, item, jetzt))
 
     if not text:
         return ft.IconButton(
@@ -367,7 +588,7 @@ def plan_neu_zeigen(page: Any, state: Any, plan: Plan) -> bool:
     neu = _neue(state, m.neu(gesehen(state)), False)
     if not neu:
         return False
-    page.show_dialog(plan_blatt(page, state, plan, m, neu=tuple(neu)))
+    page.show_dialog(plan_faellig_blatt(page, state, plan, neu))
     return True
 
 
@@ -379,7 +600,7 @@ def plan_nachher_zeigen(page: Any, state: Any, plan: Plan) -> bool:
     neu = _neue(state, m.nachher_neu(gesehen(state)), True)
     if not neu:
         return False
-    page.show_dialog(plan_blatt(page, state, plan, m, neu=tuple(neu), titel="Zum Abschluss"))
+    page.show_dialog(plan_faellig_blatt(page, state, plan, neu, titel="Zum Abschluss"))
     return True
 
 
@@ -396,7 +617,7 @@ def plan_antwort_zeigen(page: Any, state: Any, plan: Plan, antworten: Sequence[s
     ]
     if not neu:
         return False
-    page.show_dialog(plan_blatt(page, state, plan, m, neu=tuple(neu), titel="Zu deiner Antwort"))
+    page.show_dialog(plan_faellig_blatt(page, state, plan, neu, titel="Zu deiner Antwort"))
     return True
 
 
@@ -529,6 +750,8 @@ def plan_blatt(
 
 __all__ = [
     "begleitvideos",
+    "beim_ueben",
+    "faellig_blatt",
     "gesehen",
     "gesehen_setzen",
     "material_blatt",
@@ -537,6 +760,7 @@ __all__ = [
     "neu_zeigen",
     "plan_antwort_zeigen",
     "plan_blatt",
+    "plan_faellig_blatt",
     "plan_knopf",
     "plan_nachher_zeigen",
     "plan_neu_zeigen",

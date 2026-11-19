@@ -371,6 +371,25 @@ def plan_material(plan: Plan) -> Material:
     return Material(teile, tuple(medien))
 
 
+def beim_ueben(m: Material, dran: Collection[str]) -> Material:
+    """Das Material, wie es **während** der Übung zu sehen ist (Ben, 19.11.2026: „Die, die nicht
+    dran sind, sollen nicht gezeigt werden“): Abschnitte, Begleitung und Erklärungen für vorher —
+    was „nachher“ kommt, bleibt weg, was „bei …“ kommt, bis sein Ereignis da war (``dran``: die
+    Adressen, die in diesem Lauf schon kamen); ebenso das Ersetzte.
+
+    >>> m = Material(medien=(Media(uri="https://x/v"), Media(uri="https://x/n", wann="nachher"),
+    ...     Media(uri="https://x/p", wann="bei", bei=Ereignis("satz", n=2))))
+    >>> [x.uri for x in beim_ueben(m, ()).medien], [x.uri for x in beim_ueben(m, {"https://x/p"}).medien]
+    (['https://x/v'], ['https://x/v', 'https://x/p'])
+    """
+    medien = tuple(
+        x
+        for x in m.medien
+        if x.rolle == BEGLEITUNG or not x.wann or (x.wann == BEI and x.uri in dran)
+    )
+    return Material(m.abschnitte, medien)
+
+
 __all__ = [
     "BILD",
     "LINK",
@@ -381,6 +400,7 @@ __all__ = [
     "Lage",
     "Material",
     "art",
+    "beim_ueben",
     "material_von",
     "plan_material",
 ]

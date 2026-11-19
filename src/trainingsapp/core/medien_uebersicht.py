@@ -361,7 +361,7 @@ class _Bau:
 
 
 def _aus_uebungen(bau: _Bau) -> list[Zeile]:
-    """Je Übung (in der Folge ihres ersten Auftritts im Plan) Beschreibung, Medien, Animation."""
+    """Je Übung (in der Folge ihres ersten Auftritts im Plan) Medien und Animation."""
     zeilen: list[Zeile] = []
     je_uebung: dict[str, list[PlanItem]] = {}
     for item in bau.plan.items:
@@ -373,18 +373,9 @@ def _aus_uebungen(bau: _Bau) -> list[Zeile]:
         ziel = Ziel(ZIEL_UEBUNG, u.id)
         stellen = [bau.nummer.get(i.id, 0) for i in items]
         bei = f"bei {_stellen(stellen)} · {u.name}"
-        teile = [a for a in abschnitte(u.description) if not a.leer]
-        if teile:
-            zeilen.append(
-                Zeile(
-                    art=TEXTART,
-                    titel=f"Beschreibung · {u.name}",
-                    unter="Text" if len(teile) == 1 else f"Text · {len(teile)} Abschnitte",
-                    wo=f"im „i“ {bei}",
-                    ziel=ziel,
-                    text=u.description,
-                )
-            )
+        # Die Beschreibung der Übung steht hier nicht (Ben, 19.11.2026: „Übungsbeschreibungen
+        # sind unnötig“, `docs/plan_medien_einheitlich.md` §2.4) — sie bleibt im „i“; ein Stück,
+        # das einem ihrer Abschnitte zugeordnet ist, nennt ihn („zu: Ausführung“)
         # Was eine Planübung ersetzt, gilt dort nicht (`core.material.material_von`)
         weg = {i.id: {x.uri for x in material_von(u, i).ersetzt} for i in items}
         for m in u.media:
@@ -583,9 +574,9 @@ def uebersicht(
     >>> p = Plan(items=[PlanItem(id="i", exercise_id="u", description="## Im Plan\\nlangsam")])
     >>> ue = uebersicht(p, {"u": u})
     >>> [(g.titel, [z.titel for z in g.zeilen]) for g in ue.gruppen]
-    [('AUS DEN ÜBUNGEN', ['Beschreibung · Kniebeuge', 'Technik']), ('AUS DIESEM PLAN', ['Im Plan'])]
-    >>> ue.zeilen[1].unter, ue.zeilen[1].wo, ue.kopf()
-    ('Link · Erklärung · zeigt sich beim ersten Mal', 'bei 1 · Kniebeuge', '3 Stücke')
+    [('AUS DEN ÜBUNGEN', ['Technik']), ('AUS DIESEM PLAN', ['Im Plan'])]
+    >>> ue.zeilen[0].unter, ue.zeilen[0].wo, ue.kopf()
+    ('Link · Erklärung · zeigt sich beim ersten Mal', 'bei 1 · Kniebeuge', '2 Stücke')
     """
     bau = _Bau(plan, uebungen, gesehen, datei, nummern([i.id for i in plan.items]))
     gruppen: list[Gruppe] = []

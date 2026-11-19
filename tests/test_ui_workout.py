@@ -308,10 +308,9 @@ async def test_workout_zeigt_neues_material_von_selbst_und_haelt_die_uhr(umgebun
     state.timer_beobachter["workout"]()
     zweites = _blaetter(seite)[-1]
     assert len(_blaetter(seite)) == 2 and "Merkblatt" in _texte(zweites)
-    # Haken „gesehen“ an beiden — wie beim Öffnen des Stücks
-    for b_, uri in ((blatt, TECHNIK), (zweites, MERKBLATT)):
-        haken = next(x for x in _alle(b_) if getattr(x, "data", None) == ("gesehen", uri))
-        haken.on_change(SimpleNamespace(control=SimpleNamespace(value=True)))
+    # „Gesehen“ an beiden — das Blatt zeigt nur das Fällige (Ben, 19.11.2026)
+    for b_ in (blatt, zweites):
+        next(x for x in _alle(b_) if getattr(x, "data", None) == "faellig_gesehen").on_click(None)
     await zweites.on_dismiss(None)
     assert material.gesehen(state) == {TECHNIK, MERKBLATT}
     assert laufend.route == route

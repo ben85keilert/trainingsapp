@@ -90,8 +90,8 @@ def test_gruppen_nach_herkunft_mit_wo() -> None:
     gruppen = _gruppen(ue)
     assert [g.herkunft for g in ue.gruppen] == [AUS_UEBUNG, AUS_PLAN]
     uebung = [(z.titel, z.wo) for z in gruppen[AUS_UEBUNG]]
+    # ohne die Beschreibung der Übung (Ben, 19.11.2026) — die bleibt im „i“
     assert uebung == [
-        ("Beschreibung · Kniebeuge", "im „i“ bei 1 und 3 · Kniebeuge"),
         # die Technik gilt bei 1, bei 3 ersetzt sie das Stück der Planübung
         ("Technik", "bei 1 · Kniebeuge — bei 3 ersetzt"),
         ("Zählen", "bei 1 und 3 · Kniebeuge"),
@@ -100,13 +100,11 @@ def test_gruppen_nach_herkunft_mit_wo() -> None:
         ("PDF-Datei", "bei 2 · Katze-Kuh"),
     ]
     unter = {z.titel: z.unter for z in gruppen[AUS_UEBUNG]}
-    assert unter["Beschreibung · Kniebeuge"] == "Text · 2 Abschnitte"
     assert unter["Technik"] == "Link · Erklärung · zeigt sich beim ersten Mal"
     assert unter["Zählen"] == "Link · Begleitung"
     assert unter["PDF-Datei"] == "PDF-Datei · Erklärung · gesehen"
     assert unter["Bild der Bewegung · Kniebeuge"] == "Animation · nur auf diesem Gerät"
     arten = {z.titel: z.art for z in gruppen[AUS_UEBUNG]}
-    assert arten["Beschreibung · Kniebeuge"] == TEXTART
     assert arten["Bild der Bewegung · Kniebeuge"] == ANIMATION
     assert all(z.ziel.art == ZIEL_UEBUNG for z in gruppen[AUS_UEBUNG])
     plan_zeilen = [(z.titel, z.unter, z.wo, z.ziel.art) for z in gruppen[AUS_PLAN]]

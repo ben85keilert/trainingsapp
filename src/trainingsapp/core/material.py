@@ -24,7 +24,16 @@ from .beschreibung import Abschnitt, abschnitte
 from .linkvideos import direkt
 from .models import (
     BEGLEITUNG,
+    BEI,
+    E_ABSCHNITT,
+    E_ANTWORT,
+    E_SATZ,
+    E_WDH,
+    E_ZEIT,
+    IMMER,
+    NACHHER,
     NICHT_MATERIAL,
+    Ereignis,
     Exercise,
     Media,
     MediaKind,
@@ -72,6 +81,52 @@ def art(medium: Media) -> str:
     if medium.kind == MediaKind.IMAGE:
         return BILD
     return VIDEO
+
+
+@dataclass(frozen=True, slots=True)
+class Lage:
+    """Wo die Übung gerade steht — woran `Material.faellig` die Ereignisse misst. Alles aus Uhr,
+    Zählung und Wahl, nie aus Messwerten."""
+
+    #: Name des laufenden Timer-Abschnitts
+    abschnitt: str = ""
+    #: der wievielte zählende Abschnitt läuft (1 = Satz 1; 0 = keiner)
+    satz: int = 0
+    #: Sekunden seit dem Start der Uhr
+    gelaufen_s: float = 0.0
+    #: gezählte Wiederholungen — ``None``: es zählt niemand
+    wdh: int | None = None
+    #: die gewählten Antworten einer Frage des Ablaufs
+    antworten: tuple[str, ...] = ()
+
+    def trifft(self, e: Ereignis) -> bool:
+        """Ist das Ereignis eingetreten?
+
+        >>> Lage(abschnitt="Pause").trifft(Ereignis("abschnitt", name="pause"))
+        True
+        >>> Lage(satz=2).trifft(Ereignis("satz", n=2)), Lage(satz=3).trifft(Ereignis("satz", n=2))
+        (True, False)
+        >>> Lage(wdh=None).trifft(Ereignis("wdh", n=5)), Lage(wdh=7).trifft(Ereignis("wdh", n=5))
+        (False, True)
+        >>> Lage(antworten=("Knie zwickt",)).trifft(Ereignis("antwort", antworten=("knie zwickt",)))
+        True
+        """
+        if e.art == E_ABSCHNITT:
+            return bool(self.abschnitt) and self.abschnitt.casefold() == e.name.casefold()
+        if e.art == E_SATZ:
+            return self.satz == e.n
+        if e.art == E_ZEIT:
+            return self.gelaufen_s >= e.sekunden
+        if e.art == E_WDH:
+            return self.wdh is not None and self.wdh >= e.n
+        if e.art == E_ANTWORT:
+            gewaehlt = {a.casefold() for a in self.antworten}
+            return any(a.casefold() in gewaehlt for a in e.antworten)
+        return False
+
+
+def _von_selbst(stuecke: tuple[Media, ...], gesehen: Collection[str]) -> tuple[Media, ...]:
+    return tuple(m for m in stuecke if m.oft == IMMER or (m.zeigen and m.uri not in gesehen))
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,16 +178,96 @@ class Material:
         """Was man ansieht und abhakt — die Uhr steht."""
         return tuple(m for m in self.medien if m.rolle != BEGLEITUNG)
 
+    @property
+    def vorher(self) -> tuple[Media, ...]:
+        """Erklärungen für **vor** der Übung (bzw. vor dem Start des Plans) — die Vorgabe."""
+        return tuple(m for m in self.erklaerungen if not m.wann)
+
+    @property
+    def nachher(self) -> tuple[Media, ...]:
+        """Erklärungen für **nach** der Übung bzw. am Ende des Plans (Ben, 18.11.2026)."""
+        return tuple(m for m in self.erklaerungen if m.wann == NACHHER)
+
+    @property
+    def bei(self) -> tuple[Media, ...]:
+        """Erklärungen, die zu einem **Ereignis** aufgehen (`Media.bei`)."""
+        return tuple(m for m in self.erklaerungen if m.wann == BEI and m.bei is not None)
+
     def neu(self, gesehen: Collection[str]) -> tuple[Media, ...]:
-        """Erklärungen, die sich beim ersten Mal von selbst zeigen und noch nicht abgehakt sind.
+        """Erklärungen für vorher, die von selbst kommen: jedes Mal (``oft = "immer"``) oder
+        beim ersten Mal, bis sie abgehakt sind.
 
         >>> a = Media(uri="https://x/a", zeigen=True)
         >>> b = Media(uri="https://x/b")
-        >>> m = Material(medien=(a, b))
-        >>> [x.uri for x in m.neu(set())], m.neu({"https://x/a"})
-        (['https://x/a'], ())
+        >>> c = Media(uri="https://x/c", oft="immer")
+        >>> d = Media(uri="https://x/d", zeigen=True, wann="nachher")
+        >>> m = Material(medien=(a, b, c, d))
+        >>> [x.uri for x in m.neu(set())], [x.uri for x in m.neu({"https://x/a", "https://x/c"})]
+        (['https://x/a', 'https://x/c'], ['https://x/c'])
         """
-        return tuple(m for m in self.erklaerungen if m.zeigen and m.uri not in gesehen)
+        return _von_selbst(self.vorher, gesehen)
+
+    def nachher_neu(self, gesehen: Collection[str]) -> tuple[Media, ...]:
+        """Was nach der Übung von selbst kommt — wie `neu`, für „nachher“.
+
+        >>> d = Media(uri="https://x/d", zeigen=True, wann="nachher")
+        >>> e = Media(uri="https://x/e", wann="nachher")
+        >>> m = Material(medien=(d, e))
+        >>> [x.uri for x in m.nachher_neu(set())], m.nachher_neu({"https://x/d"})
+        (['https://x/d'], ())
+        """
+        return _von_selbst(self.nachher, gesehen)
+
+    def faellig(self, lage: Lage, schon: Collection[str] = ()) -> tuple[Media, ...]:
+        """Die Stücke „bei …“, deren Ereignis **jetzt** eingetreten ist — ohne die, die in
+        diesem Lauf schon kamen (``schon``: ihre Adressen).
+
+        >>> pause = Media(uri="https://x/p", wann="bei", bei=Ereignis("abschnitt", name="Pause"))
+        >>> spaet = Media(uri="https://x/s", wann="bei", bei=Ereignis("zeit", sekunden=60))
+        >>> m = Material(medien=(pause, spaet))
+        >>> [x.uri for x in m.faellig(Lage(abschnitt="pause", gelaufen_s=10))]
+        ['https://x/p']
+        >>> [x.uri for x in m.faellig(Lage(abschnitt="Satz", gelaufen_s=61), {"https://x/p"})]
+        ['https://x/s']
+        """
+        return tuple(
+            m for m in self.bei if m.uri not in schon and m.bei is not None and lage.trifft(m.bei)
+        )
+
+    def nach_abschnitten(
+        self, ohne: Collection[Media] = ()
+    ) -> tuple[list[tuple[Abschnitt, tuple[Media, ...]]], tuple[Media, ...]]:
+        """Das Blatt in seiner Ordnung (Ben, 18.11.2026: „zugewiesen … und danach geordnet.
+        Gerne auch Mehrfachzuweisung“): je Abschnitt seine Stücke — ein Stück mit zwei
+        Abschnitten steht unter beiden —, dazu die Stücke ohne (bekannten) Abschnitt. ``ohne``:
+        Stücke, die schon woanders stehen (oben als „neu“).
+
+        >>> v = Media(uri="https://x/v", abschnitte=("Ausführung", "Hinweise"))
+        >>> w = Media(uri="https://x/w", abschnitte=("Gibt es nicht",))
+        >>> m = Material(
+        ...     (Abschnitt("Ausführung", "stehen"), Abschnitt("Hinweise", "ruhig atmen")), (v, w)
+        ... )
+        >>> je, rest = m.nach_abschnitten()
+        >>> [(a.name, [x.uri for x in ms]) for a, ms in je]
+        [('Ausführung', ['https://x/v']), ('Hinweise', ['https://x/v'])]
+        >>> [x.uri for x in rest]
+        ['https://x/w']
+        """
+        da = {a.name.casefold() for a in self.abschnitte if a.name}
+        medien = [m for m in self.medien if m not in ohne]
+        je = [
+            (
+                a,
+                tuple(
+                    m
+                    for m in medien
+                    if a.name and a.name.casefold() in {n.casefold() for n in m.abschnitte}
+                ),
+            )
+            for a in self.abschnitte
+        ]
+        rest = tuple(m for m in medien if not ({n.casefold() for n in m.abschnitte} & da))
+        return je, rest
 
     def kurztext(self) -> str:
         """„Text · 2 Videos · PDF“ — was es gibt.
@@ -198,6 +333,16 @@ def material_von(uebung: Exercise | None, item: PlanItem | None) -> Material:
             continue
         schon.add(m.uri)
         (ersetzt if m.uri in weg else medien).append(m)
+    # Abschnitte der Übungsbeschreibung kommen nur dazu, wenn ein Stück zu ihnen gehört (Ben,
+    # 18.11.2026, Frage e) — sonst bleibt die Beschreibung der Übung im „i“
+    gemeint = {n.casefold() for m in medien for n in m.abschnitte}
+    da = {a.name.casefold() for a in teile}
+    if uebung is not None and gemeint - da:
+        teile += tuple(
+            a
+            for a in abschnitte(uebung.description)
+            if not a.leer and a.name.casefold() in gemeint - da
+        )
     return Material(teile, tuple(medien), tuple(ersetzt))
 
 
@@ -233,6 +378,7 @@ __all__ = [
     "PDF",
     "TON",
     "VIDEO",
+    "Lage",
     "Material",
     "art",
     "material_von",

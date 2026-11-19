@@ -788,6 +788,53 @@ async def _laufen(
         if strecke is not None and strecke.file_path:
             with contextlib.suppress(Exception):
                 _nachlauf_fragen(page, state, strecke)
+        with contextlib.suppress(Exception):
+            _medien_nachher(page, state, e, uebung)
+
+
+def _medien_nachher(page: Any, state: Any, e: Einheitslauf, uebung: Any) -> None:
+    """Medien für **nachher** (Ben, 18.11.2026: „am Anfang des Planes, am Ende“;
+    `docs/plan_medien_zeitpunkte.md` §2) — nach dem Ende der Einheit, wenn die Ansicht neu steht
+    und kein anderer Dialog offen ist: nach einer Übung ihr Blatt „Nach der Übung“; war sie die
+    letzte ihrer Liste oder endete ein Workout, das Blatt „Zum Abschluss“ des Plans. Nicht nach
+    einem Abbruch. Was von selbst kommt, sagt das Stück (`Media.oft`, „gesehen“)."""
+    from trainingsapp.devices.plan_ablauf import PlanAblaufBaustein
+    from trainingsapp.ui.components import material
+    from trainingsapp.ui.components.dialoge import dialog_offen
+
+    timer = e.timer
+    if timer is not None and getattr(timer.lauf, "abgebrochen", False):
+        return
+    workout = e.teil("plan")
+    if not isinstance(uebung, UebungKontext) and not isinstance(workout, PlanAblaufBaustein):
+        return
+
+    async def zeigen() -> None:
+        await asyncio.sleep(0.4)  # die Ansicht entsteht gerade neu — erst danach ein Blatt
+        for _ in range(100):  # nach jedem Dialog, der offen ist (Reste, Rückfragen), nie darüber
+            if not dialog_offen(page):
+                break
+            await asyncio.sleep(0.3)
+        else:
+            return
+        with contextlib.suppress(Exception):  # die App geht gerade zu, die Datenbank ist weg
+            oeffnen()
+
+    def oeffnen() -> None:
+        if isinstance(uebung, UebungKontext):
+            u = state.uebungen.laden(uebung.uebung_id)
+            item = state.plaene.item_laden(uebung.item_id) if uebung.item_id else None
+            if u is not None and material.nachher_zeigen(page, state, u, item):
+                return
+            plan = state.plaene.laden(uebung.plan_id) if uebung.plan_id else None
+            if plan is not None and plan.items and plan.items[-1].id == uebung.item_id:
+                material.plan_nachher_zeigen(page, state, plan)
+        elif isinstance(workout, PlanAblaufBaustein):
+            plan = state.plaene.laden(workout.plan_id)
+            if plan is not None:
+                material.plan_nachher_zeigen(page, state, plan)
+
+    page.run_task(zeigen)
 
 
 def _nachlauf_fragen(page: Any, state: Any, strecke: Any) -> None:

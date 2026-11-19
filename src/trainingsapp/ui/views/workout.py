@@ -127,6 +127,8 @@ def workout_view(
         "ueberspringen": None,
         #: für welchen Schritt und Durchlauf schon nach neuem Material gesehen wurde
         "material_fuer": None,
+        #: der Schritt, dessen Übung läuft — (Marke, Übung, Planübung): für ihr „nachher“
+        "nachher_fuer": None,
     }
 
     def beide_auffrischen() -> None:
@@ -195,20 +197,38 @@ def workout_view(
         e, teil = paar
         s = teil.schritt
         marke = (e.id, teil.k, len(teil.verlauf))
-        if stand["material_fuer"] == marke or teil.phase != UEBUNG or not s.uebung_id:
-            return
         # Im Start-Bild des Workout-Plans (``/plan/<id>``) noch nicht: `zum_fokus` wechselt gleich
         # die Route, die Ansichten entstehen neu — das Blatt kommt mit dem ersten Takt im Fokus
         if route != workout_route(plan) or getattr(page, "route", None) != route:
             return
         if dialog_offen(page):
             return
+        # **Nachher** (Ben, 18.11.2026): Ist die Übung eines Schritts vorbei (nächster Schritt
+        # oder ihre Pause), geht auf, was sie für nachher hat — vor dem, was der neue Schritt
+        # mitbringt (das kommt mit dem nächsten Takt, sobald dieses Blatt zu ist)
+        lief = stand["nachher_fuer"]
+        if lief is not None and (lief[0] != marke or teil.phase != UEBUNG):
+            stand["nachher_fuer"] = None
+            u_vorher = katalog.get(lief[1])
+            try:
+                if u_vorher is not None and material.nachher_zeigen(
+                    page, state, u_vorher, state.plaene.item_laden(lief[2])
+                ):
+                    return
+            except Exception:
+                _log.exception("Medien nach dem Workout-Schritt nicht gezeigt")
+        if stand["material_fuer"] == marke or teil.phase != UEBUNG or not s.uebung_id:
+            return
         stand["material_fuer"] = marke
+        stand["nachher_fuer"] = (marke, s.uebung_id, s.item_id)
         u = katalog.get(s.uebung_id)
         if u is None:
             return
         try:
-            material.neu_zeigen(page, state, u, state.plaene.item_laden(s.item_id))
+            # je Schritt wird nur einmal gefragt — „jedes Mal“ kommt darum bei jedem Schritt
+            material.neu_zeigen(
+                page, state, u, state.plaene.item_laden(s.item_id), immer_wieder=True
+            )
         except Exception:  # das Material darf das Workout nie aufhalten — mit Protokoll
             _log.exception("Material des Workout-Schritts nicht gezeigt")
 
@@ -773,6 +793,13 @@ def workout_view(
             teil.antwort_geben(wahl)
             einheit_ui.melden(state)
             auffrischen()
+            # Ein Stück des Plans „bei der Antwort …“ geht auf — der Weg bleibt, wie er ist
+            # (Ben, 18.11.2026: „wenn Wahl für hier und da … → Video“)
+            try:
+                if wahl and not dialog_offen(page):
+                    material.plan_antwort_zeigen(page, state, plan, wahl)
+            except Exception:  # Medien halten das Workout nie auf
+                _log.exception("Medien zur Antwort nicht gezeigt")
 
         def kreuzen(antwort: str) -> Callable[[Any], None]:
             def handler(_e: Any = None) -> None:
@@ -1181,18 +1208,21 @@ def workout_view(
         ]
         if b.inhalt.text:
             teile.append(ft.Text(b.inhalt.text, size=14))
-        if b.inhalt.url:
+        # je Stück ein Knopf — der eine Link von früher zuerst, dann die weiteren (Ben,
+        # 18.11.2026: mehrere Stücke am Weg); ohne Titel heißt der Knopf „Öffnen“
+        for s in b.inhalt.stuecke:
 
-            def oeffnen() -> None:
+            def oeffnen(_e: Any = None, adresse: str = s.uri) -> None:
                 if browser is not None and hasattr(page, "run_task"):
-                    page.run_task(links.oeffnen, page, browser, b.inhalt.url)
+                    page.run_task(links.oeffnen, page, browser, adresse)
 
             teile.append(
                 ft.TextButton(
-                    "Öffnen",
+                    s.title or "Öffnen",
                     icon=ft.Icons.PLAY_CIRCLE_OUTLINE,
                     on_click=oeffnen,
-                    tooltip=b.inhalt.url,
+                    tooltip=s.uri,
+                    data=("weg_stueck", s.uri),
                 )
             )
         return karte(*teile, abstand=4)

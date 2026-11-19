@@ -117,6 +117,98 @@ class MediaSource(StrEnum):
     PAKET = "paket"
 
 
+#: Arten eines Ereignisses, zu dem sich ein Stück zeigt (`Ereignis.art`)
+E_ABSCHNITT = "abschnitt"
+E_SATZ = "satz"
+E_ZEIT = "zeit"
+E_WDH = "wdh"
+E_ANTWORT = "antwort"
+EREIGNIS_ARTEN = (E_ABSCHNITT, E_SATZ, E_ZEIT, E_WDH, E_ANTWORT)
+
+
+@dataclass(frozen=True, slots=True)
+class Ereignis:
+    """Wozu ein Stück mit ``wann = "bei"`` aufgeht (Ben, 18.11.2026: „zu bestimmten Ereignissen …
+    wenn Wahl für hier und da/Wdh oder Zeit soundso → Video“; `docs/plan_medien_zeitpunkte.md`
+    §2): der Timer-Abschnitt ``name`` beginnt · Satz ``n`` beginnt · die Uhr läuft seit
+    ``sekunden`` · ``n`` Wiederholungen sind gezählt · eine der ``antworten`` einer Frage des
+    Ablaufs ist gewählt. Gerechnet aus Uhr, Zählung und Wahl — **nie aus Messwerten**.
+
+    >>> Ereignis(E_ABSCHNITT, name="Pause").als_dict()
+    {'art': 'abschnitt', 'name': 'Pause'}
+    >>> Ereignis.aus({"art": "wdh", "n": "10", "name": "x"})
+    Ereignis(art='wdh', name='', n=10, sekunden=0.0, antworten=())
+    >>> Ereignis.aus({"art": "antwort", "antworten": ["Knie zwickt", " "]}).text()
+    'bei der Antwort „Knie zwickt“'
+    >>> Ereignis.aus({"art": "zeit", "sekunden": 90}).text()
+    'nach 1:30'
+    >>> Ereignis.aus({"art": "satz", "n": 2}).text()
+    'wenn Satz 2 beginnt'
+    >>> Ereignis.aus({"art": "tanz"}) is None, Ereignis.aus({"art": "satz"}) is None
+    (True, True)
+    """
+
+    art: str = ""
+    name: str = ""
+    n: int = 0
+    sekunden: float = 0.0
+    antworten: tuple[str, ...] = ()
+
+    def als_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"art": self.art}
+        if self.art == E_ABSCHNITT:
+            d["name"] = self.name
+        elif self.art in (E_SATZ, E_WDH):
+            d["n"] = self.n
+        elif self.art == E_ZEIT:
+            d["sekunden"] = self.sekunden
+        elif self.art == E_ANTWORT:
+            d["antworten"] = list(self.antworten)
+        return d
+
+    @staticmethod
+    def aus(roh: Any) -> Ereignis | None:
+        """Aus der Wörterbuch-Form — ``None``, wenn die Art unbekannt ist oder ihr Wert fehlt."""
+        hat = getattr(roh, "get", None)
+        if hat is None:
+            return None
+        art = str(hat("art") or "")
+        try:
+            if art == E_ABSCHNITT:
+                name = str(hat("name") or "").strip()
+                return Ereignis(art, name=name) if name else None
+            if art in (E_SATZ, E_WDH):
+                n = int(hat("n") or 0)
+                return Ereignis(art, n=n) if n > 0 else None
+            if art == E_ZEIT:
+                s = float(hat("sekunden") or 0)
+                return Ereignis(art, sekunden=s) if s > 0 else None
+            if art == E_ANTWORT:
+                roh_liste = hat("antworten") or ()
+                if isinstance(roh_liste, str):
+                    roh_liste = [roh_liste]
+                antworten = tuple(a for x in roh_liste if (a := str(x).strip()))
+                return Ereignis(art, antworten=antworten) if antworten else None
+        except (TypeError, ValueError):
+            return None
+        return None
+
+    def text(self) -> str:
+        """In Worten, für Editor und Übersicht."""
+        if self.art == E_ABSCHNITT:
+            return f"wenn „{self.name}“ beginnt"
+        if self.art == E_SATZ:
+            return f"wenn Satz {self.n} beginnt"
+        if self.art == E_ZEIT:
+            s = int(self.sekunden)
+            return f"nach {s // 60}:{s % 60:02d}"
+        if self.art == E_WDH:
+            return f"ab {self.n} Wiederholungen"
+        if self.art == E_ANTWORT:
+            return "bei der Antwort " + " · ".join(f"„{a}“" for a in self.antworten)
+        return ""
+
+
 @dataclass(slots=True)
 class Media:
     """Ein Video oder Bild zu einer Übung oder einem Trainingseintrag."""
@@ -138,9 +230,48 @@ class Media:
     #: Die Adresse (``uri``) eines Stücks der Übung, das dieses hier ersetzt — an einer
     #: Planübung oder in einer Ergänzung; das ersetzte wird nicht mehr angeboten
     ersetzt: str = ""
+    #: **Wann** sich eine Erklärung zeigt (Ben, 18.11.2026, `docs/plan_medien_zeitpunkte.md`
+    #: §2): leer = **vorher** (vor dem ▶ der Übung, vor dem Start des Plans), ``"nachher"`` =
+    #: nach „Fertig“ der Übung bzw. am Ende des Plans, ``"bei"`` = zu einem Ereignis (`bei`).
+    #: Eine Begleitung läuft „dabei“ — das sagt ihre Rolle
+    wann: str = ""
+    #: **Wie oft** es von selbst kommt: leer = nach `zeigen` (an: bis es abgehakt ist, aus: nur
+    #: auf Tipp), ``"immer"`` = jedes Mal
+    oft: str = ""
+    #: Das Ereignis zu ``wann = "bei"``
+    bei: Ereignis | None = None
+    #: Die **Abschnitte** der Beschreibung (ihre Namen, ``## Name``), zu denen das Stück gehört —
+    #: mehrere erlaubt; das Blatt beim Üben stellt es unter jeden davon (§3)
+    abschnitte: tuple[str, ...] = ()
+
+    @property
+    def von_selbst(self) -> bool:
+        """Kommt es von selbst — bis es abgehakt ist oder jedes Mal?"""
+        return self.zeigen or self.oft == IMMER
+
+    def zeit_zusatz(self) -> dict[str, Any]:
+        """Wann, wie oft, Ereignis und Abschnitte — nur, was gesetzt ist (in der Datenbank der
+        Übung die Spalte ``zusatz_json``, Migration 071).
+
+        >>> Media(uri="https://x.org/v", wann="nachher", oft="immer").zeit_zusatz()
+        {'wann': 'nachher', 'oft': 'immer'}
+        >>> Media(uri="https://x.org/v", abschnitte=("Ausführung",)).zeit_zusatz()
+        {'abschnitte': ['Ausführung']}
+        """
+        d: dict[str, Any] = {}
+        if self.wann:
+            d["wann"] = self.wann
+        if self.oft:
+            d["oft"] = self.oft
+        if self.bei is not None and self.wann == BEI:
+            d["bei"] = self.bei.als_dict()
+        if self.abschnitte:
+            d["abschnitte"] = list(self.abschnitte)
+        return d
 
     def zusatz(self) -> dict[str, Any]:
-        """Rolle, „von selbst zeigen“ und „ersetzt“ — nur, was gesetzt ist.
+        """Rolle, „von selbst zeigen“ und „ersetzt“ — nur, was gesetzt ist; dazu Wann, Wie oft,
+        Ereignis und Abschnitte (`zeit_zusatz`).
 
         >>> Media(uri="https://x.org/v", rolle="begleitung").zusatz()
         {'rolle': 'begleitung'}
@@ -154,6 +285,7 @@ class Media:
             d["zeigen"] = True
         if self.ersetzt:
             d["ersetzt"] = self.ersetzt
+        d.update(self.zeit_zusatz())
         return d
 
     def als_dict(self) -> dict[str, Any]:
@@ -185,15 +317,22 @@ SYMBOL = "symbol"
 ROLLEN = frozenset({BEGLEITUNG, BEWEGUNG, SYMBOL})
 #: Stücke mit diesen Rollen zeigt die App an ihrem eigenen Platz, nicht unter „Material“
 NICHT_MATERIAL = frozenset({BEWEGUNG, SYMBOL})
+#: `Media.wann`: nach der Übung bzw. am Ende des Plans · zu einem Ereignis; leer = vorher
+NACHHER = "nachher"
+BEI = "bei"
+ZEITPUNKTE = frozenset({NACHHER, BEI})
+#: `Media.oft`: jedes Mal von selbst
+IMMER = "immer"
 
 
 def medien_zusatz(roh: Any) -> dict[str, Any]:
     """Was `Media.zusatz` schreibt, als Argumente für `Media` — Unbekanntes fällt weg.
 
-    >>> medien_zusatz({"rolle": "begleitung", "zeigen": 1, "ersetzt": " https://x.org/alt "})
-    {'rolle': 'begleitung', 'zeigen': True, 'ersetzt': 'https://x.org/alt'}
-    >>> medien_zusatz({"rolle": "tanz"})
-    {'rolle': '', 'zeigen': False, 'ersetzt': ''}
+    >>> z = medien_zusatz({"rolle": "begleitung", "zeigen": 1, "ersetzt": " https://x.org/alt "})
+    >>> z["rolle"], z["zeigen"], z["ersetzt"]
+    ('begleitung', True, 'https://x.org/alt')
+    >>> medien_zusatz({"rolle": "tanz"})["rolle"], medien_zusatz({"wann": "nachher"})["wann"]
+    ('', 'nachher')
     >>> medien_zusatz({"rolle": "bewegung"})["rolle"], medien_zusatz({"rolle": "symbol"})["rolle"]
     ('bewegung', 'symbol')
     """
@@ -205,6 +344,43 @@ def medien_zusatz(roh: Any) -> dict[str, Any]:
         "rolle": rolle if rolle in ROLLEN else "",
         "zeigen": bool(hat("zeigen")),
         "ersetzt": str(hat("ersetzt") or "").strip(),
+        **zeit_zusatz_lesen(roh),
+    }
+
+
+def zeit_zusatz_lesen(roh: Any) -> dict[str, Any]:
+    """Was `Media.zeit_zusatz` schreibt, als Argumente für `Media` — Unbekanntes fällt weg; ein
+    „bei“ ohne brauchbares Ereignis ist keins (das Stück liegt dann still hinter „Medien“).
+
+    >>> z = zeit_zusatz_lesen({"wann": "bei", "bei": {"art": "satz", "n": 2}, "oft": "immer"})
+    >>> z["wann"], z["oft"], z["bei"].text(), z["abschnitte"]
+    ('bei', 'immer', 'wenn Satz 2 beginnt', ())
+    >>> zeit_zusatz_lesen({"wann": "bei", "abschnitte": ["Ausführung", "", "Ausführung"]})
+    {'wann': '', 'oft': '', 'bei': None, 'abschnitte': ('Ausführung',)}
+    >>> zeit_zusatz_lesen({"wann": "morgen", "oft": "nie", "abschnitte": "Hinweise"})
+    {'wann': '', 'oft': '', 'bei': None, 'abschnitte': ('Hinweise',)}
+    """
+    hat = getattr(roh, "get", None)
+    if hat is None:
+        return {}
+    wann = str(hat("wann") or "")
+    wann = wann if wann in ZEITPUNKTE else ""
+    ereignis = Ereignis.aus(hat("bei")) if wann == BEI else None
+    if wann == BEI and ereignis is None:
+        wann = ""
+    liste = hat("abschnitte") or ()
+    if isinstance(liste, str):
+        liste = [liste]
+    namen: list[str] = []
+    for x in liste:
+        name = str(x).strip()
+        if name and name not in namen:
+            namen.append(name)
+    return {
+        "wann": wann,
+        "oft": IMMER if str(hat("oft") or "") == IMMER else "",
+        "bei": ereignis,
+        "abschnitte": tuple(namen),
     }
 
 
@@ -723,10 +899,21 @@ class Strecke:
 
 __all__ = [
     "BEGLEITUNG",
+    "BEI",
     "BEWEGUNG",
+    "EREIGNIS_ARTEN",
+    "E_ABSCHNITT",
+    "E_ANTWORT",
+    "E_SATZ",
+    "E_WDH",
+    "E_ZEIT",
+    "IMMER",
+    "NACHHER",
     "NICHT_MATERIAL",
     "ROLLEN",
     "SYMBOL",
+    "ZEITPUNKTE",
+    "Ereignis",
     "Exercise",
     "HrvRecording",
     "HrvTitel",
@@ -741,4 +928,5 @@ __all__ = [
     "Subject",
     "jetzt",
     "new_id",
+    "zeit_zusatz_lesen",
 ]

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from trainingsapp.core.ablauf import Ablauf, Kante
-from trainingsapp.core.bedingung import ENDE, Inhalt
+from trainingsapp.core.bedingung import ENDE, Inhalt, Stueck
 from trainingsapp.core.kursbloecke import FRAGE, MEDIUM, PLAN_WEG, TEXT, Block
 from trainingsapp.core.kurse import Kapitel
 from trainingsapp.core.medien_uebersicht import (
@@ -180,6 +180,33 @@ def test_wege_im_workout_nur_mit_inhalt_und_nur_mit_ablauf() -> None:
     assert wege[0].text == "Erst lockern" and wege[0].ziel.art == ZIEL_ABLAUF
     plan.ablauf = Ablauf(an=False, kanten=kanten)
     assert IM_WORKOUT not in _gruppen(uebersicht(plan, uebungen))
+
+
+def test_weg_mit_mehreren_stuecken() -> None:
+    """Ben, 18.11.2026: am Weg mehr als ein Link — je weiterem Stück eine Zeile; die Datei hält
+    sie unter ``inhalt.medien``, eine ältere App liest weiter Text und den einen Link."""
+    plan, uebungen = _plan()
+    inhalt = Inhalt(
+        "Erst lockern",
+        STUFE,
+        (Stueck("https://x.org/wade", "Wade dehnen"), Stueck("https://x.org/huefte")),
+    )
+    kante = Kante("i1", "i3", text="Rücken tut weh", inhalt=inhalt)
+    assert Kante.aus_dict(kante.als_dict()) == kante
+    assert kante.als_dict()["inhalt"]["medien"] == [
+        {"uri": "https://x.org/wade", "title": "Wade dehnen"},
+        {"uri": "https://x.org/huefte"},
+    ]
+    plan.ablauf = Ablauf(an=True, start="i1", kanten=(kante, Kante("i3", "i2")))
+    wege = _gruppen(uebersicht(plan, uebungen))[IM_WORKOUT]
+    assert [(z.titel, z.wo) for z in wege] == [
+        ("Rücken tut weh", "am Weg von 1 · Kniebeuge zu 3 · Kniebeuge"),
+        ("Wade dehnen", "am Weg von 1 · Kniebeuge zu 3 · Kniebeuge"),
+        ("https://x.org/huefte", "am Weg von 1 · Kniebeuge zu 3 · Kniebeuge"),
+    ]
+    # nur weitere Stücke, kein Text: der Weg hat trotzdem Inhalt
+    nur = Kante("i1", "i2", inhalt=Inhalt(medien=(Stueck("https://x.org/wade"),)))
+    assert not nur.inhalt.leer and [s.uri for s in nur.inhalt.stuecke] == ["https://x.org/wade"]
 
 
 def test_kurs_nur_was_ihm_gegeben_wird_und_wege_mit_seinem_inhalt() -> None:

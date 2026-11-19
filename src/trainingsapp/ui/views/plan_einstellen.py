@@ -49,6 +49,7 @@ from trainingsapp.core import zaehlen as zl
 from trainingsapp.core.anhaenge import BILD, VIDEO, Ziel
 from trainingsapp.core.bedingung import Bedingung
 from trainingsapp.core.bereinigen import NichtBereinigbar
+from trainingsapp.core.beschreibung import abschnitte as beschreibung_abschnitte
 from trainingsapp.core.links import erlaubt as link_erlaubt
 from trainingsapp.core.models import (
     BEGLEITUNG,
@@ -269,6 +270,19 @@ def plan_einstellen(
         inhalt_hinweis="Was in diesem Plan gilt … Tippen oder diktieren.",
         erster_name="Anweisung",
     )
+
+    def abschnitt_namen() -> list[str]:
+        """Die Abschnitte, denen ein Stück zugeordnet werden kann (Ben, 18.11.2026): die der
+        Anweisungen hier, wie sie gerade dastehen, dann die der Übungsbeschreibung."""
+        namen: list[str] = []
+        for a in [
+            *beschreibung_abschnitte(anweisung_editor.text()),
+            *beschreibung_abschnitte(uebung.description),
+        ]:
+            if a.name and a.name not in namen:
+                namen.append(a.name)
+        return namen
+
     anweisung_anfang = anweisung_editor.text()
     links_stand: list[dict[str, Any]] = [
         {"medium": m, "titel": m.title, "uri": m.uri, "id": m.id, "zusatz": werte_von(m)}
@@ -337,6 +351,7 @@ def plan_einstellen(
                         ersetzbar=ersetzbar,
                         kennung=z["id"],
                         bewegung=medium.kind == MediaKind.IMAGE,
+                        abschnitte=abschnitt_namen,
                     )
                 )
                 continue
@@ -373,7 +388,11 @@ def plan_einstellen(
                     ],
                 )
             )
-            zeilen.append(rollen_zeile(z["zusatz"], ersetzbar=ersetzbar, kennung=z["id"]))
+            zeilen.append(
+                rollen_zeile(
+                    z["zusatz"], ersetzbar=ersetzbar, kennung=z["id"], abschnitte=abschnitt_namen
+                )
+            )
         zeilen += [
             links_fehler,
             ft.Row(

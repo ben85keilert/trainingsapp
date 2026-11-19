@@ -37,7 +37,16 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
-from .bedingung import ENDE, HAUPTZWEIG, Bedingung, Inhalt, Stand, sekunden_text
+from .bedingung import (
+    ENDE,
+    HAUPTZWEIG,
+    Bedingung,
+    Inhalt,
+    Stand,
+    inhalt_als_dict,
+    inhalt_aus,
+    sekunden_text,
+)
 from .bedingung import GEMACHT as B_GEMACHT
 from .bedingung import KEINE as B_KEINE
 from .bedingung import SKALA as B_SKALA
@@ -197,8 +206,7 @@ class Kante:
         if self.text:
             d["text"] = self.text
         if not self.inhalt.leer:
-            paare = (("text", self.inhalt.text), ("url", self.inhalt.url))
-            d["inhalt"] = {k: v for k, v in paare if v}
+            d["inhalt"] = inhalt_als_dict(self.inhalt)
         return d
 
     @classmethod
@@ -241,12 +249,7 @@ class Kante:
         antworten = _texte(roh.get("antworten")) if ausloeser == ANTWORT else ()
         if ausloeser == ANTWORT and not antworten:
             ausloeser = FREI  # ohne Antwort gilt der Weg bei jeder anderen
-        inhalt_roh = roh.get("inhalt")
-        inhalt = (
-            Inhalt(str(inhalt_roh.get("text") or ""), str(inhalt_roh.get("url") or ""))
-            if isinstance(inhalt_roh, Mapping)
-            else Inhalt()
-        )
+        inhalt = inhalt_aus(roh.get("inhalt"))
         return cls(
             str(roh["von"]),
             str(roh["nach"]),

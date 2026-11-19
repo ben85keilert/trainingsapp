@@ -201,10 +201,20 @@ def test_plan_selbst_link_dazu_aendern_herausnehmen(page, state) -> None:
     blatt = page.dialoge[-1]
     _daten(blatt, "plan_titel").value = "Einstimmung"
     _daten(blatt, "plan_adresse").value = "https://x.org/einstimmung"
-    _daten(blatt, "plan_zeigen").value = True
+    # Wann und wie oft: dieselben Zeilen wie an der Übung, mit den Wörtern des Plans
+    schalter = _daten(blatt, ("material_zeigen", "plan"))
+    schalter.on_change(SimpleNamespace(control=SimpleNamespace(value=True)))
+    wann = _daten(blatt, ("material_wann", "plan"))
+    assert [s.label.value for s in wann.segments] == ["Vor dem Start", "Am Ende", "Bei …"]
+    wann.on_change(SimpleNamespace(control=SimpleNamespace(selected=["nachher"])))
     asyncio.run(blatt.on_dismiss(None))
     (m,) = state.plaene.laden(plan.id).media
-    assert (m.uri, m.title, m.zeigen) == ("https://x.org/einstimmung", "Einstimmung", True)
+    assert (m.uri, m.title, m.zeigen, m.wann) == (
+        "https://x.org/einstimmung",
+        "Einstimmung",
+        True,
+        "nachher",
+    )
     # Eine Adresse, die die App nicht öffnen darf, kommt nicht dazu — die Meldung erst danach
     _daten(plan_medien_view(page, state, plan, basis), "plan_medium_dazu").items[0].on_click(None)
     blatt = page.dialoge[-1]

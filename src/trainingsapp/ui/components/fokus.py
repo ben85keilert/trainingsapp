@@ -26,7 +26,7 @@ import flet as ft
 from hrv_core.trends import KENNZAHLEN, verlauf
 
 from trainingsapp.core.hf_profil import bereich_von, bereiche_fuer
-from trainingsapp.core.models import Media
+from trainingsapp.core.models import IMMER, Media
 from trainingsapp.core.timer import Abschnitt, dauer_text
 from trainingsapp.core.timer_eintrag import gelaufene_zeiten
 from trainingsapp.devices.einheit import Einheitslauf
@@ -241,6 +241,12 @@ class Fokus:
         self._video_von_hand_aus = False
         #: Die Haken im Ebenen-Menü
         self._haken: dict[str, ft.Icon] = {}
+        #: Stücke „bei …“ (Ben, 18.11.2026: „zu bestimmten Ereignissen … wenn Wdh oder Zeit
+        #: soundso → Video“): Tritt ihr Ereignis ein, steht ein Hinweis unter der Uhr — die Uhr
+        #: läuft weiter, ein Tipp öffnet das Blatt (`_ereignisse_nachziehen`)
+        self.ereignis_platz = ft.Column(spacing=6, tight=True, visible=False)
+        self._material: Any = None
+        self._bei_schon: set[str] = set()
         self.hf_wert = ft.Text("—", size=28, weight=ft.FontWeight.W_600)
         self.hf_unten = ft.Text("kein Gurt", size=11, opacity=0.65)
         self.hf_karte = ft.Container(
@@ -430,6 +436,71 @@ class Fokus:
             data="video_laden",
         )
 
+    def _ereignisse_nachziehen(
+        self, e: Einheitslauf, lauf: Any, stand: Any, zaehlend: list[int]
+    ) -> None:
+        """Stücke „bei …“: Ist ihr Ereignis eingetreten (`core.material.Material.faellig` —
+        aus Uhr, Zählung, nie aus Messwerten), kommt je Stück ein Hinweis unter die Uhr; je Lauf
+        einmal, und nur, solange es nicht abgehakt ist oder „jedes Mal“ kommen soll."""
+        from trainingsapp.core.material import Lage, material_von
+        from trainingsapp.ui.components.material import gesehen
+
+        if self._material is None:
+            self._material = material_von(self.uebung, self.item)
+        m = self._material
+        if not m.bei or not lauf.begonnen:
+            return
+        gezaehlt = e.teil("zaehlen")
+        lage = Lage(
+            abschnitt=str(stand.name or ""),
+            satz=zaehlend.index(stand.nummer) + 1 if stand.nummer in zaehlend else 0,
+            gelaufen_s=float(lauf.vergangen_s()),
+            wdh=int(gezaehlt.summe) if isinstance(gezaehlt, ZaehlBaustein) else None,
+        )
+        neu = m.faellig(lage, self._bei_schon)
+        if not neu:
+            return
+        self._bei_schon.update(x.uri for x in neu)
+        abgehakt = gesehen(self.state)
+        for x in neu:
+            if x.oft == IMMER or x.uri not in abgehakt:
+                self.ereignis_platz.controls.append(self._ereignis_hinweis(m, x))
+        self.ereignis_platz.visible = bool(self.ereignis_platz.controls)
+
+    def _ereignis_hinweis(self, m: Any, x: Media) -> ft.Control:
+        from trainingsapp.ui.components.material import material_blatt
+
+        def weg(_e: Any = None) -> None:
+            self.ereignis_platz.controls.remove(zeile)
+            self.ereignis_platz.visible = bool(self.ereignis_platz.controls)
+            self.neu_zeichnen()
+
+        def ansehen(_e: Any = None) -> None:
+            weg()
+            self.page.show_dialog(
+                material_blatt(
+                    self.page, self.state, self.uebung, self.item, m, neu=(x,), titel="Jetzt"
+                )
+            )
+
+        zeile = ft.Container(
+            padding=ft.Padding.only(left=12, right=4, top=2, bottom=2),
+            border_radius=12,
+            bgcolor=ft.Colors.SECONDARY_CONTAINER,
+            content=ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Icon(ft.Icons.MENU_BOOK, size=20),
+                    ft.Text(x.title or "Medium", size=13, expand=True),
+                    ft.TextButton("Ansehen", on_click=ansehen, data=("ereignis_ansehen", x.uri)),
+                    ft.IconButton(ft.Icons.CLOSE, icon_size=18, tooltip="Später", on_click=weg),
+                ],
+            ),
+            data=("ereignis", x.uri),
+        )
+        return zeile
+
     def _video_nachziehen(self, laeuft: bool) -> None:
         """Das Video läuft mit der Uhr (Ben: „automatisch abgespielt“) und steht mit ihr — nur
         bei einem Wechsel, damit ein ⏸ von Hand nicht je Tick überstimmt wird."""
@@ -518,6 +589,7 @@ class Fokus:
                 rechts=[*([material] if material is not None else []), knopf],
             ),
             self.balken_platz,
+            self.ereignis_platz,
             self.tempo_platz,
             ft.Row(
                 alignment=ft.MainAxisAlignment.CENTER,
@@ -578,6 +650,7 @@ class Fokus:
         self.halt_knopf.tooltip = "Weiter" if not stand.laeuft else "Pause"
         self.halt_knopf.disabled = (stand.fertig and ueber <= 0) or lauf.abgebrochen
         self._video_nachziehen(_uhr_laeuft(lauf))
+        self._ereignisse_nachziehen(e, lauf, stand, zaehlend)
         # „Ohne Uhr — nur Fokus“ (P146): keine Zeit, keine Pause — Kurven und Eintragen bleiben
         ohne = bool(getattr(lauf.profil, "ohne_uhr", False))
         self.zeit_text.visible = not ohne

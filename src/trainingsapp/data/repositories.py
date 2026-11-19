@@ -59,6 +59,7 @@ from ..core.models import (
     new_id,
     tag_name_pruefen,
     tagesgrenzen,
+    zeit_zusatz_lesen,
 )
 from ..core.pakete import stand_tag_nachziehen
 from ..core.parameter import kontextfelder, modus_aus_felder
@@ -209,7 +210,8 @@ class ExerciseRepo:
                 self.con.execute(
                     "INSERT INTO exercise_media "
                     "(id, exercise_id, kind, source, uri, title, license, sort_order, "
-                    "rolle, zeigen, ersetzt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "rolle, zeigen, ersetzt, zusatz_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         m.id,
                         uebung.id,
@@ -222,6 +224,7 @@ class ExerciseRepo:
                         m.rolle,
                         int(m.zeigen),
                         m.ersetzt,
+                        json.dumps(z, ensure_ascii=False) if (z := m.zeit_zusatz()) else "",
                     ),
                 )
             # Tags: je Name genau eine Zeile in `tag`, Zuordnung komplett ersetzen.
@@ -522,6 +525,7 @@ class ExerciseRepo:
                     rolle=r["rolle"],
                     zeigen=bool(r["zeigen"]),
                     ersetzt=r["ersetzt"],
+                    **zeit_zusatz_lesen(_json_lesen(r["zusatz_json"], {})),
                 )
             )
         for u in uebungen:

@@ -15,6 +15,7 @@ from attrappen import Gurt, Seite, Uhr, ruhe  # noqa: E402
 from trainingsapp.core.bewegungsbild import mit_bewegungsbild  # noqa: E402
 from trainingsapp.core.models import (  # noqa: E402
     BEGLEITUNG,
+    Ereignis,
     Exercise,
     Media,
     MediaKind,
@@ -292,6 +293,62 @@ async def test_begleitvideo_im_fokus_laeuft_mit_der_uhr_statt_der_bewegung(umgeb
     # wieder an: es beginnt neu — die Uhr läuft, aber das ⏸ von Hand gilt weiter
     video_eintrag.content.on_click(None)
     assert _sichtbar(fokus, huelle) and video.autoplay is False
+    state.einheit.timer.lauf.abbrechen()
+    await _sekunden(state, uhr, gurt, 2)
+
+
+async def test_stueck_bei_einem_ereignis_meldet_sich_unter_der_uhr(umgebung) -> None:
+    """Ben, 18.11.2026: „zu bestimmten Ereignissen … wenn Wdh oder Zeit soundso → Video“ — ein
+    Hinweis unter der Uhr, die Uhr läuft weiter; ein Tipp öffnet das Blatt."""
+    state, uhr, gurt = umgebung
+    u = _kniebeuge(state, bild=False)
+    u.media = [
+        Media(
+            uri="https://x.org/satz.mp4",
+            title="So geht der Satz",
+            wann="bei",
+            bei=Ereignis("abschnitt", name="satz"),
+        ),
+        Media(
+            uri="https://x.org/spaet.mp4",
+            title="Nach 20 Sekunden",
+            wann="bei",
+            bei=Ereignis("zeit", sekunden=20),
+        ),
+    ]
+    state.uebungen.speichern(u)
+    u = state.uebungen.laden(u.id)
+    seite = Seite()
+    basis = f"/uebung/{u.id}"
+    _knopf(uebung_timer_view(seite, state, basis, u), "Starten").on_click()
+    await _sekunden(state, uhr, gurt, 2)
+    fokus = uebung_timer_view(seite, state, basis, u)
+    hinweise = [
+        x
+        for x in _alle(fokus)
+        if isinstance(getattr(x, "data", None), tuple) and x.data[0] == "ereignis"
+    ]
+    # Der Abschnitt läuft schon (ohne Rücksicht auf Groß und klein), die 20 Sekunden noch nicht
+    assert [h.data[1] for h in hinweise] == ["https://x.org/satz.mp4"]
+    assert "So geht der Satz" in _texte(hinweise[0])
+    await _sekunden(state, uhr, gurt, 20)
+    state.timer_beobachter["uebung"]()
+    hinweise = [
+        x
+        for x in _alle(fokus)
+        if isinstance(getattr(x, "data", None), tuple) and x.data[0] == "ereignis"
+    ]
+    assert [h.data[1] for h in hinweise] == ["https://x.org/satz.mp4", "https://x.org/spaet.mp4"]
+    # „Ansehen“ öffnet das Blatt mit dem Stück oben und nimmt den Hinweis weg
+    ansehen = next(x for x in _alle(hinweise[0]) if isinstance(x, ft.TextButton))
+    ansehen.on_click(None)
+    assert "Jetzt" in _texte(seite.dialoge[-1]) and "So geht der Satz" in _texte(seite.dialoge[-1])
+    hinweise = [
+        x
+        for x in _alle(fokus)
+        if isinstance(getattr(x, "data", None), tuple) and x.data[0] == "ereignis"
+    ]
+    assert [h.data[1] for h in hinweise] == ["https://x.org/spaet.mp4"]
     state.einheit.timer.lauf.abbrechen()
     await _sekunden(state, uhr, gurt, 2)
 

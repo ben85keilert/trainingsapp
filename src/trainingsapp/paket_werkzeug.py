@@ -425,6 +425,7 @@ def pruefen(
     f_rollen, h_rollen = rollen_pruefen(roh, datei.parent)  # vor dem Einbinden (nimmt `datei`)
     fehler.extend(f_rollen)
     hinweise.extend(h_rollen)
+    hinweise.extend(zeitpunkte_pruefen(roh))
     if datei.suffix == ".toml" and _nennt_dateien(roh):
         with tempfile.TemporaryDirectory() as arbeit:
             try:
@@ -616,6 +617,70 @@ _UUID_TEXT = re.compile(r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 _BEWEGUNG_ENDUNGEN = frozenset({"png", "jpg", "jpeg", "gif", "webp"})
 #: Endungen eines Symbols: SVG (eingefärbt) oder PNG (wie es ist)
 _SYMBOL_ENDUNGEN = frozenset({"svg", "png"})
+
+
+def zeitpunkte_pruefen(roh: Mapping[str, Any]) -> list[str]:
+    """Hinweise zu Zeitpunkt und Abschnitten der Medien (Ben, 18.11.2026,
+    `docs/plan_medien_zeitpunkte.md` §2/§3): ein ``wann`` oder ``oft``, das die App nicht kennt;
+    ein ``wann = "bei"`` ohne lesbares Ereignis (die App zeigt das Stück dann nur auf Tipp); an
+    einer Übung ein Abschnitt, den ihre Beschreibung nicht hat (das Stück steht dann unter
+    „Weitere“). Kein Fehler — die App liest alles davon, nur anders als gemeint.
+
+    >>> roh = {"exercises": [{"name": "Baum", "description": "## Ausführung\\nstehen", "media": [
+    ...     {"uri": "https://x.org/a", "abschnitte": ["Ausführung", "Hinweise"]},
+    ...     {"uri": "https://x.org/b", "wann": "morgen", "oft": "nie"},
+    ...     {"uri": "https://x.org/c", "wann": "bei", "bei": {"art": "satz"}},
+    ...     {"uri": "https://x.org/d", "wann": "bei", "bei": {"art": "zeit", "sekunden": 90}}]}]}
+    >>> for zeile in zeitpunkte_pruefen(roh):
+    ...     print(zeile[:78])
+    Übung „Baum“: Medium „https://x.org/a“: Abschnitt „Hinweise“ hat die Beschreib
+    Medium „https://x.org/b“: wann = „morgen“ kennt die App nicht (nachher, bei) —
+    Medium „https://x.org/b“: oft = „nie“ kennt die App nicht (immer) — es gilt „z
+    Medium „https://x.org/c“: wann = „bei“ ohne lesbares Ereignis (bei = { art = …
+    """
+    from trainingsapp.core.beschreibung import abschnitte
+    from trainingsapp.core.models import BEI, IMMER, ZEITPUNKTE, Ereignis
+
+    hinweise: list[str] = []
+    for e in roh.get("exercises") or []:
+        if not isinstance(e, dict) or not isinstance(e.get("media"), list):
+            continue
+        da = {a.name.casefold() for a in abschnitte(str(e.get("description") or "")) if a.name}
+        for m in e["media"]:
+            if not isinstance(m, dict):
+                continue
+            liste = m.get("abschnitte") or []
+            for name in [liste] if isinstance(liste, str) else liste:
+                if str(name).strip().casefold() not in da:
+                    hinweise.append(
+                        f"Übung „{e.get('name', e.get('key', '?'))}“: Medium "
+                        f"„{m.get('title') or m.get('datei') or m.get('uri') or '?'}“: Abschnitt "
+                        f"„{name}“ hat die Beschreibung nicht — das Stück steht dann unter den "
+                        "übrigen"
+                    )
+    for liste in medienlisten(roh):
+        for m in liste:
+            if not isinstance(m, dict):
+                continue
+            name = str(m.get("title") or m.get("datei") or m.get("uri") or "?")
+            wann = str(m.get("wann") or "")
+            if wann and wann not in ZEITPUNKTE:
+                hinweise.append(
+                    f"Medium „{name}“: wann = „{wann}“ kennt die App nicht (nachher, bei) — sie "
+                    "zeigt es vorher"
+                )
+            oft = str(m.get("oft") or "")
+            if oft and oft != IMMER:
+                hinweise.append(
+                    f"Medium „{name}“: oft = „{oft}“ kennt die App nicht (immer) — es gilt „zeigen“"
+                )
+            if wann == BEI and Ereignis.aus(m.get("bei")) is None:
+                hinweise.append(
+                    f"Medium „{name}“: wann = „bei“ ohne lesbares Ereignis (bei = {{ art = … }}: "
+                    "abschnitt mit name, satz oder wdh mit n, zeit mit sekunden, antwort mit "
+                    "antworten) — die App zeigt es nur auf Tipp"
+                )
+    return hinweise
 
 
 def rollen_pruefen(roh: Mapping[str, Any], ordner: Path) -> tuple[list[str], list[str]]:

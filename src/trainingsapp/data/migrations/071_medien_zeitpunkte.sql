@@ -1,0 +1,14 @@
+-- Zeitpunkte und Abschnitte am Medium (Ben, 18.11.2026, docs/plan_medien_zeitpunkte.md §2/§3:
+-- „Die Medien müssen auf beliebige Punkte gesetzt werden können … Die Beschreibungen … und die
+-- anderen Medien müssen zugewiesen werden können und danach geordnet. Gerne auch
+-- Mehrfachzuweisung“).
+--
+-- `exercise_media.zusatz_json`: was `core.models.Media.zeit_zusatz` schreibt — JSON-Objekt mit
+--   `wann` ("nachher" | "bei"; fehlt = vorher), `oft` ("immer"; fehlt = nach `zeigen`),
+--   `bei` (das Ereignis: art abschnitt | satz | zeit | wdh | antwort mit seinem Wert) und
+--   `abschnitte` (Namen der Abschnitte der Beschreibung, zu denen das Stück gehört).
+--   Leer = nichts davon. Eine Spalte statt vier: Es wird nie danach gesucht, nur mitgelesen.
+--
+-- Planübung und Plan halten ihre Stücke schon als JSON (`plan_item.media_json`,
+-- `plan.media_json`, `Media.als_dict`) — dort stehen die Felder ohne Migration.
+ALTER TABLE exercise_media ADD COLUMN zusatz_json TEXT NOT NULL DEFAULT '';

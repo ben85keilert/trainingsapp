@@ -34,7 +34,7 @@ import flet as ft
 
 from trainingsapp.core import ablauf as ab
 from trainingsapp.core.ablauf import Ablauf, Kante
-from trainingsapp.core.bedingung import ENDE, Inhalt
+from trainingsapp.core.bedingung import ENDE, Stueck
 
 KARTE = ft.Colors.SURFACE_CONTAINER_HIGHEST
 #: Die Auslöser in Kurzform — in der Leiste unter dem Bild stehen alle fünf in einer Zeile
@@ -922,7 +922,7 @@ def _weg(
                 min_lines=1,
                 max_lines=3,
                 on_blur=lambda e: aendern(
-                    i, inhalt=Inhalt((e.control.value or "").strip(), k.inhalt.url)
+                    i, inhalt=replace(k.inhalt, text=(e.control.value or "").strip())
                 ),
             ),
             ft.TextField(
@@ -931,10 +931,74 @@ def _weg(
                 dense=True,
                 keyboard_type=ft.KeyboardType.URL,
                 on_blur=lambda e: aendern(
-                    i, inhalt=Inhalt(k.inhalt.text, (e.control.value or "").strip())
+                    i, inhalt=replace(k.inhalt, url=(e.control.value or "").strip())
                 ),
             ),
         ]
+        # Weitere Stücke am Weg (Ben, 18.11.2026: bisher nur ein Link) — je Stück Titel und
+        # Adresse; eine leere Adresse fällt beim Verlassen des Felds heraus
+        weitere = list(k.inhalt.medien)
+        if offen.get(f"stueck{i}"):
+            # das neue Stück: sein Titel wartet, bis die Adresse dasteht
+            weitere.append(Stueck("", str(offen.get(f"stuecktitel{i}") or "")))
+
+        def stueck_setzen(n: int, **neu: str) -> None:
+            liste = [*k.inhalt.medien, weitere[-1]][: max(n + 1, len(k.inhalt.medien))]
+            liste[n] = replace(liste[n], **neu)
+            if n >= len(k.inhalt.medien) and not liste[n].uri.strip():
+                offen[f"stuecktitel{i}"] = liste[n].title  # noch ohne Adresse: nur merken
+                return
+            offen.pop(f"stueck{i}", None)
+            offen.pop(f"stuecktitel{i}", None)
+            aendern(
+                i,
+                inhalt=replace(k.inhalt, medien=tuple(s for s in liste if s.uri.strip())),
+                zeichnen=True,
+            )
+
+        for n, s in enumerate(weitere):
+            zeilen.append(
+                ft.Row(
+                    spacing=6,
+                    controls=[
+                        ft.TextField(
+                            label="Titel",
+                            value=s.title,
+                            dense=True,
+                            expand=2,
+                            data=("weg_stueck_titel", n),
+                            on_blur=lambda e, n=n: stueck_setzen(
+                                n, title=(e.control.value or "").strip()
+                            ),
+                        ),
+                        ft.TextField(
+                            label="Weiterer Link (https://…)",
+                            value=s.uri,
+                            dense=True,
+                            expand=3,
+                            keyboard_type=ft.KeyboardType.URL,
+                            data=("weg_stueck_uri", n),
+                            on_blur=lambda e, n=n: stueck_setzen(
+                                n, uri=(e.control.value or "").strip()
+                            ),
+                        ),
+                    ],
+                )
+            )
+        if not offen.get(f"stueck{i}"):
+
+            def stueck_dazu(_e: Any = None) -> None:
+                offen[f"stueck{i}"] = True
+                aendern(i, zeichnen=True)
+
+            zeilen.append(
+                ft.TextButton(
+                    "Weiteres Medium …",
+                    icon=ft.Icons.ADD,
+                    on_click=stueck_dazu,
+                    data="weg_stueck_dazu",
+                )
+            )
     else:
 
         def inhalt_auf(_e: Any = None) -> None:

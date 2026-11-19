@@ -53,6 +53,7 @@ import flet as ft
 from trainingsapp.core import varianten as var
 from trainingsapp.core.anhaenge import BILD, VIDEO, Ziel
 from trainingsapp.core.bereinigen import NichtBereinigbar
+from trainingsapp.core.beschreibung import abschnitte as beschreibung_abschnitte
 from trainingsapp.core.bewegungsbild import bewegungsbild, mit_bewegungsbild
 from trainingsapp.core.gps_wahl import GpsWahl
 from trainingsapp.core.models import (
@@ -414,6 +415,11 @@ def uebung_bearbeiten(
     )
     beschreibung_spalte = beschreibung_editor.spalte
     beschreibung_text = beschreibung_editor.text
+
+    def abschnitt_namen() -> list[str]:
+        """Die Abschnitte der Beschreibung, wie sie gerade dasteht — ihnen lässt sich ein Stück
+        zuordnen (Ben, 18.11.2026, `components/material_rolle.py`)."""
+        return [a.name for a in beschreibung_abschnitte(beschreibung_text()) if a.name]
 
     # -- Typen und Regionen ------------------------------------------------
     # Die Tag-Auswahl wie im Katalog: zwei Kästen, Mehrfachauswahl in der
@@ -1159,6 +1165,7 @@ def uebung_bearbeiten(
                             ersetzbar=ersetzbar_ohne(m.uri),
                             kennung=m.uri,
                             bewegung=m.kind == MediaKind.IMAGE,
+                            abschnitte=abschnitt_namen,
                         ),
                     ],
                 )
@@ -1185,6 +1192,7 @@ def uebung_bearbeiten(
                             link_rollen.setdefault(id(titel), werte_von(None)),
                             ersetzbar=ersetzbar_ohne((adresse.value or "").strip()),
                             kennung=(adresse.value or "").strip(),
+                            abschnitte=abschnitt_namen,
                         ),
                     ],
                 )

@@ -57,6 +57,7 @@ from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import PLAN_MEDIEN_MD
 from trainingsapp.ui.components.karte import info_knopf, karte
 from trainingsapp.ui.components.material import gesehen
+from trainingsapp.ui.components.material_rolle import gelesen, rollen_zeile, werte_von
 from trainingsapp.ui.components.medienliste import SYMBOLE, oeffner
 from trainingsapp.ui.components.plan_reiter import ohne_uebergang, plan_reiter
 from trainingsapp.ui.state import AppState
@@ -235,10 +236,15 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
             visible=not datei,
             data="plan_adresse",
         )
-        zeigen = ft.Switch(
-            label="Vor dem Start beim ersten Mal zeigen",
-            value=bool(alt and alt.zeigen),
-            data="plan_zeigen",
+        # Wann und wie oft (Ben, 18.11.2026: „am Anfang des Planes, am Ende … zu bestimmten
+        # Ereignissen“): Vor dem Start · Am Ende · Bei einer Antwort; dazu die Abschnitte der
+        # Beschreibung des Plans — dieselben Zeilen wie an Übung und Planübung
+        werte = {**werte_von(alt), "rolle": ""}  # am Plan gibt es keine Begleitung
+        wann = rollen_zeile(
+            werte,
+            kennung="plan",
+            plan=True,
+            abschnitte=lambda: [a.name for a in abschnitte(frisch().description) if a.name],
         )
         stand = {"weg": False}
 
@@ -258,10 +264,11 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
                     melden(f"Nur https-Adressen: {ziel}")
                     return
                 name = (titel.value or "").strip()
+                zusatz = {**gelesen({**werte, "rolle": ""}), "ersetzt": ""}
                 stueck = (
-                    replace(alt, uri=ziel, title=name, zeigen=bool(zeigen.value), rolle="")
+                    replace(alt, uri=ziel, title=name, **zusatz)
                     if alt is not None
-                    else Media(uri=ziel, title=name, zeigen=bool(zeigen.value))
+                    else Media(uri=ziel, title=name, **zusatz)
                 )
                 if alt is not None:
                     if ziel != alt.uri and any(m.uri == ziel for m in medien):
@@ -308,11 +315,12 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
                     ),
                     titel,
                     adresse,
-                    zeigen,
+                    wann,
                     ft.Text(
                         "Am Kopf des Plans und vor dem Start des Workouts hinter dem "
-                        "Buch-Symbol; „von selbst“ geht es vor dem ersten Start auf, bis es "
-                        "abgehakt ist.",
+                        "Buch-Symbol. „Von selbst“ geht es vor dem Start auf (bis es abgehakt "
+                        "ist oder jedes Mal), „Am Ende“ nach der letzten Übung bzw. dem Workout, "
+                        "„Bei …“ nach einer Antwort im Workout.",
                         size=12,
                         opacity=0.7,
                     ),

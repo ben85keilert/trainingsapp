@@ -64,15 +64,65 @@ HAUPTZWEIG: Final = "A"
 
 
 @dataclass(frozen=True, slots=True)
+class Stueck:
+    """Ein weiteres Stück an einem Weg: Adresse (https) und Titel — in der Datei wie ein Medium
+    (``uri``, ``title``)."""
+
+    uri: str
+    title: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Inhalt:
-    """Was bei Erfüllung aufgeht: ein Text (Auftrag) und/oder ein Link (Video)."""
+    """Was bei Erfüllung aufgeht: ein Text (Auftrag) und/oder ein Link (Video) — und seit
+    19.11.2026 **weitere Stücke** (Ben, 18.11.: „Bisher geht das vor allem für bestimmte Wege“
+    und nur mit einem Link; `docs/plan_medien_zeitpunkte.md` §2, Frage d).
+
+    >>> i = Inhalt("Dehnen", "https://x.org/a", (Stueck("https://x.org/b", "Wade"),))
+    >>> [s.uri for s in i.stuecke], i.leer, Inhalt(medien=(Stueck("https://x.org/b"),)).leer
+    (['https://x.org/a', 'https://x.org/b'], False, False)
+    >>> inhalt_aus(inhalt_als_dict(i)) == i, inhalt_als_dict(Inhalt())
+    (True, {})
+    >>> inhalt_aus({"medien": [{"uri": " "}, {"uri": "https://x.org/b"}, "x"]}).medien
+    (Stueck(uri='https://x.org/b', title=''),)
+    """
 
     text: str = ""
     url: str = ""
+    medien: tuple[Stueck, ...] = ()
 
     @property
     def leer(self) -> bool:
-        return not (self.text.strip() or self.url.strip())
+        return not (self.text.strip() or self.url.strip() or self.medien)
+
+    @property
+    def stuecke(self) -> tuple[Stueck, ...]:
+        """Alle Links — der eine von früher zuerst."""
+        erster = (Stueck(self.url.strip()),) if self.url.strip() else ()
+        return erster + self.medien
+
+
+def inhalt_als_dict(inhalt: Inhalt) -> dict[str, Any]:
+    """Der Inhalt für die Datei — nur, was gesetzt ist; eine ältere App liest Text und Link und
+    übergeht ``medien``."""
+    d: dict[str, Any] = {k: v for k, v in (("text", inhalt.text), ("url", inhalt.url)) if v}
+    if inhalt.medien:
+        d["medien"] = [
+            {"uri": s.uri, **({"title": s.title} if s.title else {})} for s in inhalt.medien
+        ]
+    return d
+
+
+def inhalt_aus(roh: Any) -> Inhalt:
+    if not isinstance(roh, Mapping):
+        return Inhalt()
+    liste = roh.get("medien")
+    medien = tuple(
+        Stueck(uri, str(m.get("title") or "").strip())
+        for m in (liste if isinstance(liste, list) else [])
+        if isinstance(m, Mapping) and (uri := str(m.get("uri") or "").strip())
+    )
+    return Inhalt(str(roh.get("text") or ""), str(roh.get("url") or ""), medien)
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,8 +210,7 @@ class Bedingung:
         if self.hart:
             d["hart"] = True
         if not self.inhalt.leer:
-            paare = (("text", self.inhalt.text), ("url", self.inhalt.url))
-            d["inhalt"] = {k: v for k, v in paare if v}
+            d["inhalt"] = inhalt_als_dict(self.inhalt)
         if self.zweig != HAUPTZWEIG:
             d["zweig"] = self.zweig
         if self.dann:
@@ -205,12 +254,7 @@ class Bedingung:
             for w in (roh.get("wege") or [])
             if isinstance(w, Mapping) and w.get("ziel")
         )
-        inhalt_roh = roh.get("inhalt")
-        inhalt = (
-            Inhalt(str(inhalt_roh.get("text") or ""), str(inhalt_roh.get("url") or ""))
-            if isinstance(inhalt_roh, Mapping)
-            else Inhalt()
-        )
+        inhalt = inhalt_aus(roh.get("inhalt"))
         zweig = str(roh.get("zweig") or HAUPTZWEIG)
         if zweig not in ZWEIGE:
             zweig = HAUPTZWEIG
@@ -487,6 +531,9 @@ __all__ = [
     "Erfuellung",
     "Inhalt",
     "Stand",
+    "Stueck",
+    "inhalt_als_dict",
+    "inhalt_aus",
     "mit_zweig",
     "naechster_im_zweig",
     "pruefen",

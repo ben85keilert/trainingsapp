@@ -37,7 +37,19 @@ from .bewegungsbild import EINGEBAUT, bewegungsbild
 from .kursbloecke import MEDIUM, PLAN_WEG, TEXT, ZU_ENDE, Block, bloecke_von
 from .kurse import Kapitel
 from .material import BILD, LINK, PDF, TON, VIDEO, art, material_von
-from .models import BEGLEITUNG, BEWEGUNG, SYMBOL, Exercise, Media, MediaSource, Plan, PlanItem
+from .models import (
+    BEGLEITUNG,
+    BEI,
+    BEWEGUNG,
+    IMMER,
+    NACHHER,
+    SYMBOL,
+    Exercise,
+    Media,
+    MediaSource,
+    Plan,
+    PlanItem,
+)
 from .paketmedien import groesse_text, ist_paketmedium
 from .videoinfo import Videoinfo
 from .zaehlen import wirksame_wahl
@@ -264,10 +276,19 @@ def _zustand(m: Media, gesehen: Collection[str]) -> list[str]:
     if m.rolle == SYMBOL:
         return ["Symbol"]
     teile = ["Erklärung"]
-    if m.uri in gesehen:
+    # Wann (Ben, 18.11.2026, `docs/plan_medien_zeitpunkte.md` §2): vorher ist die Vorgabe
+    if m.wann == NACHHER:
+        teile.append("nachher")
+    elif m.wann == BEI and m.bei is not None:
+        teile.append(m.bei.text())
+    if m.oft == IMMER:
+        teile.append("jedes Mal")
+    elif m.uri in gesehen:
         teile.append("gesehen")
-    elif m.zeigen:
+    elif m.zeigen and m.wann != BEI:
         teile.append("zeigt sich beim ersten Mal")
+    if m.abschnitte:
+        teile.append("zu: " + ", ".join(m.abschnitte))
     return teile
 
 
@@ -451,6 +472,17 @@ def _aus_plan(bau: _Bau) -> list[Zeile]:
     return zeilen
 
 
+def _weg_zeilen(bau: _Bau, k: Kante, ziel: Ziel, *, aus: str = "") -> list[Zeile]:
+    """Der Inhalt an einem Weg und je weiterem Stück (`Inhalt.medien`) eine eigene Zeile."""
+    erste = _weg_zeile(bau, k, ziel, aus=aus)
+    zeilen = [erste] if (k.inhalt.text.strip() or k.inhalt.url.strip()) else []
+    zeilen += [
+        bau.medium_zeile(Media(uri=s.uri, title=s.title or s.uri), erste.wo, ziel)
+        for s in k.inhalt.medien
+    ]
+    return zeilen
+
+
 def _weg_zeile(bau: _Bau, k: Kante, ziel: Ziel, *, aus: str = "") -> Zeile:
     """Der Inhalt an einem Weg: ein Link (mit dem Text als Satz) oder nur Text. Der Weg in
     Worten („von … zu …“) — der Pfeil fehlt manchen Schriften (Web-Fassung ohne CDN)."""
@@ -578,9 +610,9 @@ def uebersicht(
             if teil is not None:
                 ziel = Ziel(ZIEL_KURS, teil.kurs_id, teil.kapitel.id)
                 aus = f"aus Kapitel {teil.nummer}"
-                kurs_wege.setdefault(teil.kurs_id, []).append(_weg_zeile(bau, k, ziel, aus=aus))
+                kurs_wege.setdefault(teil.kurs_id, []).extend(_weg_zeilen(bau, k, ziel, aus=aus))
             else:
-                workout.append(_weg_zeile(bau, k, Ziel(ZIEL_ABLAUF)))
+                workout.extend(_weg_zeilen(bau, k, Ziel(ZIEL_ABLAUF)))
     if workout:
         gruppen.append(
             Gruppe(

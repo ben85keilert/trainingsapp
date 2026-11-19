@@ -483,6 +483,7 @@ def test_gedrueckt_halten_oeffnet_das_menue_an_der_uebung(umgebung) -> None:
     eintraege = _menue_oeffnen(ansicht, ik)
     assert eintraege == [
         "Übung einstellen …",
+        "Medien …",  # die vier Stellen der Übung (Ben, 19.11.2026)
         "Beiname …",
         "Nur ihren Weg zeigen",
         "Als Start",

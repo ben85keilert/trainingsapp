@@ -74,12 +74,14 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import ablauf as ab
+from trainingsapp.core import medien_stellen as ms
 from trainingsapp.core.ablauf import Ablauf, Frage, Kante
 from trainingsapp.core.models import Exercise, Media, Plan
 from trainingsapp.core.standards import eigenes
 from trainingsapp.core.uebung_timer import timer_fuer
 from trainingsapp.core.uebungsfilter import paket_wahl
 from trainingsapp.ui.components import ablaufbild as abbild
+from trainingsapp.ui.components import medien_stellen
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
@@ -693,6 +695,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
     _vorher = frisch().ablauf
     if (_mit := stuecke_abholen(state, plan.id, _vorher)) != _vorher:
         speichern(_mit)
+    medien_stellen.abholen(state, frisch())  # … und was für eine Stelle einer Übung wartet
 
     def plan_stuecke() -> list[tuple[Media, str]]:
         """Die Stücke dieses Plans und seiner Planübungen — vorn in „aus vorhandenen Medien“."""
@@ -1307,6 +1310,10 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                 dann(lambda: page.push_route(f"{basis}/ziel/{knoten}")),
                 ft.Icons.SETTINGS_OUTLINED,
             ),
+            # die vier Stellen der Übung — auch die leeren (Ben, 19.11.2026)
+            abbild.Eintrag(
+                "Medien …", dann(lambda: marke_getippt(knoten)), ft.Icons.MENU_BOOK_OUTLINED
+            ),
             abbild.Eintrag(
                 "Beiname …", dann(lambda: beiname_blatt(knoten)), ft.Icons.LABEL_OUTLINE
             ),
@@ -1331,6 +1338,29 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             )
         )
         return abbild.Menue(knoten, eintraege, menue_schliessen, nach_oben)
+
+    def marke_getippt(knoten: str) -> None:
+        """Eine Marke der Medien (an einer Kachel oder an „Start“) bzw. „Medien …“ im Menü: das
+        Blatt mit den Stellen dieser Übung bzw. des Plans (`components/medien_stellen.py`)."""
+        menue_zu()
+        blatt = medien_stellen.stellen_blatt(
+            page,
+            state,
+            plan.id,
+            medien_stellen.PLAN if knoten == abbild.START else knoten,
+            basis=basis,
+            hier=route,
+            neu_zeichnen=neu_zeichnen,
+        )
+        if blatt is not None:
+            with contextlib.suppress(Exception):
+                page.show_dialog(blatt)
+
+    def marken_jetzt(p: Plan) -> dict[str, tuple[str, ...]]:
+        """Je Knoten die belegten Stellen, unter `START` die des Plans."""
+        marken = {it.id: ms.stellen_von(katalog.get(it.exercise_id), it).belegt for it in p.items}
+        marken[abbild.START] = ms.plan_stellen(p).belegt
+        return marken
 
     def kante_getippt(k: Kante) -> None:
         """Der Punkt eines Wegs (oder sein Etikett): Der Weg ist gewählt, seine **Leiste** steht
@@ -1407,6 +1437,9 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             on_verbinden=verbinden,
             on_kachel_auf=kachel_auf,
             on_ziehen=ziele.zeigen,
+            marken=marken_jetzt(p),
+            wege_mit_inhalt=ms.wege_mit_inhalt(p.ablauf),
+            on_marke=marke_getippt,
         )
 
     # „Ende“ und „◀ zurück“ am unteren Rand des Bildes — nur zu sehen, während gezogen wird

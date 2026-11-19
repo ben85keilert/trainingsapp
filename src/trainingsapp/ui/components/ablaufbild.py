@@ -54,7 +54,7 @@ import contextlib
 import inspect
 import math
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -63,6 +63,7 @@ import flet.canvas as cv
 
 from trainingsapp.core import ablauf as ab
 from trainingsapp.core import ablauf_geometrie as geo
+from trainingsapp.core import medien_stellen as ms
 from trainingsapp.core.ablauf import Ablauf, Kante, Lage
 from trainingsapp.core.ablauf_geometrie import (
     EBENE,
@@ -97,9 +98,45 @@ GRUPPE_KACHEL = "uebung"
 GRUPPE_WEG = "weg"
 #: „Start“ als Herkunft in ``on_verbinden`` (kein Knoten)
 START = ab.VOM_START
+#: Die Marken der Medien an einer Kachel (Ben, 19.11.2026): Größe, Farbe, Lage am rechten Rand
+#: von oben nach unten — die Lage sagt das Wann — und das Zeichen darin
+MARKE = 16
+MARKE_FARBE = ft.Colors.SECONDARY
+MARKE_OBEN: dict[str, float] = {
+    ms.VORHER: -6,
+    ms.DABEI: 12,
+    ms.BEI_EREIGNIS: 30,
+    ms.DANACH: KNOTEN - MARKE + 6,
+}
+MARKE_ZEICHEN: dict[str, ft.IconData | None] = {
+    ms.VORHER: None,
+    ms.DABEI: ft.Icons.PLAY_ARROW,
+    ms.BEI_EREIGNIS: ft.Icons.BOLT,
+    ms.DANACH: None,
+}
 #: Breite der Menükarte an einem Knoten und Höhe einer Zeile darin
 MENUE_B = 216
 MENUE_ZEILE = 42
+
+
+def _marke(knoten: str, stelle: str, on_marke: Callable[[str], Any] | None) -> ft.Control:
+    """Eine Marke am rechten Rand der Kachel — ein Punkt (vorher oben, nachher unten), ▶ für
+    die Begleitung, ein Blitz für „bei …“. Ein Tipp öffnet die Medien dieser Übung."""
+    zeichen = MARKE_ZEICHEN.get(stelle)
+    return ft.Container(
+        right=-7,
+        top=MARKE_OBEN.get(stelle, 0),
+        width=MARKE,
+        height=MARKE,
+        border_radius=MARKE / 2,
+        bgcolor=MARKE_FARBE,
+        border=ft.Border.all(2, ft.Colors.SURFACE),
+        alignment=ft.Alignment.CENTER,
+        tooltip=f"Medien: {ms.NAMEN.get(stelle, stelle)} — {ms.ERKLAERT.get(stelle, '')}",
+        on_click=(lambda _e: on_marke(knoten)) if on_marke is not None else None,
+        content=ft.Icon(zeichen, size=10, color=ft.Colors.SURFACE) if zeichen else None,
+        data=("marke", knoten, stelle),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +257,9 @@ def zeichnung(
     on_verbinden: Callable[[str, str], Any] | None = None,
     on_kachel_auf: Callable[[str, str], Any] | None = None,
     on_ziehen: Callable[[bool], Any] | None = None,
+    marken: Mapping[str, Sequence[str]] | None = None,
+    wege_mit_inhalt: Collection[tuple[str, str]] = (),
+    on_marke: Callable[[str], Any] | None = None,
 ) -> Zeichnung:
     """Die Schichten der Fläche. ``lagen``: wo jeder Knoten liegt (sonst `core.ablauf.layout`);
     ``laufend`` leuchtet, ``erledigt`` ist blass, ``vernebelt`` auf 25 %, ``gewaehlt`` hat einen
@@ -246,6 +286,14 @@ def zeichnung(
       dafür gedacht, die Ziele ein- und auszublenden (`Ziele.zeigen`). Fällt der Punkt ins
       Leere, kommt **kein** ``False`` (`fangnetz`).
 
+    **Marken der Medien** (Ben, 19.11.2026, `docs/plan_medien_einheitlich.md` §2.3 — nur, wenn
+    der Aufrufer ``marken`` gibt): je Knoten die belegten Stellen (`core.medien_stellen.STELLEN`)
+    — am rechten Rand der Kachel von oben nach unten **vorher · dabei · bei … · nachher**, die
+    Lage sagt das Wann; unter dem Schlüssel `START` die Stellen des Plans (an der Pille „Start“,
+    dort steht mit ``on_marke`` immer eine Marke — leer als Umriss). ``wege_mit_inhalt``: Wege
+    (von, nach), an denen etwas liegt — ihr Punkt trägt einen Ring. ``on_marke(knoten)``: Tipp
+    auf eine Marke (Knoten-ID oder `START`).
+
     ``menue``: das Menü an einem Knoten (`Menue`) — Schirm über allem, der Knoten und die Karte
     darüber."""
     ids = [it.id for it in items]
@@ -255,6 +303,7 @@ def zeichnung(
     lage = dict(lagen) if lagen is not None else ab.layout(ablauf, ids)
     lage = {k: v for k, v in lage.items() if k in namen}
     nebel = set(vernebelt)
+    mit_inhalt = set(wege_mit_inhalt)
     fertig = set(erledigt)
     bedarf = set(ab.bedarf(ablauf, ids))
     start = ablauf.startknoten(ids)
@@ -341,12 +390,19 @@ def zeichnung(
         damit sich Geschwisterwege nicht überdecken."""
         text = etikett_text(k, zaehlung)
         warm = k.nach in bedarf or k.zurueck
+        # Liegt am Weg etwas (Text, Link, Datei), trägt sein Punkt einen Ring in der Farbe der
+        # Medien-Marken — wie die Marken an den Kacheln
+        hat_inhalt = (k.von, k.nach) in mit_inhalt
         punkt = ft.Container(
-            width=PUNKT,
-            height=PUNKT,
-            border_radius=PUNKT / 2,
+            width=PUNKT + (4 if hat_inhalt else 0),
+            height=PUNKT + (4 if hat_inhalt else 0),
+            border_radius=(PUNKT + 4) / 2,
             bgcolor=farbe_fuer(k),
-            border=ft.Border.all(2, ft.Colors.SURFACE),
+            border=ft.Border.all(3, MARKE_FARBE)
+            if hat_inhalt
+            else ft.Border.all(2, ft.Colors.SURFACE),
+            tooltip="Medien oder Text an diesem Weg" if hat_inhalt else None,
+            data=("weg_marke", k.von, k.nach) if hat_inhalt else None,
         )
         aufschrift = ft.Text(
             text,
@@ -638,6 +694,29 @@ def zeichnung(
             data=("start",),
         )
     )
+    if marken is not None and on_marke is not None:
+        belegt = tuple(marken.get(START, ()))
+        schichten.append(
+            ft.Container(
+                left=sx + 40 - 10,
+                top=RAND - 8,
+                width=24,
+                height=24,
+                border_radius=12,
+                bgcolor=MARKE_FARBE if belegt else ft.Colors.SURFACE,
+                border=ft.Border.all(2, ft.Colors.SURFACE if belegt else MARKE_FARBE),
+                alignment=ft.Alignment.CENTER,
+                tooltip="Medien zum Plan: "
+                + (" · ".join(ms.NAMEN_PLAN[x] for x in belegt) if belegt else "noch keine"),
+                on_click=lambda _e: on_marke(START),
+                content=ft.Icon(
+                    ft.Icons.MENU_BOOK if belegt else ft.Icons.ADD,
+                    size=14,
+                    color=ft.Colors.SURFACE if belegt else MARKE_FARBE,
+                ),
+                data=("marke", START),
+            )
+        )
 
     def badge(text: str, farbe: str = ft.Colors.ON_SURFACE) -> ft.Control:
         return ft.Container(
@@ -694,6 +773,13 @@ def zeichnung(
             ),
         )
         zeichen: list[ft.Control] = [form, badge(str(nummer.get(it.id, "?")))]
+        if marken is not None:
+            # der Haken „fertig“ sitzt oben rechts und geht vor (nur im laufenden Bild)
+            zeichen.extend(
+                _marke(it.id, stelle, on_marke)
+                for stelle in marken.get(it.id, ())
+                if not (stelle == ms.VORHER and it.id in fertig)
+            )
         if it.id in fertig:
             zeichen.append(
                 ft.Container(

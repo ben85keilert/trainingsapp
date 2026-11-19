@@ -139,7 +139,7 @@ from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
 from trainingsapp.core.zaehlen import ENDE_ABGEHAKT
 from trainingsapp.ui import marken, uebung_lauf
 from trainingsapp.ui import plan_ablauf as plan_ablauf_ui
-from trainingsapp.ui.components import einzel_seite, zaehl_stand
+from trainingsapp.ui.components import einzel_seite, medien_stellen, zaehl_stand
 from trainingsapp.ui.components.dialoge import Nachher, obersten_schliessen, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import ohne_auto_update, sicher
@@ -398,6 +398,10 @@ def plan_view(
         route = basis or f"/plaene/{plan.id}"
     else:
         route = f"/plan/{plan.id}"
+    if bearbeiten and not einzel and nachtrag is None and medien_stellen.abholen(state, plan):
+        # Ein Stück aus Kamera, Rekorder oder Fotoauswahl hängt jetzt an seiner Stelle (Ben,
+        # 19.11.2026) — die Ansicht zeigt den Plan, wie er nun in der Datenbank steht
+        plan = state.plaene.laden(plan.id) or plan
     #: In welcher Session die Einträge landen — ``None`` = die planlose des Tages
     sitzungsplan = None if einzel else plan.id
     #: die fertige Ansicht — „Fertig“ fragt, was unter ihr liegt
@@ -1551,6 +1555,24 @@ def plan_view(
                     ],
                 ),
                 *uhr,
+                # Beim Bearbeiten: die vier Stellen der Medien als Marken — ein Tipp öffnet
+                # „Medien an dieser Stelle“ (Ben, 19.11.2026, `components/medien_stellen.py`)
+                *(
+                    [
+                        medien_stellen.marken_knopf(
+                            page,
+                            state,
+                            plan.id,
+                            item,
+                            uebung,
+                            basis=route,
+                            hier=route,
+                            neu_zeichnen=state.neu_zeichnen,
+                        )
+                    ]
+                    if bearbeiten
+                    else []
+                ),
                 # Material (U2, F6): Anweisungen der Planübung, Videos — hält die Uhr an
                 *(
                     [k]

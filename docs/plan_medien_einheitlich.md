@@ -24,7 +24,7 @@ Ben, 19.11.2026 („Zur Bereitstellung der Medien in der App“):
 
 **Stand 19.11.2026:** Ben: „Empfehlungen a–h gelten, bau E1 und E2. Wenn alles geklappt hat,
 mach den ganzen Rest danach gleich mit, außer es gibt Skizzen mit Alternativen und einer
-erforderlichen Auswahl.“ **Gebaut: E1–E4** — was gebaut ist und wo es abweicht, steht in **§5**.
+erforderlichen Auswahl.“ **Gebaut: E1–E5** — was gebaut ist und wo es abweicht, steht in **§5**.
 Fragen im Katalog als **P227** (a–h entschieden wie empfohlen).
 
 Gesucht im Katalog (Entscheidungszeilen): medien, medium, verkleiner, zuschneid, crop, begleit.
@@ -266,6 +266,24 @@ Zuschneiden am Handy.
 | E2 | Was fällig ist (vor dem ▶, „bei …“, nach „Fertig“; am Plan vor dem Start, zu einer Antwort, am Ende), steht **selbst** im Blatt: ein Video auf dem Gerät läuft im Spieler, ein Bild steht da — sonst nichts. „Gesehen“ hakt ab, „Später“ schließt nur; was jedes Mal kommt, hat „Weiter“. Das Buch-Symbol im Fokus zeigt nur Abschnitte, Begleitung, Vorher und was „bei …“ in diesem Lauf schon kam | `components/material.py` (`faellig_blatt`, `plan_faellig_blatt`, `_faellig_inhalt`), `core.material.beim_ueben`, `Fokus._ereignis_hinweis` |
 | E3 | **Ein Menü „Medium hinzufügen“** in „Übung bearbeiten“, „Im Plan einstellen“ und im Reiter „Medien“ des Plans: Link · Foto · Video · Fotoauswahl · Datei · Audio · **aus vorhandenen Medien** (Blatt mit Suche; ein Verweis auf dieselbe Datei). **Beschriftung** am Medium (`Media.text`, in allen drei Editoren unter dem Titel, gezeigt unter der Zeile und unter dem eingeblendeten Stück). Kamera, Fotoauswahl und Rekorder fragen bei einem Medium **Titel und Beschriftung**; neu als Ziel: der Plan und „Ablage“ (für E4), neu als Art: Audio. Der Kurs-Block „Medium“ nimmt Datei und Vorhandenes und behält Art, Quelle und Rolle. Die Anhang-Menüs an Notiz und Eintrag nehmen Namen und Symbole aus derselben Tabelle | `components/medium_dazu.py`, `core/medien_vorrat.py`, `core.anhaenge.Ziel` (`fuer_plan`, `fuer_ablage`), `ui/paketdatei.py` (`medium_mit`, `abholen`), `components/material_rolle.py`, `views/kurs_bearbeiten.block_dialog` |
 | E4 | **Der Weg trägt echte Stücke:** im Wege-Formular (Reiter „Ablauf“ und „Im Plan einstellen“) dasselbe Menü — Link · Foto · Video · Fotoauswahl · Datei · Audio · aus vorhandenen Medien (die Stücke des Plans vorn); je Stück Titel und Beschriftung. Im Workout steht eine Datei als Medienzeile (ein Tipp öffnet sie in der App). Ablage (Aufräumen, Verkleinern) und Paket-Export lesen die Dateien an Wegen mit; der Reiter „Medien“ zeigt sie mit Größe | `core.bedingung.Stueck` (`kind`, `source`, `text`), `core.ablauf.wegdateien`, `core.pakete.paketmedien_in`, `data/paketmedien._ABFRAGEN`, `components/wege_form.py` (`WegMedien`, `stuecke_abholen`), `views/workout.inhalt_karte` |
+| E5 | **Marken im Ablaufbild:** am rechten Rand der Kachel von oben nach unten vorher (Punkt) · dabei (▶) · bei … (Blitz) · nachher (Punkt); ein Weg mit Inhalt trägt einen Ring um seinen Punkt; an „Start“ eine Marke für die Medien des Plans (leer als „+“). Tipp auf eine Marke oder „Medien …“ im Menü der Kachel öffnet das **Blatt „Medien an dieser Stelle“**: die Stellen untereinander, je Stück Stift (zum Editor) und ✕, je Stelle „Medium hinzufügen“ — das neue Stück bekommt Rolle und Zeitpunkt der Stelle und kommt dort von selbst. In der **Liste** (Plan bearbeiten) dieselben vier Marken in der Zeile der Planübung, gefüllt oder als Umriss | `core/medien_stellen.py`, `components/medien_stellen.py` (`stellen_blatt`, `marken_knopf`, `abholen`), `components/ablaufbild.py` (`marken`, `wege_mit_inhalt`, `on_marke`), `views/ablauf.py`, `views/plan.py` |
+
+**Abweichungen (E5):**
+
+- **Vier Marken am rechten Rand** statt nur zweier Ecken: Die Lage von oben nach unten ist die
+  Reihenfolge beim Üben; „dabei“ und „bei …“ tragen ein Zeichen, vorher und nachher sind Punkte
+  (Bens Vorschlag: oben rechts = Anfang, unten rechts = Ende — so geblieben).
+- **Skizzen vorab gab es nicht:** Die Lage war mit Frage h entschieden, Alternativen zur Auswahl
+  entstanden keine. Stattdessen am Bildschirm geprüft (Web-Fotos, 412 px): Marken im Bild, Blatt
+  einer Übung, Marken in der Liste.
+- **Am Weg** öffnet der Tipp auf den Punkt wie bisher die Leiste des Wegs („Mehr …“ = Blatt mit
+  dem Menü aus E4) — kein eigenes Stellen-Blatt.
+- **„Bei …“ wird im Blatt nicht angelegt:** Das Ereignis wählt man im Editor (ein Knopf führt
+  hin) — das Blatt setzt nichts von selbst.
+- **Fragen** tragen keine eigene Marke: Was zu einer Antwort kommt, steht unter „Start“ bei den
+  Stellen des Plans („Bei einer Antwort“).
+- **Im laufenden Workout-Bild** stehen keine Marken (dort sitzt oben rechts der Haken „fertig“).
+- **Titel und Beschriftung** ändert man über den Stift im Editor, nicht im Blatt.
 
 **Abweichungen (E4):**
 

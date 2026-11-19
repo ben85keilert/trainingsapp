@@ -177,9 +177,17 @@ def test_datei_fuers_paket_in_uebung_bearbeiten(tmp_path, page, state, monkeypat
     u = Exercise(name="Meine Beuge")
     state.uebungen.speichern(u)
     ansicht = uebung_bearbeiten(page, state, state.uebungen.laden(u.id))
-    menue = _daten(ansicht, "datei_fuers_paket")
+    # Das eine Menü „Medium hinzufügen“ (Ben, 19.11.2026) — am Rechner ohne Kamera und
+    # Fotoauswahl: Link · Datei · Ton · aus Vorhandenem
+    menue = _daten(ansicht, "medium_dazu")
+    assert [i.data[1] for i in menue.items] == ["link", "datei", "ton", "vorhandenes"]
     eintrag = next(i for i in menue.items if i.content == "Datei wählen …")
-    asyncio.run(eintrag.on_click())
+
+    async def tippen() -> None:
+        eintrag.on_click(None)
+        await asyncio.gather(*page.aufgaben)
+
+    asyncio.run(tippen())
     titel = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Titel"]
     assert [t.value for t in titel] == ["Mein Foto"]
     titel[0].value = "So geht es"

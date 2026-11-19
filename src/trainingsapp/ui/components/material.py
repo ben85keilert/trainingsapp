@@ -208,6 +208,8 @@ def _faellig_inhalt(
         if x.title:
             controls.append(ft.Text(x.title, size=14, weight=ft.FontWeight.W_600))
         controls.append(ft.Container(content=stueck, data=("eingeblendet", x.uri)))
+        if x.text.strip():  # die Beschriftung: worauf achten
+            controls.append(ft.Text(x.text.strip(), size=13, selectable=True))
     return controls, spieler
 
 

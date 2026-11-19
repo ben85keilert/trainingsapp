@@ -116,8 +116,11 @@ class _Hochladen:
         #: Verkleinert und bereit zum Behalten
         self.fertig = False
         self.laeuft = False
+        self.name_feld = paketdatei.titel_feld()
         self.notiz = ft.TextField(
-            label="Notiz (optional)", hint_text="z. B. links, Seitenansicht", dense=True
+            label=paketdatei.BESCHRIFTUNG if ziel.ist_paketdatei else "Notiz (optional)",
+            hint_text="z. B. links, Seitenansicht",
+            dense=True,
         )
         self.titel = ft.Text("", size=15, weight=ft.FontWeight.W_600)
         self.status = ft.Text("", size=13, opacity=0.75)
@@ -271,8 +274,11 @@ class _Hochladen:
             datei, bild = self.ziel, self.frontbild
             try:
                 name = await paketdatei.ablegen(self.state, datei, datei.suffix)
-                if not paketdatei.anhaengen(self.state, self.woran, paketdatei.medium_fuer(name)):
-                    self.melden("Die Übung gibt es nicht mehr.")
+                medium = paketdatei.medium_mit(
+                    name, self.name_feld.value or "", self.notiz.value or ""
+                )
+                if not paketdatei.anhaengen(self.state, self.woran, medium):
+                    self.melden("Das Ziel gibt es nicht mehr.")
                     return
             except (NichtBereinigbar, OSError, sqlite3.Error) as fehler:
                 self.melden(f"Nicht gespeichert: {fehler}")
@@ -402,12 +408,14 @@ class _Hochladen:
     def zeichnen(self) -> None:
         self.knoepfe.controls = self._knoepfe()
         self.notiz.visible = self.fertig
+        self.name_feld.visible = self.fertig and self.woran.ist_paketdatei
         for c in (
             self.knoepfe,
             self.titel,
             self.status,
             self.ort,
             self.balken,
+            self.name_feld,
             self.notiz,
             self.flaeche,
         ):
@@ -467,6 +475,7 @@ def anhang_hochladen_view(page: Any, state: AppState, route: str, ziel: Ziel) ->
                                     h.balken,
                                     h.status,
                                     h.ort,
+                                    h.name_feld,
                                     h.notiz,
                                     h.knoepfe,
                                     ft.Text(

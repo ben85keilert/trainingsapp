@@ -42,8 +42,10 @@ from trainingsapp.core.anhaenge import (
     groesse_text,
     neuer_anhang,
 )
+from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.models import jetzt, new_id
 from trainingsapp.data.anhaenge import qualitaet_lesen
+from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.tonspieler import Tonspieler
 from trainingsapp.ui.components.zurueck import zurueck_ziel
@@ -79,8 +81,11 @@ class _Ton:
         self.startet = False
         self.spieler: Tonspieler | None = None
         self.ticker: Any = None
+        self.name_feld = paketdatei.titel_feld()
         self.notiz = ft.TextField(
-            label="Notiz (optional)", hint_text="z. B. Gedanken nach dem Laufen", dense=True
+            label=paketdatei.BESCHRIFTUNG if ziel.ist_paketdatei else "Notiz (optional)",
+            hint_text="z. B. Gedanken nach dem Laufen",
+            dense=True,
         )
         self.zeit = ft.Text("0:00", size=48, weight=ft.FontWeight.W_600)
         self.rest = ft.Text("", size=12, opacity=0.6)
@@ -258,6 +263,26 @@ class _Ton:
         try:
             if self.spieler is not None:
                 await self.spieler.anhalten()
+            if self.ziel.ist_paketdatei:
+                # Ton als Medium (Ben, 19.11.2026: alle Arten überall) — bereinigt in die Ablage
+                # der Paketdateien, an Übung, Planübung, Plan oder zum Abholen
+                try:
+                    name = await paketdatei.ablegen(self.state, datei, f".{self.endung}")
+                    medium = paketdatei.medium_mit(
+                        name, self.name_feld.value or "", self.notiz.value or ""
+                    )
+                    if not paketdatei.anhaengen(self.state, self.ziel, medium):
+                        self.melden("Das Ziel gibt es nicht mehr.")
+                        return
+                except (NichtBereinigbar, OSError, sqlite3.Error) as fehler:
+                    self.melden(f"Nicht gespeichert: {fehler}")
+                    return
+                self.datei_loeschen()
+                self.fertig = False
+                self.page.show_dialog(ft.SnackBar(ft.Text("Ton gespeichert")))
+                self.speichert = False
+                await self.zurueck()
+                return
             a = neuer_anhang(
                 self.ziel,
                 AUDIO,
@@ -335,9 +360,18 @@ class _Ton:
     def zeichnen(self) -> None:
         self.knoepfe.controls = self._knoepfe()
         self.notiz.visible = self.fertig
+        self.name_feld.visible = self.fertig and self.ziel.ist_paketdatei
         if not self.fertig:
             self.flaeche.content = _mikrofon(self.laeuft_seit is not None)
-        for c in (self.knoepfe, self.notiz, self.flaeche, self.zeit, self.rest, self.status):
+        for c in (
+            self.knoepfe,
+            self.name_feld,
+            self.notiz,
+            self.flaeche,
+            self.zeit,
+            self.rest,
+            self.status,
+        ):
             with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
                 c.update()
 
@@ -435,6 +469,7 @@ def anhang_ton_view(page: Any, state: AppState, route: str, ziel: Ziel) -> ft.Vi
                                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                                 controls=[
                                     t.status,
+                                    t.name_feld,
                                     t.notiz,
                                     t.knoepfe,
                                     ft.Text(

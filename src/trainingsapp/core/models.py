@@ -243,6 +243,10 @@ class Media:
     #: Die **Abschnitte** der Beschreibung (ihre Namen, ``## Name``), zu denen das Stück gehört —
     #: mehrere erlaubt; das Blatt beim Üben stellt es unter jeden davon (§3)
     abschnitte: tuple[str, ...] = ()
+    #: Die **Beschriftung** (Ben, 19.11.2026, `docs/plan_medien_einheitlich.md` §2.1): ein Satz
+    #: oder zwei unter dem Titel — was zu sehen ist, worauf man achten soll. Gezeigt unter dem
+    #: Stück; ältere Apps übergehen das Feld
+    text: str = ""
 
     @property
     def von_selbst(self) -> bool:
@@ -257,6 +261,8 @@ class Media:
         {'wann': 'nachher', 'oft': 'immer'}
         >>> Media(uri="https://x.org/v", abschnitte=("Ausführung",)).zeit_zusatz()
         {'abschnitte': ['Ausführung']}
+        >>> Media(uri="https://x.org/v", text=" Knie über dem Fuß ").zeit_zusatz()
+        {'text': 'Knie über dem Fuß'}
         """
         d: dict[str, Any] = {}
         if self.wann:
@@ -267,6 +273,8 @@ class Media:
             d["bei"] = self.bei.als_dict()
         if self.abschnitte:
             d["abschnitte"] = list(self.abschnitte)
+        if self.text.strip():
+            d["text"] = self.text.strip()
         return d
 
     def zusatz(self) -> dict[str, Any]:
@@ -356,9 +364,9 @@ def zeit_zusatz_lesen(roh: Any) -> dict[str, Any]:
     >>> z["wann"], z["oft"], z["bei"].text(), z["abschnitte"]
     ('bei', 'immer', 'wenn Satz 2 beginnt', ())
     >>> zeit_zusatz_lesen({"wann": "bei", "abschnitte": ["Ausführung", "", "Ausführung"]})
-    {'wann': '', 'oft': '', 'bei': None, 'abschnitte': ('Ausführung',)}
+    {'wann': '', 'oft': '', 'bei': None, 'abschnitte': ('Ausführung',), 'text': ''}
     >>> zeit_zusatz_lesen({"wann": "morgen", "oft": "nie", "abschnitte": "Hinweise"})
-    {'wann': '', 'oft': '', 'bei': None, 'abschnitte': ('Hinweise',)}
+    {'wann': '', 'oft': '', 'bei': None, 'abschnitte': ('Hinweise',), 'text': ''}
     """
     hat = getattr(roh, "get", None)
     if hat is None:
@@ -381,6 +389,7 @@ def zeit_zusatz_lesen(roh: Any) -> dict[str, Any]:
         "oft": IMMER if str(hat("oft") or "") == IMMER else "",
         "bei": ereignis,
         "abschnitte": tuple(namen),
+        "text": str(hat("text") or "").strip(),
     }
 
 

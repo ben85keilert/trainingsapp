@@ -46,7 +46,7 @@ import flet as ft
 from trainingsapp.core import ablauf as ab
 from trainingsapp.core import varianten as var
 from trainingsapp.core import zaehlen as zl
-from trainingsapp.core.anhaenge import BILD, VIDEO, Ziel
+from trainingsapp.core.anhaenge import Ziel
 from trainingsapp.core.bedingung import Bedingung
 from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.beschreibung import abschnitte as beschreibung_abschnitte
@@ -94,6 +94,7 @@ from trainingsapp.core.uebung_timer import TimerWahl, timer_fuer
 from trainingsapp.core.zaehlen import VORLAGE_AUTO, VORLAGEN_ANGEBOT, SensorWahl, vorlagen_angebot
 from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components import editor_reiter as er
+from trainingsapp.ui.components import medium_dazu
 from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
 from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -118,7 +119,7 @@ from trainingsapp.ui.components.wege_form import wege_karte
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.timer_bibliothek import in_uebung_speichern
-from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route, kamera_moeglich
+from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
 from trainingsapp.ui.views.anhang_hochladen import hochladen_route
 
 #: Die Karte eines Parameters
@@ -395,20 +396,7 @@ def plan_einstellen(
             )
         zeilen += [
             links_fehler,
-            ft.Row(
-                wrap=True,
-                spacing=8,
-                controls=[
-                    ft.TextButton(
-                        "Link hinzufügen",
-                        icon=ft.Icons.ADD_LINK,
-                        tooltip="Video, Text oder PDF — eine https-Adresse",
-                        on_click=link_hinzufuegen,
-                        data="link_hinzufuegen",
-                    ),
-                    datei_menue(),
-                ],
-            ),
+            medien_menue(),
         ]
         links_spalte.controls = zeilen
 
@@ -443,44 +431,29 @@ def plan_einstellen(
                 hochladen_route(ansicht.route, Ziel.fuer_paketdatei(item_id=item.id))
             )
 
-    def datei_menue() -> ft.Control:
-        eintraege = [
-            ft.PopupMenuItem(
-                content="Datei wählen …",
-                icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                on_click=datei_fuers_paket,
+    def vorhandenes_dazu(m: Media) -> None:
+        """Ein Stück, das es schon gibt: dieselbe Datei bzw. Adresse, hier neu eingestellt."""
+        if all(z["uri"] != m.uri for z in links_stand):
+            links_stand.append(
+                {"medium": m, "titel": m.title, "uri": m.uri, "id": m.id, "zusatz": werte_von(m)}
             )
-        ]
-        if kamera_moeglich(page):
-            eintraege += [
-                ft.PopupMenuItem(
-                    content="Foto aufnehmen",
-                    icon=ft.Icons.PHOTO_CAMERA_OUTLINED,
-                    on_click=lambda _e=None: page.run_task(paketdatei_aufnehmen, BILD),
-                ),
-                ft.PopupMenuItem(
-                    content="Video aufnehmen",
-                    icon=ft.Icons.VIDEOCAM_OUTLINED,
-                    on_click=lambda _e=None: page.run_task(paketdatei_aufnehmen, VIDEO),
-                ),
-            ]
-        if state.hochladen is not None:
-            eintraege.append(
-                ft.PopupMenuItem(
-                    content="Aus der Fotoauswahl",
-                    icon=ft.Icons.PHOTO_LIBRARY_OUTLINED,
-                    on_click=paketdatei_hochladen,
-                )
-            )
-        return ft.PopupMenuButton(
-            content=ft.Row(
-                tight=True,
-                spacing=6,
-                controls=[ft.Icon(ft.Icons.ATTACH_FILE, size=18), ft.Text("Datei fürs Paket")],
+        links_neu()
+
+    def medien_menue() -> ft.Control:
+        """„Medium hinzufügen“ — dieselbe Reihe wie überall (`components/medium_dazu.py`)."""
+        schon = {z["uri"] for z in links_stand} | {m.uri for m in (uebung.media if uebung else [])}
+        return medium_dazu.menue(
+            page,
+            state,
+            medium_dazu.Wege(
+                link=link_hinzufuegen,
+                datei=datei_fuers_paket,
+                aufnehmen=paketdatei_aufnehmen,
+                fotoauswahl=paketdatei_hochladen,
+                vorhandenes=vorhandenes_dazu,
             ),
-            tooltip="Bild, Video, Ton oder PDF für diese Planübung — Ortsangaben fallen weg",
-            items=eintraege,
-            data="datei_fuers_paket",
+            vorhandene=lambda: medium_dazu.vorrat_von(state, ohne=schon),
+            tooltip="Link, Foto, Video, Ton oder Datei für diese Planübung — ohne Ortsangaben",
         )
 
     def links_lesen() -> list[Media]:

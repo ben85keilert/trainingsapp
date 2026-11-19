@@ -24,7 +24,7 @@ Ben, 19.11.2026 („Zur Bereitstellung der Medien in der App“):
 
 **Stand 19.11.2026:** Ben: „Empfehlungen a–h gelten, bau E1 und E2. Wenn alles geklappt hat,
 mach den ganzen Rest danach gleich mit, außer es gibt Skizzen mit Alternativen und einer
-erforderlichen Auswahl.“ **Gebaut: E1, E2** — was gebaut ist und wo es abweicht, steht in **§5**.
+erforderlichen Auswahl.“ **Gebaut: E1, E2, E3** — was gebaut ist und wo es abweicht, steht in **§5**.
 Fragen im Katalog als **P227** (a–h entschieden wie empfohlen).
 
 Gesucht im Katalog (Entscheidungszeilen): medien, medium, verkleiner, zuschneid, crop, begleit.
@@ -129,8 +129,8 @@ Aus vorhandenen Medien …**
   mit **Titel**, **Beschriftung** und — wo es Zeitpunkte gibt — **Wann**. Die Notiz der
   Kamera-Seite wird nicht mehr verworfen, sie wird die Beschriftung.
 - **Daten:** `Media` bekommt ein Feld `text` (Beschriftung), geschrieben wie die anderen Zusätze
-  (nur wenn gesetzt; ältere Apps übergehen es — wie bei `wann`, **für `text` noch nicht
-  nachgeprüft**). Der Anhang hat `note` als Beschriftung; ob er zusätzlich einen Titel braucht,
+  (nur wenn gesetzt; ältere Apps übergehen es — nachgesehen: `core.models.zeit_zusatz_lesen`
+  liest nur die Felder, die es kennt). Der Anhang hat `note` als Beschriftung; ob er zusätzlich einen Titel braucht,
   ist Frage c.
 - Kurs-Block „Medium“ nimmt dieselbe Komponente und behält dabei das ganze `Media` (heute gehen
   Rolle, Art und Quelle beim Bearbeiten verloren).
@@ -264,6 +264,21 @@ Zuschneiden am Handy.
 |---|---|---|
 | E1 | Der Reiter „Medien“ listet die Beschreibung der Übung nicht mehr; Anweisungen der Planübung, Texte an Wegen, Beschreibung des Plans und Kurs-Blöcke bleiben | `core/medien_uebersicht._aus_uebungen` |
 | E2 | Was fällig ist (vor dem ▶, „bei …“, nach „Fertig“; am Plan vor dem Start, zu einer Antwort, am Ende), steht **selbst** im Blatt: ein Video auf dem Gerät läuft im Spieler, ein Bild steht da — sonst nichts. „Gesehen“ hakt ab, „Später“ schließt nur; was jedes Mal kommt, hat „Weiter“. Das Buch-Symbol im Fokus zeigt nur Abschnitte, Begleitung, Vorher und was „bei …“ in diesem Lauf schon kam | `components/material.py` (`faellig_blatt`, `plan_faellig_blatt`, `_faellig_inhalt`), `core.material.beim_ueben`, `Fokus._ereignis_hinweis` |
+| E3 | **Ein Menü „Medium hinzufügen“** in „Übung bearbeiten“, „Im Plan einstellen“ und im Reiter „Medien“ des Plans: Link · Foto · Video · Fotoauswahl · Datei · Audio · **aus vorhandenen Medien** (Blatt mit Suche; ein Verweis auf dieselbe Datei). **Beschriftung** am Medium (`Media.text`, in allen drei Editoren unter dem Titel, gezeigt unter der Zeile und unter dem eingeblendeten Stück). Kamera, Fotoauswahl und Rekorder fragen bei einem Medium **Titel und Beschriftung**; neu als Ziel: der Plan und „Ablage“ (für E4), neu als Art: Audio. Der Kurs-Block „Medium“ nimmt Datei und Vorhandenes und behält Art, Quelle und Rolle. Die Anhang-Menüs an Notiz und Eintrag nehmen Namen und Symbole aus derselben Tabelle | `components/medium_dazu.py`, `core/medien_vorrat.py`, `core.anhaenge.Ziel` (`fuer_plan`, `fuer_ablage`), `ui/paketdatei.py` (`medium_mit`, `abholen`), `components/material_rolle.py`, `views/kurs_bearbeiten.block_dialog` |
+
+**Abweichungen (E3):**
+
+- **Kein eigener Schritt „Benennen“:** Titel und Beschriftung stehen dort, wo das Stück entsteht —
+  auf der Seite von Kamera, Fotoauswahl und Rekorder, in der Zeile des Editors, am Plan im Blatt
+  des Stücks (es öffnet sich nach „Datei wählen“ und „aus Vorhandenem“ von selbst).
+- **Im Kurs-Block keine Kamera:** Der Dialog des Blocks überlebt den Wechsel zur Kamera nicht.
+  Dort gibt es Adresse, „Datei wählen“ und „aus vorhandenen Medien“ — ein Foto oder Video nimmt
+  man an Übung oder Plan auf und holt es dann hierher.
+- **Anhänge** (Notiz, Eintrag) behalten ihre Form (Symbolzeile, Büroklammer, Knopfzeile) — gleich
+  sind Reihe, Namen und Symbole; ein Link und „aus Vorhandenem“ gibt es dort nicht (Frage a).
+- **Ein Link behält in „Übung bearbeiten“ nicht seine Art** (er wird wie bisher als Video
+  gespeichert) — nicht neu, hier nur vermerkt.
+- **Symbol und Bild der Bewegung** behalten ihr eigenes Blatt mit Ablage.
 
 **Abweichungen (E2):**
 

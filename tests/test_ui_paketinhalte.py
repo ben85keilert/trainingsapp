@@ -118,7 +118,7 @@ def test_anweisungen_im_plan_einstellen_bleiben_wortgleich_und_links_kommen_dazu
     titel = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Titel"]
     assert [t.value for t in titel] == ["Blatt"]
     # Ein Link dazu — die Felder entstehen neu, die Werte stehen im Formular
-    _klick(_daten(ansicht, "link_hinzufuegen"))
+    _klick(_daten(ansicht, ("medium_dazu", "link")), None)
     felder = [x for x in _alle(ansicht) if isinstance(x, ft.TextField)]
     neu_titel = [f for f in felder if f.label == "Titel"][-1]
     neu_adresse = [f for f in felder if f.label == "Adresse (https://…)"][-1]

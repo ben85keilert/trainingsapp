@@ -47,6 +47,7 @@ from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.medium_dazu import AUFNAHME, FOTOAUSWAHL
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
@@ -258,46 +259,27 @@ class _Leistungen:
 
     def anhang_knopf(self, eintrag_id: str) -> ft.Control:
         """Die Büroklammer an der Karte: Foto, Video oder Audio gezielt an **diesen** Eintrag."""
-        foto = self.aufnahme_ziel(BILD, eintrag_id) or self.basis
-        video = self.aufnahme_ziel(VIDEO, eintrag_id) or self.basis
-        ton = self.aufnahme_ziel(AUDIO, eintrag_id) or self.basis
-        dokument = self.aufnahme_ziel(DOKUMENT, eintrag_id) or self.basis
+        # dieselben Namen und Symbole wie überall (`components/medium_dazu.AUFNAHME`)
+        eintraege = [
+            ft.PopupMenuItem(
+                content=ft.Text(AUFNAHME[art][1]),
+                icon=AUFNAHME[art][2],
+                on_click=self._weiter_zu(self.aufnahme_ziel(art, eintrag_id) or self.basis),
+            )
+            for art in (BILD, VIDEO, AUDIO, DOKUMENT)
+        ]
+        if (hoch := self.hochladen_ziel(eintrag_id)) is not None:
+            eintraege.append(
+                ft.PopupMenuItem(
+                    content=ft.Text(FOTOAUSWAHL[1]),
+                    icon=FOTOAUSWAHL[2],
+                    on_click=self._weiter_zu(hoch),
+                )
+            )
         return ft.PopupMenuButton(
             icon=ft.Icons.ATTACH_FILE,
             tooltip="Foto, Video, Audio oder Dokument an diesen Eintrag",
-            items=[
-                ft.PopupMenuItem(
-                    content=ft.Text("Foto aufnehmen"),
-                    icon=ft.Icons.CAMERA_ALT_OUTLINED,
-                    on_click=self._weiter_zu(foto),
-                ),
-                ft.PopupMenuItem(
-                    content=ft.Text("Video aufnehmen"),
-                    icon=ft.Icons.VIDEOCAM_OUTLINED,
-                    on_click=self._weiter_zu(video),
-                ),
-                ft.PopupMenuItem(
-                    content=ft.Text("Audio aufnehmen"),
-                    icon=ft.Icons.MIC_NONE,
-                    on_click=self._weiter_zu(ton),
-                ),
-                ft.PopupMenuItem(
-                    content=ft.Text("Dokument aufnehmen"),
-                    icon=ft.Icons.DOCUMENT_SCANNER_OUTLINED,
-                    on_click=self._weiter_zu(dokument),
-                ),
-                *(
-                    [
-                        ft.PopupMenuItem(
-                            content=ft.Text("Aus der Fotoauswahl"),
-                            icon=ft.Icons.PHOTO_LIBRARY_OUTLINED,
-                            on_click=self._weiter_zu(hoch),
-                        )
-                    ]
-                    if (hoch := self.hochladen_ziel(eintrag_id)) is not None
-                    else []
-                ),
-            ],
+            items=eintraege,
         )
 
     def anhang_zeile(self, k: _Karte) -> ft.Control | None:
@@ -487,13 +469,11 @@ def _nachtragen_zeile(
             # Hochladen aus der Fotoauswahl (P74, Skizze I1) — nur mit Erweiterung
             hoch = leistungen.hochladen_ziel()
             knoepfe = [
-                ("Foto", ft.Icons.CAMERA_ALT_OUTLINED, foto),
-                ("Video", ft.Icons.VIDEOCAM_OUTLINED, video),
-                ("Audio", ft.Icons.MIC_NONE, ton),
-                ("Dokument", ft.Icons.DOCUMENT_SCANNER_OUTLINED, dokument),
+                (AUFNAHME[art][0], AUFNAHME[art][2], ziel)
+                for art, ziel in ((BILD, foto), (VIDEO, video), (AUDIO, ton), (DOKUMENT, dokument))
             ]
             if hoch is not None:
-                knoepfe.append(("Hochladen", ft.Icons.PHOTO_LIBRARY_OUTLINED, hoch))
+                knoepfe.append((FOTOAUSWAHL[0], FOTOAUSWAHL[2], hoch))
             breit = max(12 // len(knoepfe), 2)
             zeilen.append(
                 ft.ResponsiveRow(

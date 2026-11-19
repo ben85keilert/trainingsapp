@@ -663,3 +663,45 @@ def test_regel_am_kapitelplan_kommt_in_den_plan(page, state) -> None:
     state.kurse.kapitel_erreichen(kurs, kurs.kapitel[0], state.profil.id)
     (angelegt,) = state.kurse.kapitel_plaene(kurs.kapitel[0].id, state.profil.id)
     assert angelegt.anpassung == {"ab": 7, "bis": 3, "prozent": 10}
+
+
+def test_medium_block_nimmt_vorhandenes_und_behaelt_art_und_rolle(page, state) -> None:
+    """Ben, 19.11.2026 (`docs/plan_medien_einheitlich.md` §2.1): Der Block „Medium“ nimmt statt
+    einer Adresse auch ein Stück, das es schon gibt (dieselbe Datei) — mit Beschriftung; beim
+    Bearbeiten bleiben Art, Quelle und Rolle."""
+    from trainingsapp.core.kursbloecke import MEDIUM
+    from trainingsapp.core.models import Media, MediaKind, MediaSource
+    from trainingsapp.ui.views.kurs_bearbeiten import kapitel_bearbeiten, kurs_anlegen
+
+    film = "medien/" + "f" * 64 + ".mp4"
+    planke = Exercise(
+        name="Planke",
+        media=[Media(kind=MediaKind.VIDEO, source=MediaSource.PAKET, uri=film, title="Film")],
+    )
+    state.uebungen.speichern(planke)
+    kurs = kurs_anlegen(state)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    _daten(ansicht, ("block_neu", MEDIUM)).on_click()
+    dialog = page.dialoge[-1]
+    # Ohne Adresse und ohne Datei bleibt der Dialog
+    _daten(dialog, "block_uebernehmen").on_click()
+    assert "Ein Medium braucht eine https-Adresse oder eine Datei." in _texte(dialog)
+    menue = _daten(dialog, "block_medium_dazu")
+    assert [i.data[1] for i in menue.items] == ["datei", "vorhandenes"]
+    menue.items[-1].on_click(None)
+    _daten(page.dialoge[-1], ("vorhandenes", film)).on_click(None)
+    assert _felder(dialog)["Titel"].value == "Film"
+    assert _daten(dialog, "block_adresse").visible is False
+    _daten(dialog, "block_beschriftung").value = "erst ansehen"
+    _daten(dialog, "block_uebernehmen").on_click()
+    _felder(ansicht)["Titel"].value = "Rumpf"
+    _speichern(ansicht)
+    (block,) = state.kurse.laden(kurs.id).kapitel[0].bloecke
+    m = block.medium
+    assert (m.uri, m.source, m.kind, m.title, m.text) == (
+        film,
+        MediaSource.PAKET,
+        MediaKind.VIDEO,
+        "Film",
+        "erst ansehen",
+    )

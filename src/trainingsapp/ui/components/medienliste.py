@@ -40,6 +40,36 @@ def medium_zeile(
     uebergeben: Callable[[Callable[[], Awaitable[None]]], None] | None = None,
     beim_oeffnen: Callable[[], None] | None = None,
 ) -> ft.Control:
+    """Die Zeile zu ``medium`` (`_zeile`) — mit seiner **Beschriftung** darunter, wenn es eine
+    hat (Ben, 19.11.2026, `Media.text`)."""
+    zeile = _zeile(
+        page, state, medium, browser=browser, uebergeben=uebergeben, beim_oeffnen=beim_oeffnen
+    )
+    if not medium.text.strip():
+        return zeile
+    return ft.Column(
+        spacing=0,
+        tight=True,
+        controls=[
+            zeile,
+            ft.Container(
+                padding=ft.Padding.only(left=40, bottom=6),
+                content=ft.Text(medium.text.strip(), size=12, opacity=0.8, selectable=True),
+                data=("medium_text", medium.uri),
+            ),
+        ],
+    )
+
+
+def _zeile(
+    page: Any,
+    state: Any,
+    medium: Media,
+    *,
+    browser: Any = None,
+    uebergeben: Callable[[Callable[[], Awaitable[None]]], None] | None = None,
+    beim_oeffnen: Callable[[], None] | None = None,
+) -> ft.Control:
     """Die Zeile zu ``medium``. ``browser``: der UrlLauncher der Ansicht (sonst der der App);
     ``uebergeben``: statt selbst zu ``…/paketmedium/…`` zu gehen, bekommt der Aufrufer den
     Weg (das Material-Blatt schließt sich erst, `components/material.py`); ``beim_oeffnen``:
@@ -158,8 +188,8 @@ def oeffner(
     """Was ein Tipp auf die Zeile zu ``medium`` tut — ohne die Zeile: für Ansichten, die ein
     Stück in eigener Gestalt zeigen (die Übersicht im Reiter „Medien“ des Plans,
     `views/plan_medien.py`). ``None``, wenn die Zeile nichts tut (Paketdatei fehlt). Es ist der
-    Handler von `medium_zeile` selbst, damit beide nie auseinanderlaufen."""
-    zeile = medium_zeile(
+    Handler der Zeile selbst (`_zeile`), damit beide nie auseinanderlaufen."""
+    zeile = _zeile(
         page, state, medium, browser=browser, uebergeben=uebergeben, beim_oeffnen=beim_oeffnen
     )
     if getattr(zeile, "disabled", False):

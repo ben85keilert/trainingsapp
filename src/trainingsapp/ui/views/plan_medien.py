@@ -26,6 +26,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import videoinfo
+from trainingsapp.core.anhaenge import Ziel as AnhangZiel
 from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.beschreibung import abschnitte
 from trainingsapp.core.bewegungsbild import png_masse
@@ -52,6 +53,7 @@ from trainingsapp.core.models import Exercise, Media, MediaSource, Plan
 from trainingsapp.core.paketmedien import dateiname, groesse_text, ist_paketmedium
 from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components import editor_reiter as er
+from trainingsapp.ui.components import medium_dazu
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import PLAN_MEDIEN_MD
@@ -224,8 +226,10 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
         )
         page.show_dialog(blatt)
 
-    def medium_blatt(uri: str | None) -> None:
-        """Ein Stück des Plans ändern (``uri``) oder einen Link dazu (``None``)."""
+    def medium_blatt(uri: str | None, *, neu_dazu: bool = False) -> None:
+        """Ein Stück des Plans ändern (``uri``) oder einen Link dazu (``None``). ``neu_dazu``:
+        das Stück kam gerade dazu (Datei, aus Vorhandenem) — das Blatt lässt es **gleich
+        benennen und beschriften** (Ben, 19.11.2026), danach zeichnet der Reiter neu."""
         alt = next((m for m in frisch().media if m.uri == uri), None) if uri else None
         datei = alt is not None and ist_paketmedium(alt)
         titel = ft.TextField(label="Titel", value=alt.title if alt else "", data="plan_titel")
@@ -259,6 +263,8 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
             else:
                 ziel = alt.uri if datei and alt is not None else (adresse.value or "").strip()
                 if not ziel:
+                    if neu_dazu:
+                        state.neu_zeichnen()
                     return  # nichts eingetragen
                 if not datei and not link_erlaubt(ziel):
                     melden(f"Nur https-Adressen: {ziel}")
@@ -283,6 +289,7 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
                     neu = medien
             if neu != medien:
                 state.plaene.medien_setzen(plan.id, neu)
+            if neu != medien or neu_dazu:
                 state.neu_zeichnen()
 
         knoepfe: list[ft.Control] = []
@@ -330,6 +337,13 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
         )
         page.show_dialog(blatt)
 
+    def stueck_dazu(m: Media) -> None:
+        """Ein neues Stück an den Plan — und gleich sein Blatt zum Benennen."""
+        medien = list(frisch().media)
+        if all(x.uri != m.uri for x in medien):
+            state.plaene.medien_setzen(plan.id, [*medien, m])
+        medium_blatt(m.uri, neu_dazu=True)
+
     async def datei_dazu() -> None:
         """Eine Datei vom Gerät an den Plan: bereinigt in die Ablage (wie „Datei fürs Paket“)."""
         pfad = await paketdatei.datei_waehlen(page)
@@ -340,10 +354,19 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
         except (NichtBereinigbar, OSError) as fehler:
             melden(f"Nicht übernommen: {fehler}")
             return
-        medien = list(frisch().media)
-        if all(m.uri != name for m in medien):
-            state.plaene.medien_setzen(plan.id, [*medien, paketdatei.medium_fuer(name, pfad.stem)])
-        state.neu_zeichnen()
+        stueck_dazu(paketdatei.medium_fuer(name, pfad.stem))
+
+    async def aufnehmen(art: str) -> None:
+        """Kamera bzw. Rekorder: Die Aufnahme hängt sich an den Plan (`Ziel.fuer_plan`), Titel
+        und Beschriftung stehen auf ihrer Seite."""
+        from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
+
+        await page.push_route(aufnahme_route(hier, AnhangZiel.fuer_plan(plan.id), art))
+
+    async def aus_fotoauswahl() -> None:
+        from trainingsapp.ui.views.anhang_hochladen import hochladen_route
+
+        await page.push_route(hochladen_route(hier, AnhangZiel.fuer_plan(plan.id)))
 
     def dazu_zeile() -> ft.Control:
         """Unter „Aus diesem Plan“: Beschreibung und Stücke des Plans selbst."""
@@ -358,29 +381,22 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
                 )
             )
         knoepfe.append(
-            ft.PopupMenuButton(
-                content=ft.Row(
-                    tight=True,
-                    spacing=6,
-                    controls=[
-                        ft.Icon(ft.Icons.ADD, size=18, color=ft.Colors.PRIMARY),
-                        ft.Text("Medium zum Plan", color=ft.Colors.PRIMARY),
-                    ],
+            medium_dazu.menue(
+                page,
+                state,
+                medium_dazu.Wege(
+                    link=lambda: medium_blatt(None),
+                    datei=datei_dazu,
+                    aufnehmen=aufnehmen,
+                    fotoauswahl=aus_fotoauswahl,
+                    vorhandenes=stueck_dazu,
                 ),
-                tooltip="Ein Link oder eine Datei für den ganzen Plan",
-                items=[
-                    ft.PopupMenuItem(
-                        content="Link …",
-                        icon=ft.Icons.ADD_LINK,
-                        on_click=lambda _e=None: medium_blatt(None),
-                    ),
-                    ft.PopupMenuItem(
-                        content="Datei wählen …",
-                        icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                        on_click=lambda _e=None: page.run_task(datei_dazu),
-                    ),
-                ],
-                data="plan_medium_dazu",
+                text="Medium zum Plan",
+                tooltip="Link, Foto, Video, Ton oder Datei für den ganzen Plan",
+                vorhandene=lambda: medium_dazu.vorrat_von(
+                    state, ohne={m.uri for m in frisch().media}
+                ),
+                kennung="plan_medium_dazu",
             )
         )
         return ft.Container(

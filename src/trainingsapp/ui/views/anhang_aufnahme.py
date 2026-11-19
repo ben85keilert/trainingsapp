@@ -124,6 +124,11 @@ def ziel_name(state: AppState, ziel: Ziel) -> str:
     if ziel.bewegung_id is not None:
         u = state.uebungen.laden(ziel.bewegung_id, mit_geloeschten=True)
         return f"Bewegung: {u.name if u is not None else 'Übung'}"
+    if ziel.paket_plan_id is not None:
+        plan = state.plaene.laden(ziel.paket_plan_id)
+        return f"Zum Plan: {plan.name if plan is not None else 'Plan'}"
+    if ziel.ablage is not None:
+        return "Neues Medium"
     if ziel.ist_paketdatei:
         uebung_id = ziel.paket_uebung_id
         if uebung_id is None and (item := state.plaene.item_laden(ziel.paket_item_id or "")):
@@ -220,8 +225,13 @@ class _Aufnahme:
         self.daten: bytes | None = None
         self.frontbild: bytes | None = None
         self.dauer_s: float | None = None
+        # Wird das Ergebnis ein Medium (Übung, Planübung, Plan, Weg …), heißt es gleich und trägt
+        # seine Beschriftung (Ben, 19.11.2026) — bis dahin fiel die Notiz dort weg
+        self.name_feld = paketdatei.titel_feld()
         self.notiz = ft.TextField(
-            label="Notiz (optional)", hint_text="z. B. links, Seitenansicht", dense=True
+            label=paketdatei.BESCHRIFTUNG if ziel.ist_paketdatei else "Notiz (optional)",
+            hint_text="z. B. links, Seitenansicht",
+            dense=True,
         )
         self.status = ft.Text("", size=13, opacity=0.75)
         self.zeit = ft.Text("", size=28, weight=ft.FontWeight.W_600)
@@ -812,8 +822,11 @@ class _Aufnahme:
             # Eine Datei fürs Paket (U4): bereinigt in die Ablage, als Medium an die Übung
             try:
                 name = await paketdatei.ablegen(self.state, self.daten, ENDUNG[self.art])
-                if not paketdatei.anhaengen(self.state, self.ziel, paketdatei.medium_fuer(name)):
-                    self.melden("Die Übung gibt es nicht mehr.")
+                medium = paketdatei.medium_mit(
+                    name, self.name_feld.value or "", self.notiz.value or ""
+                )
+                if not paketdatei.anhaengen(self.state, self.ziel, medium):
+                    self.melden("Das Ziel gibt es nicht mehr.")
                     return
             except (NichtBereinigbar, OSError, sqlite3.Error) as fehler:
                 self.melden(f"Nicht gespeichert: {fehler}")
@@ -909,6 +922,7 @@ class _Aufnahme:
         self.knoepfe.controls = self._knoepfe()
         self.leiste.controls = self._leiste()
         self.notiz.visible = self.daten is not None
+        self.name_feld.visible = self.daten is not None and self.ziel.ist_paketdatei
         self._seiten_zeichnen()
         for c in (
             self.streifen,
@@ -919,6 +933,7 @@ class _Aufnahme:
             self.gross,
             self.status,
             self.zeit,
+            self.name_feld,
             self.notiz,
             self.flaeche,
         ):
@@ -1248,6 +1263,7 @@ def anhang_aufnahme_view(page: Any, state: AppState, route: str, ziel: Ziel, art
                                 controls=[
                                     a.zeit,
                                     a.status,
+                                    a.name_feld,
                                     a.notiz,
                                     a.streifen,
                                     a.werkzeuge,

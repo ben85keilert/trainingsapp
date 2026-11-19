@@ -68,5 +68,10 @@ def test_editor_laesst_bewegung_und_symbol_stehen() -> None:
     spalte = rollen_zeile(werte).content
     knopf = next(c for c in spalte.controls if isinstance(c, ft.SegmentedButton))
     assert [s.value for s in knopf.segments][-1] == BEWEGUNG and knopf.selected == [BEWEGUNG]
-    ohne = rollen_zeile(werte_von(None)).content.controls[0]
+    # vorn steht die Beschriftung (Ben, 19.11.2026), danach die Rolle
+    ohne = next(
+        c
+        for c in rollen_zeile(werte_von(None)).content.controls
+        if isinstance(c, ft.SegmentedButton)
+    )
     assert len(ohne.segments) == 2  # ohne Bilddatei keine Bewegung zur Wahl

@@ -862,15 +862,19 @@ def main(page: ft.Page, browserspeicher: Browserspeicher | None = None) -> None:
             uebung_id = ziel.uebung_id or ziel.bewegung_id or ""
             return gelesen if state.uebungen.laden(uebung_id) is not None else None
         if ziel.ist_paketdatei:
-            # Eine Datei fürs Paket (U4, 9.11.2026): Foto oder Video, an einer Übung bzw.
-            # Planübung, die es gibt
-            if rest[:1] not in (["foto"], ["video"], []) and rest:
+            # Eine Datei fürs Paket (U4, 9.11.2026): Foto, Video oder Ton (seit 19.11.2026), an
+            # einer Übung, Planübung oder einem Plan, die es gibt — oder in die Ablage, für die
+            # Ansicht, die geschickt hat (`Ziel.ablage`)
+            if rest[:1] not in (["foto"], ["video"], ["audio"], []) and rest:
                 return None
-            da = (
-                state.uebungen.laden(ziel.paket_uebung_id) is not None
-                if ziel.paket_uebung_id is not None
-                else state.plaene.item_laden(ziel.paket_item_id or "") is not None
-            )
+            if ziel.ablage is not None:
+                return gelesen
+            if ziel.paket_uebung_id is not None:
+                da = state.uebungen.laden(ziel.paket_uebung_id) is not None
+            elif ziel.paket_plan_id is not None:
+                da = state.plaene.laden(ziel.paket_plan_id) is not None
+            else:
+                da = state.plaene.item_laden(ziel.paket_item_id or "") is not None
             return gelesen if da else None
         if ziel.notiz_id is not None:
             notiz = state.tagesnotizen.laden(ziel.notiz_id)

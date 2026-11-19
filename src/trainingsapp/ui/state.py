@@ -508,6 +508,10 @@ class AppState:
     #: Titel der Paketdateien, die gerade geöffnet werden (Dateiname → Titel) — die Route
     #: ``…/paketmedium/<datei>`` trägt nur den Namen (`views/paketmedium.py`, U3)
     paketmedium_titel: dict[str, str] = field(default_factory=dict)
+    #: Neue Stücke aus Kamera, Fotoauswahl oder Rekorder, die auf ihre Ansicht warten (Ben,
+    #: 19.11.2026, `core.anhaenge.Ziel.ablage`): Schlüssel → Medium; die Ansicht, die geschickt
+    #: hat, holt es beim nächsten Aufbau ab (`ui/paketdatei.abholen`)
+    medium_dazu: dict[str, Any] = field(default_factory=dict)
     #: Die Uhr, die für das Material angehalten ist, während eine Paketdatei offen ist — sie
     #: läuft weiter, wenn man aus der Ansicht zurückgeht (`components/material.py`)
     material_lauf: Any = None

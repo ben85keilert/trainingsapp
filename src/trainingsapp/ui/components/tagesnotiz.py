@@ -222,36 +222,23 @@ class Tagesnotiz(Notizeditor):
 
     def _anhang_wege(self) -> list[tuple[Any, str, str]]:
         """Foto, Video, Audio, Dokument — und aus der Fotoauswahl, wo die Erweiterung da ist."""
+        from trainingsapp.ui.components.medium_dazu import AUFNAHME, FOTOAUSWAHL
         from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
         from trainingsapp.ui.views.anhang_hochladen import hochladen_route
 
         ziel = Ziel.fuer_notiz(self.profil_id, self.tag, self.notiz.id)
+        # dieselben Namen und Symbole wie überall (`components/medium_dazu.AUFNAHME`)
         wege: list[tuple[Any, str, str]] = [
             (
-                ft.Icons.CAMERA_ALT_OUTLINED,
-                "Foto zur Notiz",
-                aufnahme_route(self.basis, ziel, BILD),
-            ),
-            (
-                ft.Icons.VIDEOCAM_OUTLINED,
-                "Video zur Notiz",
-                aufnahme_route(self.basis, ziel, VIDEO),
-            ),
-            (ft.Icons.MIC_NONE, "Audio zur Notiz", aufnahme_route(self.basis, ziel, AUDIO)),
-            (
-                ft.Icons.DOCUMENT_SCANNER_OUTLINED,
-                "Dokument zur Notiz (Seiten aufnehmen oder PDF wählen)",
-                aufnahme_route(self.basis, ziel, DOKUMENT),
-            ),
+                AUFNAHME[art][2],
+                f"{AUFNAHME[art][0]} zur Notiz"
+                + (" (Seiten aufnehmen oder PDF wählen)" if art == DOKUMENT else ""),
+                aufnahme_route(self.basis, ziel, art),
+            )
+            for art in (BILD, VIDEO, AUDIO, DOKUMENT)
         ]
         if self.state.hochladen is not None:
-            wege.append(
-                (
-                    ft.Icons.PHOTO_LIBRARY_OUTLINED,
-                    "Aus der Fotoauswahl",
-                    hochladen_route(self.basis, ziel),
-                )
-            )
+            wege.append((FOTOAUSWAHL[2], FOTOAUSWAHL[1], hochladen_route(self.basis, ziel)))
         return wege
 
     def _kacheln(self) -> ft.Control | None:

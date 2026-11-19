@@ -64,6 +64,7 @@ import flet as ft
 
 from trainingsapp.core import links
 from trainingsapp.core.anpassung import Regel
+from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.kursbau import (
     AUSFUEHRUNG_WAHL,
     EIGEN,
@@ -123,10 +124,13 @@ from trainingsapp.core.kurse import (
 from trainingsapp.core.kursplan import GRUNDLAGE
 from trainingsapp.core.models import Exercise, Media
 from trainingsapp.core.pakete import paketplan_aus
+from trainingsapp.core.paketmedien import ist_paketmedium
 from trainingsapp.core.plaene import WOCHENTAGE_KURZ, tage_text
 from trainingsapp.core.result_spec import FieldSpec, ResultSpec, basis_key, ist_leer
 from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import TimerProfil
+from trainingsapp.ui import paketdatei
+from trainingsapp.ui.components import medium_dazu
 from trainingsapp.ui.components.baustein_form import baustein_blatt, timer_editor_teil
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -329,8 +333,11 @@ def block_kurz(block: Block, katalog: dict[str, Exercise], sicht: Kurssicht | No
 
 def block_fehler(block: Block) -> str | None:
     """Was einem Block zum Speichern fehlt — ``None`` = vollständig."""
-    if block.art == MEDIUM and (block.medium is None or not links.erlaubt(block.medium.uri)):
-        return "Ein Medium braucht eine https-Adresse."
+    if block.art == MEDIUM and (
+        block.medium is None
+        or not (ist_paketmedium(block.medium) or links.erlaubt(block.medium.uri))
+    ):
+        return "Ein Medium braucht eine https-Adresse oder eine Datei."
     if block.art == FRAGE and (not block.titel or not block.antworten):
         return "Eine Frage braucht einen Text und mindestens eine Antwort."
     if block.art == TEST and not block.uebung and not block.aus:
@@ -1288,10 +1295,68 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             min_lines=4 if block.art == TEXT else 1,
             data="block_text",
         )
+        # Das Stück des Blocks — ein Link (Adresse) oder eine Datei bzw. ein Stück, das es
+        # schon gibt (Ben, 19.11.2026: überall dieselben Wege, `components/medium_dazu.py`);
+        # Art, Quelle und Rolle bleiben beim Bearbeiten erhalten
+        stueck: dict[str, Media | None] = {"m": block.medium}
+
+        def ist_datei() -> bool:
+            return stueck["m"] is not None and ist_paketmedium(stueck["m"])
+
         adresse = ft.TextField(
             label="Adresse (https://…)",
-            value=block.medium.uri if block.medium else "",
+            value=block.medium.uri if block.medium and not ist_datei() else "",
             keyboard_type=ft.KeyboardType.URL,
+            visible=not ist_datei(),
+            data="block_adresse",
+        )
+        datei_text = ft.Text(
+            "Datei aus dem Paket", size=12, opacity=0.7, visible=ist_datei(), data="block_datei"
+        )
+        beschriftung = ft.TextField(
+            label="Beschriftung (optional)",
+            hint_text="Worauf achten? Was ist zu sehen?",
+            value=block.medium.text if block.medium else "",
+            multiline=True,
+            min_lines=1,
+            max_lines=3,
+            data="block_beschriftung",
+        )
+
+        def stueck_setzen(m: Media) -> None:
+            stueck["m"] = m
+            if not str(kopf.value or "").strip():
+                kopf.value = m.title
+            if not str(beschriftung.value or "").strip():
+                beschriftung.value = m.text
+            adresse.value = "" if ist_datei() else m.uri
+            adresse.visible, datei_text.visible = not ist_datei(), ist_datei()
+            for c in (kopf, beschriftung, adresse, datei_text):
+                with contextlib.suppress(Exception):
+                    c.update()
+
+        async def block_datei() -> None:
+            pfad = await paketdatei.datei_waehlen(page)
+            if pfad is None:
+                return
+            try:
+                name = await paketdatei.ablegen(state, pfad, pfad.suffix)
+            except (NichtBereinigbar, OSError) as fehler:
+                datei_text.value, datei_text.visible = f"Nicht übernommen: {fehler}", True
+                with contextlib.suppress(Exception):
+                    datei_text.update()
+                return
+            state.pakete.ablage.entwurf_merken(name)  # bis der Kurs gespeichert ist
+            stueck_setzen(paketdatei.medium_fuer(name, pfad.stem))
+
+        medium_wege = medium_dazu.menue(
+            page,
+            state,
+            medium_dazu.Wege(datei=block_datei, vorhandenes=stueck_setzen),
+            text="Datei oder vorhandenes Medium",
+            tooltip="Statt einer Adresse: eine Datei vom Gerät oder ein Stück, das es schon gibt",
+            vorhandene=lambda: medium_dazu.vorrat_von(state),
+            kennung="block_medium_dazu",
         )
         antworten = ft.TextField(
             label="Antworten — eine je Zeile, * = trifft zu, | Hinweis",
@@ -1450,7 +1515,15 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             neuer = replace(block, text=str(text.value or "").strip())
             wort = " ".join(str(kopf.value or "").split())
             if block.art == MEDIUM:
-                neuer.medium = Media(uri=str(adresse.value or "").strip(), title=wort)
+                alt = stueck["m"]
+                ziel = alt.uri if alt is not None and ist_datei() else str(adresse.value or "")
+                anfang = alt if alt is not None else Media()
+                neuer.medium = replace(
+                    anfang,
+                    uri=ziel.strip(),
+                    title=wort,
+                    text=str(beschriftung.value or "").strip(),
+                )
                 neuer.text = ""
             else:
                 neuer.titel = wort
@@ -1931,7 +2004,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
 
         felder: dict[str, list[ft.Control]] = {
             TEXT: [kopf, text],
-            MEDIUM: [kopf, adresse],
+            MEDIUM: [kopf, adresse, datei_text, medium_wege, beschriftung],
             FRAGE: [
                 kopf,
                 text,

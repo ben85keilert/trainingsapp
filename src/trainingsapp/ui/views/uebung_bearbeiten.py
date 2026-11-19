@@ -51,7 +51,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import varianten as var
-from trainingsapp.core.anhaenge import BILD, VIDEO, Ziel
+from trainingsapp.core.anhaenge import BILD, Ziel
 from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.beschreibung import abschnitte as beschreibung_abschnitte
 from trainingsapp.core.bewegungsbild import bewegungsbild, mit_bewegungsbild
@@ -102,7 +102,7 @@ from trainingsapp.core.zaehlen import (
     vorlagen_angebot,
 )
 from trainingsapp.ui import paketdatei, systemdialog
-from trainingsapp.ui.components import paketwechsel, stellung
+from trainingsapp.ui.components import medium_dazu, paketwechsel, stellung
 from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
 from trainingsapp.ui.components.bewegungsbild import bewegungsbild_blatt
 from trainingsapp.ui.components.chips_wahl import chips_zeile
@@ -133,7 +133,7 @@ from trainingsapp.ui.components.varianten import symbol as varianten_symbol
 from trainingsapp.ui.components.verlauf_aufteilung import ansichten_karte
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route, kamera_moeglich
+from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
 from trainingsapp.ui.views.anhang_hochladen import hochladen_route
 from trainingsapp.ui.views.uebung_timer import formular_profil_route
 
@@ -1081,46 +1081,35 @@ def uebung_bearbeiten(
             lambda formular: hochladen_route(formular, Ziel.fuer_paketdatei(gespeichert["id"]))
         )
 
-    def datei_menue() -> ft.Control:
-        """„Datei fürs Paket“ — wählen, Foto, Video, Fotoauswahl (was das Gerät kann)."""
-        eintraege = [
-            ft.PopupMenuItem(
-                content="Datei wählen …",
-                icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                on_click=datei_fuers_paket,
-            )
-        ]
-        if kamera_moeglich(page):
-            eintraege += [
-                ft.PopupMenuItem(
-                    content="Foto aufnehmen",
-                    icon=ft.Icons.PHOTO_CAMERA_OUTLINED,
-                    on_click=lambda _e=None: page.run_task(paketdatei_aufnehmen, BILD),
-                ),
-                ft.PopupMenuItem(
-                    content="Video aufnehmen",
-                    icon=ft.Icons.VIDEOCAM_OUTLINED,
-                    on_click=lambda _e=None: page.run_task(paketdatei_aufnehmen, VIDEO),
-                ),
-            ]
-        if state.hochladen is not None:
-            eintraege.append(
-                ft.PopupMenuItem(
-                    content="Aus der Fotoauswahl",
-                    icon=ft.Icons.PHOTO_LIBRARY_OUTLINED,
-                    on_click=paketdatei_hochladen,
-                )
-            )
-        return ft.PopupMenuButton(
-            content=ft.Row(
-                tight=True,
-                spacing=6,
-                controls=[ft.Icon(ft.Icons.ATTACH_FILE, size=18), ft.Text("Datei fürs Paket")],
+    def vorhandenes_dazu(m: Media) -> None:
+        """Ein Stück, das es schon gibt (`core/medien_vorrat.py`): dieselbe Datei bzw. Adresse,
+        hier mit eigener Rolle und eigenem Zeitpunkt."""
+        if m.source == MediaSource.PAKET:
+            if all(x.uri != m.uri for x in paket_medien):
+                paket_medien.append(m)
+            medien_zeichnen()
+        else:
+            zeile_anlegen(m)
+        page.update()
+
+    def schon_da() -> set[str]:
+        return {m.uri for m in paket_medien} | {(a.value or "").strip() for _t, a in medien_zeilen}
+
+    def medien_menue() -> ft.Control:
+        """„Medium hinzufügen“ — dieselbe Reihe wie überall (`components/medium_dazu.py`)."""
+        return medium_dazu.menue(
+            page,
+            state,
+            medium_dazu.Wege(
+                link=link_hinzufuegen,
+                datei=datei_fuers_paket,
+                aufnehmen=paketdatei_aufnehmen,
+                fotoauswahl=paketdatei_hochladen,
+                vorhandenes=vorhandenes_dazu,
             ),
-            tooltip="Bild, Video, Ton oder PDF — reist mit, wenn du die Übung als Paket "
-            "weitergibst; Ortsangaben fallen weg",
-            items=eintraege,
-            data="datei_fuers_paket",
+            vorhandene=lambda: medium_dazu.vorrat_von(state, ohne=schon_da()),
+            tooltip="Link, Foto, Video, Ton oder Datei — Dateien reisen mit, wenn du die Übung "
+            "als Paket weitergibst; Ortsangaben fallen weg",
         )
 
     def paket_entferner(m: Media) -> Callable[[], None]:
@@ -2251,16 +2240,7 @@ def uebung_bearbeiten(
             MATERIAL: [
                 abschnitt("VIDEOS, LINKS UND DATEIEN"),
                 medien_spalte,
-                ft.Row(
-                    wrap=True,
-                    spacing=8,
-                    controls=[
-                        ft.TextButton(
-                            "Link hinzufügen", icon=ft.Icons.ADD_LINK, on_click=link_hinzufuegen
-                        ),
-                        datei_menue(),
-                    ],
-                ),
+                medien_menue(),
             ],
         },
     )

@@ -140,6 +140,7 @@ def werte_von(medium: Media | None) -> dict[str, Any]:
         "bei_art": medium.bei.art if medium.bei is not None else "",
         "bei_wert": ereignis_text(medium.bei),
         "abschnitte": tuple(medium.abschnitte),
+        "text": medium.text,
     }
 
 
@@ -161,6 +162,8 @@ def gelesen(werte: dict[str, Any]) -> dict[str, Any]:
     ('', None, 'immer', True)
     >>> gelesen({"abschnitte": ("Ausführung",)})["abschnitte"]
     ('Ausführung',)
+    >>> gelesen({"text": " Knie über dem Fuß "})["text"]
+    'Knie über dem Fuß'
     """
     rolle = str(werte.get("rolle") or "")
     rolle = rolle if rolle in ROLLEN else ""
@@ -183,6 +186,8 @@ def gelesen(werte: dict[str, Any]) -> dict[str, Any]:
         "oft": oft,
         "bei": ereignis,
         "abschnitte": tuple(werte.get("abschnitte") or ()) if rolle in ("", BEGLEITUNG) else (),
+        # die Beschriftung (Ben, 19.11.2026) — an jedem Stück, gleich welcher Rolle
+        "text": str(werte.get("text") or "").strip(),
     }
 
 
@@ -398,7 +403,24 @@ def rollen_zeile(
         werte["rolle"] = wahl if wahl in (BEGLEITUNG, BEWEGUNG) else ""
         sichtbar_setzen()
 
+    def beschriftet(e: ft.Event[ft.TextField]) -> None:
+        werte["text"] = (e.control.value or "").strip()
+
+    # Die Beschriftung (Ben, 19.11.2026: „gleich benannt und beschriftet“) — steht beim Üben
+    # unter dem Stück; `on_change`, damit auch Zurück-speichert den letzten Stand hat
+    beschriftung = ft.TextField(
+        label="Beschriftung (optional)",
+        hint_text="Worauf achten? Was ist zu sehen?",
+        value=str(werte.get("text") or ""),
+        dense=True,
+        multiline=True,
+        min_lines=1,
+        max_lines=3,
+        on_change=beschriftet,
+        data=("material_text", kennung),
+    )
     teile: list[ft.Control] = [
+        beschriftung,
         ft.SegmentedButton(
             selected=[str(werte.get("rolle") or "") or ERKLAERUNG],
             show_selected_icon=False,

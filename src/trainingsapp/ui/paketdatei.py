@@ -10,6 +10,7 @@ des `Ziel`. Mit dem Paket reist sie mit (`core.paketdatei.export_schreiben`).
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -35,12 +36,52 @@ async def ablegen(state: Any, quelle: Path | bytes, endung: str) -> str:
 
 
 def anhaengen(state: Any, ziel: Ziel, medium: Media) -> bool:
-    """An die Übung bzw. Planübung des Ziels — ``False``, wenn es sie nicht (mehr) gibt."""
+    """An die Übung, die Planübung oder den Plan des Ziels — ``False``, wenn es sie nicht (mehr)
+    gibt. Ein Ziel „Ablage“ legt das Stück für die Ansicht bereit, die geschickt hat
+    (`abholen`)."""
     if ziel.paket_uebung_id is not None:
         return bool(state.uebungen.medium_anhaengen(ziel.paket_uebung_id, medium))
     if ziel.paket_item_id is not None:
         return bool(state.plaene.item_medium_anhaengen(ziel.paket_item_id, medium))
+    if ziel.paket_plan_id is not None:
+        plan = state.plaene.laden(ziel.paket_plan_id)
+        if plan is None:
+            return False
+        if all(m.uri != medium.uri for m in plan.media):
+            state.plaene.medien_setzen(plan.id, [*plan.media, medium])
+        return True
+    if ziel.ablage is not None:
+        state.medium_dazu[ziel.ablage] = medium
+        ablage = state.pakete.ablage
+        if ablage is not None:  # bis die Ansicht es abholt, räumt niemand die Datei weg
+            ablage.entwurf_merken(medium.uri)
+        return True
     return False
+
+
+def abholen(state: Any, schluessel: str) -> Media | None:
+    """Das Stück, das Kamera, Fotoauswahl oder Rekorder unter ``schluessel`` bereitgelegt haben
+    — einmal; ``None``, wenn nichts wartet."""
+    medium = state.medium_dazu.pop(schluessel, None)
+    return medium if isinstance(medium, Media) else None
+
+
+def medium_mit(name: str, titel: str = "", text: str = "") -> Media:
+    """Das Medium zur abgelegten Datei ``name`` — **gleich benannt und beschriftet** (Ben,
+    19.11.2026): ohne Titel „Foto vom 19.11.“, die Beschriftung nur, wenn sie dasteht."""
+    return replace(medium_fuer(name, titel.strip()), text=text.strip())
+
+
+def titel_feld() -> ft.TextField:
+    """Das Feld „Titel“ auf den Seiten für Kamera, Fotoauswahl und Ton, wenn das Ergebnis ein
+    Medium wird (kein Anhang)."""
+    return ft.TextField(
+        label="Titel", hint_text="z. B. Ausführung von der Seite", dense=True, data="medium_titel"
+    )
+
+
+#: So heißt das Notizfeld dieser Seiten, wenn das Ergebnis ein Medium wird
+BESCHRIFTUNG = "Beschriftung (optional)"
 
 
 async def datei_waehlen(page: Any) -> Path | None:
@@ -60,4 +101,13 @@ async def datei_waehlen(page: Any) -> Path | None:
     return Path(pfad) if pfad else None
 
 
-__all__ = ["ablegen", "anhaengen", "datei_waehlen", "medium_fuer"]
+__all__ = [
+    "BESCHRIFTUNG",
+    "abholen",
+    "ablegen",
+    "anhaengen",
+    "datei_waehlen",
+    "medium_fuer",
+    "medium_mit",
+    "titel_feld",
+]

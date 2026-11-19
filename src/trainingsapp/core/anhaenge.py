@@ -282,6 +282,15 @@ class Ziel:
 
     >>> Ziel.fuer_paketdatei("u1").teil, Ziel.fuer_paketdatei(item_id="i1").teil
     ('paketdatei/u1', 'planpaketdatei/i1')
+
+    Seit 19.11.2026 (`docs/plan_medien_einheitlich.md` §2.1) ebenso **am Plan selbst**
+    (`paket_plan_id`) und **in die Ablage** (`ablage`: ein Schlüssel, unter dem die Ansicht, die
+    geschickt hat, das neue Stück abholt — ein Weg im Ablauf, ein Block im Kurs).
+
+    >>> Ziel.fuer_plan("p1").teil, Ziel.fuer_ablage("weg-3").teil
+    ('planmedium/p1', 'ablage/weg-3')
+    >>> Ziel.fuer_ablage("x").ist_paketdatei
+    True
     """
 
     eintrag_id: str | None = None
@@ -292,6 +301,16 @@ class Ziel:
     bewegung_id: str | None = None
     paket_uebung_id: str | None = None
     paket_item_id: str | None = None
+    paket_plan_id: str | None = None
+    ablage: str | None = None
+
+    @classmethod
+    def fuer_plan(cls, plan_id: str) -> Ziel:
+        return cls(paket_plan_id=plan_id)
+
+    @classmethod
+    def fuer_ablage(cls, schluessel: str) -> Ziel:
+        return cls(ablage=schluessel)
 
     @classmethod
     def fuer_eintrag(cls, eintrag_id: str) -> Ziel:
@@ -315,7 +334,12 @@ class Ziel:
 
     @property
     def ist_paketdatei(self) -> bool:
-        return self.paket_uebung_id is not None or self.paket_item_id is not None
+        return (
+            self.paket_uebung_id is not None
+            or self.paket_item_id is not None
+            or self.paket_plan_id is not None
+            or self.ablage is not None
+        )
 
     @property
     def ist_bewegung(self) -> bool:
@@ -343,6 +367,10 @@ class Ziel:
             return f"{PAKETDATEI_TEIL}/{self.paket_uebung_id}"
         if self.paket_item_id is not None:
             return f"{PLANPAKETDATEI_TEIL}/{self.paket_item_id}"
+        if self.paket_plan_id is not None:
+            return f"{PLANMEDIUM_TEIL}/{self.paket_plan_id}"
+        if self.ablage is not None:
+            return f"{ABLAGE_TEIL}/{self.ablage}"
         return self.eintrag_id or ""
 
 
@@ -354,6 +382,9 @@ BEWEGUNG_TEIL = "bewegung"
 #: Eine Datei fürs Paket an einer Übung bzw. einer Planübung (U4)
 PAKETDATEI_TEIL = "paketdatei"
 PLANPAKETDATEI_TEIL = "planpaketdatei"
+#: … am Plan selbst und in die Ablage (für die Ansicht, die geschickt hat) — 19.11.2026
+PLANMEDIUM_TEIL = "planmedium"
+ABLAGE_TEIL = "ablage"
 
 
 def ziel_lesen(teile: list[str], profil_id: str) -> tuple[Ziel, list[str]] | None:
@@ -375,10 +406,22 @@ def ziel_lesen(teile: list[str], profil_id: str) -> tuple[Ziel, list[str]] | Non
     'u1'
     >>> ziel_lesen(["planpaketdatei", "i1", "video"], "p1")[0].paket_item_id
     'i1'
+    >>> ziel_lesen(["planmedium", "pl", "foto"], "p1")[0].paket_plan_id
+    'pl'
+    >>> ziel_lesen(["ablage", "weg-3", "audio"], "p1")[0].ablage
+    'weg-3'
     """
     if not teile:
         return None
-    if teile[0] in (NOTIZ_TEIL, UEBUNG_TEIL, BEWEGUNG_TEIL, PAKETDATEI_TEIL, PLANPAKETDATEI_TEIL):
+    if teile[0] in (
+        NOTIZ_TEIL,
+        UEBUNG_TEIL,
+        BEWEGUNG_TEIL,
+        PAKETDATEI_TEIL,
+        PLANPAKETDATEI_TEIL,
+        PLANMEDIUM_TEIL,
+        ABLAGE_TEIL,
+    ):
         if len(teile) < 2 or not teile[1]:
             return None
         if teile[0] == UEBUNG_TEIL:
@@ -389,6 +432,10 @@ def ziel_lesen(teile: list[str], profil_id: str) -> tuple[Ziel, list[str]] | Non
             return Ziel.fuer_paketdatei(uebung_id=teile[1]), teile[2:]
         if teile[0] == PLANPAKETDATEI_TEIL:
             return Ziel.fuer_paketdatei(item_id=teile[1]), teile[2:]
+        if teile[0] == PLANMEDIUM_TEIL:
+            return Ziel.fuer_plan(teile[1]), teile[2:]
+        if teile[0] == ABLAGE_TEIL:
+            return Ziel.fuer_ablage(teile[1]), teile[2:]
         return Ziel(profil_id=profil_id, notiz_id=teile[1]), teile[2:]
     return Ziel.fuer_eintrag(teile[0]), teile[1:]
 

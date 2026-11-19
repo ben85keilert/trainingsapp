@@ -224,6 +224,9 @@ def _neue(state: Any, subject_id: str | None = None) -> Einheitslauf:
         senke=getattr(state, "einheiten", None),
         subject_id=subject_id or state.profil.id,
     )
+    signale = getattr(state, "timer_signale", None)
+    if callable(signale):  # „Abschnitte in die HRV-Messung“ gilt auch in der Einheit
+        e.timer_notizen = lambda: bool(signale().notizen)
     state.einheit = e
     return e
 

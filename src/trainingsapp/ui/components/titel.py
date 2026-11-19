@@ -28,7 +28,6 @@ verwirft.
 
 from __future__ import annotations
 
-import contextlib
 import re
 from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime, timedelta
@@ -39,16 +38,12 @@ import flet as ft
 from trainingsapp.core.models import HrvTitel
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import schliessen
+from trainingsapp.ui.components.namenwahl import MAX_ZEILEN, ZEILE, Namenwahl, passende
 
 #: So weit vor und nach der Messung zählen Planeinträge noch zu ihr
 RAND = timedelta(minutes=10)
 #: Höchstens so viele Vorschläge aus dem Zusammenhang (Pläne, Timer)
 MAX_VORSCHLAEGE = 3
-#: Höchstens so viele Zeilen zeigt die Liste im Blatt (Ben, 26.10.2026: „sonst wird die
-#: Scrollbar zu groß“) — darüber hinaus filtert das Tippen
-MAX_ZEILEN = 7
-#: Höhe einer Zeile der Liste (dichte `ListTile`, px)
-ZEILE = 48
 
 _TIMER = re.compile(r"^Timer „(.+?)“")
 
@@ -85,19 +80,6 @@ def titel_vorschlaege(
             break
     eindeutig = list(dict.fromkeys(n.strip() for n in namen if n and n.strip()))
     return eindeutig[:MAX_VORSCHLAEGE]
-
-
-def passende(gespeicherte: Iterable[HrvTitel], suche: str) -> list[HrvTitel]:
-    """Die Überschriften, in denen ``suche`` vorkommt — ohne Suche alle, Reihenfolge bleibt.
-
-    >>> t = [HrvTitel(name="Intervalle Beine"), HrvTitel(name="Ruhe morgens")]
-    >>> [x.name for x in passende(t, "")]
-    ['Intervalle Beine', 'Ruhe morgens']
-    >>> [x.name for x in passende(t, " bei")]
-    ['Intervalle Beine']
-    """
-    s = suche.strip().casefold()
-    return [t for t in gespeicherte if not s or s in t.name.casefold()]
 
 
 def titel_kopf(
@@ -207,12 +189,19 @@ def titel_blatt(
     dem neuen Text (ohne die beiden Rückrufe fehlen ✕ und „merken“). Das Blatt schließt
     sich selbst (`dialoge.schliessen`); weggewischt speichert es, was geändert wurde.
     """
-    titel_feld = ft.TextField(
+    # Feld und Liste: derselbe Baustein wie beim Namen eines Abschnitts (Ben, 19.11.2026)
+    wahl = Namenwahl(
         label="Titel",
-        value=titel or vorgabe,
-        dense=True,
-        capitalization=ft.TextCapitalization.SENTENCES,
+        wert=titel or vorgabe,
+        vorschlaege=vorschlaege,
+        gespeicherte=gespeicherte,
+        merken=merken,
+        entfernen=entfernen,
+        art="Gespeicherte Überschrift",
+        leer="Noch keine gespeicherten Überschriften — was du vergibst, steht beim "
+        "nächsten Mal hier.",
     )
+    titel_feld, liste = wahl.feld, wahl.liste
     beschreibung_feld = ft.TextField(
         label="Beschreibung",
         value=beschreibung,
@@ -222,131 +211,9 @@ def titel_blatt(
         max_lines=6,
         capitalization=ft.TextCapitalization.SENTENCES,
     )
-    vorrat: list[HrvTitel] = list(gespeicherte)
-    # Feste Höhe ab dem Öffnen (Ben, 26.10.2026: „es irritiert, dass sich mit dem Tippen die
-    # Größe des Fensters verändert“): so viele Zeilen, wie beim Öffnen da sind, höchstens
-    # `MAX_ZEILEN` — wird die Liste beim Filtern kürzer, bleibt unten Luft; wird sie länger
-    # („merken“), scrollt sie in sich. Das Blatt misst seine Höhe sonst bei jeder Änderung.
-    anfangs = len(vorschlaege) + len(vorrat)
-    zeilen_hoehe = max(1, min(MAX_ZEILEN, anfangs) + (1 if anfangs > MAX_ZEILEN else 0))
-    liste = ft.Column(spacing=0, scroll=ft.ScrollMode.AUTO, height=zeilen_hoehe * ZEILE)
-    #: Der zuletzt übernommene Name: solange er im Feld steht, zeigt die Liste alles
-    stand = {"gewaehlt": (titel_feld.value or "").strip()}
 
     def eingabe() -> tuple[str, str]:
         return (titel_feld.value or "").strip(), (beschreibung_feld.value or "").strip()
-
-    def nehmen(name: str) -> Callable[[], None]:
-        def handler() -> None:
-            titel_feld.value = name
-            stand["gewaehlt"] = name
-            liste_zeichnen()
-            with contextlib.suppress(Exception):
-                titel_feld.update()
-
-        return handler
-
-    def entferner(t: HrvTitel) -> Callable[[], None]:
-        def handler() -> None:
-            if entfernen is not None:
-                entfernen(t)
-            vorrat[:] = [x for x in vorrat if x.id != t.id]
-            liste_zeichnen()
-
-        return handler
-
-    def merker(name: str) -> Callable[[], None]:
-        def handler() -> None:
-            if merken is None:
-                return
-            t = merken(name)
-            if t is not None and all(x.id != t.id for x in vorrat):
-                vorrat.append(t)
-            stand["gewaehlt"] = name
-            liste_zeichnen()
-
-        return handler
-
-    def zeile(
-        name: str, symbol: ft.IconData, tipp: str, *, rechts: ft.Control | None = None
-    ) -> ft.Control:
-        return ft.ListTile(
-            dense=True,
-            content_padding=ft.Padding.only(left=4, right=0),
-            leading=ft.Icon(symbol, size=20, opacity=0.7, tooltip=tipp),
-            title=ft.Text(name, size=14, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
-            trailing=rechts,
-            on_click=nehmen(name),
-        )
-
-    def liste_zeichnen() -> None:
-        text = (titel_feld.value or "").strip()
-        suche = "" if text == stand["gewaehlt"] else text
-        zeilen: list[ft.Control] = [
-            zeile(n, ft.Icons.AUTO_AWESOME_OUTLINED, "Aus Plan oder Timer")
-            for n in vorschlaege
-            if not suche or suche.casefold() in n.casefold()
-        ]
-        treffer = passende(vorrat, suche)
-        rest = len(zeilen) + len(treffer) - MAX_ZEILEN
-        for t in treffer[: max(0, MAX_ZEILEN - len(zeilen))]:
-            symbol = (
-                ft.Icons.PUSH_PIN
-                if t.angeheftet
-                else ft.Icons.HISTORY
-                if t.zuletzt is not None
-                else ft.Icons.BOOKMARK_BORDER
-            )
-            tipp = "Angeheftet" if t.angeheftet else "Gespeicherte Überschrift"
-            kreuz = (
-                ft.IconButton(
-                    ft.Icons.CLOSE,
-                    icon_size=18,
-                    visual_density=ft.VisualDensity.COMPACT,
-                    tooltip="Aus der Liste nehmen",
-                    on_click=entferner(t),
-                )
-                if entfernen is not None
-                else None
-            )
-            zeilen.append(zeile(t.name, symbol, tipp, rechts=kreuz))
-        if rest > 0:
-            zeilen.append(
-                ft.Container(
-                    height=ZEILE,
-                    padding=ft.Padding.only(left=16),
-                    alignment=ft.Alignment.CENTER_LEFT,
-                    content=ft.Text(f"+{rest} weitere — zum Filtern tippen", size=12, opacity=0.65),
-                )
-            )
-        bekannt = {n.casefold() for n in vorschlaege} | {t.name.casefold() for t in vorrat}
-        if text and merken is not None and text.casefold() not in bekannt:
-            zeilen.append(
-                ft.ListTile(
-                    dense=True,
-                    content_padding=ft.Padding.only(left=4, right=0),
-                    leading=ft.Icon(
-                        ft.Icons.BOOKMARK_ADD_OUTLINED, size=20, color=ft.Colors.PRIMARY
-                    ),
-                    title=ft.Text(f"„{text}“ merken", size=14, color=ft.Colors.PRIMARY),
-                    on_click=merker(text),
-                )
-            )
-        if not zeilen and not vorrat and not vorschlaege:
-            zeilen.append(
-                ft.Text(
-                    "Noch keine gespeicherten Überschriften — was du vergibst, steht beim "
-                    "nächsten Mal hier.",
-                    size=12,
-                    opacity=0.65,
-                )
-            )
-        liste.controls = zeilen
-        with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
-            liste.update()
-
-    titel_feld.on_change = lambda _: liste_zeichnen()
-    liste_zeichnen()
 
     anfang = eingabe()
     #: Gespeichert oder abgebrochen — das Schließen danach tut nichts mehr

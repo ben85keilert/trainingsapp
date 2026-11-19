@@ -72,9 +72,10 @@ async def test_hrv_laeuft_schon_timer_startet_auf_die_sekunde(aufbau) -> None:
 
     rec = laden(ergebnis.pfad)
     wand = {x["text"]: x["t_wall_s"] for x in rec.ereignisse}
+    # Der erste Abschnitt fällt mit „Intervalle: Start“ zusammen — keine zweite Marke (Ben,
+    # 19.11.2026); seine Grenze bleibt auf der Timer-Spur
     assert wand == {
         "Intervalle: Start": 60.0,
-        "Timer „T“: Belastung (Runde 1/2)": 60.0,
         "Pause (Runde 1/2)": 90.0,
         "Belastung (Runde 2/2)": 105.0,
         "Pause (Runde 2/2)": 135.0,
@@ -181,8 +182,9 @@ async def test_kurze_abschnitte_bekommen_keine_marke(aufbau) -> None:
     await e.abschliessen()
     rec = laden(lauf.aufnahme_stoppen(tmp_path).pfad)
     texte = [x["text"] for x in rec.ereignisse]
-    # Die HRV lief schon vor der Einheit — darum Start und Ende der Einheit als eigene Spur
-    assert texte == ["x: Start", "Timer „ABC“: A", "C", "Timer beendet", "x: Ende"]
+    # Die HRV lief schon vor der Einheit — darum Start und Ende der Einheit als eigene Spur;
+    # was der Timer im selben Augenblick meldet, bekommt keine zweite Marke (Ben, 19.11.2026)
+    assert texte == ["x: Start", "C", "x: Ende"]
     # Die Zeitleiste behält alles
     assert [x.daten.get("name") for x in repo.ereignisse(e.id) if x.art == "abschnitt"] == [
         "A",
@@ -211,8 +213,7 @@ async def test_pause_beendet_den_abschnitt_weiter_setzt_ihn_fort(aufbau) -> None
     rec = laden(ergebnis.pfad)
     wand = [(x["text"], x["t_wall_s"]) for x in rec.ereignisse]
     assert wand == [
-        ("x: Start", 5.0),
-        ("Timer „P“: Halten", 5.0),
+        ("x: Start", 5.0),  # „Timer „P“: Halten“ im selben Augenblick bleibt still
         ("Timer angehalten", 25.0),
         ("weiter: Halten", 45.0),
         ("Timer fertig", 85.0),
@@ -224,6 +225,28 @@ async def test_pause_beendet_den_abschnitt_weiter_setzt_ihn_fort(aufbau) -> None
         ("x", 5, 95),
         ("Halten", 45, 85),
     ]
+
+
+async def test_ohne_abschnitte_in_hrv_setzt_die_uhr_keine_marke(aufbau) -> None:
+    """Ben, 19.11.2026: Eine Marke für die Uhr nur, wenn „Abschnitte in die HRV-Messung“ an
+    ist — auch in der Einheit (vorher las nur der Timer ohne Einheit den Schalter). Aus: keine
+    Notiz, kein Abschnitt vom Timer, und ein Timer allein bekommt auch keine Klammer mit
+    seinem Namen; an: eine Marke mit seinem Namen."""
+    uhr, gurt, lauf, repo, profil, tmp_path = aufbau
+    lauf.aufnahme_starten()
+    await _sekunden(uhr, gurt, 5)
+    timer = TimerLauf(TimerProfil(name="P", abschnitte=[Abschnitt("Halten", 30)]), uhr=lauf.uhr)
+    e = _einheit(lauf, uhr, repo, profil, "Dehnen")
+    e.timer_notizen = lambda: False
+    e.hinzufuegen(HrvBaustein(lauf, basis=tmp_path))
+    e.hinzufuegen(TimerBaustein(timer))
+    e.starten()
+    await _sekunden(uhr, gurt, 40, e)
+    e.beenden()
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    assert ergebnis is not None
+    assert laden(ergebnis.pfad).ereignisse == []
+    assert zusatz_lesen(ergebnis.pfad, float)[1] == []
 
 
 async def test_neue_aufnahme_mitten_in_der_einheit(aufbau) -> None:

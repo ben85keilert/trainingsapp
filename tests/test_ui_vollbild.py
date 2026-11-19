@@ -221,19 +221,37 @@ async def test_live_vollbild_zwei_achsen_ablesen_und_notizen(daten) -> None:
     (e,) = lauf.aufnahme.ereignisse
     assert e["text"] == "Atemübung"
 
-    # Marke ziehen: Geste beginnt auf der Marke, endet 30 s früher
-    px = marke_px()
-    wischer.on_horizontal_drag_start(SimpleNamespace(local_position=ft.Offset(px, 10)))
-    ziel = px - 30 * anteil_px
-    wischer.on_horizontal_drag_update(
-        SimpleNamespace(
-            local_position=ft.Offset(ziel, 10), local_delta=ft.Offset(-30 * anteil_px, 0)
+    def ziehen() -> None:
+        """Eine Geste beginnt auf der Marke und endet 30 s früher."""
+        px = marke_px()
+        wischer.on_horizontal_drag_start(SimpleNamespace(local_position=ft.Offset(px, 10)))
+        ziel = px - 30 * anteil_px
+        wischer.on_horizontal_drag_update(
+            SimpleNamespace(
+                local_position=ft.Offset(ziel, 10), local_delta=ft.Offset(-30 * anteil_px, 0)
+            )
         )
-    )
-    wischer.on_horizontal_drag_end(SimpleNamespace(local_position=ft.Offset(ziel, 10)))
+        wischer.on_horizontal_drag_end(SimpleNamespace(local_position=ft.Offset(ziel, 10)))
+
+    # Marke ziehen nur mit „In Kurve“ in ihrer Eingabe (Ben, 19.11.2026: beim Wischen
+    # verschoben sich sonst schnell Marken); gespeichert wird mit ✓
+    wischer.on_tap_down(SimpleNamespace(local_position=ft.Offset(marke_px(), 120)))
+    _symbol(ansicht, ft.Icons.EDIT_OUTLINED, "Notiz bearbeiten").on_click()
+    next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.TextButton) and c.content == "In Kurve"
+    ).on_click()
+    ziehen()
+    assert lauf.aufnahme.ereignisse[0]["t_wall_s"] == e["t_wall_s"]  # erst ✓ speichert
+    _symbol(ansicht, ft.Icons.CHECK, "Speichern").on_click()
     (e2,) = lauf.aufnahme.ereignisse
     assert e2["t_wall_s"] == pytest.approx(e["t_wall_s"] - 30, abs=3.0)
     assert e2["text"] == "Atemübung"
+    # Ohne „In Kurve“ wandert keine Marke — die Geste blättert die Kurve
+    ziehen()
+    (e3,) = lauf.aufnahme.ereignisse
+    assert e3["t_wall_s"] == e2["t_wall_s"]
 
     # Ablesen: hält die Kurve an und zeigt die Werte aller Kurven am Strich
     assert state.messung_ende_s is None

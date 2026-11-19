@@ -130,6 +130,32 @@ def test_knoepfe_in_zwei_zeilen() -> None:
     assert _texte(zeilen[2]) == ["−5 s", "−1 s", "+1 s", "+5 s"]
 
 
+def test_marken_ziehen_nur_mit_in_kurve() -> None:
+    """Ben, 19.11.2026: Beim Wischen in der Kurve verschoben sich schnell Notizmarken —
+    ohne „In Kurve“ folgt keine Marke dem Finger (die Geste blättert), mit „In Kurve“ nur die
+    der offenen Eingabe, und auch die erst, wenn die Geste an ihr beginnt. Gespeichert wird
+    erst mit ✓; danach ist „In Kurve“ aus wie nach einem Tipp."""
+    w = _Welt(live=False)
+    f = w.feld
+    vorher = list(w.liste)
+    assert not f.greifen(30.0)  # keine Eingabe offen: keine Marke, egal wie nah
+    f.loslassen()
+    f.bearbeiten(1)  # „Notiz 30“
+    assert not f.greifen(30.0)  # ohne „In Kurve“ nicht — auch nicht die eigene
+    assert not f.greifen(10.0)  # und keine andere
+    f.waehlen_umschalten()
+    assert not f.greifen(10.0)  # mit „In Kurve“: eine andere Marke bleibt, die Kurve blättert
+    assert f.greifen(30.4)  # die eigene folgt
+    assert f.greifen(42.0) and f.x == 42.0
+    f.loslassen()
+    assert not f.waehlen and f.gezogen is None and f.x == 42.0
+    assert w.liste == vorher  # noch nichts gespeichert
+    f._text.value = "Notiz 30"
+    f.uebernehmen()
+    zeiten = sorted(round(e["t_wall_s"]) for e in w.liste)
+    assert zeiten == [10, 42, 50]
+
+
 def test_zeit_als_dauer_oder_uhrzeit_eintippen_nachtraeglich() -> None:
     w = _Welt(live=False)
     f = w.feld

@@ -865,6 +865,22 @@ class HrvTitel:
 
 
 @dataclass(slots=True)
+class AbschnittName:
+    """Ein gemerkter Name für Abschnitte (Migration 072, Ben 19.11.2026) — eine eigene Liste
+    neben den Überschriften (`HrvTitel`), mit demselben Verhalten: Jeder vergebene Name kommt
+    von selbst hinein; ``angeheftet`` hält ihn oben, sonst zählt ``zuletzt`` — ``None``: noch
+    nie als Abschnitt vergeben.
+    """
+
+    id: str = field(default_factory=new_id)
+    subject_id: str = ""
+    name: str = ""
+    angeheftet: bool = False
+    zuletzt: datetime | None = None
+    created_at: datetime = field(default_factory=jetzt)
+
+
+@dataclass(slots=True)
 class Strecke:
     """Ein Training mit Strecke — nur Ortsfreies (Migration 012).
 
@@ -913,6 +929,7 @@ __all__ = [
     "ROLLEN",
     "SYMBOL",
     "ZEITPUNKTE",
+    "AbschnittName",
     "Ereignis",
     "Exercise",
     "HrvRecording",

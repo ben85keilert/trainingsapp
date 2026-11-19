@@ -100,6 +100,9 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
     async def zu_ueberschriften() -> None:
         await page.push_route("/einstellungen/hrv/ueberschriften")
 
+    async def zu_abschnittsnamen() -> None:
+        await page.push_route("/einstellungen/hrv/abschnittsnamen")
+
     def setzen(**werte: Any) -> None:
         for name, wert in werte.items():
             setattr(e, name, wert)
@@ -880,6 +883,19 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                     ),
                     trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT),
                     on_click=zu_ueberschriften,
+                ),
+                ft.ListTile(
+                    dense=True,
+                    content_padding=ft.Padding.only(left=0, right=0),
+                    leading=ft.Icon(ft.Icons.LABEL_OUTLINE),
+                    title=ft.Text("Abschnittsnamen"),
+                    subtitle=ft.Text(
+                        f"{len(state.hrv.abschnittnamen(state.profil.id))} gemerkt — zum "
+                        "Antippen beim Benennen eines Abschnitts; anlegen, anheften, löschen",
+                        size=12,
+                    ),
+                    trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT),
+                    on_click=zu_abschnittsnamen,
                 ),
             ),
             karte(

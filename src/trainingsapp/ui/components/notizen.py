@@ -11,7 +11,8 @@ ihre Stelle in die Kurve. Die Eingabe hat vier Zeilen:
    wer eine Notiz nachträgt, hat oft nur die Uhr; der Knopf daneben zeigt die
    jeweils andere Schreibweise und schaltet um (`core.zeitangabe`).
 2. Zeit setzen — „Jetzt" (live), „In Kurve" (der nächste Tipp in die Kurve
-   setzt den Zeitpunkt), „Übungen" (unten).
+   setzt den Zeitpunkt, oder man zieht die Marke der Eingabe — nur dann folgt eine
+   Marke dem Finger, Ben 19.11.2026), „Übungen" (unten).
 3. ±1 s / ±5 s zum Verschieben.
 4. Text, Speichern, Abbrechen (beim Bearbeiten: Löschen).
 
@@ -231,9 +232,9 @@ class Notizfeld:
         self._mitte = mitte
         self._jetzt = jetzt
         self._breite = breite
-        #: Marke, die gerade mit dem Finger gezogen wird (Index), und wo sie steht
+        #: Die Marke der offenen Eingabe wird gerade mit dem Finger gezogen (Index wie
+        #: ``bearbeite``) — nur mit „In Kurve“ (`greifen`); ihre Stelle steht in ``x``
         self.gezogen: int | None = None
-        self.zieh_x = 0.0
         self._offen_merken = offen_merken
         self._uebungen = uebungen
         self._uebungen_merken = uebungen_merken
@@ -614,32 +615,34 @@ class Notizfeld:
         return beste[1] if beste is not None else None
 
     def greifen(self, x: float) -> bool:
-        """Für `zeitfenster.wischbar`: Eine Marke unter dem Finger folgt ihm.
+        """Für `zeitfenster.wischbar`: Nur mit **„In Kurve“** folgt eine Marke dem Finger —
+        die der offenen Eingabe, keine andere (Ben, 19.11.2026: „wenn man in die Kurve klickt
+        und links/rechts wischt, passiert es schnell, dass die Markierungen für die Notizen
+        verschieben. Dafür braucht es eine Absicherung“). Sonst blättert die Geste die Kurve,
+        mit „In Kurve“ ebenso, wenn sie nicht an der Marke beginnt.
 
         Beim ersten Aufruf einer Geste entscheidet die Nähe; danach kommt jede
-        weitere Lage hierher, bis `loslassen`. Die Kurve zeichnet `wischbar`.
+        weitere Lage hierher, bis `loslassen`. Die Kurve zeichnet `wischbar`; gespeichert
+        wird wie nach einem Tipp erst mit ✓ der Eingabe.
         """
         if self.gezogen is not None:
-            self.zieh_x = x
+            self.x = x
             return True
-        i = self.bei(x, ohne=self.bearbeite)
-        if i is None:
+        if not self.waehlen or self.bearbeite is None:
             return False
-        self.gezogen, self.zieh_x = i, x
+        if abs(x - self._x_der_eingabe()) > self._toleranz():
+            return False
+        self.gezogen = self.bearbeite
+        self.x, self.eingefroren = x, True
         return True
 
     def loslassen(self) -> None:
-        """Ende der Geste: die gezogene Marke bekommt ihren neuen Anker."""
-        i, self.gezogen = self.gezogen, None
-        zb = self._zeitbezug()
-        liste = list(self._ereignisse())
-        if i is None or zb is None or not 0 <= i < len(liste):
+        """Ende der Geste: Die Marke der Eingabe steht — wie nach einem Tipp ist „In Kurve“
+        wieder aus."""
+        if self.gezogen is None:
             return
-        bearbeitet = self._bearbeitete(liste)
-        alt = liste[i]
-        liste[i] = notiz(str(alt.get("text") or ""), zb.anker(self.zieh_x), zb.start_utc, alt)
-        self._speichern(sortiert(liste, zb.beats()))
-        self._neu_zaehlen(bearbeitet)
+        self.gezogen = None
+        self.waehlen = False
         self._aendern(kurve=True)
 
     # -- Etikett in der Kurve (Vollbild, Ben 16.10.2026) ----------------------------
@@ -767,17 +770,15 @@ class Notizfeld:
             if (
                 x is not None
                 and x_von <= x <= x_bis
-                and i not in (self.bearbeite, self.gezogen)
+                and i != self.bearbeite
                 and not self._ausblenden(e)
             ):
                 notizen.append(x)
         reihen = [senkrechte(notizen, FARBEN["notiz"], 1.5, gestrichelt=False)]
-        if self.bearbeite is not None:
+        if self.bearbeite is not None:  # auch, während sie mit „In Kurve“ gezogen wird
             x = self._x_der_eingabe()
             if x_von <= x <= x_bis:
                 reihen.append(senkrechte([x], FARBEN["notiz_neu"], 2.0, gestrichelt=True))
-        if self.gezogen is not None and x_von <= self.zieh_x <= x_bis:
-            reihen.append(senkrechte([self.zieh_x], FARBEN["notiz_neu"], 2.0, gestrichelt=True))
         return [r for r in reihen if r.punkte]
 
     def positionen(self, x_von: float, x_bis: float, nur: Callable[[dict], bool]) -> list[float]:

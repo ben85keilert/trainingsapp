@@ -650,6 +650,11 @@ class Einheitslauf:
         self.warnung: str | None = None
         #: Wird nach jedem Takt mit den neuen Ereignissen gerufen; Fehler stoppen nichts
         self.beobachter: Callable[[list[Ereignis]], None] | None = None
+        #: Schalter „Abschnitte in die HRV-Messung“ der Timer-Signale (`TimerSignale.notizen`)
+        #: — aus: Timer und Takt schreiben keine Notizen und Abschnitte in die Messung, wie
+        #: ohne Einheit (`ui.timer_takt._in_messung`); die Oberfläche setzt ihn (Ben,
+        #: 19.11.2026: eine Marke für die Uhr nur, wenn der Schalter an ist)
+        self.timer_notizen: Callable[[], bool] = lambda: True
         self._beteiligungen: dict[int, Beteiligung] = {}
         self._gestartet: set[int] = set()
         self._nr = 0
@@ -966,6 +971,10 @@ class Einheitslauf:
             # Nur die Messung, die schon lief (Einzelstarts, `ui.einheit.platz_machen`):
             # nichts, was eine Klammer bräuchte (Ben, 26.10.2026: „Start: HRV-Messung“ weg)
             return False
+        if all(t.art in ("hrv", "timer") for t in self.teile) and not self.timer_notizen():
+            # Ein Timer allein, ohne „Abschnitte in die HRV-Messung“: Die Klammer trüge
+            # seinen Namen — keine Marke für die Uhr (Ben, 19.11.2026)
+            return False
         # Auch das Zählen nicht: es gehört zu einer Übung, deren Start und Ende klammern
         return self.teil("plan") is None and self.teil("zaehlen") is None
 
@@ -1012,7 +1021,7 @@ class Einheitslauf:
         if neu is None or neu.leer:
             return
         hrv = self.hrv
-        if hrv is not None and id(hrv) in self._gestartet:
+        if hrv is not None and id(hrv) in self._gestartet and self.timer_notizen():
             in_die_messung(hrv.messlauf, neu, profil=timer.lauf.profil.markenname)
         z = self.teil("zaehlen")
         runden = getattr(z, "takt_runden", None)
@@ -1043,21 +1052,27 @@ class Einheitslauf:
         meldet, wird still (`core.einheit.in_klammer`, Ben 13.11.2026: „Die zusätzliche Notiz
         für die Uhr ist störend, wenn ohnehin schon die Übung markiert wird“) — ihr Anfang
         mit dem Start der Einheit und ihr Ende, wenn die Einheit dort endet (``ende_t_s``,
-        oder weil sie mit dem Timer endet). Ein Timer allein behält seine Notizen: Dort ist
-        er selbst, was die Klammer nennt, und sein erster Abschnitt sagt, womit er beginnt."""
+        oder weil sie mit dem Timer endet). Seit 19.11.2026 auch bei einem **Timer allein**
+        (Ben: „Wenn ein Ereignis startet/endet und damit 2 Markierungen gesetzt werden, muss
+        dafür gesorgt sein, dass die 2. nicht entsteht“): Die Klammer trägt dort seinen Namen
+        („Dehnen: Start“), sein erster Abschnitt bleibt als Grenze auf der Timer-Spur."""
         teil = self.teil("plan")
         if not isinstance(teil, UebungBaustein):
-            if not self._einheit_klammer or self.teil("gps") is None:
+            if not self._einheit_klammer:
                 return liste
             return [
                 in_klammer(e, ende_t_s=e.t_s if self.ende_mit_timer else ende_t_s) for e in liste
             ]
-        # Der Anfang der Uhr fällt mit „Wadenheben: Start“ (t_s = 0) zusammen und wird still
-        # (Ben, 26.10.2026); was die Uhr vorhat, trägt dafür die Startnotiz der Übung
+        # Der Anfang der Uhr fällt mit „Wadenheben: Start“ zusammen und wird still (Ben,
+        # 26.10.2026); was die Uhr vorhat, trägt dafür die Startnotiz der Übung. Tritt die Uhr
+        # später bei (erst „Wdh. zählen“, dann ▶), ist ihr Anfang der Augenblick des Beitritts
+        # — auch dann keine zweite Marke: Der Name der Übung hat Vorrang (Ben, 19.11.2026)
         timer = self.timer
+        beteiligung = self._beteiligungen.get(id(timer)) if timer is not None else None
+        uhr_start = beteiligung.von_s if beteiligung is not None else 0.0
         out = []
         for e in liste:
-            x = in_uebung(e, teil.kontext.uebung_id, teil.name, start_t_s=0.0)
+            x = in_uebung(e, teil.kontext.uebung_id, teil.name, start_t_s=uhr_start)
             if timer is not None and (x.quelle, x.art) == ("plan", "uebung_start"):
                 x = replace(x, daten={**x.daten, **uhr_angaben(timer.lauf)})
             out.append(x)
@@ -1147,7 +1162,15 @@ class Einheitslauf:
         if hrv is None or self.t0 is None:
             return
         t0 = self.t0
+        timer_notizen: bool | None = None
         for e in neu:
+            if e.quelle == "timer":
+                # „Abschnitte in die HRV-Messung“ aus: nichts vom Timer in die Messung, wie
+                # ohne Einheit (`ui.timer_takt._in_messung`) — einmal je Takt gefragt
+                if timer_notizen is None:
+                    timer_notizen = bool(self.timer_notizen())
+                if not timer_notizen:
+                    continue
             if (e.quelle, e.art) == ("einheit", "start"):
                 # Ob die Einheit eine Klammer bekommt, entscheidet sich am Anfang — das Ende
                 # folgt dem, auch wenn inzwischen ein Teil beitrat

@@ -2069,6 +2069,61 @@ def test_migration_030_uebernimmt_vergebene_titel(tmp_path) -> None:
     con.close()
 
 
+def test_gemerkte_abschnittsnamen(welt) -> None:
+    """Migration 072 (Ben, 19.11.2026): eine eigene Liste für Abschnittsnamen, dasselbe
+    Verhalten wie die Überschriften — merken, Reihenfolge, anheften, umbenennen, entfernen;
+    die Überschriften bleiben, wie sie sind."""
+    from trainingsapp.data.repositories import HrvRepo
+
+    con, _, ich, _ = welt
+    hrv = HrvRepo(con)
+    assert hrv.abschnittname_merken(ich.id, "  ") is None
+    vorab = hrv.abschnittname_merken(ich.id, " Erholung ", verwendet=False)
+    assert vorab is not None and vorab.name == "Erholung" and vorab.zuletzt is None
+    hrv.abschnittname_merken(ich.id, "Rad")
+    hrv.abschnittname_merken(ich.id, "Behandlung")
+    assert [n.name for n in hrv.abschnittnamen(ich.id)] == ["Behandlung", "Rad", "Erholung"]
+    assert hrv.titel_liste(ich.id) == []
+    erholung = hrv.abschnittnamen(ich.id)[2]
+    hrv.abschnittname_anheften(erholung.id, True)
+    namen = hrv.abschnittnamen(ich.id)
+    assert namen[0].name == "Erholung" and namen[0].angeheftet
+    rad = namen[2]
+    assert hrv.abschnittname_umbenennen(rad.id, "") == "Bitte einen Namen eingeben."
+    assert hrv.abschnittname_umbenennen(rad.id, "Erholung") == "„Erholung“ gibt es schon."
+    assert hrv.abschnittname_umbenennen(rad.id, "Radfahren") is None
+    hrv.abschnittname_entfernen(rad.id)
+    assert [n.name for n in hrv.abschnittnamen(ich.id)] == ["Erholung", "Behandlung"]
+    assert hrv.abschnittname_umbenennen(rad.id, "x") == "Diesen Namen gibt es nicht mehr."
+    assert hrv.abschnittnamen("anderes-profil") == []
+
+
+def test_migration_072_uebernimmt_die_ueberschriften_als_namen(tmp_path) -> None:
+    """Was bisher als Vorschlag kam (die Überschriften), bleibt beim Tippen auffindbar — als
+    gemerkter Name, kein Favorit, noch nie als Abschnitt vergeben."""
+    from trainingsapp.data.db import MIGRATIONS_DIR, migrieren, verbinden
+    from trainingsapp.data.repositories import HrvRepo
+
+    ordner = tmp_path / "bis071"
+    ordner.mkdir()
+    for datei in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        if int(datei.name[:3]) <= 71:
+            (ordner / datei.name).write_text(datei.read_text(encoding="utf-8"), encoding="utf-8")
+    con = verbinden(tmp_path / "alt.db")
+    assert migrieren(con, ordner) == 71
+    ich = Subject(name="Ich")
+    SubjectRepo(con).speichern(ich)
+    hrv = HrvRepo(con)
+    hrv.titel_merken(ich.id, "Morgens")
+    hrv.titel_merken(ich.id, "Behandlung", verwendet=False)
+    con.commit()
+    assert migrieren(con) == letzte_migration()
+    namen = hrv.abschnittnamen(ich.id)
+    assert sorted(n.name for n in namen) == ["Behandlung", "Morgens"]
+    assert not any(n.angeheftet or n.zuletzt for n in namen)
+    con.close()
+
+
 # ---------------------------------------------------------------------------
 # Durchsicht 10.11.2026: D21, D22, D23
 # ---------------------------------------------------------------------------

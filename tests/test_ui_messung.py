@@ -1909,12 +1909,14 @@ def test_uebersicht_zeilen_gleich_hoch_mit_und_ohne_grund() -> None:
 
 async def test_live_abschnitt_start_und_ende(daten) -> None:
     """Live (Ben, 27.10.2026): Klappfeld „Abschnitte“ mit Chips und Liste; „Abschnitt:
-    Start“ fragt den Namen (gespeicherte Überschriften als Vorschlag), der Knopf wird zu
-    „‹Name› · Ende“, die Chips bleiben beim Einklappen stehen."""
+    Start“ fragt den Namen (seit 19.11.2026: die gemerkten Abschnittsnamen als Liste wie im
+    Titel-Blatt, nicht mehr alle Überschriften als Knöpfe), der Knopf wird zu „‹Name› · Ende“,
+    die Chips bleiben beim Einklappen stehen."""
     from trainingsapp.core.models import HrvTitel
 
     state, tmp_path = daten
-    state.hrv.titel_merken(state.profil.id, "Behandlung Rücken")
+    state.hrv.abschnittname_merken(state.profil.id, "Behandlung Rücken")
+    state.hrv.titel_merken(state.profil.id, "Morgenmessung")  # eine Überschrift: nicht hier
     lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
     await lauf.verbinden(SIM_SYNTH, "Simulator H10")
     task = asyncio.create_task(lauf.laufen())
@@ -1930,12 +1932,10 @@ async def test_live_abschnitt_start_und_ende(daten) -> None:
     start.on_click()
     dialog = seite.aufrufe[-1]
     assert isinstance(dialog, ft.AlertDialog) and dialog.title.value == "Abschnitt: Start"
-    vorschlag = next(  # gespeicherte Überschrift als Knopf
-        c
-        for c in _alle_controls(dialog)
-        if isinstance(c, ft.OutlinedButton) and c.content == "Behandlung Rücken"
-    )
-    vorschlag.on_click()
+    assert not [c for c in _alle_controls(dialog) if isinstance(c, ft.OutlinedButton)]
+    zeilen = [c for c in _alle_controls(dialog) if isinstance(c, ft.ListTile)]
+    assert [z.title.value for z in zeilen] == ["Behandlung Rücken"]
+    zeilen[0].on_click()
     next(b for b in dialog.actions if b.content == "Start").on_click()
     await dialog.on_dismiss(None)
     assert lauf.offener_abschnitt() is not None
@@ -2097,6 +2097,72 @@ def test_alte_eigene_abschnitte_bekommen_ihr_notizpaar(daten) -> None:
     grenzen = [e for e in laden(pfad).ereignisse if "marke" in e]
     assert [e["text"] for e in grenzen] == ["Belastung", "Alt: Start", "Alt: Ende"]
     assert grenzen[1]["marke"]["spur"] == "seg-00000002"
+
+
+def test_ablauf_abschnitt_loeschen_nimmt_seine_notizen_mit(daten) -> None:
+    """Ben, 19.11.2026: „wenn Abschnitte gelöscht werden, sollen auch die zugehörigen Notizen
+    mit gelöscht werden“ — auch beim Abschnitt einer Übung: „Planke: Start“ und „Planke: Ende“
+    gehen mit (die Rückfrage nennt sie), „Pause“ beginnt den nächsten und bleibt, eine freie
+    Notiz bleibt; „Rückgängig“ holt sie zurück."""
+    import json
+
+    from hrv_core.ausschnitte import Abschnitt, zusatz_speichern
+    from hrv_core.ereignisse import anker_aus_herz, metadaten_schreiben, notiz
+    from hrv_core.korrektur import analyse_pfad
+    from hrv_core.recording import laden
+
+    state, tmp_path = daten
+    eintrag, pfad = _golden_eintrag(state, tmp_path)
+    rec = laden(pfad)
+
+    def n(t: float, text: str, art: str = "", name: str = "") -> dict:
+        marke = {"quelle": "plan", "art": art, "spur": "uebung"} if art else None
+        if marke is not None and name:
+            marke["name"] = name
+        return notiz(text, anker_aus_herz(rec.beats, t), rec.start_utc, marke=marke)
+
+    metadaten_schreiben(
+        pfad,
+        ereignisse=[
+            n(60, "Planke: Start", "uebung_start", "Planke"),
+            n(90, "frei"),
+            n(150, "Planke: Ende", "uebung_ende"),
+            n(150, "Pause", "pause", "Pause"),
+        ],
+    )
+    zusatz_speichern(
+        pfad,
+        None,
+        [Abschnitt("Planke", 60, 150, id="u-1"), Abschnitt("Pause", 150, 200, id="u-2")],
+        float,
+    )
+    seite = _seite()
+    view = messung_detail_view(seite, state, eintrag)
+
+    def texte() -> list[str]:
+        return [e["text"] for e in laden(pfad).ereignisse]
+
+    def segmente() -> list[str]:
+        return [s["name"] for s in json.loads(analyse_pfad(pfad).read_text())["segments"]]
+
+    _symbol(view, ft.Icons.CLOSE, "Abschnitt löschen").on_click()  # der erste: „Planke“
+    frage = _loeschen_bestaetigen(seite)
+    assert "„Planke: Start“ und „Planke: Ende“" in frage.content.value
+    _schliessen_und_warten(seite, frage)
+    assert segmente() == ["Pause"]
+    assert texte() == ["frei", "Pause"]
+    meldung = seite.aufrufe[-1]
+    assert meldung.content.value == "„Planke“ gelöscht"
+    meldung.action.on_click()  # Rückgängig
+
+    async def warten() -> None:
+        while seite.aufgaben:
+            aufgaben, seite.aufgaben[:] = list(seite.aufgaben), []
+            await asyncio.gather(*aufgaben)
+
+    asyncio.run(warten())
+    assert texte() == ["Planke: Start", "frei", "Planke: Ende", "Pause"]
+    assert segmente() == ["Planke", "Pause"]
 
 
 async def test_bluetooth_aus_warnt_statt_zu_suchen(daten) -> None:

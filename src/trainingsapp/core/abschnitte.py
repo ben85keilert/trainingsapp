@@ -170,6 +170,26 @@ def name_teilen(name: str) -> tuple[str, str]:
     return name or "Abschnitt", ""
 
 
+# -- Gemerkte Namen (Migration 072, Ben 19.11.2026) ------------------------------------
+
+_NUMMERIERT = re.compile(r"^abschnitt\s*\d*$", re.IGNORECASE)
+
+
+def merkenswert(name: str) -> str | None:
+    """Der Name, der in die gemerkten kommt — der der Gruppe, ohne Zusatz; ``None`` für die
+    bloße Vorgabe „Abschnitt 3“ (sie füllte die Liste nur mit Nummern).
+
+    >>> merkenswert("Radfahren (5 km)"), merkenswert(" Behandlung ")
+    ('Radfahren', 'Behandlung')
+    >>> merkenswert("Abschnitt 3"), merkenswert("Abschnitt"), merkenswert("  ")
+    (None, None, None)
+    """
+    if not name.strip():
+        return None
+    gruppe, _ = name_teilen(name)
+    return None if _NUMMERIERT.match(gruppe) else gruppe
+
+
 def start_text(name: str) -> str:
     """Text der Start-Notiz.
 
@@ -817,6 +837,97 @@ def notizen_entfernen(
     return [e for i, e in enumerate(out) if i not in weg]
 
 
+#: Marken eines Ablaufs, die einen Abschnitt nur **beenden** — „Planke: Ende“, „Timer fertig“,
+#: „Timer angehalten“, das Ende einer Einheit oder eines Workouts. Alle anderen Marken eines
+#: Ablaufs beginnen einen (die Kette: jede Grenze beendet die vorige).
+_ABLAUF_ENDE = frozenset(
+    {("timer", "ende"), ("timer", "pause"), ("einheit", "ende"), ("plan", "ende")}
+)
+
+
+def _beendet_nur(m: Mapping[str, Any]) -> bool:
+    art = str(m.get("art") or "")
+    return art == "uebung_ende" or (str(m.get("quelle") or ""), art) in _ABLAUF_ENDE
+
+
+def ablauf_notizen(
+    ereignisse: Sequence[Mapping[str, Any]],
+    a: Abschnitt,
+    x_von: Callable[[dict], float | None],
+    andere: Sequence[Abschnitt] = (),
+) -> list[int]:
+    """Die Notizen, die einen Abschnitt eines **Ablaufs** begrenzen (Timer, Übung, Einheit,
+    Workout, km) — sie gehen mit, wenn er gelöscht wird (Ben, 19.11.2026: „Abschnitte und
+    Notizen sind aneinander gekoppelt: wenn Abschnitte gelöscht werden, sollen auch die
+    zugehörigen Notizen mit gelöscht werden“). Zurück kommen ihre Stellen in ``ereignisse``.
+
+    - **Anfang:** die Notiz mit Marke auf seinem Anfang (± `RAST_S`), die einen Abschnitt
+      beginnt — liegen dort mehrere, die mit seinem Namen.
+    - **Ende:** eine Notiz auf seinem Ende, die nur beendet („Planke: Ende“, „Timer fertig“)
+      — nie die, mit der in der Kette der nächste Abschnitt beginnt.
+    - Hängt an derselben Stelle auch ein Abschnitt aus ``andere`` und trägt die Notiz nicht
+      den Namen dieses, bleibt sie (sie könnte jenem gehören). Leistungen und die Grenzen
+      eigener Abschnitte (Quelle ``person``) bleiben immer — die nimmt `notizen_entfernen`.
+
+    >>> def n(x, text, quelle, art, name=None):
+    ...     m = {"quelle": quelle, "art": art, "spur": quelle}
+    ...     return {"text": text, "x": x, "marke": {**m, **({"name": name} if name else {})}}
+    >>> liste = [n(10, "Planke: Start", "plan", "uebung_start", "Planke"),
+    ...     {"text": "frei", "x": 20}, n(70, "Planke: Ende", "plan", "uebung_ende"),
+    ...     n(70, "Pause", "plan", "pause", "Pause"),
+    ...     n(100, "Pause (Runde 1/8)", "timer", "abschnitt", "Pause"),
+    ...     n(130, "Timer fertig", "timer", "ende")]
+    >>> x = lambda e: e.get("x")
+    >>> ablauf_notizen(liste, Abschnitt("Planke", 10, 70), x)
+    [0, 2]
+    >>> ablauf_notizen(liste, Abschnitt("Pause", 70, 100), x)  # das Ende beginnt den nächsten
+    [3]
+    >>> ablauf_notizen(liste, Abschnitt("Pause (Runde 1/8)", 100, 130), x)
+    [4, 5]
+    >>> ablauf_notizen(liste, Abschnitt("Belastung", 100, 130), x,
+    ...     andere=[Abschnitt("Pause (Runde 1/8)", 100, 130)])  # fremder Name, geteilte Stelle
+    []
+    >>> ablauf_notizen([n(5, "km 1", "gps", "km")], Abschnitt("km 2", 5, 400), x)
+    [0]
+    >>> eigene = marken_aus_text([{"text": "A: Start", "x": 10}, {"text": "A: Ende", "x": 70}],
+    ...     x)
+    >>> ablauf_notizen(eigene, Abschnitt("A", 10, 70), x)
+    []
+    """
+    grund = grundname(a.name).casefold()
+
+    def passt(e: Mapping[str, Any]) -> bool:
+        text = str(e.get("text") or "").casefold()
+        name = str(_marke(e).get("name") or "").casefold()
+        return bool(grund) and (text.startswith(grund) or name == grund)
+
+    def an(stelle: float, ende: bool) -> list[int]:
+        out: list[int] = []
+        for i, e in enumerate(ereignisse):
+            m = _marke(e)
+            if not m or m.get("quelle") == QUELLE or _beendet_nur(m) != ende:
+                continue
+            x = x_von(dict(e))
+            if x is not None and abs(x - stelle) <= RAST_S:
+                out.append(i)
+        return out
+
+    def waehlen(kandidaten: list[int], stelle: float, ende: bool) -> int | None:
+        mit_namen = [i for i in kandidaten if passt(ereignisse[i])]
+        if mit_namen:
+            return mit_namen[0]
+        geteilt = any(
+            abs((b.bis_s if ende else b.von_s) - stelle) <= RAST_S for b in andere if b is not a
+        )
+        return kandidaten[0] if len(kandidaten) == 1 and not geteilt else None
+
+    gewaehlt = (
+        waehlen(an(a.von_s, False), a.von_s, False),
+        waehlen(an(a.bis_s, True), a.bis_s, True),
+    )
+    return sorted({i for i in gewaehlt if i is not None})
+
+
 def raender_setzen(
     ereignisse: Sequence[Mapping[str, Any]], a: Abschnitt, x_von: Callable[[dict], float | None]
 ) -> list[dict] | None:
@@ -856,6 +967,7 @@ __all__ = [
     "RAST_S",
     "Getippt",
     "abgleichen",
+    "ablauf_notizen",
     "ende_marke",
     "ende_text",
     "grenze_im_text",
@@ -869,6 +981,7 @@ __all__ = [
     "kennungen",
     "laufende_kennung",
     "marken_aus_text",
+    "merkenswert",
     "name_teilen",
     "neue_kennung",
     "notizen_aktualisieren",

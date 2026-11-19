@@ -313,6 +313,7 @@ def test_verweise_der_unterseiten_und_zurueck(umgebung) -> None:
         ("/einstellungen/daten", "/papierkorb"),
         ("/einstellungen/daten", "/archiv"),
         ("/einstellungen/hrv", "/einstellungen/hrv/ueberschriften"),
+        ("/einstellungen/hrv", "/einstellungen/hrv/abschnittsnamen"),
     ):
         seite.gehe(von)
         seite.gehe(nach)
@@ -366,3 +367,25 @@ def test_geraete_backup_vorgabe_aus_schalter_schreibt_die_marke(page, state, tmp
 def test_praxis_edition_ohne_geraete_backup(page, state, monkeypatch):
     monkeypatch.setenv("TRAININGSAPP_EDITION", "praxis")
     assert "Mit dem Gerät sichern" not in _schalter(einstellungen_daten(page, state))
+
+
+def test_abschnittsnamen_anlegen_anheften_entfernen(page, state) -> None:
+    """Einstellungen → HRV-Messung → Abschnittsnamen (Ben, 19.11.2026): dieselbe Seite wie
+    für die Überschriften, mit der eigenen Liste — anlegen, anheften (steht oben), entfernen."""
+    from trainingsapp.ui.views.einstellungen_hrv_titel import einstellungen_hrv_abschnittsnamen
+
+    state.hrv.abschnittname_merken(state.profil.id, "Rad")
+    ansicht = einstellungen_hrv_abschnittsnamen(page, state)
+    assert ansicht.route == "/einstellungen/hrv/abschnittsnamen"
+    feld = next(c for c in _von(ansicht, ft.TextField) if c.label == "Neuer Name")
+    feld.value = "Behandlung"
+    feld.on_submit(None)
+    assert [n.name for n in state.hrv.abschnittnamen(state.profil.id)] == ["Rad", "Behandlung"]
+    zeile = next(c for c in _von(ansicht, ft.ListTile) if c.title.value == "Behandlung")
+    zeile.leading.on_click()  # anheften
+    namen = state.hrv.abschnittnamen(state.profil.id)
+    assert namen[0].name == "Behandlung" and namen[0].angeheftet
+    zeile = next(c for c in _von(ansicht, ft.ListTile) if c.title.value == "Rad")
+    zeile.trailing.on_click()  # entfernen
+    assert [n.name for n in state.hrv.abschnittnamen(state.profil.id)] == ["Behandlung"]
+    assert state.hrv.titel_liste(state.profil.id) == []  # die Überschriften bleiben

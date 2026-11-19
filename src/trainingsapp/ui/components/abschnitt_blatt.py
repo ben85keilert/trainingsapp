@@ -11,7 +11,7 @@ nichts, der Aufrufer bekommt Name, Grenzen und Ränder.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any
 
 import flet as ft
@@ -22,6 +22,7 @@ from trainingsapp.core.zeitangabe import DAUER, UHR, dauer_text, stelle_lesen, s
 from trainingsapp.ui.components.abschnitte import rand_zeile
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
+from trainingsapp.ui.components.namenwahl import Namenwahl
 
 #: Schritte an Von und Bis (Sekunden)
 SCHRITTE_S: tuple[int, ...] = (-60, -10, 10, 60)
@@ -77,14 +78,16 @@ def abschnitt_blatt(
     endteil_s: float = 0.0,
     neu: bool,
     uhr: bool,
-    vorschlaege: Sequence[str] = (),
+    wahl: Namenwahl | None = None,
     sichern: Callable[[str, float, float | None, float, float], Any],
     loeschen: Callable[[], Any] | None = None,
 ) -> ft.BottomSheet:
     """Das Blatt; ``sichern(name, von, bis, kopf_s, endteil_s)`` und ``loeschen()`` laufen,
     wenn es zu ist. Zeiten auf der Kurvenachse des Aufrufers; ``grenzen`` liefert Anfang
     und Ende der Messung (live: bis jetzt). ``bis=None``: Der Abschnitt läuft noch (live) —
-    bleibt „Bis“ leer, läuft er weiter. ``uhr``: mit Uhrzeiten beginnen."""
+    bleibt „Bis“ leer, läuft er weiter. ``uhr``: mit Uhrzeiten beginnen. ``wahl``: das
+    Namensfeld mit den gemerkten Abschnittsnamen (`components.namenwahl`, Ben 19.11.2026 —
+    wie die Überschrift im Titel-Blatt); ohne eins ein Feld ohne Liste. Leer gilt ``name``."""
     zb = zeitbezug
     laeuft = bis is None
     stand: dict[str, Any] = {
@@ -170,13 +173,6 @@ def abschnitt_blatt(
         if ok:
             zeigen()
 
-    def waehlen(vorschlag: str) -> Callable[[], None]:
-        def handler() -> None:
-            name_feld.value = vorschlag
-            auffrischen(name_feld)
-
-        return handler
-
     def fertig() -> None:
         if not (lesen(von_feld, "von") and lesen(bis_feld, "bis")):
             return
@@ -201,12 +197,9 @@ def abschnitt_blatt(
             f"rechnet {text(stand['von'] - stand['kopf'])}–{text(stand['bis'] + stand['endteil'])}"
         )
 
-    name_feld = ft.TextField(
-        label="Name",
-        value=name,
-        dense=True,
-        capitalization=ft.TextCapitalization.SENTENCES,
-    )
+    if wahl is None:
+        wahl = Namenwahl(wert=name)
+    name_feld = wahl.feld
     von_feld = ft.TextField(
         label="Von",
         dense=True,
@@ -243,14 +236,8 @@ def abschnitt_blatt(
 
     inhalt: list[ft.Control] = [
         ft.Text("Neuer Abschnitt" if neu else "Abschnitt", size=20, weight=ft.FontWeight.W_500),
-        name_feld,
+        wahl.control,
     ]
-    knoepfe: list[ft.Control] = [
-        ft.OutlinedButton(n, on_click=waehlen(n))
-        for n in dict.fromkeys(v for v in vorschlaege if v.strip())
-    ]
-    if knoepfe:
-        inhalt.append(ft.Row(wrap=True, spacing=6, run_spacing=6, controls=knoepfe))
     if zb.start_utc is not None:
         inhalt.append(
             ft.SegmentedButton(

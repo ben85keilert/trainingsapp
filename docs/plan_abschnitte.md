@@ -174,3 +174,45 @@ bleiben.
 - **Nicht gebaut:** Abschnitte eines Ablaufs (Timer, Übung) live ändern; ihr Kopf/Endteil
   steht weiter in der Marke ihrer Start-Notiz. „Aus Notizen …“ bleibt.
 - Gerätetest T127.
+
+## 8. Korrekturen vom 19.11.2026 (Katalog P228, Gerätetest T153)
+
+Ben: „Abschnitte und Notizen sind aneinander gekoppelt: wenn Abschnitte gelöscht werden, sollen
+auch die zugehörigen Notizen mit gelöscht werden.“ — „wenn man in die Kurve klickt und
+links/rechts wischt, passiert es schnell, dass die Markierungen für die Notizen verschieben …
+nur, wenn der Button ‚In Kurve‘ aktiv ist.“ — „das Setzen eines neuen Abschnittes mit ‚+‘
+braucht ein besseres Namensmenü … gemerkte Ausdrücke, die vorgeschlagen werden beim Tippen …
+so 4–5 Buttons … Favoritenfunktion.“
+
+- **Löschen nimmt die Notizen mit — auch bei Abschnitten eines Ablaufs** (Timer, Übung,
+  Einheit, Workout, km; in der Aufzeichnung, ✕ und „Alle löschen“): die Notiz mit Marke auf
+  dem Anfang (liegen dort mehrere, die mit seinem Namen) und eine Notiz auf dem Ende, die nur
+  beendet („Planke: Ende“, „Timer fertig“) — nie die, mit der in der Kette der nächste beginnt;
+  was an derselben Stelle einem anderen Abschnitt gehören könnte, bleibt
+  (`core.abschnitte.ablauf_notizen`). Die Rückfrage nennt die Notizen, „Rückgängig“ holt sie
+  zurück. Leistungen und Notizen ohne Marke („Aus Notizen …“) bleiben. Bei eigenen Abschnitten
+  galt das schon (§7).
+- **Marken ziehen nur mit „In Kurve“** (`Notizfeld.greifen`): Ohne „In Kurve“ folgt keine
+  Marke dem Finger, die Geste blättert die Kurve. Mit „In Kurve“ (in der Eingabe einer Notiz)
+  folgt nur deren Marke, und nur, wenn die Geste an ihr beginnt; danach ist „In Kurve“ aus wie
+  nach einem Tipp, gespeichert wird mit ✓. Gilt in HRV- und HF-Vollbild und in der
+  Aufzeichnung (hochkant zog man nie).
+- **Gemerkte Namen** (Migration 072, eine **eigene Liste** neben den Überschriften): Ben
+  wählte danach „das alte Muster für beide“ — der Name eines Abschnitts setzt sich wie die
+  Überschrift im Titel-Blatt, aus **einem** Baustein (`components/namenwahl.Namenwahl`, auch
+  im Titel-Blatt): Feld mit Vorgabe, darunter die Liste (📌 angeheftete zuerst, dann die
+  zuletzt vergebenen), Tippen filtert („enthält“), Antippen übernimmt, ✕ nimmt heraus,
+  „„…“ merken“ nimmt Neues auf, höchstens sieben Zeilen und „+n weitere“, feste Höhe ab dem
+  Öffnen; keine Knöpfe. **Angeheftet** wird unter Einstellungen → HRV-Messung →
+  **Abschnittsnamen** (dieselbe Seite wie „Überschriften“, `views/einstellungen_hrv_titel.py`).
+  Gemerkt wird jeder vergebene Name (der der Gruppe, nie die bloße Vorgabe „Abschnitt 3“). Die
+  bisherigen Überschriften kamen einmalig als gemerkte Namen hinein. Gilt für „Abschnitt:
+  Start“, „+“ live und „Mit zwei Zeiten …“ in der Aufzeichnung. Eine erste Fassung mit bis zu
+  fünf Favoriten als Knöpfen (☆ in der Zeile) hat Ben am selben Tag verworfen.
+- **Eine Marke je Augenblick** (`docs/plan_einheit.md` §4): Eine Uhr, die einer Übung später
+  beitritt, setzt keine eigene Marke („Kniebeuge: Start“ hat Vorrang); ein Timer allein mit
+  Klammer setzt nur „‹Name›: Start“; „Abschnitte in die HRV-Messung“ gilt auch in der Einheit.
+- **Offen:** Live lassen sich Abschnitte eines Ablaufs weiter nicht löschen, und wer live eine
+  Notiz eines Ablaufs löscht oder verschiebt, lässt dessen Grenze stehen (sie liegt im
+  Messlauf, `_grenzen`, nicht in der Notiz). Das Takt-Paar eines Atemtakts („Takt …: Start“)
+  steht weiter neben „Planke: Start“ — es ist Teil des Vertrags §15.

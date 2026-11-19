@@ -38,6 +38,7 @@ from ..core.models import (
     TAG_REGION,
     TAG_TYP,
     TAGEBUCH_TAG,
+    AbschnittName,
     DayNote,
     Exercise,
     HrvRecording,
@@ -3377,6 +3378,79 @@ class HrvRepo:
     @staticmethod
     def _titel_zeile(r: sqlite3.Row) -> HrvTitel:
         return HrvTitel(
+            id=r["id"],
+            subject_id=r["subject_id"],
+            name=r["name"],
+            angeheftet=bool(r["pinned"]),
+            zuletzt=datetime.fromisoformat(r["last_used_at"]) if r["last_used_at"] else None,
+            created_at=datetime.fromisoformat(r["created_at"]) if r["created_at"] else jetzt(),
+        )
+
+    # -- Gemerkte Namen für Abschnitte (Migration 072) --------------------------------
+
+    def abschnittnamen(self, subject_id: str) -> list[AbschnittName]:
+        """Die gemerkten Abschnittsnamen eines Profils — wie `titel_liste`: angeheftete
+        zuerst, dann die zuletzt vergebenen, dann nach dem Alphabet."""
+        return [
+            self._abschnittname_zeile(r)
+            for r in self.con.execute(
+                "SELECT * FROM hrv_section_name WHERE subject_id = ? "
+                "ORDER BY pinned DESC, last_used_at DESC, name COLLATE NOCASE",
+                (subject_id,),
+            )
+        ]
+
+    def abschnittname_merken(
+        self, subject_id: str, name: str, *, verwendet: bool = True
+    ) -> AbschnittName | None:
+        """Einen Namen merken — beim Vergeben (``verwendet``: „zuletzt“ ist jetzt). Gibt es
+        ihn schon, rückt nur „zuletzt“ nach. ``None``: leerer Name."""
+        name = name.strip()
+        if not name:
+            return None
+        wann = jetzt().isoformat()
+        self.con.execute(
+            "INSERT INTO hrv_section_name (id, subject_id, name, last_used_at, created_at) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(subject_id, name) DO UPDATE SET "
+            "last_used_at = CASE WHEN excluded.last_used_at != '' "
+            "THEN excluded.last_used_at ELSE last_used_at END",
+            (new_id(), subject_id, name, wann if verwendet else "", wann),
+        )
+        r = self.con.execute(
+            "SELECT * FROM hrv_section_name WHERE subject_id = ? AND name = ?", (subject_id, name)
+        ).fetchone()
+        return self._abschnittname_zeile(r)
+
+    def abschnittname_umbenennen(self, name_id: str, neu: str) -> str | None:
+        """Umbenennen — wie `titel_umbenennen`; die Abschnitte der Messungen behalten ihren
+        Namen. Gibt den Fehler zurück (leer, schon vorhanden) oder ``None``."""
+        neu = neu.strip()
+        if not neu:
+            return "Bitte einen Namen eingeben."
+        alt = self.con.execute("SELECT * FROM hrv_section_name WHERE id = ?", (name_id,)).fetchone()
+        if alt is None:
+            return "Diesen Namen gibt es nicht mehr."
+        if neu == alt["name"]:
+            return None
+        doppelt = self.con.execute(
+            "SELECT 1 FROM hrv_section_name WHERE subject_id = ? AND name = ? AND id != ?",
+            (alt["subject_id"], neu, name_id),
+        ).fetchone()
+        if doppelt is not None:
+            return f"„{neu}“ gibt es schon."
+        self.con.execute("UPDATE hrv_section_name SET name = ? WHERE id = ?", (neu, name_id))
+        return None
+
+    def abschnittname_anheften(self, name_id: str, an: bool) -> None:
+        self.con.execute("UPDATE hrv_section_name SET pinned = ? WHERE id = ?", (int(an), name_id))
+
+    def abschnittname_entfernen(self, name_id: str) -> None:
+        """Aus der Liste nehmen — die Abschnitte der Messungen behalten ihren Namen."""
+        self.con.execute("DELETE FROM hrv_section_name WHERE id = ?", (name_id,))
+
+    @staticmethod
+    def _abschnittname_zeile(r: sqlite3.Row) -> AbschnittName:
+        return AbschnittName(
             id=r["id"],
             subject_id=r["subject_id"],
             name=r["name"],

@@ -611,5 +611,5 @@ Training und der Lauf der Uhr).
 Übung markiert wird.“ Hat die Einheit eine Klammer („Gehen: Start“ … „Gehen: Ende“ — die Messung lief
 schon) und ein Training dabei, bleibt der Abschnitt der Uhr, der mit dem Start zusammenfällt, ohne
 eigene Notiz, ebenso ihr Ende im Augenblick des Endes (`core.einheit.in_klammer`,
-`Einheitslauf._mit_uebung`); die Grenzen auf der Timer-Spur bleiben. Ein Timer allein behält seine
-Notizen (`docs/plan_einheit.md` §4).
+`Einheitslauf._mit_uebung`); die Grenzen auf der Timer-Spur bleiben. Seit 19.11.2026 gilt das auch für
+einen Timer allein mit Klammer (Ben: keine zweite Marke im selben Augenblick; `docs/plan_einheit.md` §4).

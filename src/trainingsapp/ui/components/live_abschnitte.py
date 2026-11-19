@@ -41,6 +41,7 @@ from trainingsapp.ui.components.abschnitte import (
 from trainingsapp.ui.components.bereich import BereichEditor
 from trainingsapp.ui.components.dialoge import meldung
 from trainingsapp.ui.components.kurve import Reihe
+from trainingsapp.ui.components.namenwahl import name_merken, namenwahl
 
 #: So weit vor jetzt beginnt der Vorschlag für einen nachgetragenen Abschnitt (s)
 NACHTRAG_VORGABE_S = 300.0
@@ -128,6 +129,7 @@ class LiveAbschnitte:
 
     def starten(self, name: str) -> None:
         self.lauf.abschnitt_starten(name)
+        name_merken(self.state, name)
         self._zeichnen_und_melden()
 
     def marker(self) -> None:
@@ -145,11 +147,12 @@ class LiveAbschnitte:
             lauf.abschnitt_beenden()
             self._zeichnen_und_melden()
             return
+        vorgabe = f"Abschnitt {len(lauf.abschnitte()) + 1}"
         page.show_dialog(
             name_dialog(
                 page,
-                vorschlaege=[t.name for t in state.hrv.titel_liste(state.profil.id)],
-                vorgabe=f"Abschnitt {len(lauf.abschnitte()) + 1}",
+                wahl=namenwahl(state, wert=vorgabe),
+                vorgabe=vorgabe,
                 starten=self.starten,
             )
         )
@@ -168,26 +171,28 @@ class LiveAbschnitte:
             lauf.abschnitt_setzen(
                 a.id if a is not None else None, name, von, bis, kopf_s=kopf_s, endteil_s=endteil_s
             )
+            name_merken(state, name)
             self._zeichnen_und_melden()
 
         def loeschen() -> None:
             assert a is not None
             self._loeschen(a)
 
+        vorgabe = f"Abschnitt {len(lauf.abschnitte()) + 1}"
         page.show_dialog(
             abschnitt_blatt(
                 page,
                 zeitbezug=zb,
                 live=True,
                 grenzen=lambda: (anfang, lauf.jetzt_s()),
-                name=a.name if a is not None else f"Abschnitt {len(lauf.abschnitte()) + 1}",
+                name=a.name if a is not None else vorgabe,
                 von=a.von_s if a is not None else max(anfang, jetzt - NACHTRAG_VORGABE_S),
                 bis=None if laeuft else (a.bis_s if a is not None else jetzt),
                 kopf_s=a.kopf_s if a is not None else 0.0,
                 endteil_s=a.endteil_s if a is not None else 0.0,
                 neu=a is None,
                 uhr=state.hrv_einstellungen().achse_uhrzeit,
-                vorschlaege=[t.name for t in state.hrv.titel_liste(state.profil.id)],
+                wahl=namenwahl(state, wert=a.name if a is not None else vorgabe),
                 sichern=sichern,
                 loeschen=loeschen if a is not None else None,
             )
@@ -372,15 +377,17 @@ class LiveAbschnitte:
             return
         a, laeuft = stand["a"], stand["laeuft"]
         kopf, endteil = stand["raender"]
+        name = str(stand["name"].value or "").strip() or a.name
         self.lauf.abschnitt_setzen(
             a.id,
-            str(stand["name"].value or "").strip() or a.name,
+            name,
             editor.von,
             None if laeuft else editor.bis,
             kopf_s=kopf,
             endteil_s=endteil,
         )
         self.editor_schliessen(zeichnen=False)
+        name_merken(self.state, name)
         self._zeichnen_und_melden()
 
     def editor_schliessen(self, *, zeichnen: bool = True) -> None:

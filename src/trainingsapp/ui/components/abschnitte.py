@@ -28,6 +28,7 @@ from trainingsapp.core.abschnitte import rand_lesen, rand_text
 from trainingsapp.core.laufend import minuten
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
+from trainingsapp.ui.components.namenwahl import Namenwahl
 
 #: Schnellwahl im Blatt (Minuten, mit Vorzeichen)
 RAND_SCHNELL_MIN: tuple[int, ...] = (-5, -2, -1, 0, 1, 2, 5, 10)
@@ -277,41 +278,25 @@ def raender_text(a: Abschnitt) -> str:
 def name_dialog(
     page: Any,
     *,
-    vorschlaege: Sequence[str],
+    wahl: Namenwahl,
     vorgabe: str,
     starten: Callable[[str], Any],
     titel: str = "Abschnitt: Start",
 ) -> ft.AlertDialog:
-    """Der Name eines Abschnitts beim Start (live): Tippfeld mit Vorgabe und die
-    gespeicherten Überschriften als Knöpfe (Ben, 26.10.: Überschriften vordefinieren)."""
+    """Der Name eines Abschnitts beim Start (live): Feld mit Vorgabe und die gemerkten
+    Abschnittsnamen als Liste zum Antippen — wie die Überschrift im Titel-Blatt
+    (`components.namenwahl`, Ben 19.11.2026; vorher alle Überschriften als Knöpfe). Leer gilt
+    ``vorgabe``."""
     nachher = Nachher()
-    feld = ft.TextField(
-        label="Name",
-        value=vorgabe,
-        dense=True,
-        autofocus=True,
-        capitalization=ft.TextCapitalization.SENTENCES,
-        on_submit=lambda _: los(),
-    )
     dialog: ft.AlertDialog
 
     def los() -> None:
-        name = (feld.value or "").strip() or vorgabe
+        name = wahl.text or vorgabe
         nachher.danach(lambda: starten(name))
         schliessen(dialog)
 
-    def waehlen(name: str) -> Callable[[], None]:
-        def handler() -> None:
-            feld.value = name
-            with contextlib.suppress(Exception):
-                feld.update()
-
-        return handler
-
-    knoepfe: list[ft.Control] = [
-        ft.OutlinedButton(name, on_click=waehlen(name))
-        for name in dict.fromkeys(n for n in vorschlaege if n.strip())
-    ]
+    wahl.feld.autofocus = True
+    wahl.feld.on_submit = lambda _e: los()
     dialog = ft.AlertDialog(
         title=ft.Text(titel),
         on_dismiss=nachher.bei_schliessen,
@@ -320,12 +305,7 @@ def name_dialog(
             spacing=10,
             width=320,
             controls=[
-                feld,
-                *(
-                    [ft.Row(wrap=True, spacing=6, run_spacing=6, controls=knoepfe)]
-                    if knoepfe
-                    else []
-                ),
+                wahl.control,
                 ft.Text("Das Ende setzt der Knopf „‹Name› · Ende“.", size=12, opacity=0.7),
             ],
         ),

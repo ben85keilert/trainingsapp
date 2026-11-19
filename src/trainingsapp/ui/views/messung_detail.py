@@ -176,6 +176,7 @@ from trainingsapp.ui.components.korrektur_blatt import (
 )
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
 from trainingsapp.ui.components.layout import ohne_auto_update, sicher
+from trainingsapp.ui.components.namenwahl import name_merken, namenwahl
 from trainingsapp.ui.components.notizen import (
     Notizfeld,
     senkrechte,
@@ -1566,7 +1567,7 @@ def _aufbauen(
         if m.ablesen:
             strich_setzen(x, zeichnen=False)
             return True
-        if notizfeld.greifen(x):  # eine Marke unterm Finger folgt ihm
+        if notizfeld.greifen(x):  # nur mit „In Kurve“: die Marke der Eingabe folgt
             m.etikett = None  # die Liste ordnet sich gleich neu
             return True
         return band_greifen(x)
@@ -1820,8 +1821,23 @@ def _aufbauen(
         notizen_speichern(sortiert(liste, rec.beats))
         notizfeld.auffrischen()
 
+    def ablauf_weg(abschnitte: list[Abschnitt], andere: list[Abschnitt]) -> list[dict]:
+        """Die Notizen auf Anfang und Ende der Abschnitte eines Ablaufs (Timer, Übung,
+        Einheit, km), die mit ihnen gehen (`core.abschnitte.ablauf_notizen`)."""
+        liste = rec.ereignisse
+        return [
+            liste[i]
+            for a in abschnitte
+            for i in eigene_abschnitte.ablauf_notizen(liste, a, zeitbezug.x, andere)
+        ]
+
     def notizen_weg(abschnitte: list[Abschnitt]) -> None:
-        liste = list(rec.ereignisse)
+        """Die Notizen gelöschter Abschnitte gehen mit (Ben, 19.11.2026: „Abschnitte und
+        Notizen sind aneinander gekoppelt“): eines eigenen das Paar Grenz-Notizen
+        (`notizen_entfernen`), eines Ablaufs die Notizen auf Anfang und Ende. ``eigene`` ist
+        schon ohne sie — was dort an derselben Stelle hängt, behält seine Notiz."""
+        weg = ablauf_weg(abschnitte, eigene)
+        liste = [e for e in rec.ereignisse if not any(e is w for w in weg)]
         for a in abschnitte:
             liste = eigene_abschnitte.notizen_entfernen(liste, a.id, zeitbezug.x)
         if len(liste) != len(rec.ereignisse):
@@ -1829,11 +1845,26 @@ def _aufbauen(
             notizfeld.auffrischen()
 
     def abschnitt_loeschen(a: Abschnitt) -> None:
-        """Erst fragen (Ben, 21.10.2026), dann löschen — „Rückgängig“ holt ihn zurück."""
+        """Erst fragen (Ben, 21.10.2026), dann löschen — „Rückgängig“ holt ihn zurück. Die
+        Rückfrage nennt die Notizen, die mitgehen (Ben, 19.11.2026)."""
+        texte = [
+            f"„{str(e.get('text') or '').strip()}“"
+            for e in ablauf_weg([a], [b for b in eigene if b.id != a.id])
+        ]
+        if eigener(a):
+            mit = ", mit seinen Grenz-Notizen"
+        elif texte:
+            mit = (
+                f", mit der Notiz {texte[0]}"
+                if len(texte) == 1
+                else f", mit den Notizen {' und '.join(texte)}"
+            )
+        else:
+            mit = ""
         page.show_dialog(
             loeschen_rueckfrage(
                 "Abschnitt löschen?",
-                f"„{a.name}“ ({_uhr(a.von_s)}–{_uhr(a.bis_s)}) wird gelöscht. Die Messung "
+                f"„{a.name}“ ({_uhr(a.von_s)}–{_uhr(a.bis_s)}) wird gelöscht{mit}. Die Messung "
                 "selbst bleibt unverändert.",
                 lambda: abschnitt_entfernen(a),
             )
@@ -1867,7 +1898,8 @@ def _aufbauen(
             loeschen_rueckfrage(
                 "Alle Abschnitte löschen?",
                 ("Der Abschnitt wird" if n == 1 else f"Alle {n} Abschnitte werden")
-                + " gelöscht. Die Messung selbst bleibt unverändert.",
+                + " gelöscht, mit den Notizen auf ihren Grenzen. Die Messung selbst bleibt "
+                "unverändert.",
                 alle_entfernen,
                 knopf="Alle löschen",
             )
@@ -2260,21 +2292,23 @@ def _aufbauen(
             notizen_fuer(ziel, neu=a is None)
             zusatz_sichern()
             zeichnen()
+            name_merken(state, name)
 
+        vorgabe = f"Abschnitt {len(eigene) + 1}"
         page.show_dialog(
             abschnitt_blatt(
                 page,
                 zeitbezug=zeitbezug,
                 live=False,
                 grenzen=grenzen,
-                name=a.name if a is not None else f"Abschnitt {len(eigene) + 1}",
+                name=a.name if a is not None else vorgabe,
                 von=von,
                 bis=bis,
                 kopf_s=a.kopf_s if a is not None else 0.0,
                 endteil_s=a.endteil_s if a is not None else 0.0,
                 neu=a is None,
                 uhr=einst.achse_uhrzeit,
-                vorschlaege=[t.name for t in state.hrv.titel_liste(state.profil.id)],
+                wahl=namenwahl(state, wert=a.name if a is not None else vorgabe),
                 sichern=sichern,
                 loeschen=(lambda: abschnitt_entfernen(a)) if a is not None else None,
             )
@@ -2309,6 +2343,8 @@ def _aufbauen(
         notizen_fuer(a, neu=neu)
         zusatz_sichern()
         editor_schliessen()
+        if neu or eigener(a):  # die Namen eines Ablaufs (Timer, Übung) kommen nicht dazu
+            name_merken(state, a.name)
 
     def licht_zeichnen() -> None:
         """Die Zeile „Kennzahlen im Licht der Atmung“ (`core.atem_auswertung.licht_text`):
@@ -2797,7 +2833,7 @@ def _aufbauen(
         return True
 
     def rr_losgelassen() -> None:
-        notizfeld.loslassen()  # eine gezogene Marke bekommt ihren neuen Anker
+        notizfeld.loslassen()  # „In Kurve“: die gezogene Marke der Eingabe steht
         if aw.griff is not None:
             aw.griff = None
             nachrechnen_planen()

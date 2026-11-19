@@ -400,6 +400,10 @@ async def test_stoppuhr_dazu_misst_den_laufenden_satz(umgebung) -> None:
     assert eintrag.result["reps"] == [z.saetze[0].wert]  # vorher: [4, 10]
     assert eintrag.result["duration"] == 25
     _nummern_stimmen(state, e)
+    # Keine zweite Marke für die Uhr, die der Übung beitrat (Ben, 19.11.2026: „Eine Übung
+    # startet mit Stoppuhr → nur Marke für die Übung ohne Stoppuhrmarke“)
+    texte = [str(x.get("text")) for x in state.messlauf.ereignisse()]
+    assert "Kniebeuge: Start" in texte and "Stoppuhr" not in texte
 
 
 async def test_einmal_timer_dazu_misst_den_laufenden_satz(umgebung) -> None:

@@ -18,8 +18,9 @@ Seit dem 16.10.2026 (Ben) gebaut wie das Vollbild der Aufzeichnung
   einer Seitenleiste mit denselben Feldern wie hochkant (Text, Zeit, Übungen)
   und Fenster & Darstellung der gezeigten Kurven.
 - **Etikett:** Ein Tipp auf eine Notizmarke zeigt Zeit und Text in der Kurve,
-  mit Bearbeiten und Löschen; jede Marke lässt sich mit dem Finger an ihre
-  Stelle ziehen (`Notizfeld.greifen`).
+  mit Bearbeiten und Löschen; verschoben wird eine Marke nur mit „In Kurve“ in
+  ihrer Eingabe — Tipp oder Ziehen (`Notizfeld.greifen`; Ben, 19.11.2026: beim Wischen
+  verrutschten sonst Marken).
 - **Atmung** (Plan Beschleunigung §7.3, B1): Erfasst ein Zähl-Teil der Einheit gerade die
   Atmung (`zaehl_stand.atem_teil`), liegt das Einatmen der letzten 60 s als
   Schatten hinter den Kurven (`components.atem_live`), und der Kopf nennt Rate, Phase und mit
@@ -397,7 +398,7 @@ def _vollbild(
         return notizfeld.greifen(x)
 
     def losgelassen() -> None:
-        notizfeld.loslassen()  # speichert eine gezogene Marke (zeichnet selbst neu)
+        notizfeld.loslassen()  # „In Kurve“: die gezogene Marke der Eingabe steht
 
     # -- Zeichnen ---------------------------------------------------------------------------
 

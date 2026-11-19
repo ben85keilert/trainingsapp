@@ -37,6 +37,7 @@ Routen:
     /einstellungen/hrv              Einstellungen der HRV-Messung
     /einstellungen/herzfrequenz     Herzfrequenz: Profilwerte mit Herkunft, Bereiche, Sicht
     /einstellungen/hrv/ueberschriften   Gespeicherte Überschriften der Messungen (Migration 030)
+    /einstellungen/hrv/abschnittsnamen  Gemerkte Abschnittsnamen (Migration 072)
     /einstellungen/training         Training: Karte einfärben, Tempo mit Pausen, Spalten je km
     /einstellungen/profile          Profile wählen, anlegen, umbenennen, löschen
     /einstellungen/tags             Typen und Regionen der Übungen: anlegen, umbenennen, löschen
@@ -142,7 +143,10 @@ from trainingsapp.ui.views.einstellungen_anhaenge import einstellungen_anhaenge
 from trainingsapp.ui.views.einstellungen_darstellung import einstellungen_darstellung
 from trainingsapp.ui.views.einstellungen_herzfrequenz import einstellungen_herzfrequenz
 from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
-from trainingsapp.ui.views.einstellungen_hrv_titel import einstellungen_hrv_titel
+from trainingsapp.ui.views.einstellungen_hrv_titel import (
+    einstellungen_hrv_abschnittsnamen,
+    einstellungen_hrv_titel,
+)
 from trainingsapp.ui.views.einstellungen_notiz_tags import einstellungen_notiz_tags_view
 from trainingsapp.ui.views.einstellungen_seiten import (
     einstellungen_daten,
@@ -1204,6 +1208,8 @@ def main(page: ft.Page, browserspeicher: Browserspeicher | None = None) -> None:
                 ablegen(lambda: einstellungen_hrv(page, state))
                 if teile[2:3] == ["ueberschriften"]:
                     ablegen(lambda: einstellungen_hrv_titel(page, state))
+                elif teile[2:3] == ["abschnittsnamen"]:
+                    ablegen(lambda: einstellungen_hrv_abschnittsnamen(page, state))
             elif teile[1:2] == ["training"]:
                 ablegen(lambda: einstellungen_training(page, state))
             # Die Menüseiten der Einstellungen (Ben, 11.11.2026)

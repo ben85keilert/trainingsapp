@@ -75,7 +75,7 @@ import flet as ft
 
 from trainingsapp.core import ablauf as ab
 from trainingsapp.core.ablauf import Ablauf, Frage, Kante
-from trainingsapp.core.models import Exercise, Plan
+from trainingsapp.core.models import Exercise, Media, Plan
 from trainingsapp.core.standards import eigenes
 from trainingsapp.core.uebung_timer import timer_fuer
 from trainingsapp.core.uebungsfilter import paket_wahl
@@ -89,7 +89,14 @@ from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.plan_reiter import plan_reiter
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uebungsfilter import FilterLeiste
-from trainingsapp.ui.components.wege_form import weg_leiste, wege_karte, ziel_name
+from trainingsapp.ui.components.wege_form import (
+    WegMedien,
+    ablage_schluessel,
+    stuecke_abholen,
+    weg_leiste,
+    wege_karte,
+    ziel_name,
+)
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.timer import timer_knopf
 
@@ -680,6 +687,20 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
 
     def speichern(a: Ablauf) -> None:
         ablauf_speichern(state, plan.id, a)
+
+    # Ein Stück, das Kamera, Rekorder oder Fotoauswahl für einen Weg bereitgelegt haben (Ben,
+    # 19.11.2026, `wege_form.stuecke_abholen`), hängt jetzt an seiner Kante
+    _vorher = frisch().ablauf
+    if (_mit := stuecke_abholen(state, plan.id, _vorher)) != _vorher:
+        speichern(_mit)
+
+    def plan_stuecke() -> list[tuple[Media, str]]:
+        """Die Stücke dieses Plans und seiner Planübungen — vorn in „aus vorhandenen Medien“."""
+        p = frisch()
+        return [
+            *((m, f"Plan {p.name}") for m in p.media),
+            *((m, f"{p.name} · Planübung") for it in p.items for m in it.media),
+        ]
 
     def gewaehlt() -> str | None:
         return state.ablauf_wahl.get(plan.id)
@@ -1589,6 +1610,27 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         p = frisch()
         stand: dict[str, Any] = {"a": p.ablauf, "verworfen": False}
         merken: dict[str, Any] = {}
+        nachher = Nachher()
+
+        def weg_aufnehmen(i: int, art: str | None) -> None:
+            """Vom Weg zur Kamera, zum Rekorder (``art``) oder in die Fotoauswahl (``None``):
+            das Blatt schließt und speichert, dann geht es hinüber — beim Zurückkommen holt
+            die Ansicht das Stück ab."""
+            from trainingsapp.core.anhaenge import Ziel as AnhangZiel
+            from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
+            from trainingsapp.ui.views.anhang_hochladen import hochladen_route
+
+            ziel_ = AnhangZiel.fuer_ablage(ablage_schluessel(plan.id, i))
+            hin = (
+                hochladen_route(route, ziel_) if art is None else aufnahme_route(route, ziel_, art)
+            )
+
+            async def gehen() -> None:
+                await page.push_route(hin)
+
+            nachher.danach(gehen)
+            schliessen(blatt)
+
         namen = knoten_namen(state, p)
         item = next((it for it in p.items if it.id == knoten), None)
         uebung = katalog.get(item.exercise_id) if item is not None else None
@@ -1614,6 +1656,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                     merken=merken,
                     fokus=fokus,
                     allein=allein,
+                    medien=WegMedien(page, state, weg_aufnehmen, plan_stuecke),
                 ),
             ]
 
@@ -1627,6 +1670,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             if not stand["verworfen"] and stand["a"] != p.ablauf:
                 speichern(stand["a"])
             neu_zeichnen()
+            await nachher.bei_schliessen()
 
         def abbrechen(_e: Any = None) -> None:
             stand["verworfen"] = True

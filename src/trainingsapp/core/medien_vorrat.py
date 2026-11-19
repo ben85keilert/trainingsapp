@@ -15,7 +15,8 @@ from __future__ import annotations
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 
-from .models import NICHT_MATERIAL, Exercise, Media, MediaSource, Plan
+from .bedingung import Stueck
+from .models import NICHT_MATERIAL, Exercise, Media, MediaKind, MediaSource, Plan
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,4 +109,50 @@ def passt(v: Vorhanden, suche: str) -> bool:
     )
 
 
-__all__ = ["Vorhanden", "passt", "uebernommen", "vorrat"]
+def _art(kind: str) -> MediaKind:
+    try:
+        return MediaKind(kind)
+    except ValueError:
+        return MediaKind.VIDEO
+
+
+def stueck_aus_medium(m: Media) -> Stueck:
+    """Ein Medium als Stück am Weg — eine Paketdatei mit Art und Quelle, sonst ein Link.
+
+    >>> film = Media(kind=MediaKind.VIDEO, source=MediaSource.PAKET, title="Film", text="langsam",
+    ...     uri="medien/" + "a" * 64 + ".mp4")
+    >>> s = stueck_aus_medium(film)
+    >>> s.ist_datei, s.kind, s.text, stueck_als_medium(s).source
+    (True, 'video', 'langsam', <MediaSource.PAKET: 'paket'>)
+    >>> stueck_aus_medium(Media(uri="https://x.org/a")).als_dict()
+    {'uri': 'https://x.org/a'}
+    """
+    datei = m.source == MediaSource.PAKET
+    return Stueck(
+        m.uri,
+        m.title,
+        kind=str(m.kind) if datei else "",
+        source="paket" if datei else "",
+        text=m.text,
+    )
+
+
+def stueck_als_medium(s: Stueck) -> Media:
+    """Ein Stück am Weg als Medium — zum Anzeigen mit `medienliste.medium_zeile`."""
+    return Media(
+        kind=_art(s.kind),
+        source=MediaSource.PAKET if s.ist_datei else MediaSource.URL,
+        uri=s.uri,
+        title=s.title,
+        text=s.text,
+    )
+
+
+__all__ = [
+    "Vorhanden",
+    "passt",
+    "stueck_als_medium",
+    "stueck_aus_medium",
+    "uebernommen",
+    "vorrat",
+]

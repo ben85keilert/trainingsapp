@@ -115,7 +115,12 @@ from trainingsapp.ui.components.timer_zeile import (
     timer_zeile,
 )
 from trainingsapp.ui.components.uhr_blatt import PLAN, UEBUNG, uhr_blatt
-from trainingsapp.ui.components.wege_form import wege_karte
+from trainingsapp.ui.components.wege_form import (
+    WegMedien,
+    ablage_schluessel,
+    stuecke_abholen,
+    wege_karte,
+)
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.timer_bibliothek import in_uebung_speichern
@@ -245,8 +250,30 @@ def plan_einstellen(
     #: gespiegelt); gespeichert wird mit der Seite
     plan_jetzt = state.plaene.laden(plan.id) or plan
     ablauf_anfang = plan_jetzt.ablauf
-    ablauf_stand: dict[str, Any] = {"a": plan_jetzt.ablauf}
+    # Ein Stück, das Kamera, Rekorder oder Fotoauswahl für einen Weg bereitgelegt haben (Ben,
+    # 19.11.2026), hängt jetzt an seiner Kante — gespeichert wird es mit der Seite
+    ablauf_stand: dict[str, Any] = {"a": stuecke_abholen(state, plan.id, plan_jetzt.ablauf)}
     wege_merken: dict[str, Any] = {}
+
+    async def weg_aufnehmen(i: int, art: str | None) -> None:
+        """Vom Weg zur Kamera, zum Rekorder (``art``) oder in die Fotoauswahl (``None``): erst
+        speichern — die Seite entsteht beim Zurückkommen neu und holt das Stück ab."""
+        if sichern() is not None:
+            return
+        ziel_ = Ziel.fuer_ablage(ablage_schluessel(plan.id, i))
+        await page.push_route(
+            hochladen_route(ansicht.route, ziel_)
+            if art is None
+            else aufnahme_route(ansicht.route, ziel_, art)
+        )
+
+    def plan_stuecke() -> list[tuple[Media, str]]:
+        """Die Stücke dieses Plans und seiner Planübungen — vorn in „aus vorhandenen Medien“."""
+        p = state.plaene.laden(plan.id) or plan
+        return [
+            *((m, f"Plan {p.name}") for m in p.media),
+            *((m, f"{p.name} · Planübung") for it in p.items for m in it.media),
+        ]
 
     #: Das Ziel je Parameter — ein kleines Formular je Karte (P107 wie „Übung bearbeiten“),
     #: die Werte gemerkt über ein Aus- und wieder Einschalten
@@ -604,6 +631,7 @@ def plan_einstellen(
                     namen=namen(),
                     ohne_timer=ohne_timer(),
                     merken=wege_merken,
+                    medien=WegMedien(page, state, weg_aufnehmen, plan_stuecke),
                 ),
             )
         # Eine Liste hat keine Bedingungen (Ben, 10.11.2026: „Bedingungen machen bei der linearen

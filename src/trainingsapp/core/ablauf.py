@@ -2454,6 +2454,28 @@ def _zahl(roh: Any) -> float:
     return wert if wert == wert and wert > 0 else 0.0
 
 
+def wegdateien(roh: Any) -> set[str]:
+    """Die Paketdateien (``medien/<sha256>.<endung>``), die die Wege eines Ablaufs nennen —
+    aus seiner Datei-Form (`Ablauf.als_dict`); für Export und Ablage (`core.pakete
+    .paketmedien_in`).
+
+    >>> s = {"uri": "medien/" + "a" * 64 + ".mp4", "source": "paket"}
+    >>> link = {"uri": "https://x.org/medien/b.mp4"}
+    >>> roh = {"kanten": [{"von": "a", "nach": "b", "inhalt": {"medien": [s, link]}}]}
+    >>> [n[-8:] for n in wegdateien(roh)], wegdateien(None), wegdateien({"kanten": "x"})
+    (['aaaa.mp4'], set(), set())
+    """
+    if not isinstance(roh, Mapping):
+        return set()
+    kanten = roh.get("kanten")
+    namen: set[str] = set()
+    for k in kanten if isinstance(kanten, list) else []:
+        if not isinstance(k, Mapping):
+            continue
+        namen |= {s.uri for s in inhalt_aus(k.get("inhalt")).medien if s.ist_datei}
+    return namen
+
+
 __all__ = [
     "ANTWORT",
     "ANTWORTEN_MAX",
@@ -2544,4 +2566,5 @@ __all__ = [
     "warnungen",
     "weg_durch",
     "weg_neu",
+    "wegdateien",
 ]

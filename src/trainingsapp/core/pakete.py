@@ -1602,6 +1602,13 @@ def paketmedien_in(
     >>> k = Kurs(name="K", kapitel=[Kapitel(titel="A")], kursplan=Kursplan(vorlage=v))
     >>> [n[-8:] for n in paketmedien_in([], [k])]
     ['aaaa.mp4']
+
+    Auch die Dateien an den **Wegen** eines Ablaufs (`core.ablauf.wegdateien`):
+
+    >>> stueck = {"uri": "medien/" + "b" * 64 + ".mp4", "source": "paket"}
+    >>> weg = {"kanten": [{"von": "x", "nach": "y", "inhalt": {"medien": [stueck]}}]}
+    >>> [n[-8:] for n in paketmedien_in([], [], [PaketPlan("p", PlanVorlage("R", ablauf=weg))])]
+    ['bbbb.mp4']
     """
     plaene = list(plaene)
     medien: list[Media] = [m for u in uebungen for m in u.media]
@@ -1616,6 +1623,8 @@ def paketmedien_in(
             vorlagen.extend(kap.plaene)
     medien.extend(m for v in vorlagen for item in v.items for m in item.medien)
     namen = {m.uri for m in medien if ist_paketmedium(m)}
+    for v in vorlagen:  # Dateien an den Wegen eines Ablaufs (19.11.2026)
+        namen |= ab.wegdateien(v.ablauf)
     for e in ergaenzungen:  # Ergänzungen tragen Medien als Wörterbücher (U5)
         for roh in e.daten.get("media") or []:
             if (

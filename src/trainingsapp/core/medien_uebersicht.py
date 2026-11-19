@@ -26,7 +26,7 @@ Datenbank noch Dateien. Es kennt kein flet.
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Final
 
 from .ablauf import ZURUECK, Kante, nummern
@@ -37,6 +37,7 @@ from .bewegungsbild import EINGEBAUT, bewegungsbild
 from .kursbloecke import MEDIUM, PLAN_WEG, TEXT, ZU_ENDE, Block, bloecke_von
 from .kurse import Kapitel
 from .material import BILD, LINK, PDF, TON, VIDEO, art, material_von
+from .medien_vorrat import stueck_als_medium
 from .models import (
     BEGLEITUNG,
     BEI,
@@ -468,7 +469,7 @@ def _weg_zeilen(bau: _Bau, k: Kante, ziel: Ziel, *, aus: str = "") -> list[Zeile
     erste = _weg_zeile(bau, k, ziel, aus=aus)
     zeilen = [erste] if (k.inhalt.text.strip() or k.inhalt.url.strip()) else []
     zeilen += [
-        bau.medium_zeile(Media(uri=s.uri, title=s.title or s.uri), erste.wo, ziel)
+        bau.medium_zeile(replace(stueck_als_medium(s), title=s.title or s.uri), erste.wo, ziel)
         for s in k.inhalt.medien
     ]
     return zeilen

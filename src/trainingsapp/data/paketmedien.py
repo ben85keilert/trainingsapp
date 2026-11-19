@@ -43,6 +43,10 @@ _ABFRAGEN: Final = (
     # die Medien des Plans selbst (Migration 069) — auch eines endgültig gelöschten: seine Zeile
     # bleibt als Grabstein, die Dateien bleiben privat auf dem Gerät (P225 d)
     "SELECT media_json FROM plan WHERE media_json LIKE '%medien/%'",
+    # Dateien an einem Weg des Ablaufs (19.11.2026, `core.bedingung.Stueck`) — im Ablauf und
+    # gespiegelt in der Bedingung der Planübung
+    "SELECT ablauf_json FROM plan WHERE ablauf_json LIKE '%medien/%'",
+    "SELECT bedingung_json FROM plan_item WHERE bedingung_json LIKE '%medien/%'",
     "SELECT package_standard_json FROM plan WHERE package_standard_json LIKE '%medien/%'",
     "SELECT plans_json FROM package WHERE plans_json LIKE '%medien/%'",
     "SELECT package_standard_json FROM course WHERE package_standard_json LIKE '%medien/%'",
@@ -336,6 +340,18 @@ class Paketablage:
             self._json_ersetzen(
                 "SELECT id, media_json FROM plan WHERE instr(media_json, ?)",
                 "UPDATE plan SET media_json = ? WHERE id = ?",
+                alt,
+                neu,
+            )
+            self._json_ersetzen(
+                "SELECT id, ablauf_json FROM plan WHERE instr(ablauf_json, ?)",
+                "UPDATE plan SET ablauf_json = ? WHERE id = ?",
+                alt,
+                neu,
+            )
+            self._json_ersetzen(
+                "SELECT id, bedingung_json FROM plan_item WHERE instr(bedingung_json, ?)",
+                "UPDATE plan_item SET bedingung_json = ? WHERE id = ?",
                 alt,
                 neu,
             )

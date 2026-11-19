@@ -65,11 +65,58 @@ HAUPTZWEIG: Final = "A"
 
 @dataclass(frozen=True, slots=True)
 class Stueck:
-    """Ein weiteres Stück an einem Weg: Adresse (https) und Titel — in der Datei wie ein Medium
-    (``uri``, ``title``)."""
+    """Ein Stück an einem Weg — in der Datei wie ein Medium (``uri``, ``title``). Bis
+    19.11.2026 nur ein Link; seitdem auch eine **Datei aus dem Paket** oder ein Stück, das es
+    schon gibt (Ben: „es kann kein Video hinterlegt werden“, `docs/plan_medien_einheitlich.md`
+    §2.2): ``source = "paket"`` mit ``uri = "medien/<sha256>.<endung>"`` und der Art
+    (``kind``), dazu die Beschriftung (``text``). Ein Link trägt weder Art noch Quelle — seine
+    Datei bleibt, wie eine ältere App sie schrieb.
+
+    >>> s = Stueck("medien/" + "a" * 64 + ".mp4", "Dehnen", kind="video", source="paket")
+    >>> s.ist_datei, s.als_dict()["source"], Stueck("https://x.org/b").als_dict()
+    (True, 'paket', {'uri': 'https://x.org/b'})
+    >>> stueck_aus(s.als_dict()) == s, stueck_aus({"uri": " "}) is None
+    (True, True)
+    """
 
     uri: str
     title: str = ""
+    kind: str = ""
+    source: str = ""
+    text: str = ""
+
+    @property
+    def ist_datei(self) -> bool:
+        return self.source == "paket" and self.uri.startswith("medien/")
+
+    def als_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"uri": self.uri}
+        if self.title:
+            d["title"] = self.title
+        if self.ist_datei:
+            d["source"] = "paket"
+            if self.kind:
+                d["kind"] = self.kind
+        if self.text:
+            d["text"] = self.text
+        return d
+
+
+def stueck_aus(roh: Any) -> Stueck | None:
+    """Ein Stück aus seiner Datei-Form — ``None`` ohne Adresse."""
+    if not isinstance(roh, Mapping):
+        return None
+    uri = str(roh.get("uri") or "").strip()
+    if not uri:
+        return None
+    datei = str(roh.get("source") or "") == "paket" and uri.startswith("medien/")
+    return Stueck(
+        uri,
+        str(roh.get("title") or "").strip(),
+        kind=str(roh.get("kind") or "") if datei else "",
+        source="paket" if datei else "",
+        text=str(roh.get("text") or "").strip(),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,7 +131,7 @@ class Inhalt:
     >>> inhalt_aus(inhalt_als_dict(i)) == i, inhalt_als_dict(Inhalt())
     (True, {})
     >>> inhalt_aus({"medien": [{"uri": " "}, {"uri": "https://x.org/b"}, "x"]}).medien
-    (Stueck(uri='https://x.org/b', title=''),)
+    (Stueck(uri='https://x.org/b', title='', kind='', source='', text=''),)
     """
 
     text: str = ""
@@ -107,9 +154,7 @@ def inhalt_als_dict(inhalt: Inhalt) -> dict[str, Any]:
     übergeht ``medien``."""
     d: dict[str, Any] = {k: v for k, v in (("text", inhalt.text), ("url", inhalt.url)) if v}
     if inhalt.medien:
-        d["medien"] = [
-            {"uri": s.uri, **({"title": s.title} if s.title else {})} for s in inhalt.medien
-        ]
+        d["medien"] = [s.als_dict() for s in inhalt.medien]
     return d
 
 
@@ -118,9 +163,7 @@ def inhalt_aus(roh: Any) -> Inhalt:
         return Inhalt()
     liste = roh.get("medien")
     medien = tuple(
-        Stueck(uri, str(m.get("title") or "").strip())
-        for m in (liste if isinstance(liste, list) else [])
-        if isinstance(m, Mapping) and (uri := str(m.get("uri") or "").strip())
+        s for m in (liste if isinstance(liste, list) else []) if (s := stueck_aus(m)) is not None
     )
     return Inhalt(str(roh.get("text") or ""), str(roh.get("url") or ""), medien)
 
@@ -539,4 +582,5 @@ __all__ = [
     "pruefen",
     "schleifen",
     "sekunden_text",
+    "stueck_aus",
 ]

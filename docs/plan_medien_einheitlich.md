@@ -24,7 +24,7 @@ Ben, 19.11.2026 („Zur Bereitstellung der Medien in der App“):
 
 **Stand 19.11.2026:** Ben: „Empfehlungen a–h gelten, bau E1 und E2. Wenn alles geklappt hat,
 mach den ganzen Rest danach gleich mit, außer es gibt Skizzen mit Alternativen und einer
-erforderlichen Auswahl.“ **Gebaut: E1, E2, E3** — was gebaut ist und wo es abweicht, steht in **§5**.
+erforderlichen Auswahl.“ **Gebaut: E1–E4** — was gebaut ist und wo es abweicht, steht in **§5**.
 Fragen im Katalog als **P227** (a–h entschieden wie empfohlen).
 
 Gesucht im Katalog (Entscheidungszeilen): medien, medium, verkleiner, zuschneid, crop, begleit.
@@ -265,6 +265,24 @@ Zuschneiden am Handy.
 | E1 | Der Reiter „Medien“ listet die Beschreibung der Übung nicht mehr; Anweisungen der Planübung, Texte an Wegen, Beschreibung des Plans und Kurs-Blöcke bleiben | `core/medien_uebersicht._aus_uebungen` |
 | E2 | Was fällig ist (vor dem ▶, „bei …“, nach „Fertig“; am Plan vor dem Start, zu einer Antwort, am Ende), steht **selbst** im Blatt: ein Video auf dem Gerät läuft im Spieler, ein Bild steht da — sonst nichts. „Gesehen“ hakt ab, „Später“ schließt nur; was jedes Mal kommt, hat „Weiter“. Das Buch-Symbol im Fokus zeigt nur Abschnitte, Begleitung, Vorher und was „bei …“ in diesem Lauf schon kam | `components/material.py` (`faellig_blatt`, `plan_faellig_blatt`, `_faellig_inhalt`), `core.material.beim_ueben`, `Fokus._ereignis_hinweis` |
 | E3 | **Ein Menü „Medium hinzufügen“** in „Übung bearbeiten“, „Im Plan einstellen“ und im Reiter „Medien“ des Plans: Link · Foto · Video · Fotoauswahl · Datei · Audio · **aus vorhandenen Medien** (Blatt mit Suche; ein Verweis auf dieselbe Datei). **Beschriftung** am Medium (`Media.text`, in allen drei Editoren unter dem Titel, gezeigt unter der Zeile und unter dem eingeblendeten Stück). Kamera, Fotoauswahl und Rekorder fragen bei einem Medium **Titel und Beschriftung**; neu als Ziel: der Plan und „Ablage“ (für E4), neu als Art: Audio. Der Kurs-Block „Medium“ nimmt Datei und Vorhandenes und behält Art, Quelle und Rolle. Die Anhang-Menüs an Notiz und Eintrag nehmen Namen und Symbole aus derselben Tabelle | `components/medium_dazu.py`, `core/medien_vorrat.py`, `core.anhaenge.Ziel` (`fuer_plan`, `fuer_ablage`), `ui/paketdatei.py` (`medium_mit`, `abholen`), `components/material_rolle.py`, `views/kurs_bearbeiten.block_dialog` |
+| E4 | **Der Weg trägt echte Stücke:** im Wege-Formular (Reiter „Ablauf“ und „Im Plan einstellen“) dasselbe Menü — Link · Foto · Video · Fotoauswahl · Datei · Audio · aus vorhandenen Medien (die Stücke des Plans vorn); je Stück Titel und Beschriftung. Im Workout steht eine Datei als Medienzeile (ein Tipp öffnet sie in der App). Ablage (Aufräumen, Verkleinern) und Paket-Export lesen die Dateien an Wegen mit; der Reiter „Medien“ zeigt sie mit Größe | `core.bedingung.Stueck` (`kind`, `source`, `text`), `core.ablauf.wegdateien`, `core.pakete.paketmedien_in`, `data/paketmedien._ABFRAGEN`, `components/wege_form.py` (`WegMedien`, `stuecke_abholen`), `views/workout.inhalt_karte` |
+
+**Abweichungen (E4):**
+
+- **Keine neue Paket-Formatversion** (die offene Prüfung aus §2.2): Eine ältere App liest das
+  Stück als Adresse `medien/…` — sein Knopf öffnet dort nichts (`components/links.py` lässt nur
+  https zu), die Datei räumt sie weg. Der Plan bleibt lesbar und läuft; nur dieses Stück fehlt.
+  Darum keine Schranke wie bei Kursplan (6) oder Antworten (7). **Nachgesehen** im Code von
+  heute (`core.bedingung.inhalt_aus`, `views/workout.inhalt_karte`), **nicht** an einer alten
+  APK ausprobiert.
+- **Kamera vom Weg aus:** Die Seite bzw. das Blatt speichert erst, dann geht es zur Kamera; das
+  Stück hängt beim Zurückkommen am Weg (`Ziel.fuer_ablage`) — das Blatt des Wegs ist dann zu.
+- **Der erste Link** eines Wegs (Feld „Link“) bleibt, wie er ist, ohne Titel — für Pakete von
+  früher.
+- **Im Workout wird eine Datei am Weg nicht eingeblendet**, sondern steht als Zeile (die Karte
+  entsteht bei jedem Neuzeichnen neu; ein Spieler darin begänne jedes Mal von vorn).
+- **„Videos laden“** am Kopf des Plans sammelt die Links an Wegen weiter nicht ein.
+- **Kurs-Bausteine „Weg“** tragen weiter nur Text und Link.
 
 **Abweichungen (E3):**
 

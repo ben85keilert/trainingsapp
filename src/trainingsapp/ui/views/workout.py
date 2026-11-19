@@ -56,11 +56,13 @@ from trainingsapp.ui.components.hilfe import WORKOUT_MD
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.medienliste import medium_zeile
 from trainingsapp.ui.components.modus_wahl import WORKOUT, modus_wahl
 from trainingsapp.ui.components.srpe import workout_srpe_zeile
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uhr import schluessel as uhr_schluessel
 from trainingsapp.ui.components.vorschlag import vorschlag_karte
+from trainingsapp.ui.components.wege_form import stueck_als_medium
 from trainingsapp.ui.plan_ablauf import GRUENDE
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.uebung_lauf import gewaehlte_ausfuehrung
@@ -1211,6 +1213,11 @@ def workout_view(
         # je Stück ein Knopf — der eine Link von früher zuerst, dann die weiteren (Ben,
         # 18.11.2026: mehrere Stücke am Weg); ohne Titel heißt der Knopf „Öffnen“
         for s in b.inhalt.stuecke:
+            if s.ist_datei:
+                # Eine Datei am Weg (Ben, 19.11.2026): dieselbe Zeile wie überall — ein Tipp
+                # öffnet sie in der App
+                teile.append(medium_zeile(page, state, stueck_als_medium(s), browser=browser))
+                continue
 
             def oeffnen(_e: Any = None, adresse: str = s.uri) -> None:
                 if browser is not None and hasattr(page, "run_task"):
@@ -1225,6 +1232,8 @@ def workout_view(
                     data=("weg_stueck", s.uri),
                 )
             )
+            if s.text:  # die Beschriftung des Stücks
+                teile.append(ft.Text(s.text, size=12, opacity=0.8))
         return karte(*teile, abstand=4)
 
     def waehrend(e: Einheitslauf, teil: PlanAblaufBaustein) -> list[ft.Control]:

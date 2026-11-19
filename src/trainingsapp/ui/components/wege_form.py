@@ -27,7 +27,7 @@ des Auslösers gilt und wie weit − und + gehen, rechnet `core.ablauf` (`ausloe
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 import flet as ft
@@ -35,6 +35,10 @@ import flet as ft
 from trainingsapp.core import ablauf as ab
 from trainingsapp.core.ablauf import Ablauf, Kante
 from trainingsapp.core.bedingung import ENDE, Stueck
+from trainingsapp.core.medien_vorrat import stueck_als_medium, stueck_aus_medium
+from trainingsapp.core.models import Media
+from trainingsapp.ui.components import medium_dazu
+from trainingsapp.ui.components.medienliste import SYMBOLE
 
 KARTE = ft.Colors.SURFACE_CONTAINER_HIGHEST
 #: Die Auslöser in Kurzform — in der Leiste unter dem Bild stehen alle fünf in einer Zeile
@@ -65,6 +69,40 @@ VORSCHLAGEN_TIPP = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class WegMedien:
+    """Was das Formular braucht, um Stücke an einen Weg zu hängen (Ben, 19.11.2026): Seite und
+    Zustand für Dateiwahl und „aus vorhandenen Medien“; ``aufnehmen``: der Weg zu Kamera,
+    Rekorder oder Fotoauswahl — bekommt die Nummer der Kante und die Art (``None`` =
+    Fotoauswahl); der Aufrufer speichert vorher und holt das Stück beim Zurückkommen ab
+    (`stuecke_abholen`). ``zuerst``: die Stücke des Plans, vorn im Blatt."""
+
+    page: Any
+    state: Any
+    aufnehmen: Callable[[int, str | None], Any] | None = None
+    zuerst: Callable[[], list[tuple[Media, str]]] | None = None
+
+
+def ablage_schluessel(plan_id: str, i: int) -> str:
+    """Unter diesem Schlüssel wartet ein neu aufgenommenes Stück für die Kante ``i``
+    (`core.anhaenge.Ziel.fuer_ablage`)."""
+    return f"weg-{plan_id}-{i}"
+
+
+def stuecke_abholen(state: Any, plan_id: str, ablauf: Ablauf) -> Ablauf:
+    """Was Kamera, Rekorder oder Fotoauswahl für die Wege dieses Plans bereitgelegt haben, an
+    seine Kante — der Ablauf mit den neuen Stücken (derselbe, wenn nichts wartet)."""
+    from trainingsapp.ui import paketdatei
+
+    kanten = list(ablauf.kanten)
+    for i, k in enumerate(kanten):
+        m = paketdatei.abholen(state, ablage_schluessel(plan_id, i))
+        if m is not None and all(x.uri != m.uri for x in k.inhalt.stuecke):
+            inhalt = replace(k.inhalt, medien=(*k.inhalt.medien, stueck_aus_medium(m)))
+            kanten[i] = replace(k, inhalt=inhalt)
+    return replace(ablauf, kanten=tuple(kanten)) if kanten != list(ablauf.kanten) else ablauf
+
+
 def wege_karte(
     knoten: str,
     lesen: Callable[[], Ablauf],
@@ -76,8 +114,12 @@ def wege_karte(
     merken: dict[str, Any] | None = None,
     fokus: str | None = None,
     allein: bool = False,
+    medien: WegMedien | None = None,
 ) -> ft.Control:
-    """Herkunft und Wege von ``knoten``. ``namen``: jeder Knoten mit Nummer („3 · Planke“), in
+    """Herkunft und Wege von ``knoten``. ``medien``: die Wege zum Hinzufügen von Stücken an
+    einem Weg (`WegMedien`) — ohne sie nur Links.
+
+    ``namen``: jeder Knoten mit Nummer („3 · Planke“), in
     Planfolge, Fragen dahinter; ``ohne_timer``: die Übung hat keinen Timer (Hinweis zu „Zeit
     ab“); ``merken``: hält über das Neuzeichnen, welche Inhalte aufgeklappt sind.
 
@@ -304,7 +346,18 @@ def wege_karte(
             )
             continue
         karte = _weg(
-            i, k, n, ziele, aendern, weg_entfernen, zum_hauptweg, zahl, offen, ohne_timer, a
+            i,
+            k,
+            n,
+            ziele,
+            aendern,
+            weg_entfernen,
+            zum_hauptweg,
+            zahl,
+            offen,
+            ohne_timer,
+            a,
+            medien,
         )
         if gewaehlt and isinstance(karte, ft.Container):
             karte.border = ft.Border.all(2, ft.Colors.PRIMARY)
@@ -704,6 +757,7 @@ def _weg(
     offen: dict[str, Any],
     ohne_timer: bool,
     ablauf: Ablauf | None = None,
+    medien: WegMedien | None = None,
 ) -> ft.Control:
     """Ein Weg als Karte — Ziel, wann, anbieten/ausführen, Pflicht, Danach, Beschriftung.
     Kommt er **aus einer Frage** (``ablauf`` kennt sie), fragt die Karte, bei welcher Antwort
@@ -956,41 +1010,132 @@ def _weg(
                 zeichnen=True,
             )
 
+        def stueck_weg(n: int) -> Callable[[Any], None]:
+            def handler(_e: Any = None) -> None:
+                liste = [x for m, x in enumerate(k.inhalt.medien) if m != n]
+                aendern(i, inhalt=replace(k.inhalt, medien=tuple(liste)), zeichnen=True)
+
+            return handler
+
         for n, s in enumerate(weitere):
+            titel = ft.TextField(
+                label="Titel",
+                value=s.title,
+                dense=True,
+                expand=2,
+                data=("weg_stueck_titel", n),
+                on_blur=lambda e, n=n: stueck_setzen(n, title=(e.control.value or "").strip()),
+            )
+            if s.ist_datei:
+                # Eine Datei (Ben, 19.11.2026): Titel und Beschriftung, keine Adresse
+                zeilen.append(
+                    ft.Row(
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Icon(
+                                SYMBOLE.get(stueck_als_medium(s).kind, ft.Icons.ATTACH_FILE),
+                                size=20,
+                            ),
+                            titel,
+                            ft.Text("Datei", size=11, opacity=0.6),
+                            ft.IconButton(
+                                ft.Icons.CLOSE,
+                                icon_size=18,
+                                tooltip="Vom Weg nehmen",
+                                on_click=stueck_weg(n),
+                                data=("weg_stueck_weg", n),
+                            ),
+                        ],
+                    )
+                )
+            else:
+                zeilen.append(
+                    ft.Row(
+                        spacing=6,
+                        controls=[
+                            titel,
+                            ft.TextField(
+                                label="Weiterer Link (https://…)",
+                                value=s.uri,
+                                dense=True,
+                                expand=3,
+                                keyboard_type=ft.KeyboardType.URL,
+                                data=("weg_stueck_uri", n),
+                                on_blur=lambda e, n=n: stueck_setzen(
+                                    n, uri=(e.control.value or "").strip()
+                                ),
+                            ),
+                        ],
+                    )
+                )
+            if s.uri.strip():
+                zeilen.append(
+                    ft.TextField(
+                        label="Beschriftung (optional)",
+                        value=s.text,
+                        dense=True,
+                        multiline=True,
+                        min_lines=1,
+                        max_lines=2,
+                        data=("weg_stueck_text", n),
+                        on_blur=lambda e, n=n: stueck_setzen(
+                            n, text=(e.control.value or "").strip()
+                        ),
+                    )
+                )
+
+        def stueck_dazu(_e: Any = None) -> None:
+            offen[f"stueck{i}"] = True
+            aendern(i, zeichnen=True)
+
+        def stueck_anhaengen(neu: Stueck) -> None:
+            if all(x.uri != neu.uri for x in k.inhalt.stuecke):
+                aendern(i, inhalt=replace(k.inhalt, medien=(*k.inhalt.medien, neu)), zeichnen=True)
+
+        if medien is not None:
+            # Dieselbe Reihe wie überall (`components/medium_dazu.py`) — eine Datei oder ein
+            # Stück, das es schon gibt, hängt sofort am Weg; die Kamera über den Aufrufer
+            m = medien
+
+            async def datei() -> None:
+                from trainingsapp.core.bereinigen import NichtBereinigbar
+                from trainingsapp.ui import paketdatei
+
+                pfad = await paketdatei.datei_waehlen(m.page)
+                if pfad is None:
+                    return
+                try:
+                    name = await paketdatei.ablegen(m.state, pfad, pfad.suffix)
+                except (NichtBereinigbar, OSError) as fehler:
+                    m.page.show_dialog(ft.SnackBar(ft.Text(f"Nicht übernommen: {fehler}")))
+                    return
+                m.state.pakete.ablage.entwurf_merken(name)  # bis der Ablauf gespeichert ist
+                stueck_anhaengen(stueck_aus_medium(paketdatei.medium_fuer(name, pfad.stem)))
+
+            aufnehmen = m.aufnehmen
             zeilen.append(
-                ft.Row(
-                    spacing=6,
-                    controls=[
-                        ft.TextField(
-                            label="Titel",
-                            value=s.title,
-                            dense=True,
-                            expand=2,
-                            data=("weg_stueck_titel", n),
-                            on_blur=lambda e, n=n: stueck_setzen(
-                                n, title=(e.control.value or "").strip()
-                            ),
-                        ),
-                        ft.TextField(
-                            label="Weiterer Link (https://…)",
-                            value=s.uri,
-                            dense=True,
-                            expand=3,
-                            keyboard_type=ft.KeyboardType.URL,
-                            data=("weg_stueck_uri", n),
-                            on_blur=lambda e, n=n: stueck_setzen(
-                                n, uri=(e.control.value or "").strip()
-                            ),
-                        ),
-                    ],
+                medium_dazu.menue(
+                    m.page,
+                    m.state,
+                    medium_dazu.Wege(
+                        link=stueck_dazu if not offen.get(f"stueck{i}") else None,
+                        datei=datei,
+                        aufnehmen=(lambda art: aufnehmen(i, art)) if aufnehmen else None,
+                        fotoauswahl=(lambda: aufnehmen(i, None)) if aufnehmen else None,
+                        vorhandenes=lambda x: stueck_anhaengen(stueck_aus_medium(x)),
+                    ),
+                    text="Medium an diesem Weg",
+                    tooltip="Link, Foto, Video, Audio oder Datei — oder eines, das es schon gibt",
+                    vorhandene=lambda: medium_dazu.vorrat_von(
+                        m.state,
+                        zuerst=m.zuerst() if m.zuerst is not None else (),
+                        ohne={x.uri for x in k.inhalt.stuecke},
+                    ),
+                    kennung=f"weg_medium_dazu{i}",
                 )
             )
-        if not offen.get(f"stueck{i}"):
-
-            def stueck_dazu(_e: Any = None) -> None:
-                offen[f"stueck{i}"] = True
-                aendern(i, zeichnen=True)
-
+        elif not offen.get(f"stueck{i}"):
             zeilen.append(
                 ft.TextButton(
                     "Weiteres Medium …",
@@ -1014,4 +1159,15 @@ def _weg(
     )
 
 
-__all__ = ["ANTWORT_KURZ", "AUSLOESER_KURZ", "weg_leiste", "wege_karte", "ziel_name"]
+__all__ = [
+    "ANTWORT_KURZ",
+    "AUSLOESER_KURZ",
+    "WegMedien",
+    "ablage_schluessel",
+    "stueck_als_medium",
+    "stueck_aus_medium",
+    "stuecke_abholen",
+    "weg_leiste",
+    "wege_karte",
+    "ziel_name",
+]

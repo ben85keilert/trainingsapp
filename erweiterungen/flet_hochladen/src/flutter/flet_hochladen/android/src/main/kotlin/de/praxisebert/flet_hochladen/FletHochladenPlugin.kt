@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import com.otaliastudios.transcoder.Transcoder
 import com.otaliastudios.transcoder.TranscoderListener
+import com.otaliastudios.transcoder.source.ClipDataSource
 import com.otaliastudios.transcoder.source.DataSource
 import com.otaliastudios.transcoder.source.DataSourceWrapper
 import com.otaliastudios.transcoder.source.FilePathDataSource
@@ -29,7 +30,8 @@ private const val KANAL = "flet_hochladen"
  * Bitrate und AAC-Ton über Transcoder, **ohne Ortsangabe**, dazu ein Frontbild als JPEG.
  *
  * Methoden (Dart → Kotlin, Kanal „flet_hochladen"): `dauer_ms` {pfad}, `verkleinern`
- * {quelle, ziel, frontbild, kurze_seite, video_bitrate, audio_bitrate, jpeg_qualitaet},
+ * {quelle, ziel, frontbild, kurze_seite, video_bitrate, audio_bitrate, jpeg_qualitaet,
+ * bildrate, kanaele, von_ms, bis_ms},
  * `abbrechen`. Fortschritt (Kotlin → Dart): `fortschritt` (0…1).
  *
  * Warum nicht video_compress: Es lässt die Bitrate schätzen (0,14 · Breite · Höhe · fps,
@@ -102,6 +104,10 @@ class FletHochladenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         // Tonkanäle (0 = ohne Ton, 1 = einkanalig) — fehlen sie, wie beim Hochladen bisher
         val fps = call.argument<Number>("bildrate")?.toInt() ?: 30
         val kanaele = call.argument<Number>("kanaele")?.toInt()
+        // Kürzen (trainingsapp P226, Ben 18.11.2026: „Anfang oder Ende wegschneiden“): Anfang
+        // und Ende in Millisekunden ab dem Beginn des Originals — 0 bzw. fehlend = nicht kürzen
+        val vonMs = call.argument<Number>("von_ms")?.toLong() ?: 0L
+        val bisMs = call.argument<Number>("bis_ms")?.toLong() ?: 0L
         File(ziel).parentFile?.mkdirs()
 
         // Kurze Seite höchstens `kurz`, lange höchstens 16:9 dazu; ein Hochkant-Video bekommt
@@ -122,8 +128,16 @@ class FletHochladenPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 .bitRate(tonrate)
                 .build()
         }
+        // Der Schnitt liegt innen, `OhneOrt` außen: Es nimmt nur die Ortsangabe aus dem
+        // Format. Transcoder springt zum Schlüsselbild vor dem Anfang und verwirft bis dorthin.
+        var datenquelle: DataSource = FilePathDataSource(quelle)
+        if (bisMs > vonMs && bisMs > 0L) {
+            datenquelle = ClipDataSource(datenquelle, vonMs * 1000L, bisMs * 1000L)
+        } else if (vonMs > 0L) {
+            datenquelle = ClipDataSource(datenquelle, vonMs * 1000L)
+        }
         laufend = Transcoder.into(ziel)
-            .addDataSource(OhneOrt(FilePathDataSource(quelle)))
+            .addDataSource(OhneOrt(datenquelle))
             .setVideoTrackStrategy(video)
             .setAudioTrackStrategy(ton)
             .setValidator(WriteAlwaysValidator())

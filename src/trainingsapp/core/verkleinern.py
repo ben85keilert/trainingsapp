@@ -109,14 +109,39 @@ class Ziel:
     kanaele: int
     #: Das Ergebnis wäre nicht kleiner als das Original (dessen Bitrate liegt schon darunter)
     nicht_kleiner: bool = False
+    #: **Kürzen** (Ben, 18.11.2026: „Anfang oder Ende wegschneiden“,
+    #: `docs/plan_medien_zeitpunkte.md` §4): ab hier … bis hier, in Sekunden ab dem Beginn des
+    #: Originals; ``bis_s = 0``: bis zum Ende
+    von_s: float = 0.0
+    bis_s: float = 0.0
+
+    @property
+    def gekuerzt(self) -> bool:
+        return self.von_s > 0 or self.bis_s > 0
+
+    def dauer(self, dauer_s: float) -> float:
+        """Wie lang die Kopie wird.
+
+        >>> Ziel(720, 30, 1, 0, 0, von_s=5, bis_s=20).dauer(60), Ziel(720, 30, 1, 0, 0).dauer(60)
+        (15.0, 60)
+        >>> Ziel(720, 30, 1, 0, 0, von_s=50).dauer(60), Ziel(720, 30, 1, 0, 0, bis_s=90).dauer(60)
+        (10.0, 60.0)
+        """
+        if not self.gekuerzt:
+            return dauer_s
+        ende = min(self.bis_s, dauer_s) if self.bis_s > 0 else dauer_s
+        return max(0.0, float(ende) - self.von_s)
 
     def bytes(self, dauer_s: float) -> int:
-        """Die geschätzte Größe: Bitrate mal Dauer, dazu der Container.
+        """Die geschätzte Größe: Bitrate mal Dauer (der gekürzten Kopie), dazu der Container.
 
         >>> Ziel(720, 30, 800_000, 64_000, 2).bytes(60)
         6609600
+        >>> Ziel(720, 30, 800_000, 64_000, 2, von_s=30).bytes(60)
+        3304800
         """
-        return round((self.video_bitrate + self.audio_bitrate) / 8 * dauer_s * CONTAINER)
+        dauer = self.dauer(dauer_s)
+        return round((self.video_bitrate + self.audio_bitrate) / 8 * dauer * CONTAINER)
 
     def text(self) -> str:
         """„720p · 30 fps · Ton Sprache“.
@@ -126,6 +151,62 @@ class Ziel:
         """
         ton = "ohne Ton" if not self.kanaele else ("Ton einkanalig" if self.kanaele == 1 else "Ton")
         return f"{self.kurze_seite}p · {self.bildrate} fps · {ton}"
+
+
+def zeit_text(sekunden: float) -> str:
+    """„1:05“ bzw. mit Zehnteln „0:07,5“ — die Marken beim Kürzen.
+
+    >>> zeit_text(65), zeit_text(7.5), zeit_text(0)
+    ('1:05', '0:07,5', '0:00')
+    """
+    zehntel = round(max(0.0, sekunden) * 10)
+    ganz, rest = divmod(zehntel, 10)
+    text = f"{ganz // 60}:{ganz % 60:02d}"
+    return f"{text},{rest}" if rest else text
+
+
+def zeit_lesen(text: str) -> float | None:
+    """Eine Marke aus dem Feld: „1:05“, „65“, „7,5“ — ``None``, wenn es keine Zeit ist.
+
+    >>> zeit_lesen("1:05"), zeit_lesen("65"), zeit_lesen(" 0:07,5 "), zeit_lesen("7.5")
+    (65.0, 65.0, 7.5, 7.5)
+    >>> zeit_lesen("eins"), zeit_lesen("1:75"), zeit_lesen("-3"), zeit_lesen("")
+    (None, None, None, 0.0)
+    """
+    text = text.strip().replace(",", ".")
+    if not text:
+        return 0.0
+    teile = text.split(":")
+    try:
+        if len(teile) == 2:
+            minuten, sekunden = int(teile[0]), float(teile[1])
+            if minuten < 0 or not 0 <= sekunden < 60:
+                return None
+            return minuten * 60 + sekunden
+        if len(teile) == 1:
+            wert = float(teile[0])
+            return wert if wert >= 0 else None
+    except ValueError:
+        return None
+    return None
+
+
+def schnitt(von_s: float, bis_s: float, dauer_s: float | None) -> tuple[float, float]:
+    """Anfang und Ende, wie sie gelten: innerhalb des Videos, das Ende hinter dem Anfang (sonst
+    bis zum Schluss), ein Ende am Schluss ist „kein Ende“ (0) — mindestens eine Sekunde bleibt.
+
+    >>> schnitt(5, 20, 60), schnitt(5, 60, 60), schnitt(5, 3, 60), schnitt(70, 0, 60)
+    ((5.0, 20.0), (5.0, 0.0), (5.0, 0.0), (59.0, 0.0))
+    >>> schnitt(0, 0, 60), schnitt(10, 10.4, 60)
+    ((0.0, 0.0), (10.0, 11.0))
+    """
+    von = float(max(0.0, von_s))
+    if dauer_s:
+        von = min(von, float(max(0.0, dauer_s - 1)))
+    bis = float(bis_s)
+    if bis <= von or (dauer_s and bis >= dauer_s):
+        return von, 0.0
+    return von, max(bis, von + 1)
 
 
 def _basis(kurz: int) -> int:
@@ -231,6 +312,14 @@ def ffmpeg_befehl(quelle: Path, ziel_pfad: Path, z: Ziel, programm: str = "ffmpe
     "scale='if(gt(iw,ih),-2,720)':'if(gt(iw,ih),720,-2)',fps=24"
     >>> "-an" in b, b[b.index("-b:v") + 1], b[b.index("-map_metadata") + 1], b[-1]
     (True, '680000', '-1', 'b.mp4')
+    >>> "-ss" in b or "-t" in b
+    False
+
+    Gekürzt (von 5 s bis 20 s): der Sprung vor der Eingabe, die Länge dahinter.
+
+    >>> b = ffmpeg_befehl(Path("a.mov"), Path("b.mp4"), Ziel(720, 24, 1, 0, 0, von_s=5, bis_s=20))
+    >>> b[b.index("-ss") : b.index("-ss") + 3], b[b.index("-t") + 1]
+    (['-ss', '5.000', '-i'], '15.000')
     """
     k = z.kurze_seite
     befehl = [
@@ -240,8 +329,12 @@ def ffmpeg_befehl(quelle: Path, ziel_pfad: Path, z: Ziel, programm: str = "ffmpe
         "-loglevel",
         "error",
         "-y",
+        # Kürzen: vor der Eingabe springt ffmpeg zum Schlüsselbild davor und verwirft bis zum
+        # Anfang — beim Neukodieren bildgenau; die Länge steht hinter der Eingabe
+        *(["-ss", f"{z.von_s:.3f}"] if z.von_s > 0 else []),
         "-i",
         str(quelle),
+        *(["-t", f"{z.bis_s - z.von_s:.3f}"] if z.bis_s > z.von_s else []),
         "-map",
         "0:v:0",
         *(["-map", "0:a:0?"] if z.kanaele else []),
@@ -417,6 +510,9 @@ __all__ = [
     "ffmpeg_befehl",
     "fortschritt_aus",
     "mit_ffmpeg",
+    "schnitt",
     "wahl",
+    "zeit_lesen",
+    "zeit_text",
     "ziel",
 ]

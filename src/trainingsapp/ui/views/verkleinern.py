@@ -28,7 +28,7 @@ import asyncio
 import contextlib
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import flet as ft
@@ -47,7 +47,10 @@ from trainingsapp.core.verkleinern import (
     VORLAGEN,
     Schema,
     Ziel,
+    schnitt,
     wahl,
+    zeit_lesen,
+    zeit_text,
     ziel,
 )
 from trainingsapp.ui import paketdatei
@@ -173,17 +176,37 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         "schema": eingepasst(VORLAGEN[VORGABE]),
         "genauer": False,
         "zeigen": "neu",
+        #: Kürzen: Anfang und Ende in Sekunden (0 = von vorn bzw. bis zum Schluss)
+        "von": 0.0,
+        "bis": 0.0,
     }
 
+    def mit_schnitt(z: Ziel) -> Ziel:
+        """Das Ziel mit Anfang und Ende (Ben, 18.11.2026: „Anfang oder Ende wegschneiden“)."""
+        von, bis = schnitt(stand["von"], stand["bis"], info.dauer_s if info else 0.0)
+        return replace(z, von_s=von, bis_s=bis) if von or bis else z
+
     def jetzt() -> Ziel:
-        return ziel(stand["schema"], info, groesse)
+        return mit_schnitt(ziel(stand["schema"], info, groesse))
+
+    def zu_gross(z: Ziel) -> bool:
+        """Wäre nicht kleiner — gekürzt ist es das immer."""
+        return z.nicht_kleiner and not z.gekuerzt
 
     def schaetzung(z: Ziel) -> str:
         if info is None or not info.dauer_s:
             return "Die Dauer steht nicht in der Datei — keine Schätzung."
-        if z.nicht_kleiner:
+        if zu_gross(z):
             return f"Wäre nicht kleiner als jetzt ({groesse_text(groesse)})."
-        return f"Neu etwa {groesse_text(z.bytes(info.dauer_s))} · jetzt {groesse_text(groesse)}"
+        laenge = (
+            f" · {zeit_text(z.dauer(info.dauer_s))} von {zeit_text(info.dauer_s)}"
+            if z.gekuerzt
+            else ""
+        )
+        return (
+            f"Neu etwa {groesse_text(z.bytes(info.dauer_s))}{laenge} · "
+            f"jetzt {groesse_text(groesse)}"
+        )
 
     def melden(text: str) -> None:
         page.show_dialog(ft.SnackBar(ft.Text(text)))
@@ -231,11 +254,11 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
 
     def vorlage_zeile(key: str) -> ft.Control:
         s = eingepasst(VORLAGEN[key])
-        z = ziel(s, info, groesse)
+        z = mit_schnitt(ziel(s, info, groesse))
         gewaehlt = stand["vorlage"] == key
         rechts = (
             "wäre nicht kleiner"
-            if z.nicht_kleiner
+            if zu_gross(z)
             else (f"etwa {groesse_text(z.bytes(info.dauer_s))}" if info and info.dauer_s else "")
         )
 
@@ -415,10 +438,14 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         genauer_spalte.controls = genauer_teile() if stand["genauer"] else []
         genauer_knopf.content = "Weniger" if stand["genauer"] else "Genauer …"
         schaetzung_text.value = schaetzung(z)
-        schaetzung_text.color = ft.Colors.ERROR if z.nicht_kleiner else None
+        schaetzung_text.color = ft.Colors.ERROR if zu_gross(z) else None
         erstellen_knopf.disabled = (
-            womit is None or not da or z.nicht_kleiner or lauf is not None or info is None
+            womit is None or not da or zu_gross(z) or lauf is not None or info is None
         )
+        erstellen_knopf.content = "Kürzen und erstellen" if z.gekuerzt else "Erstellen"
+        von_feld.value = zeit_text(z.von_s) if z.von_s else ""
+        bis_feld.value = zeit_text(z.bis_s) if z.bis_s else ""
+        ganz_knopf.visible = z.gekuerzt
         balken.visible = abbrechen_knopf.visible = lauf is not None
         balken.value = lauf.anteil if lauf is not None else 0
         einstellen_spalte.visible = entwurf is None
@@ -426,6 +453,113 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         ergebnis_spalte.controls = ergebnis_teile(entwurf) if entwurf is not None else []
         with contextlib.suppress(Exception):
             inhalt.update()
+
+    # -- Kürzen: Anfang und Ende (Ben, 18./19.11.2026: „Crop wäre gut, also Anfang oder Ende
+    # wegschneiden“ — „auch im Medieneditor (zum Komprimieren)“): im Original an die Stelle
+    # spulen und „Anfang hier“ / „Ende hier“ tippen, oder die Zeit eintragen. Dieselbe Kopie
+    # wie beim Verkleinern — das Original bleibt -------------------------------------------
+
+    schnitt_spieler: Any = None
+    schnitt_bild: ft.Control = ft.Container()
+    if da and pfad is not None and info is not None and info.dauer_s:
+        try:
+            from trainingsapp.ui.components.videospieler import Videospieler
+
+            schnitt_spieler = Videospieler([str(pfad)], hoehe=200)
+            schnitt_bild = schnitt_spieler.control
+        except ImportError:
+            schnitt_bild = ft.Text(
+                "Ohne Vorschau in diesem Build — die Zeiten von Hand eintragen.",
+                size=12,
+                opacity=0.7,
+            )
+
+    def marke_setzen(was: str, sekunden: float | None) -> None:
+        if sekunden is None:
+            melden("Das ist keine Zeit — etwa 0:12 oder 12,5.")
+        else:
+            stand[was] = round(sekunden, 1)
+            stand["von"], stand["bis"] = schnitt(
+                stand["von"], stand["bis"], info.dauer_s if info else 0.0
+            )
+        zeichnen()
+
+    def feld_gelesen(was: str) -> Callable[[Any], None]:
+        def handler(e: Any) -> None:
+            marke_setzen(was, zeit_lesen(str(e.control.value or "")))
+
+        return handler
+
+    def hier(was: str) -> Callable[[Any], Any]:
+        async def handler(_e: Any = None) -> None:
+            stelle = await schnitt_spieler.position_s() if schnitt_spieler is not None else None
+            if stelle is None:
+                melden("Die Stelle ließ sich nicht lesen — die Zeit von Hand eintragen.")
+                return
+            marke_setzen(was, stelle)
+
+        return handler
+
+    def ganz(_e: Any = None) -> None:
+        stand["von"], stand["bis"] = 0.0, 0.0
+        zeichnen()
+
+    von_feld = ft.TextField(
+        label="Anfang",
+        hint_text="0:00",
+        dense=True,
+        width=110,
+        on_blur=feld_gelesen("von"),
+        on_submit=feld_gelesen("von"),
+        data="kuerzen_von",
+    )
+    bis_feld = ft.TextField(
+        label="Ende",
+        hint_text=zeit_text(info.dauer_s) if info is not None and info.dauer_s else "",
+        dense=True,
+        width=110,
+        on_blur=feld_gelesen("bis"),
+        on_submit=feld_gelesen("bis"),
+        data="kuerzen_bis",
+    )
+    ganz_knopf = ft.TextButton("Ganze Länge", on_click=ganz, visible=False, data="kuerzen_ganz")
+    kuerzen_teile: list[ft.Control] = (
+        [
+            ft.Text("KÜRZEN · ANFANG UND ENDE", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+            schnitt_bild,
+            ft.Row(
+                wrap=True,
+                spacing=8,
+                run_spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    von_feld,
+                    ft.OutlinedButton(
+                        "Anfang hier",
+                        on_click=hier("von"),
+                        visible=schnitt_spieler is not None,
+                        data="kuerzen_von_hier",
+                    ),
+                    bis_feld,
+                    ft.OutlinedButton(
+                        "Ende hier",
+                        on_click=hier("bis"),
+                        visible=schnitt_spieler is not None,
+                        data="kuerzen_bis_hier",
+                    ),
+                    ganz_knopf,
+                ],
+            ),
+            ft.Text(
+                "Zur Stelle spulen und „Anfang hier“ oder „Ende hier“ tippen — oder die Zeit "
+                "eintragen (0:12). Leer heißt: von vorn bzw. bis zum Schluss.",
+                size=12,
+                opacity=0.65,
+            ),
+        ]
+        if info is not None and info.dauer_s
+        else []
+    )
 
     def genauer_umschalten(_e: Any = None) -> None:
         stand["genauer"] = not stand["genauer"]
@@ -440,7 +574,7 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
 
     async def erstellen(_e: Any = None) -> None:
         z = jetzt()
-        if uri in _LAEUFE or womit is None or pfad is None or z.nicht_kleiner or info is None:
+        if uri in _LAEUFE or womit is None or pfad is None or zu_gross(z) or info is None:
             return
         lauf = Lauf(threading.Event(), zeichnen=zeichnen, balken=balken_zeigen)
         _LAEUFE[uri] = lauf
@@ -573,6 +707,7 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
             )
         )
     einstellen_spalte.controls = [
+        *kuerzen_teile,
         ft.Text("VORLAGE", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
         vorlagen_spalte,
         genauer_knopf,

@@ -70,13 +70,17 @@ class FletHochladen(ft.Service):
         audio_bitrate: int,
         bildrate: int | None = None,
         kanaele: int | None = None,
+        von_ms: int | None = None,
+        bis_ms: int | None = None,
     ) -> dict[str, Any]:
         """``art`` ``"bild"`` oder ``"video"``. Antwort: ``bytes`` (und beim Video ``breite``,
         ``hoehe``, ``dauer_ms``) — oder ``{"abgebrochen": True}``.
 
         ``bildrate`` (Bilder je Sekunde) und ``kanaele`` (0 = ohne Ton, 1 = einkanalig) kommen
         vom Verkleinern im Reiter „Medien“ (trainingsapp P225, Stufe 3); fehlen sie, gilt wie
-        beim Hochladen 30 Bilder je Sekunde und der Ton wie im Original."""
+        beim Hochladen 30 Bilder je Sekunde und der Ton wie im Original. ``von_ms``/``bis_ms``
+        kürzen das Video (P226: Anfang und Ende wegschneiden) — Millisekunden ab dem Beginn des
+        Originals; fehlend oder 0 = nicht kürzen."""
         werte: dict[str, Any] = {
             "quelle": quelle,
             "art": art,
@@ -91,6 +95,10 @@ class FletHochladen(ft.Service):
             werte["bildrate"] = int(bildrate)
         if kanaele is not None:
             werte["kanaele"] = int(kanaele)
+        if von_ms:
+            werte["von_ms"] = int(von_ms)
+        if bis_ms:
+            werte["bis_ms"] = int(bis_ms)
         antwort = await self._invoke_method("verkleinern", werte, timeout=_FRIST_VERKLEINERN)
         return dict(antwort or {})
 

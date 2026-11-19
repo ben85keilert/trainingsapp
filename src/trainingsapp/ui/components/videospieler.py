@@ -174,6 +174,14 @@ class Videospieler:
         self.video.autoplay = spielt
         self._zeigen(spielt)
 
+    async def position_s(self) -> float | None:
+        """Wo das Video gerade steht, in Sekunden — auf Tipp gefragt („Anfang hier“ beim
+        Kürzen), nie je Bild; ``None``, wenn der Spieler nicht antwortet."""
+        try:
+            return _millisekunden(await self.video.get_current_position()) / 1000
+        except Exception:
+            return None
+
     # -- Knöpfe --------------------------------------------------------------------------------
 
     async def _tipp(self, _e: Any = None) -> None:

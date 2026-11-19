@@ -16,7 +16,8 @@ import 'package:image_picker_platform_interface/image_picker_platform_interface.
 /// Fotoauswahl von Android, verkleinert und ohne Ortsangabe.
 ///
 /// Methoden (Python → Dart): `waehlen`, `dauer_ms` {pfad}, `verkleinern` {quelle, art,
-/// ziel, frontbild, kurze_seite, jpeg_qualitaet, video_bitrate, audio_bitrate},
+/// ziel, frontbild, kurze_seite, jpeg_qualitaet, video_bitrate, audio_bitrate, bildrate,
+/// kanaele, von_ms, bis_ms},
 /// `abbrechen`. Ereignis (Dart → Python): `fortschritt` {anteil}.
 ///
 /// Fotos verkleinert flutter_image_compress ohne Exif (keepExif: false) — image_picker
@@ -110,6 +111,9 @@ class FletHochladenService extends FletService {
       // Verkleinern im Reiter „Medien“ (P225, Stufe 3) — fehlen sie, gilt die Vorgabe
       "bildrate": a["bildrate"],
       "kanaele": a["kanaele"],
+      // Kürzen (P226): Anfang und Ende in Millisekunden — fehlen sie, bleibt die Länge
+      "von_ms": a["von_ms"],
+      "bis_ms": a["bis_ms"],
     });
     return Map<String, dynamic>.from(antwort ?? const {});
   }

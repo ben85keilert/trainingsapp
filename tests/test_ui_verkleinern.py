@@ -217,6 +217,42 @@ async def test_erstellen_vergleichen_uebernehmen_und_original(page, state, tmp_p
     assert not ablage.vorhanden(neu)
 
 
+@ffmpeg_da
+async def test_kuerzen_anfang_und_ende(page, state, tmp_path) -> None:
+    """Ben, 18./19.11.2026: „Crop wäre gut, also Anfang oder Ende wegschneiden“ — im Blatt
+    „Verkleinern“, dieselbe Kopie; das Original bleibt."""
+    name = _ablegen(state, _echtes_video(tmp_path))  # 3 Sekunden
+    _plan_mit_video(state, name)
+    seite = SimpleNamespace(**{**vars(page), "run_task": lambda f, *a: None})
+    ansicht = vk.verkleinern_view(seite, state, "/plaene/p/medien", dateiname(name))
+    seite.views = [ft.View(route="/plaene/p/medien"), ansicht]
+    schaetzung = _daten(ansicht, "verkleinern_schaetzung")
+    ganz = schaetzung.value
+    von, bis = _daten(ansicht, "kuerzen_von"), _daten(ansicht, "kuerzen_bis")
+    von.on_blur(SimpleNamespace(control=SimpleNamespace(value="0:01")))
+    bis.on_blur(SimpleNamespace(control=SimpleNamespace(value="2,5")))
+    assert (von.value, bis.value) == ("0:01", "0:02,5")
+    assert "0:01,5 von 0:03" in schaetzung.value and schaetzung.value != ganz
+    assert _daten(ansicht, "verkleinern_erstellen").content == "Kürzen und erstellen"
+    # Unsinn bleibt draußen: eine Meldung, die Marken wie zuvor
+    von.on_blur(SimpleNamespace(control=SimpleNamespace(value="bald")))
+    assert von.value == "0:01"
+    # Ein Ende vor dem Anfang heißt „bis zum Schluss“; „Ganze Länge“ nimmt beides zurück
+    bis.on_blur(SimpleNamespace(control=SimpleNamespace(value="0:00,5")))
+    assert bis.value == "" and "0:02 von 0:03" in schaetzung.value
+    bis.on_blur(SimpleNamespace(control=SimpleNamespace(value="2,5")))
+    # „Anfang hier“ fragt den Spieler — ohne Seite antwortet er nicht: eine Meldung, kein Wert
+    await _daten(ansicht, "kuerzen_von_hier").on_click(None)
+    assert von.value == "0:01"
+    await _daten(ansicht, "verkleinern_erstellen").on_click(None)
+    entwurf = vk._ENTWUERFE[name]
+    assert entwurf.info is not None and 1.2 <= entwurf.info.dauer_s <= 1.8
+    assert state.pakete.ablage.vorhanden(name)  # das Original bleibt
+    _daten(ansicht, "verkleinern_verwerfen").on_click(None)
+    _daten(ansicht, "kuerzen_ganz").on_click(None)
+    assert (von.value, bis.value) == ("", "") and schaetzung.value == ganz
+
+
 def test_einstieg_auf_der_uebungsseite_auch_ohne_plan(page, state) -> None:
     """Ein Video einer Übung, die in keinem Plan steht, erreicht man über ihre Seite."""
     from trainingsapp.ui.views.uebung_detail import uebung_detail

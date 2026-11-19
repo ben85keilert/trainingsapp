@@ -73,6 +73,8 @@ async def ausfuehren(
                 audio_bitrate=z.audio_bitrate,
                 bildrate=z.bildrate,
                 kanaele=z.kanaele,
+                von_ms=round(z.von_s * 1000),
+                bis_ms=round(z.bis_s * 1000),
             )
         finally:
             state.hochladen_beobachter = None
@@ -85,7 +87,7 @@ async def ausfuehren(
                 quelle,
                 ziel_pfad,
                 z,
-                dauer_s=dauer_s,
+                dauer_s=z.dauer(dauer_s) if dauer_s else dauer_s,
                 fortschritt=fortschritt,
                 abbruch=abbruch,
             )

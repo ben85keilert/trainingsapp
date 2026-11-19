@@ -278,20 +278,29 @@ def rollen_zeile(
         on_change=wert_geaendert,
         data=("material_bei_wert", kennung),
     )
-    ereignis_zeile = ft.Row(
+    # Auswahl und Feld untereinander: Nebeneinander schnitt die Handybreite beide ab (Web-Foto
+    # 19.11.2026: „Timer-Abschnitt“, „Name, z. B. P…“)
+    ereignis_zeile = ft.Column(
         spacing=6,
+        tight=True,
         controls=[
-            ft.Dropdown(
-                value=werte["bei_art"],
-                options=[ft.DropdownOption(key=a, text=EREIGNIS_WORT[a][0]) for a in ereignisse],
-                dense=True,
-                width=190,
-                border=ft.OutlineInputBorder(border_radius=8),
-                on_select=art_gewaehlt,
-                disabled=len(ereignisse) == 1,
-                data=("material_bei_art", kennung),
+            ft.Row(
+                controls=[
+                    ft.Dropdown(
+                        value=werte["bei_art"],
+                        options=[
+                            ft.DropdownOption(key=a, text=EREIGNIS_WORT[a][0]) for a in ereignisse
+                        ],
+                        dense=True,
+                        expand=True,
+                        border=ft.OutlineInputBorder(border_radius=8),
+                        on_select=art_gewaehlt,
+                        disabled=len(ereignisse) == 1,
+                        data=("material_bei_art", kennung),
+                    )
+                ]
             ),
-            wert_feld,
+            ft.Row(controls=[wert_feld]),
         ],
     )
 
@@ -333,7 +342,7 @@ def rollen_zeile(
             for n in namen
         ] or [
             ft.Text(
-                "Die Beschreibung hat noch keine Abschnitte — eine Zeile „## Name“ beginnt einen.",
+                "Noch keine benannten Abschnitte — in der Beschreibung „Abschnitt hinzufügen“.",
                 size=12,
                 opacity=0.7,
             )

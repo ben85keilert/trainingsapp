@@ -13,6 +13,8 @@ Aufruf: ``python cdp.py <cdp-port> <befehl> [werte] [<befehl> …]`` — mehrere
 - ``tippen <text>``   Text ins Feld mit Fokus (vorher anklicken).
 - ``warten <s>``
 - ``foto <datei>``    PNG; vorher ein Mausrad-Ereignis, sonst liefert Chromium das alte Bild.
+- ``foto_still <datei>``  PNG mit einem Mauszug am Rand statt des Mausrads — für **offene
+                      Flutter-Menüs**, die das Mausrad schließen würde.
 - ``js <ausdruck>``   auswerten und drucken (z. B. ``window.innerWidth``).
 
 Die Breite setzt **nur** ``halten.py`` — ein Aufruf hier, der sie setzte, höbe sie beim
@@ -100,8 +102,14 @@ async def main(port: str, args: list[str]) -> None:
             elif was == "warten":
                 await asyncio.sleep(float(args[i + 1]))
                 i += 2
-            elif was == "foto":
-                await maus("mouseWheel", 200, 500, deltaX=0, deltaY=1)
+            elif was in ("foto", "foto_still"):
+                # „foto_still“: ein Mauszug am Rand statt des Mausrads — das Rad schließt offene
+                # Flutter-Menüs (19.11.2026: das Ebenen-Menü des Fokus ließ sich sonst nicht
+                # fotografieren)
+                if was == "foto":
+                    await maus("mouseWheel", 200, 500, deltaX=0, deltaY=1)
+                else:
+                    await maus("mouseMoved", 3, 857)
                 await asyncio.sleep(0.8)
                 bild = await cmd("Page.captureScreenshot", format="png")
                 Path(args[i + 1]).write_bytes(base64.b64decode(bild["data"]))

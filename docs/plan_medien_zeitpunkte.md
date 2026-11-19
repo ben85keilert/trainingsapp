@@ -27,6 +27,10 @@ Ben, 18.11.2026 („Korrekturen für trainingsapp Übungen/Pläne Materialien“
 **Gebaut am 18.11.2026: 1, 4, 5, 7** — `docs/plan_medienrollen.md` M5 (Stand dort), Gerätetest
 **T151**. Dieses Dokument plant **2, 3 und 6**; Fragen im Katalog als **P226**.
 
+**Gebaut am 19.11.2026: 2, 3 und 6** (Ben: „Zu 6: Crop auch im Medieneditor (zum Komprimieren)
+ermöglichen. Bau deine Vorschläge ein“ — die Empfehlungen aus §7 gelten als Antworten). Was
+gebaut ist und wo es vom Vorschlag abweicht, steht in **§8**; Gerätetest **T152**.
+
 Gesucht im Katalog (Entscheidungszeilen): schneid, trimm, zuschnitt, zuordn + medi, „am Ende
 des“, „zum Ende“, „nach dem Workout“, Abschnitt + Video. Kein Treffer zu Kürzen, Zuordnen oder
 Medien am Ende; verwandt und gelesen: **P200** (Rollen statt „Vorher · Dabei · Nachher“), **P203**
@@ -163,3 +167,43 @@ Querformat (Maße beim Ablegen aus dem Kopf der Datei); Ton als Zeile (V6).
   „Kürzen“? Bildausschnitt auch? *Im selben Blatt; Ausschnitt später.*
 - **g)** Die **Uhr kleiner** neben dem Video (V2) gleich bauen oder erst nach T151? *Nach T151* —
   ob 320 × 180 am Handy reicht, zeigt erst das Gerät.
+
+## 8. Gebaut am 19.11.2026 — und wo es vom Vorschlag abweicht
+
+| Stufe | Gebaut | Fundstelle |
+|---|---|---|
+| Z1 | Feld `abschnitte` am Medium (mehrere); das Blatt beim Üben und das des Plans stellen je Abschnitt den Text und darunter seine Stücke; ein Abschnitt der **Übungsbeschreibung** kommt ins Blatt, wenn ein Stück zu ihm gehört (Frage e); im Editor „Zu Abschnitt …“ mit Chips, die Namen frisch aus der Beschreibung; `pruefen` gibt Hinweise | `core/material.py` (`nach_abschnitten`, `material_von`), `components/material.py`, `components/material_rolle.py`, `paket_werkzeug.zeitpunkte_pruefen` |
+| Z2 | `wann = "nachher"`: nach dem Ende einer Übung (auch wenn die Uhr von selbst abläuft), eines Workout-Schritts, der letzten Übung einer Liste und des Workouts — Blatt „Nach der Übung“ bzw. „Zum Abschluss“; nicht nach einem Abbruch. `oft = "immer"`: kommt bei jedem Start wieder (am ▶ wie bisher: erst das Blatt, der nächste Tipp startet) | `ui/einheit._medien_nachher`, `views/workout.material_zeigen`, `material._neue` |
+| Z3 | `wann = "bei"` mit `bei` (`core.models.Ereignis`): Timer-Abschnitt beginnt · Satz n · Zeit · Wiederholungen — ein **Hinweis unter der Uhr** im Fokus, die Uhr läuft weiter, „Ansehen“ öffnet das Blatt; am Plan die **Antwort** einer Frage im Workout — das Blatt geht auf, der Weg bleibt. Am Weg **weitere Links** mit Titel (`Inhalt.medien`) | `Material.faellig`, `core.material.Lage`, `Fokus._ereignisse_nachziehen`, `material.plan_antwort_zeigen`, `core/bedingung.py`, `components/wege_form.py` |
+| Z4 | Kürzen im Blatt „Verkleinern“: das Original im Spieler, „Anfang hier“ / „Ende hier“ oder die Zeit von Hand; ffmpeg mit `-ss`/`-t`; Android über `ClipDataSource` (`von_ms`/`bis_ms` an `flet_hochladen`) | `core/verkleinern.py` (`Ziel.von_s/bis_s`, `schnitt`), `views/verkleinern.py`, `erweiterungen/flet_hochladen` |
+
+Daten: Übung in `exercise_media.zusatz_json` (Migration 071), Planübung und Plan in ihrem JSON,
+im Paket dieselben Felder (`docs/uebungspakete.md`) — keine neue Formatversion.
+
+**Abweichungen vom Vorschlag:**
+
+- **Editor:** Die Rolle (Erklärung · Begleitung · Bewegung) bleibt, wie sie ist; darunter steht für
+  eine Erklärung **Wann** (Vorher · Nachher · Bei …) und statt dreier Stufen „Wie oft“ zwei
+  Schalter („Beim ersten Mal von selbst zeigen“, „Jedes Mal, nicht nur beim ersten“). Am Plan
+  heißen die Zeitpunkte „Vor dem Start · Am Ende · Bei …“.
+- **Keine Zeitleiste** im Reiter „Medien“: Die Übersicht nennt je Stück den Zeitpunkt („nachher“,
+  „wenn ‚Pause‘ beginnt“, „jedes Mal“, „zu: Ausführung“); eingetragen wird weiter an den zwei
+  Orten und am Plan. Die Zeitleiste als eigene Sicht ist offen.
+- **Am Weg nur Links**, keine Paketdateien (die müssten mit dem Plan reisen und von der Ablage
+  gehalten werden — eigener Schritt). Dateien an beliebigen Punkten gehen über Planübung und Plan.
+- **Eine Begleitung wechselt nicht** zu einem Ereignis; „Bei …“ gibt es nur für Erklärungen.
+- **„Bei …“ kommt immer von selbst** — bis es abgehakt ist oder jedes Mal; „nur auf Tipp“ gibt
+  es dort nicht.
+- **Ende einer Liste:** „Am Ende“ des Plans kommt, wenn die **letzte Planübung** über die Uhr
+  endet; wer die Liste nur abhakt, findet es hinter dem Buch-Symbol.
+- **Ende des Workouts:** Es kommt das Blatt des Plans; das „Nachher“ der letzten Übung steht im
+  Blatt der Übung, kommt dort aber nicht mehr von selbst.
+- **Kürzen am Handy ist ungeprüft** (braucht die APK aus diesem Stand): ob der Schnitt bildgenau
+  sitzt oder am Schlüsselbild davor, zeigt T152.
+- **Rest von M5** (§5) wartet wie empfohlen auf T151.
+
+Tests: `tests/test_ui_medien_zeitpunkte.py`, `tests/test_ui_weg_stuecke.py`,
+`tests/test_ui_fokus.py` (Hinweis unter der Uhr), `tests/test_ui_verkleinern.py` (Kürzen mit
+ffmpeg), `tests/test_medien_uebersicht.py`, Doctests in `core/models.py`, `core/material.py`,
+`core/bedingung.py`, `core/verkleinern.py`. Am Bildschirm geprüft (Web-Foto, 412 px): die Zeilen
+unter einem Stück in „Übung bearbeiten“.

@@ -353,6 +353,38 @@ async def test_stueck_bei_einem_ereignis_meldet_sich_unter_der_uhr(umgebung) -> 
     await _sekunden(state, uhr, gurt, 2)
 
 
+async def test_nachher_kommt_nach_dem_ende_der_uebung(umgebung) -> None:
+    """Ben, 18.11.2026: Medien „am Ende“ — nach „Fertig“ geht das Blatt „Nach der Übung“ auf,
+    erst wenn die Einheit abgeschlossen ist und die Ansicht neu steht; nach einem Abbruch nicht."""
+    state, uhr, gurt = umgebung
+    u = _kniebeuge(state, bild=False)
+    u.media = [
+        Media(uri="https://x.org/dehnen.mp4", title="Dehnen danach", wann="nachher", zeigen=True)
+    ]
+    state.uebungen.speichern(u)
+    u = state.uebungen.laden(u.id)
+    seite = Seite()
+    basis = f"/uebung/{u.id}"
+
+    def blaetter() -> list[str]:
+        return [t for d in seite.dialoge for t in _texte(d) if t == "Nach der Übung"]
+
+    # Abgebrochen: kein Blatt
+    _knopf(uebung_timer_view(seite, state, basis, u), "Starten").on_click()
+    await _sekunden(state, uhr, gurt, 2)
+    state.einheit.timer.lauf.abbrechen()
+    await _sekunden(state, uhr, gurt, 2)
+    await asyncio.sleep(0.8)
+    assert blaetter() == []
+    # Fertig: das Blatt kommt
+    _knopf(uebung_timer_view(seite, state, basis, u), "Starten").on_click()
+    await _sekunden(state, uhr, gurt, 2)
+    _knopf(uebung_timer_view(seite, state, basis, u), "Fertig").on_click()
+    await _sekunden(state, uhr, gurt, 2)
+    await asyncio.sleep(0.8)
+    assert blaetter() == ["Nach der Übung"]
+
+
 def test_ebene_video_ist_an_bis_man_sie_abwaehlt(tmp_path, monkeypatch) -> None:
     """Eine gespeicherte Liste von vor der Ebene „Video“ lässt das Video an."""
     monkeypatch.setenv("TRAININGSAPP_DATA_DIR", str(tmp_path))

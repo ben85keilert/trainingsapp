@@ -28,7 +28,7 @@ Alle Skripte liegen in `.claude/skills/web-fotos/scripts/`. Arbeitsordner ist ei
 3. **Fotografieren und klicken** — mehrere Befehle in einem Aufruf:
    `uv run python .claude/skills/web-fotos/scripts/cdp.py <cdp-port> klick 360 810 foto $W/1.png`
    Befehle: `nav`, `frisch`, `klick`, `lang`, `ziehen`, `rollen`, `rollen_bei`, `tippen`,
-   `warten`, `foto`, `js` (Kopf von `cdp.py`). **Das Foto mit Read ansehen**, dann erst den
+   `warten`, `foto`, `foto_still`, `js` (Kopf von `cdp.py`). **Das Foto mit Read ansehen**, dann erst den
    nächsten Klick setzen: Fotokoordinaten sind Klickkoordinaten, und sie verschieben sich mit
    jedem Layout. **Immer mit `timeout 100` davor** (`timeout 100 uv run python …/cdp.py …`):
    Hängt die Seite, hinge der Aufruf sonst bis zum Abbruch der Sitzung.
@@ -59,8 +59,10 @@ Messung 257, Verlauf 360); Reiter einer Ansicht bei y ≈ 78; Zahnrad oben recht
   Zeiger sähe sonst „gewählt“ aus. `foto` schickt sein Mausrad-Ereignis aber an (200, 500):
   Ein Control an dieser Stelle sieht auf dem Foto „überfahren“ aus (ein mittleres Segment
   wirkte grau, 17.11.2026) — ein paar Pixel weiterrollen und noch einmal fotografieren.
-- **Offene Flutter-Menüs nicht fotografieren:** Das Mausrad-Ereignis von `foto` schließt sie.
-  Eigene Menükarten in der Fläche (Ablaufbild) bleiben stehen.
+- **Offene Flutter-Menüs mit `foto_still` fotografieren:** Das Mausrad-Ereignis von `foto`
+  schließt sie; `foto_still` schickt stattdessen einen Mauszug an den Rand (19.11.2026: das
+  Ebenen-Menü des Fokus). Eigene Menükarten in der Fläche (Ablaufbild) bleiben auch bei `foto`
+  stehen.
 - **Text tippen:** erst das Feld anklicken, dann `tippen`.
 - **FastAPI:** `starten.sh` nimmt `uv run --with "fastapi==0.143.2"` — die neueste verträgt
   flet-web 1.0.3 nicht („openapi_prefix“). Nichts ins `.venv` installieren.

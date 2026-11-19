@@ -297,6 +297,10 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   „von selbst“ beim ersten Start, nie beim Aufbau einer Ansicht (Geister-Dialog).
   **Verkleinern** (`core/verkleinern.py`, `views/verkleinern.py`): nur auf Tipp, eine Kopie — das
   Original bleibt gerätelokal vermerkt (`medien_originale`), reist nie mit; ffmpeg nur aufrufen.
+- **Medien zu Zeitpunkten** (Ben, 19.11.2026, Vertrag `docs/plan_medien_zeitpunkte.md` §8): am
+  Medium `wann` (nachher · bei), `oft`, `bei` (Ereignis) und `abschnitte` — Rechnung nur in
+  `core/material.py` (`Lage`, `faellig`, `nach_abschnitten`), **nie aus Messwerten**. Blätter
+  „nachher“ gehen erst auf, wenn die Ansicht neu steht (`ui/einheit._medien_nachher`).
 - **Übungen kommen über Pakete** (Ben, 14.10.2026; Verträge `docs/uebungspakete.md`,
   `docs/plan_paketinhalte.md`; Einzelheiten in `.claude/rules/pakete.md`). Der Katalog ist das
   Paket „Standard“ (`data/seed/standard.toml`). Ein Import aktualisiert nur Übungen desselben

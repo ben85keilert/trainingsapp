@@ -96,7 +96,7 @@ def paketmedium_view(page: Any, state: AppState, basis: str, datei_name: str) ->
     elif art == MediaKind.VIDEO:
         try:
             # Knöpfe unter dem Bild, die stehen bleiben (Ben, 18.11.2026)
-            inhalt = Videospieler([str(pfad)]).control
+            inhalt = Videospieler([str(pfad)], state=state).control
         except ImportError:
             inhalt = ft.Text("Video-Erweiterung fehlt in diesem Build.", opacity=0.7)
     elif art == MediaKind.IMAGE:

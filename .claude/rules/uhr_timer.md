@@ -78,5 +78,15 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
   `OHNE_VIDEO` (alte Listen ohne beides: an).
 - Videos immer über `components/videospieler.Videospieler` (Knöpfe unter dem Bild, nicht die
   von media_kit, die nach 3 s gehen) — nie `on_position_change` abonnieren (ein Ereignis je Bild).
+- **Spieler** (Ben, 20.11.2026): unter dem Bild Zeitleiste · Knöpfe (⟲ ▶ ⟳ · Schleife ·
+  Lautstärke · Vollbild) · aufklappbare Lautstärke; die Zeitleiste fragt nur, solange das Video
+  läuft (`TAKT_S`), gesprungen wird beim Loslassen. **Vollbild richtet sich nach dem Video**
+  (`core.videoinfo.Videoinfo.hochkant`, Drehung aus `tkhd` eingerechnet;
+  `ui.ausrichtung.fuer_video`/`nach_video`) — media_kit stellt sonst immer quer und gibt danach
+  alle Richtungen frei. **Mit `state` aufbauen**: dann hält `ui.wach` (Grund „video“) den
+  Bildschirm; media_kits eigener Wakelock nähme ihn sonst auch dem Timer weg.
+- **Begleitung als Schleife**: Knopf im Spieler, gemerkt je Übung und Gerät
+  (`AppState.video_schleife`); ohne Wahl läuft ein Ausschnitt (bis `videoinfo.AUSSCHNITT_S`)
+  von selbst als Schleife. Das ✕ im Bild ist der Haken „Video“ des Ebenen-Menüs.
 - Das Ebenen-Menü bleibt offen: Den Tipp bekommt ein Container im `PopupMenuItem`, nie der Eintrag
   (`on_click` am Eintrag schließt das Menü); der Haken ist ein `ft.Icon`, nicht `checked`.

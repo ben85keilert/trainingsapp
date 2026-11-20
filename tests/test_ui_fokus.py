@@ -297,6 +297,55 @@ async def test_begleitvideo_im_fokus_laeuft_mit_der_uhr_statt_der_bewegung(umgeb
     await _sekunden(state, uhr, gurt, 2)
 
 
+async def test_begleitvideo_wegklicken_und_schleife_fuer_ausschnitte(umgebung) -> None:
+    """Ben, 20.11.2026: „Begleitvideos in der Übung müssen direkt weggeklickt werden können
+    zusätzlich zur Checkbox im Menü“ und „ein Button für Endlosschleife (automatisch), wenn die
+    Begleitung kein Ganzvideo ist, sondern nur ein Ausschnitt, der sich wiederholt“."""
+    from pathlib import Path
+
+    from mp4_bau import mp4, spur
+
+    fv = pytest.importorskip("flet_video")
+    state, uhr, gurt = umgebung
+    u = _kniebeuge(state, bild=True)
+    pfad = Path(_begleitvideo(state, u))
+    # Ein Ausschnitt von 12 s: läuft von selbst als Schleife
+    pfad.write_bytes(
+        mp4(spur(b"vide", breite=1280, hoehe=720, dauer_s=12.0, bilder=300), dauer_s=12.0)
+    )
+    seite = Seite()
+    basis = f"/uebung/{u.id}"
+    _knopf(uebung_timer_view(seite, state, basis, u), "Starten").on_click()
+    await _sekunden(state, uhr, gurt, 2)
+    fokus = uebung_timer_view(seite, state, basis, u)
+    huelle, video = _spieler(fokus)
+    assert video.playlist_mode == fv.PlaylistMode.LOOP and state.video_schleife(u.id) is None
+    # Der Knopf stellt sie ab — gemerkt an dieser Übung, auch beim nächsten Mal
+    next(x for x in _alle(huelle) if getattr(x, "data", None) == "video_schleife").on_click(None)
+    assert video.playlist_mode == fv.PlaylistMode.NONE and state.video_schleife(u.id) is False
+    # Ein ganzes Video (10 min) läuft einmal durch — bis die Person es anders stellt
+    state.video_schleife_setzen(u.id, True)
+    assert state.video_schleife(u.id) is True
+
+    # Das ✕ im Bild: wie der Haken „Video“ im Menü — die Bewegung kommt zurück
+    assert FOKUS_VIDEO in state.fokus_ebenen() and _sichtbar(fokus, huelle)
+    next(x for x in _alle(huelle) if getattr(x, "data", None) == "video_schliessen").on_click(None)
+    assert FOKUS_VIDEO not in state.fokus_ebenen() and not _sichtbar(fokus, huelle)
+    video_eintrag = next(i for i in _ebenen_menue(fokus).items if _ebene_text(i) == "Video")
+    video_eintrag.content.on_click(None)  # im Menü kommt es wieder
+    assert _sichtbar(fokus, huelle)
+    state.einheit.timer.lauf.abbrechen()
+    await _sekunden(state, uhr, gurt, 2)
+
+    lang = Path(_begleitvideo(state, _kniebeuge(state, bild=False)))
+    lang.write_bytes(
+        mp4(spur(b"vide", breite=1280, hoehe=720, dauer_s=600.0, bilder=300), dauer_s=600.0)
+    )
+    from trainingsapp.core import videoinfo
+
+    assert not videoinfo.ist_ausschnitt(videoinfo.lesen(lang).dauer_s)
+
+
 async def test_stueck_bei_einem_ereignis_meldet_sich_unter_der_uhr(umgebung) -> None:
     """Ben, 18.11.2026: „zu bestimmten Ereignissen … wenn Wdh oder Zeit soundso → Video“ — ein
     Hinweis unter der Uhr, die Uhr läuft weiter; ein Tipp öffnet das Blatt."""

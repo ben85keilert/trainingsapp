@@ -48,6 +48,20 @@ class Videoinfo:
     ton: bool = False
 
     @property
+    def hochkant(self) -> bool | None:
+        """Steht das Bild hochkant? ``None`` ohne Bildgröße. ``breite`` und ``hoehe`` sind das
+        Bild, wie es gezeigt wird — die Drehung aus dem Kopf ist schon eingerechnet (`_masse`).
+
+        >>> Videoinfo(breite=1080, hoehe=1920).hochkant, Videoinfo(breite=1920, hoehe=1080).hochkant
+        (True, False)
+        >>> Videoinfo().hochkant is None
+        True
+        """
+        if not self.breite or not self.hoehe:
+            return None
+        return self.hoehe > self.breite
+
+    @property
     def kurze_seite(self) -> int | None:
         if not self.breite or not self.hoehe:
             return None
@@ -69,6 +83,20 @@ class Videoinfo:
         if self.dauer_s is not None:
             teile.append(dauer_text(self.dauer_s))
         return " · ".join(teile)
+
+
+#: Bis zu dieser Dauer gilt ein Begleitvideo als **Ausschnitt**, der sich wiederholt — es läuft
+#: im Fokus von selbst als Schleife, bis die Person es anders stellt (Ben, 20.11.2026)
+AUSSCHNITT_S: Final = 60.0
+
+
+def ist_ausschnitt(dauer_s: float | None) -> bool:
+    """Ein kurzes Video — eine Bewegung, die sich wiederholt, kein ganzes Programm.
+
+    >>> ist_ausschnitt(12.0), ist_ausschnitt(60.0), ist_ausschnitt(600.0), ist_ausschnitt(None)
+    (True, True, False, False)
+    """
+    return dauer_s is not None and 0 < dauer_s <= AUSSCHNITT_S
 
 
 def dauer_text(sekunden: float) -> str:
@@ -147,11 +175,18 @@ def _zeitmass(nutz: bytes) -> tuple[int, int] | None:
 
 
 def _masse(nutz: bytes) -> tuple[int, int] | None:
-    """Breite und Höhe aus ``tkhd`` — die letzten acht Byte, Festkomma 16.16."""
+    """Breite und Höhe aus ``tkhd`` — die letzten acht Byte, Festkomma 16.16 —, **wie das Bild
+    gezeigt wird** (Ben, 20.11.2026: ein hochkant aufgenommenes Handy-Video lag im Vollbild
+    quer). Ein Telefon speichert hochkant Gefilmtes als Querbild mit einer Drehung um 90° oder
+    270° in der Matrix davor (a = d = 0, b und c ≠ 0); dann sind die Seiten getauscht."""
     if len(nutz) < (96 if nutz[:1] == b"\x01" else 84):
         return None
     breite = int.from_bytes(nutz[-8:-4], "big") >> 16
     hoehe = int.from_bytes(nutz[-4:], "big") >> 16
+    matrix = nutz[-44:-8]
+    a, b, c, d = (int.from_bytes(matrix[i : i + 4], "big") for i in (0, 4, 12, 16))
+    if a == 0 and d == 0 and b != 0 and c != 0:
+        breite, hoehe = hoehe, breite
     return (breite, hoehe) if breite > 0 and hoehe > 0 else None
 
 

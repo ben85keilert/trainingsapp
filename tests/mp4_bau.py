@@ -39,11 +39,18 @@ def spur(
     dauer_s: float = 3.0,
     bilder: int = 0,
     version: int = 0,
+    gedreht: bool = False,
 ) -> bytes:
-    """Eine Spur: ``art`` ``b"vide"`` oder ``b"soun"``; ``bilder`` Proben in ``stts``."""
+    """Eine Spur: ``art`` ``b"vide"`` oder ``b"soun"``; ``bilder`` Proben in ``stts``;
+    ``gedreht``: mit einer Drehung um 90° in der Matrix (hochkant gefilmt, quer gespeichert)."""
     # Zeiten und Spurnummer (Version 1: 64-Bit-Zeiten), Reserve, Ebene/Gruppe/Lautstärke,
     # Matrix — dann Breite und Höhe (Festkomma 16.16) als letzte acht Byte
-    kopf = bytes(32 if version == 1 else 20) + bytes(8) + bytes(8) + bytes(36)
+    eins = (1 << 16).to_bytes(4, "big")
+    matrix = bytes(36)
+    if gedreht:  # a = 0, b = 1, c = −1, d = 0
+        minus = (0xFFFF0000).to_bytes(4, "big")
+        matrix = bytes(4) + eins + bytes(4) + minus + bytes(20)
+    kopf = bytes(32 if version == 1 else 20) + bytes(8) + bytes(8) + matrix
     masse = (breite << 16).to_bytes(4, "big") + (hoehe << 16).to_bytes(4, "big")
     tkhd = _voll(b"tkhd", version, kopf + masse)
     mdhd = _zeit(b"mdhd", massstab, round(dauer_s * massstab), version, 4)

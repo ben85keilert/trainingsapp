@@ -456,3 +456,46 @@ async def test_verlauf_tage_nach_der_uhr_mit_workout(page, state) -> None:
     _workout(state, plan, "e-2", 10)
     texte = _texte(verlauf(page, state))
     assert texte.count("Workout Beine") == 2 and texte.count("Anstrengung —") == 1
+
+
+async def _loeschen(page, state, einheit_id: str, *, mit_eintraegen: bool) -> None:
+    """Papierkorb in der Titelleiste → Rückfrage → „Löschen“ → was danach läuft."""
+    dialoge: list = []
+    page.show_dialog = dialoge.append
+    ansicht = workout_eintrag_view(page, state, einheit_id)
+    page.views = [SimpleNamespace(route="/"), ansicht]
+    korb = next(x for x in _alle(ansicht.appbar) if getattr(x, "data", None) == "workout_loeschen")
+    korb.on_click(None)
+    dialog = dialoge[-1]
+    assert "Workout-Eintrag löschen?" in _texte(dialog)
+    haken = next(
+        x for x in _alle(dialog) if getattr(x, "data", None) == "workout_loeschen_eintraege"
+    )
+    assert haken.value is False  # Werte gehören der Übung — Vorgabe: sie bleiben
+    haken.value = mit_eintraegen
+    next(x for x in _alle(dialog) if getattr(x, "data", None) == "workout_loeschen_ja").on_click(
+        None
+    )
+    await dialog.on_dismiss(None)
+
+
+async def test_workout_eintrag_loeschen_laesst_die_werte_der_uebung(page, state) -> None:
+    """Ben, 20.11.2026: „Abgeschlossene Workouts … müssen gelöscht werden können“."""
+    plan = _plan(state, "kniebeuge", "wandsitz")
+    eintrag_id = _workout(state, plan, "e-1")
+    _workout(state, plan, "e-2", vor_minuten=10)
+    assert [w.einheit_id for w in durchlaeufe_am_tag(state, state.heute())] == ["e-1", "e-2"]
+
+    await _loeschen(page, state, "e-1", mit_eintraegen=False)
+    assert [w.einheit_id for w in durchlaeufe_am_tag(state, state.heute())] == ["e-2"]
+    assert state.sitzungen.eintrag_laden(eintrag_id) is not None  # der Wert bleibt im Tag
+    assert page.routen == ["/"]  # zurück, woher man kam
+    assert "Dieses Workout gibt es nicht mehr." in _texte(workout_eintrag_view(page, state, "e-1"))
+
+
+async def test_workout_eintrag_loeschen_auf_wunsch_mit_den_eintraegen(page, state) -> None:
+    plan = _plan(state, "kniebeuge", "wandsitz")
+    eintrag_id = _workout(state, plan, "e-1")
+    await _loeschen(page, state, "e-1", mit_eintraegen=True)
+    assert durchlaeufe_am_tag(state, state.heute()) == []
+    assert state.sitzungen.eintrag_laden(eintrag_id) is None

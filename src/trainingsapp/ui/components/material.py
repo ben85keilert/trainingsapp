@@ -189,7 +189,9 @@ def _faellig_inhalt(
             try:
                 from trainingsapp.ui.components.videospieler import Videospieler
 
-                sp = Videospieler([str(pfad)], autoplay=not spieler, hoehe=EINGEBLENDET_HOEHE)
+                sp = Videospieler(
+                    [str(pfad)], autoplay=not spieler, hoehe=EINGEBLENDET_HOEHE, state=state
+                )
                 spieler.append(sp)
                 stueck = sp.control
             except ImportError:  # ohne flet-video: die Zeile, wie bisher

@@ -252,7 +252,7 @@ def anhang_view(page: Any, state: AppState, basis: str, anhang: Anhang) -> ft.Vi
             from trainingsapp.ui.components.videospieler import Videospieler
 
             # Knöpfe unter dem Bild, die stehen bleiben (Ben, 18.11.2026)
-            inhalt = Videospieler([str(datei)]).control
+            inhalt = Videospieler([str(datei)], state=state).control
         except ImportError:
             inhalt = ft.Text("Video-Erweiterung fehlt in diesem Build.", opacity=0.7)
     else:

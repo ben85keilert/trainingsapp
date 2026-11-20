@@ -209,7 +209,11 @@ from trainingsapp.ui.views.updates import ROUTE as UPDATES_ROUTE
 from trainingsapp.ui.views.updates import beim_start as updates_beim_start
 from trainingsapp.ui.views.updates import updates_view
 from trainingsapp.ui.views.verkleinern import SEGMENT as VERKLEINERN_SEGMENT
-from trainingsapp.ui.views.verkleinern import verkleinern_view
+from trainingsapp.ui.views.verkleinern import (
+    anhang_geht,
+    anhang_verkleinern_view,
+    verkleinern_view,
+)
 from trainingsapp.ui.views.verlauf import verlauf
 from trainingsapp.ui.views.verlauf_herzfrequenz import verlauf_herzfrequenz_view
 from trainingsapp.ui.views.verlauf_kachel import verlauf_kachel_view
@@ -993,10 +997,21 @@ def main(page: ft.Page, browserspeicher: Browserspeicher | None = None) -> None:
                 ablegen(lambda: paketmedium_view(page, state, medium_basis, medium_name))
         # Ein Video verkleinern (P225 Stufe 3) legt sich genauso über die Ansicht, aus der es kam
         elif (i := wo(VERKLEINERN_SEGMENT)) is not None:
-            stapel(teile[:i])
-            if len(teile) > i + 1:
-                klein_basis, klein_name = "/" + "/".join(teile[:i]), teile[i + 1]
-                ablegen(lambda: verkleinern_view(page, state, klein_basis, klein_name))
+            if i >= 2 and teile[i - 2] == "anhang":
+                # Ein Anhang (``…/anhang/<id>/verkleinern``): erst seine Ansicht, darüber diese
+                stapel(teile[: i - 2])
+                anhang_basis = "/" + "/".join(teile[: i - 2])
+                anhang_routen(anhang_basis, teile[i - 1 : i])
+                klein_anhang = state.anhaenge.laden(teile[i - 1])
+                if klein_anhang is not None and anhang_geht(klein_anhang):
+                    ablegen(
+                        lambda: anhang_verkleinern_view(page, state, anhang_basis, klein_anhang)
+                    )
+            else:
+                stapel(teile[:i])
+                if len(teile) > i + 1:
+                    klein_basis, klein_name = "/" + "/".join(teile[:i]), teile[i + 1]
+                    ablegen(lambda: verkleinern_view(page, state, klein_basis, klein_name))
         # Anhänge (Foto, Video) legen sich wie der Timer über jede Ansicht
         elif (i := wo("anhang")) is not None:
             stapel(teile[:i])

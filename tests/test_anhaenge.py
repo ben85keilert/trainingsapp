@@ -438,3 +438,72 @@ def test_migration_036_notizen_mit_tagebuch_und_anhaengen(tmp_path) -> None:
     )
     assert [n.id for n in notizen.zum_tag("p", date(2026, 10, 20))] == ["n1", "n3"]
     con.close()
+
+
+def test_verkleinert_ersetzen_original_nehmen_und_loeschen(welt, tmp_path) -> None:
+    """Migration 073 (`docs/plan_medien_einheitlich.md` §2.6, Frage g): Die Kopie ersetzt die
+    Datei der Zeile, das Original bleibt vermerkt — bis „Original löschen“."""
+    repo, eintrag = welt.repo, welt.eintrag
+    a = neuer_anhang(eintrag.id, VIDEO, Qualitaet.MITTEL, dauer_s=10)
+    repo.anlegen(a, MP4, JPEG)
+    erste, erstes_bild = a.pfad, a.vorschau
+
+    kopie, bild = tmp_path / "k.mp4", tmp_path / "k.jpg"
+    kopie.write_bytes(MP4[:1000])
+    bild.write_bytes(JPEG[:100])
+    repo.ersetzen(a, kopie, bild, breite=640, hoehe=360, dauer_s=4)
+    assert a.pfad.endswith("_k1.mp4") and a.vorschau.endswith("_k1_bild.jpg")
+    assert a.original == erste and a.original_vorschau == erstes_bild
+    assert (a.bytes, a.breite, a.dauer_s) == (1000, 640, 4)
+    assert not kopie.exists() and repo.datei(a).read_bytes() == MP4[:1000]
+    assert repo.original_bytes(a) == len(MP4)
+    geladen = repo.laden(a.id)
+    assert (geladen.pfad, geladen.original, geladen.bytes) == (a.pfad, erste, 1000)
+    # Aufräumen lässt das Original und sein Frontbild liegen
+    assert verwaiste(repo.dateien(), repo.alle_zeilen()) == []
+
+    # zum zweiten Mal: die erste Kopie geht, das Original bleibt das erste
+    zweite = tmp_path / "k2.mp4"
+    zweite.write_bytes(MP4[:500])
+    alte_kopie = a.pfad
+    repo.ersetzen(a, zweite)
+    assert a.pfad.endswith("_k2.mp4") and a.original == erste
+    assert not (repo.wurzel / alte_kopie).exists()
+    assert repo.bild(a).is_file()  # ohne neues Frontbild: das von vorher, kopiert
+    assert verwaiste(repo.dateien(), repo.alle_zeilen()) == []
+
+    # fehlt die Kopie, ändert sich nichts
+    with pytest.raises(FileNotFoundError):
+        repo.ersetzen(a, tmp_path / "gibt_es_nicht.mp4")
+    assert a.pfad.endswith("_k2.mp4")
+
+    # Original wieder nehmen: die Kopie geht
+    kopie_pfad = a.pfad
+    assert repo.original_nehmen(a, breite=1920, hoehe=1080)
+    assert (a.pfad, a.vorschau, a.original, a.bytes) == (erste, erstes_bild, None, len(MP4))
+    assert not (repo.wurzel / kopie_pfad).exists() and repo.vorhanden(a)
+    assert repo.laden(a.id).original is None
+    assert not repo.original_nehmen(a)
+    assert verwaiste(repo.dateien(), repo.alle_zeilen()) == []
+
+    # Original löschen: nur die Kopie bleibt
+    dritte = tmp_path / "k3.mp4"
+    dritte.write_bytes(MP4[:700])
+    repo.ersetzen(a, dritte)
+    assert repo.original_loeschen(a) and a.original is None
+    assert not (repo.wurzel / erste).exists() and not (repo.wurzel / erstes_bild).exists()
+    assert repo.vorhanden(a) and repo.bild(a).is_file()
+    assert repo.laden(a.id).original is None and not repo.original_loeschen(a)
+    assert verwaiste(repo.dateien(), repo.alle_zeilen()) == []
+
+
+def test_loeschen_nimmt_das_original_mit(welt, tmp_path) -> None:
+    repo = welt.repo
+    a = neuer_anhang(welt.eintrag.id, BILD, Qualitaet.MITTEL)
+    repo.anlegen(a, JPEG)
+    kopie = tmp_path / "k.jpg"
+    kopie.write_bytes(JPEG[:50])
+    repo.ersetzen(a, kopie)
+    assert a.vorschau is None and a.original_vorschau is None
+    repo.loeschen(a.id)
+    assert repo.dateien() == []

@@ -126,7 +126,7 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.timer_bibliothek import in_uebung_speichern
 from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
 from trainingsapp.ui.views.anhang_hochladen import hochladen_route
-from trainingsapp.ui.views.verkleinern import verkleinern_route
+from trainingsapp.ui.views.verkleinern import paketdatei_geht, verkleinern_route
 
 #: Die Karte eines Parameters
 KARTE = ft.Colors.SURFACE_CONTAINER_HIGHEST
@@ -390,7 +390,7 @@ def plan_einstellen(
                                         data=("medium_bearbeiten", medium.uri),
                                     )
                                 ]
-                                if medium.kind == MediaKind.VIDEO
+                                if paketdatei_geht(medium.uri)
                                 else []
                             ),
                             ft.IconButton(

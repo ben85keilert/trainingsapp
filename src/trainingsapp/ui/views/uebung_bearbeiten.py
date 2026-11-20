@@ -136,7 +136,7 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
 from trainingsapp.ui.views.anhang_hochladen import hochladen_route
 from trainingsapp.ui.views.uebung_timer import formular_profil_route
-from trainingsapp.ui.views.verkleinern import verkleinern_route
+from trainingsapp.ui.views.verkleinern import paketdatei_geht, verkleinern_route
 
 #: Die Karte eines Parameters und die Beschreibung
 KARTE = ft.Colors.SURFACE_CONTAINER_LOWEST
@@ -1163,7 +1163,7 @@ def uebung_bearbeiten(
                                             data=("medium_bearbeiten", m.uri),
                                         )
                                     ]
-                                    if m.kind == MediaKind.VIDEO
+                                    if paketdatei_geht(m.uri)
                                     else []
                                 ),
                                 ft.IconButton(

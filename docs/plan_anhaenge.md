@@ -242,6 +242,13 @@ Nutzerrechten, hier nicht zu aggressiv sein.“ Videos höchstens zehn Minuten. 
   Kamera (`Qualitaet.video_bitrate`/`audio_bitrate`), Keyframes alle 5 s (sonst reicht
   Transcoder Videos mit passender Größe unverkleinert durch), Datenquelle **ohne Ort**
   (`OhneOrt`), dazu das Frontbild. Fortschritt in Prozent, „Abbrechen“.
+- **Nachträglich verkleinern und zuschneiden** (Ben, 19.11.2026, `plan_medien_einheitlich.md`
+  §2.6; gebaut 20.11.2026): Knopf in der Ansicht des Anhangs (Foto, Video) →
+  `…/anhang/<id>/verkleinern`, dieselbe Ansicht wie bei Paketdateien. „Übernehmen“ setzt die
+  Kopie (`…_k1.mp4`) an die Stelle der Datei; das **Original bleibt** auf dem Gerät vermerkt
+  (`entry_media.original`, Migration 073), bis man es löscht oder wieder nimmt. „Aufräumen“
+  hält es nicht für verwaist, Löschen des Anhangs nimmt es mit. Wie alles hier: nie in Export,
+  Backup oder Sync.
 - **Warum nicht die fertigen Pakete:** image_picker kopiert beim Verkleinern die GPS-Felder
   mit (`ExifDataCopier`); video_compress schätzt die Bitrate (0,14 · Breite · Höhe · fps,
   bei 720p 3,9 Mbit/s ≈ 30 MB je Minute) und schreibt den Ort des Originals ins Ergebnis;

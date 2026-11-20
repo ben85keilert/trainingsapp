@@ -15,6 +15,7 @@ import flet as ft
 
 from trainingsapp.core.models import MediaKind
 from trainingsapp.core.paketmedien import MIME, ORDNER, art_fuer, dateiname, name_lesen
+from trainingsapp.core.verkleinern import BILD_ENDUNGEN
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.tonspieler import Tonspieler
@@ -47,6 +48,14 @@ def paketmedium_view(page: Any, state: AppState, basis: str, datei_name: str) ->
     titel = state.paketmedium_titel.get(datei_name) or "Aus dem Paket"
     spieler = (
         Tonspieler(pfad) if art == MediaKind.AUDIO and pfad is not None and pfad.is_file() else None
+    )
+
+    # Videos und Fotos (JPEG, PNG) lassen sich verkleinern und zuschneiden
+    kann_verkleinern = (
+        pfad is not None
+        and pfad.is_file()
+        and teile is not None
+        and (art == MediaKind.VIDEO or teile[1].lower() in BILD_ENDUNGEN)
     )
 
     async def verlassen() -> None:
@@ -131,7 +140,7 @@ def paketmedium_view(page: Any, state: AppState, basis: str, datei_name: str) ->
                             data="paketmedium_bearbeiten",
                         )
                     ]
-                    if art == MediaKind.VIDEO and pfad is not None and pfad.is_file()
+                    if kann_verkleinern
                     else []
                 ),
                 ft.IconButton(

@@ -37,7 +37,9 @@ from trainingsapp.core.anhaenge import (
     Umfang,
     bild_ohne_metadaten,
     mp4_ortsboxen,
+    verkleinert_pfad,
     video_max_lesen,
+    vorschau_name,
     zusammenfassung,
 )
 from trainingsapp.core.models import iso_utc, jetzt, tagesgrenzen
@@ -249,11 +251,128 @@ class AnhangRepo:
         if a is None:
             return
         self.con.execute("DELETE FROM entry_media WHERE id = ?", (anhang_id,))
-        for relativ in (a.pfad, a.vorschau):
-            if relativ:
-                pfad = self.wurzel / relativ
+        self._weg(a.pfad, a.vorschau, a.original, a.original_vorschau)
+
+    def _weg(self, *relativ: str | None) -> None:
+        for r in relativ:
+            if r:
+                pfad = self.wurzel / r
                 if pfad.is_file():
                     pfad.unlink()
+
+    # -- Verkleinern (Migration 073, `docs/plan_medien_einheitlich.md` §2.6) -----------------
+
+    def original_bytes(self, a: Anhang) -> int | None:
+        """Wie groß das Original ist — ``None``, wenn keins (mehr) da ist."""
+        if not a.original:
+            return None
+        pfad = self.wurzel / a.original
+        return pfad.stat().st_size if pfad.is_file() else None
+
+    def ersetzen(
+        self,
+        a: Anhang,
+        datei: Path,
+        vorschau: Path | None = None,
+        *,
+        breite: int | None = None,
+        hoehe: int | None = None,
+        dauer_s: float | None = None,
+    ) -> None:
+        """„Übernehmen“ nach dem Verkleinern: Die Zeile nennt die Kopie ``datei`` (sie wird neben
+        die alte Datei verschoben, `core.anhaenge.verkleinert_pfad`). Die Datei von vorher bleibt
+        als **Original** vermerkt; war sie selbst schon eine Kopie, geht sie, und das erste
+        Original bleibt. ``a`` wird mitgeändert. Fehlt ``datei``: `FileNotFoundError`, nichts
+        ändert sich."""
+        if not datei.is_file():
+            raise FileNotFoundError(str(datei))
+        alt, alt_vorschau = a.pfad, a.vorschau
+        hat_original = self.original_bytes(a) is not None
+        vorlage = a.original if hat_original and a.original else a.pfad
+        ordner_rel = vorlage.rpartition("/")[0]
+        ordner_pfad = self.wurzel / ordner_rel
+        belegt = (
+            [f"{ordner_rel}/{p.name}" if ordner_rel else p.name for p in ordner_pfad.iterdir()]
+            if ordner_pfad.is_dir()
+            else []
+        )
+        neu = verkleinert_pfad(vorlage, belegt)
+        neu_vorschau = None
+        if a.vorschau:
+            ordner, _, name = neu.rpartition("/")
+            neu_vorschau = f"{ordner}/{vorschau_name(name)}" if ordner else vorschau_name(name)
+        n = datei.stat().st_size
+        _verschieben(datei, self.wurzel / neu)
+        if neu_vorschau is not None:
+            if vorschau is not None and vorschau.is_file():
+                _verschieben(vorschau, self.wurzel / neu_vorschau)
+            elif alt_vorschau and (self.wurzel / alt_vorschau).is_file():
+                shutil.copyfile(self.wurzel / alt_vorschau, self.wurzel / neu_vorschau)
+        original = a.original if hat_original else alt
+        self.con.execute(
+            "UPDATE entry_media SET uri = ?, vorschau = ?, bytes = ?, breite = ?, hoehe = ?, "
+            "dauer_s = ?, original = ? WHERE id = ?",
+            (
+                neu,
+                neu_vorschau,
+                n,
+                breite if breite is not None else a.breite,
+                hoehe if hoehe is not None else a.hoehe,
+                dauer_s if dauer_s is not None else a.dauer_s,
+                original,
+                a.id,
+            ),
+        )
+        a.pfad, a.vorschau, a.bytes, a.original = neu, neu_vorschau, n, original
+        a.breite = breite if breite is not None else a.breite
+        a.hoehe = hoehe if hoehe is not None else a.hoehe
+        a.dauer_s = dauer_s if dauer_s is not None else a.dauer_s
+        if hat_original:  # die Kopie von vorher braucht niemand mehr
+            self._weg(alt, alt_vorschau)
+
+    def original_nehmen(
+        self,
+        a: Anhang,
+        *,
+        breite: int | None = None,
+        hoehe: int | None = None,
+        dauer_s: float | None = None,
+    ) -> bool:
+        """„Original wieder nehmen“: Die Zeile nennt wieder das Original, die Kopie geht —
+        ``False``, wenn kein Original da ist. Maße und Dauer des Originals gibt der Aufrufer
+        mit (aus der Datei gelesen); sonst bleiben sie leer bzw. wie sie sind."""
+        if self.original_bytes(a) is None or not a.original:
+            return False
+        kopie, kopie_vorschau = a.pfad, a.vorschau
+        vorschau = a.original_vorschau
+        if (
+            vorschau is not None
+            and not (self.wurzel / vorschau).is_file()
+            and kopie_vorschau
+            and (self.wurzel / kopie_vorschau).is_file()
+        ):  # das Frontbild des Originals fehlt — das der Kopie tut es auch
+            _verschieben(self.wurzel / kopie_vorschau, self.wurzel / vorschau)
+        n = (self.wurzel / a.original).stat().st_size
+        self.con.execute(
+            "UPDATE entry_media SET uri = ?, vorschau = ?, bytes = ?, breite = ?, hoehe = ?, "
+            "dauer_s = ?, original = NULL WHERE id = ?",
+            (a.original, vorschau, n, breite, hoehe, dauer_s or a.dauer_s, a.id),
+        )
+        a.pfad, a.vorschau, a.bytes, a.original = a.original, vorschau, n, None
+        a.breite, a.hoehe, a.dauer_s = breite, hoehe, dauer_s or a.dauer_s
+        self._weg(kopie, kopie_vorschau if kopie_vorschau != vorschau else None)
+        return True
+
+    def original_loeschen(self, a: Anhang) -> bool:
+        """„Original löschen“: Vermerk und Datei (samt Frontbild) weg — ``True``, wenn es eins
+        gab."""
+        if not a.original:
+            return False
+        original, vorschau = a.original, a.original_vorschau
+        self.con.execute("UPDATE entry_media SET original = NULL WHERE id = ?", (a.id,))
+        a.original = None
+        self._weg(original, vorschau if vorschau != a.vorschau else None)
+        return True
 
     def loeschen_viele(self, ids: Iterable[str]) -> int:
         n = 0
@@ -419,6 +538,7 @@ class AnhangRepo:
             zum_tag=date.fromisoformat(r["day"]) if r["day"] else None,
             notiz_id=r["day_note_id"],
             seiten=r["seiten"],
+            original=r["original"],
         )
 
     def _bezug(self, r: sqlite3.Row) -> AnhangMitBezug:

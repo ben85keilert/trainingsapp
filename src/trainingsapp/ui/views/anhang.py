@@ -125,6 +125,13 @@ def anhang_view(page: Any, state: AppState, basis: str, anhang: Anhang) -> ft.Vi
         await verlassen()
         await page.push_route(zurueck_ziel(page, ansicht))
 
+    async def bearbeiten(_e: Any = None) -> None:
+        """Verkleinern · Kürzen · Ausschnitt (Ben, 19.11.2026: überall) — die Ansicht legt sich
+        über diese; das Original bleibt, bis man es löscht."""
+        from trainingsapp.ui.views.verkleinern import anhang_verkleinern_route
+
+        await weg(anhang_verkleinern_route(basis, anhang.id))
+
     # -- Löschen -------------------------------------------------------------------------
 
     def loeschen_fragen() -> None:
@@ -257,12 +264,29 @@ def anhang_view(page: Any, state: AppState, basis: str, anhang: Anhang) -> ft.Vi
         )
 
     links, rechts = blaettern(-1), blaettern(1)
+    from trainingsapp.ui.views.verkleinern import anhang_geht
+
+    kann_verkleinern = datei.is_file() and anhang_geht(anhang)
+    if anhang.original and repo.original_bytes(anhang) is not None:
+        kopf.append("verkleinert")
     ansicht = ft.View(
         route=route,
         appbar=ft.AppBar(
             title=ft.Text(titel),
             leading=ft.IconButton(ft.Icons.ARROW_BACK, on_click=zurueck),
             actions=[
+                *(
+                    [
+                        ft.IconButton(
+                            ft.Icons.COMPRESS,
+                            tooltip="Verkleinern, zuschneiden …",
+                            on_click=bearbeiten,
+                            data="anhang_bearbeiten",
+                        )
+                    ]
+                    if kann_verkleinern
+                    else []
+                ),
                 ft.IconButton(ft.Icons.SHARE_OUTLINED, tooltip="Teilen", on_click=teilen_fragen),
                 ft.IconButton(ft.Icons.DELETE_OUTLINE, tooltip="Löschen", on_click=loeschen_fragen),
                 ft.Container(width=4),

@@ -1,5 +1,12 @@
-"""„Verkleinern“ einer Videodatei (Ben, 17.11.2026, `docs/plan_medien_reiter.md` §5) — Route
-``<basis>/verkleinern/<sha256>.<endung>``, über jede Ansicht gelegt wie ``…/paketmedium/…``.
+"""„Verkleinern“ eines Videos oder Fotos (Ben, 17.11.2026, `docs/plan_medien_reiter.md` §5) —
+Route ``<basis>/verkleinern/<sha256>.<endung>`` für eine Paketdatei, über jede Ansicht gelegt wie
+``…/paketmedium/…``; für einen **Anhang** (Notiz, Eintrag) ``<basis>/anhang/<id>/verkleinern``
+(Ben, 19.11.2026: „Videos/Fotos sollen überall komprimiert und gecroppt werden können“,
+`docs/plan_medien_einheitlich.md` §2.6). Woher die Datei kommt und wohin die Kopie geht, weiß
+nur die `Quelle`; die Ansicht ist dieselbe.
+
+- **Fotos** (JPEG, PNG): die drei Stufen der Kamera und „Volle Größe“ (nur zuschneiden), am
+  Rechner mit Ausschnitt; die Größe der Kopie steht erst nach dem Erstellen fest.
 
 - **Grobes Schema mit Größe vorher** (`core/verkleinern.py`): drei Vorlagen (Klein · Mittel ·
   Groß, Vorgabe Mittel), „Genauer …“ mit Auflösung, Bildrate, Bildqualität und Ton — die
@@ -27,19 +34,24 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import threading
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 
 import flet as ft
 
 from trainingsapp.core import videoinfo
+from trainingsapp.core.anhaenge import Anhang
 from trainingsapp.core.bereinigen import NichtBereinigbar
-from trainingsapp.core.models import new_id
-from trainingsapp.core.paketmedien import ORDNER, dateiname, groesse_text
+from trainingsapp.core.models import MediaKind, new_id
+from trainingsapp.core.paketmedien import ORDNER, art_fuer, dateiname, groesse_text, name_lesen
 from trainingsapp.core.verkleinern import (
     BILD,
+    BILD_ENDUNGEN,
     BILD_NAMEN,
+    BILD_VORLAGE_NAMEN,
+    BILD_VORLAGEN,
     GANZ,
     TON,
     TON_NAMEN,
@@ -49,12 +61,16 @@ from trainingsapp.core.verkleinern import (
     Schema,
     Ziel,
     ausschnitt,
+    bild_masse,
+    bild_masse_lesen,
+    bildziel,
     schnitt,
     wahl,
     zeit_lesen,
     zeit_text,
     ziel,
 )
+from trainingsapp.data.anhaenge import jpeg_datei_ohne_metadaten, mp4_ort_entfernen
 from trainingsapp.ui import paketdatei
 from trainingsapp.ui import verkleinern as weg_
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -84,6 +100,58 @@ class Entwurf:
     ziel: Ziel
     bytes: int
     info: videoinfo.Videoinfo | None
+    #: Das Frontbild der Kopie (Anhang mit Video) — ``None``, wenn es keins gibt
+    frontbild: Path | None = None
+
+
+@dataclass(slots=True)
+class Quelle:
+    """Woher die Datei kommt und was mit der Kopie geschieht — eine Paketdatei (`_paket`) oder
+    ein Anhang (`_anhang`)."""
+
+    #: Je Datei: unter diesem Schlüssel liegen Entwurf und Lauf
+    schluessel: str
+    route: str
+    titel: str
+    pfad: Path | None
+    #: Ein Foto statt eines Videos
+    bild: bool
+    #: Endung der Kopie
+    endung: str
+    #: Liegt ein Original auf dem Gerät: seine Größe
+    original_bytes: int | None
+    #: Etwas nennt das Original noch — es bliebe auch nach „Original löschen“
+    gebunden: bool
+    #: Was unter „Übernehmen“ steht
+    hinweis: str
+    fehlt: str
+    #: Die fertige Kopie (und ihr Frontbild) ablegen → Kennung des Entwurfs, sein Pfad, Frontbild
+    ablegen: Callable[[Path, Path | None], Awaitable[tuple[str, Path | None, Path | None]]]
+    pfad_von: Callable[[str], Path | None]
+    verwerfen: Callable[[Entwurf], None]
+    #: „Übernehmen“ — `FileNotFoundError`, wenn der Entwurf weg ist
+    uebernehmen: Callable[[Entwurf], None]
+    original_nehmen: Callable[[], None]
+    #: ``True``, wenn das Original weg ist
+    original_loeschen: Callable[[], bool]
+    #: Die Kopie eines Videos bekommt ein eigenes Frontbild
+    frontbild: bool = False
+
+
+def _info(pfad: Path | None, bild: bool) -> videoinfo.Videoinfo | None:
+    """Was über die Datei bekannt ist — bei einem Foto nur Breite und Höhe (wie man es sieht)."""
+    if pfad is None or not pfad.is_file():
+        return None
+    if not bild:
+        return videoinfo.lesen(pfad)
+    masse = bild_masse_lesen(pfad)
+    return videoinfo.Videoinfo(breite=masse[0], hoehe=masse[1]) if masse else None
+
+
+def _info_text(info: videoinfo.Videoinfo | None, bild: bool) -> str:
+    if info is None:
+        return ""
+    return f"{info.breite} × {info.hoehe}" if bild else info.text()
 
 
 #: Entwürfe je Original — überleben den Neuaufbau der Ansicht
@@ -105,19 +173,32 @@ _LAEUFE: dict[str, Lauf] = {}
 
 
 async def _auftrag(
-    state: AppState, uri: str, pfad: Any, z: Ziel, info: videoinfo.Videoinfo, lauf: Lauf
+    state: AppState, q: Quelle, z: Ziel, info: videoinfo.Videoinfo, lauf: Lauf
 ) -> str | None:
-    """Erstellt den Entwurf zu ``uri`` (`_ENTWUERFE`) — eine Meldung, wenn es nicht ging,
-    sonst ``None`` (auch nach „Abbrechen“)."""
-    ablage = state.pakete.ablage
-    tmp = state.anhaenge.hochladen_ordner() / f"verkleinern_{new_id()}.mp4"
+    """Erstellt den Entwurf zu ``q`` (`_ENTWUERFE`) — eine Meldung, wenn es nicht ging, sonst
+    ``None`` (auch nach „Abbrechen“)."""
+    assert q.pfad is not None
+    tmp = state.anhaenge.hochladen_ordner() / f"verkleinern_{new_id()}.{q.endung}"
+    bild_tmp = tmp.with_name(f"{tmp.stem}_bild.jpg") if q.frontbild else None
 
     def fortschritt(anteil: float) -> None:
         lauf.anteil = anteil
 
+    def weg() -> None:
+        tmp.unlink(missing_ok=True)
+        if bild_tmp is not None:
+            bild_tmp.unlink(missing_ok=True)
+
     auftrag = asyncio.ensure_future(
         weg_.ausfuehren(
-            state, pfad, tmp, z, dauer_s=info.dauer_s, fortschritt=fortschritt, abbruch=lauf.abbruch
+            state,
+            q.pfad,
+            tmp,
+            z,
+            dauer_s=info.dauer_s,
+            fortschritt=fortschritt,
+            abbruch=lauf.abbruch,
+            frontbild=bild_tmp,
         )
     )
     while not auftrag.done():
@@ -127,42 +208,209 @@ async def _auftrag(
     try:
         fertig = auftrag.result()
     except Exception as fehler:
-        tmp.unlink(missing_ok=True)
+        weg()
         return f"Verkleinern ging nicht: {fehler}"
     if not fertig:
-        tmp.unlink(missing_ok=True)
+        weg()
         return None
     try:
-        name = await paketdatei.ablegen(state, tmp, "mp4")
+        name, neu_pfad, neu_bild = await q.ablegen(tmp, bild_tmp)
     except (NichtBereinigbar, OSError) as fehler:
+        weg()
         return f"Nicht übernommen: {fehler}"
-    finally:
-        tmp.unlink(missing_ok=True)
-    neu_pfad = None
-    if ablage is not None:
-        ablage.entwurf_merken(name)
-        neu_pfad = ablage.pfad(name)
-    neu_info = await asyncio.to_thread(videoinfo.lesen, neu_pfad) if neu_pfad else None
+    neu_info = await asyncio.to_thread(_info, neu_pfad, q.bild)
     n = neu_pfad.stat().st_size if neu_pfad is not None and neu_pfad.is_file() else 0
-    _ENTWUERFE[uri] = Entwurf(name, z, n, neu_info)
+    _ENTWUERFE[q.schluessel] = Entwurf(name, z, n, neu_info, neu_bild)
     return None
+
+
+def _paket(state: AppState, basis: str, datei_name: str) -> Quelle:
+    """Eine Datei aus der Ablage der Pakete: Die Kopie liegt dort, „Übernehmen“ lässt jedes
+    Stück auf sie zeigen (`Paketablage.ersetzen`)."""
+    uri = ORDNER + datei_name
+    ablage = state.pakete.ablage
+    pfad = ablage.pfad(uri) if ablage is not None else None
+    teile = name_lesen(uri)
+    endung = teile[1].lower() if teile is not None else ""
+    bild = endung in BILD_ENDUNGEN
+    titel = state.paketmedium_titel.get(datei_name) or ("Foto" if bild else "Video")
+    original = ablage.original(uri) if ablage is not None else None
+
+    async def ablegen(tmp: Path, _bild: Path | None) -> tuple[str, Path | None, Path | None]:
+        try:
+            name = await paketdatei.ablegen(state, tmp, tmp.suffix.lstrip("."))
+        finally:
+            tmp.unlink(missing_ok=True)
+        if ablage is None:
+            return name, None, None
+        ablage.entwurf_merken(name)
+        return name, ablage.pfad(name), None
+
+    def verwerfen(e: Entwurf) -> None:
+        if ablage is not None:
+            ablage.verwerfen(e.neu)
+
+    def uebernehmen(e: Entwurf) -> None:
+        if ablage is None:
+            raise FileNotFoundError(e.neu)
+        ablage.ersetzen(uri, e.neu)
+        state.paketmedium_titel[dateiname(e.neu) or ""] = titel
+
+    def original_nehmen() -> None:
+        if original is not None and ablage is not None:
+            ablage.ersetzen(uri, original, original_behalten=False)
+
+    return Quelle(
+        schluessel=uri,
+        route=f"{basis.rstrip('/')}/{SEGMENT}/{datei_name}",
+        titel=titel,
+        pfad=pfad,
+        bild=bild,
+        endung=("jpg" if endung == "jpeg" else endung) if bild else "mp4",
+        original_bytes=ablage.groesse(original)
+        if original is not None and ablage is not None
+        else None,
+        # Nennt ein Paketstand das Original, bliebe es auch nach „Original löschen“ liegen
+        gebunden=original is not None and ablage is not None and ablage.original_gebunden(uri),
+        hinweis=(
+            f"Übernommen zeigt jedes Stück, das dieses {'Foto' if bild else 'Video'} nennt, auf "
+            "die neue Fassung. Das Original bleibt auf dem Gerät, reist aber nicht mit. Kommt die "
+            "Übung aus einem Paket, gilt die neue Fassung als deine Änderung und bleibt bei "
+            "Updates; das Original bleibt dann, solange das Paket es nennt."
+        ),
+        fehlt="Die Datei fehlt — das Paket neu importieren.",
+        ablegen=ablegen,
+        pfad_von=lambda name: ablage.pfad(name) if ablage is not None else None,
+        verwerfen=verwerfen,
+        uebernehmen=uebernehmen,
+        original_nehmen=original_nehmen,
+        original_loeschen=lambda: ablage.original_vergessen(uri) if ablage is not None else False,
+    )
+
+
+def paketdatei_geht(uri: str) -> bool:
+    """Lässt sich diese Paketdatei verkleinern — ein Video oder ein Foto (JPEG, PNG)?
+
+    >>> h = "medien/" + "a" * 64
+    >>> [paketdatei_geht(h + e) for e in (".mp4", ".jpg", ".png", ".svg", ".pdf", ".m4a")]
+    [True, True, True, False, False, False]
+    >>> paketdatei_geht("https://example.org/a.mp4")
+    False
+    """
+    teile = name_lesen(uri)
+    if teile is None:
+        return False
+    return art_fuer(teile[1]) == MediaKind.VIDEO or teile[1].lower() in BILD_ENDUNGEN
+
+
+def anhang_verkleinern_route(basis: str, anhang_id: str) -> str:
+    """``<basis>/anhang/<id>/verkleinern``.
+
+    >>> anhang_verkleinern_route("/tag/2026-11-20", "a1")
+    '/tag/2026-11-20/anhang/a1/verkleinern'
+    """
+    return f"{basis.rstrip('/')}/anhang/{anhang_id}/{SEGMENT}"
+
+
+def anhang_geht(a: Anhang) -> bool:
+    """Lässt sich dieser Anhang verkleinern — ein Video oder ein Foto (JPEG, PNG)?"""
+    if a.ist_video:
+        return True
+    return not (a.ist_audio or a.ist_dokument) and a.pfad.rsplit(".", 1)[-1].lower() in (
+        BILD_ENDUNGEN
+    )
+
+
+def _anhang(state: AppState, basis: str, a: Anhang) -> Quelle:
+    """Ein Anhang an Notiz oder Eintrag: Die Kopie wartet im Ordner der Fotoauswahl, „Übernehmen“
+    setzt sie an die Stelle der Datei — das Original bleibt vermerkt (`AnhangRepo.ersetzen`),
+    bis man es löscht. Wie alle Anhänge verlässt beides das Gerät nie."""
+    repo = state.anhaenge
+    bild = not a.ist_video
+    endung = a.pfad.rsplit(".", 1)[-1].lower()
+
+    def sauber(tmp: Path) -> None:
+        # Netz unter dem Umwandler wie beim Hochladen: kein Ort, keine Gerätedaten
+        if bild:
+            jpeg_datei_ohne_metadaten(tmp)
+        else:
+            mp4_ort_entfernen(tmp)
+
+    async def ablegen(tmp: Path, bild_tmp: Path | None) -> tuple[str, Path | None, Path | None]:
+        await asyncio.to_thread(sauber, tmp)
+        return str(tmp), tmp, bild_tmp if bild_tmp is not None and bild_tmp.is_file() else None
+
+    def verwerfen(e: Entwurf) -> None:
+        Path(e.neu).unlink(missing_ok=True)
+        if e.frontbild is not None:
+            e.frontbild.unlink(missing_ok=True)
+
+    def uebernehmen(e: Entwurf) -> None:
+        repo.ersetzen(
+            a,
+            Path(e.neu),
+            e.frontbild,
+            breite=e.info.breite if e.info is not None else None,
+            hoehe=e.info.hoehe if e.info is not None else None,
+            dauer_s=e.info.dauer_s if e.info is not None and not bild else None,
+        )
+
+    def original_nehmen() -> None:
+        info = _info(repo.wurzel / a.original, bild) if a.original else None
+        repo.original_nehmen(
+            a,
+            breite=info.breite if info is not None else None,
+            hoehe=info.hoehe if info is not None else None,
+            dauer_s=info.dauer_s if info is not None else None,
+        )
+
+    return Quelle(
+        schluessel=f"anhang/{a.id}",
+        route=anhang_verkleinern_route(basis, a.id),
+        titel=a.name,
+        pfad=repo.datei(a),
+        bild=bild,
+        endung=("jpg" if endung == "jpeg" else endung) if bild else "mp4",
+        original_bytes=repo.original_bytes(a),
+        gebunden=False,
+        hinweis=(
+            "Übernommen steht die neue Fassung an Eintrag bzw. Notiz. Das Original bleibt auf dem "
+            "Gerät, bis du es löschst — beides verlässt das Gerät nie."
+        ),
+        fehlt="Die Datei fehlt — Einstellungen → Anhänge → Aufräumen.",
+        ablegen=ablegen,
+        pfad_von=lambda name: Path(name),
+        verwerfen=verwerfen,
+        uebernehmen=uebernehmen,
+        original_nehmen=original_nehmen,
+        original_loeschen=lambda: repo.original_loeschen(a),
+        frontbild=a.ist_video,
+    )
 
 
 def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) -> ft.View:
     """Die Ansicht für die Paketdatei ``datei_name``."""
-    uri = ORDNER + datei_name
-    route = f"{basis.rstrip('/')}/{SEGMENT}/{datei_name}"
-    ablage = state.pakete.ablage
-    pfad = ablage.pfad(uri) if ablage is not None else None
+    return _ansicht(page, state, _paket(state, basis, datei_name))
+
+
+def anhang_verkleinern_view(page: Any, state: AppState, basis: str, anhang: Anhang) -> ft.View:
+    """Die Ansicht für einen Anhang (Foto oder Video an Notiz oder Eintrag)."""
+    return _ansicht(page, state, _anhang(state, basis, anhang))
+
+
+def _ansicht(page: Any, state: AppState, q: Quelle) -> ft.View:
+    uri = q.schluessel
+    pfad = q.pfad
     da = pfad is not None and pfad.is_file()
     groesse = pfad.stat().st_size if da and pfad is not None else 0
-    info = videoinfo.lesen(pfad) if da and pfad is not None else None
-    titel = state.paketmedium_titel.get(datei_name) or "Video"
-    original = ablage.original(uri) if ablage is not None else None
-    # Nennt ein Paketstand das Original, bliebe es auch nach „Original löschen“ liegen
-    gebunden = original is not None and ablage is not None and ablage.original_gebunden(uri)
+    info = _info(pfad, q.bild)
+    titel = q.titel
     seiten, raten, hat_ton = wahl(info)
     womit = weg_.weg(state)
+    if q.bild and womit == weg_.ANDROID:
+        q.endung = "jpg"  # der Verkleinerer am Telefon schreibt immer JPEG
+    #: Die Vorlagen eines Fotos — „Volle Größe“ (nur zuschneiden) gibt es nur mit ffmpeg
+    bild_vorlagen = [k for k in BILD_VORLAGEN if womit == weg_.FFMPEG or BILD_VORLAGEN[k][0]]
 
     def eingepasst(s: Schema) -> Schema:
         """Ein Schema in dem, was zur Wahl steht (nie über dem Original)."""
@@ -190,14 +438,40 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         von, bis = schnitt(stand["von"], stand["bis"], info.dauer_s if info else 0.0)
         return replace(z, von_s=von, bis_s=bis) if von or bis else z
 
+    def bild_fuer(key: str) -> Ziel:
+        """Was die Vorlage ``key`` aus diesem Foto macht."""
+        return bildziel(
+            key, (info.breite if info else 0) or 0, (info.hoehe if info else 0) or 0, stand["bild"]
+        )
+
     def jetzt() -> Ziel:
+        if q.bild:
+            return bild_fuer(stand["vorlage"] or VORGABE)
         return mit_schnitt(ziel(stand["schema"], info, groesse, stand["bild"]))
 
     def zu_gross(z: Ziel) -> bool:
-        """Wäre nicht kleiner — gekürzt oder zugeschnitten ist es das immer."""
+        """Wäre nicht kleiner — gekürzt oder zugeschnitten ist es das immer. Ein Foto, das
+        schon so klein ist, packt nur ffmpeg neu („Volle Größe“)."""
+        if q.bild:
+            return not z.kurze_seite and womit != weg_.FFMPEG
         return z.nicht_kleiner and not z.gekuerzt and not z.zugeschnitten
 
+    def masse_text(z: Ziel) -> str:
+        if info is None or not info.breite or not info.hoehe:
+            return ""
+        b, h = bild_masse(z, info.breite, info.hoehe)
+        return f"{b} × {h}"
+
     def schaetzung(z: Ziel) -> str:
+        if q.bild:
+            if info is None:
+                return "Das Foto lässt sich nicht lesen."
+            if zu_gross(z):
+                return f"Das Foto ist schon so klein ({_info_text(info, True)})."
+            return (
+                f"Neu {masse_text(z)} · jetzt {_info_text(info, True)}, {groesse_text(groesse)}. "
+                "Wie groß die Datei wird, steht nach dem Erstellen da."
+            )
         if info is None or not info.dauer_s:
             return "Die Dauer steht nicht in der Datei — keine Schätzung."
         if zu_gross(z):
@@ -257,14 +531,24 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         zeichnen()
 
     def vorlage_zeile(key: str) -> ft.Control:
-        s = eingepasst(VORLAGEN[key])
-        z = mit_schnitt(ziel(s, info, groesse, stand["bild"]))
         gewaehlt = stand["vorlage"] == key
-        rechts = (
-            "wäre nicht kleiner"
-            if zu_gross(z)
-            else (f"etwa {groesse_text(z.bytes(info.dauer_s))}" if info and info.dauer_s else "")
-        )
+        if q.bild:
+            s = stand["schema"]
+            z = bild_fuer(key)
+            name = BILD_VORLAGE_NAMEN[key]
+            unten = masse_text(z) + (f" · JPEG {z.jpeg}" if q.endung == "jpg" else "")
+            rechts = "schon so klein" if zu_gross(z) else ""
+        else:
+            s = eingepasst(VORLAGEN[key])
+            z = mit_schnitt(ziel(s, info, groesse, stand["bild"]))
+            name, unten = VORLAGE_NAMEN[key], z.text()
+            rechts = (
+                "wäre nicht kleiner"
+                if zu_gross(z)
+                else (
+                    f"etwa {groesse_text(z.bytes(info.dauer_s))}" if info and info.dauer_s else ""
+                )
+            )
 
         def waehlen(_e: Any = None) -> None:
             stand["vorlage"] = key
@@ -293,8 +577,8 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
                         tight=True,
                         expand=True,
                         controls=[
-                            ft.Text(VORLAGE_NAMEN[key], weight=ft.FontWeight.W_500),
-                            ft.Text(z.text(), size=12, opacity=0.7),
+                            ft.Text(name, weight=ft.FontWeight.W_500),
+                            ft.Text(unten, size=12, opacity=0.7),
                         ],
                     ),
                     ft.Text(rechts, size=13, opacity=0.8),
@@ -363,11 +647,17 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         )
         return teile
 
-    def spieler(name: str) -> ft.Control:
+    def spieler(datei: Path | None) -> ft.Control:
         """Original oder Neu im selben Spieler — wie die Ansicht einer Paketdatei."""
-        datei = ablage.pfad(name) if ablage is not None else None
         if datei is None or not datei.is_file():
             return ft.Text("Die Datei fehlt.", opacity=0.7)
+        if q.bild:
+            return ft.Container(
+                height=220,
+                alignment=ft.Alignment.CENTER,
+                content=ft.Image(src=str(datei), fit=ft.BoxFit.CONTAIN),
+                data="verkleinern_bild",
+            )
         try:
             from trainingsapp.ui.components.videospieler import Videospieler
 
@@ -377,7 +667,8 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
             return ft.Text("Video-Erweiterung fehlt in diesem Build.", opacity=0.7)
 
     def ergebnis_teile(e: Entwurf) -> list[ft.Control]:
-        neu_text = e.info.text() if e.info is not None and e.info.text() else e.ziel.text()
+        neu_text = _info_text(e.info, q.bild) or (masse_text(e.ziel) if q.bild else e.ziel.text())
+        nicht_kleiner = q.bild and e.bytes >= groesse and not e.ziel.zugeschnitten
         gewaehlt = stand["zeigen"]
 
         def wechsel(ev: Any) -> None:
@@ -395,7 +686,19 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
             segmente(
                 [("original", "Jetzt"), ("neu", "Neu")], gewaehlt, wechsel, "verkleinern_zeigen"
             ),
-            spieler(uri if gewaehlt == "original" else e.neu),
+            *(
+                [
+                    ft.Text(
+                        "Die Kopie ist nicht kleiner als jetzt.",
+                        size=13,
+                        color=ft.Colors.ERROR,
+                        data="verkleinern_nicht_kleiner",
+                    )
+                ]
+                if nicht_kleiner
+                else []
+            ),
+            spieler(pfad if gewaehlt == "original" else q.pfad_von(e.neu)),
             ft.Row(
                 wrap=True,
                 spacing=8,
@@ -420,24 +723,22 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
                     ),
                 ],
             ),
-            ft.Text(
-                "Übernommen zeigt jedes Stück, das dieses Video nennt, auf die neue Fassung. Das "
-                "Original bleibt auf dem Gerät, reist aber nicht mit. Kommt die Übung aus einem "
-                "Paket, gilt die neue Fassung als deine Änderung und bleibt bei Updates; das "
-                "Original bleibt dann, solange das Paket es nennt.",
-                size=12,
-                opacity=0.65,
-            ),
+            ft.Text(q.hinweis, size=12, opacity=0.65),
         ]
 
     def zeichnen() -> None:
         z = jetzt()
         lauf = _LAEUFE.get(uri)
         entwurf = _ENTWUERFE.get(uri)
-        if entwurf is not None and ablage is not None and not ablage.vorhanden(entwurf.neu):
-            _ENTWUERFE.pop(uri, None)  # weggeräumt — dann eben neu erstellen
-            entwurf = None
-        vorlagen_spalte.controls = [vorlage_zeile(k) for k in VORLAGEN]
+        if entwurf is not None:
+            entwurf_pfad = q.pfad_von(entwurf.neu)
+            if entwurf_pfad is None or not entwurf_pfad.is_file():
+                _ENTWUERFE.pop(uri, None)  # weggeräumt — dann eben neu erstellen
+                entwurf = None
+        vorlagen_spalte.controls = [
+            vorlage_zeile(k) for k in (bild_vorlagen if q.bild else VORLAGEN)
+        ]
+        genauer_knopf.visible = not q.bild
         genauer_spalte.visible = bool(stand["genauer"])
         genauer_spalte.controls = genauer_teile() if stand["genauer"] else []
         genauer_knopf.content = "Weniger" if stand["genauer"] else "Genauer …"
@@ -692,7 +993,7 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         _LAEUFE[uri] = lauf
         zeichnen()
         try:
-            meldung = await _auftrag(state, uri, pfad, z, info, lauf)
+            meldung = await _auftrag(state, q, z, info, lauf)
         finally:
             _LAEUFE.pop(uri, None)
         stand["zeigen"] = "neu"
@@ -711,28 +1012,27 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
     def verwerfen() -> None:
         """Die Kopie weg — zurück zum Schema (auch „Anders erstellen …“)."""
         entwurf = _ENTWUERFE.pop(uri, None)
-        if entwurf is not None and ablage is not None:
-            ablage.verwerfen(entwurf.neu)
+        if entwurf is not None:
+            q.verwerfen(entwurf)
         zeichnen()
 
     async def uebernehmen(_e: Any = None) -> None:
         entwurf = _ENTWUERFE.pop(uri, None)
-        if entwurf is None or ablage is None:
+        if entwurf is None:
             return
         try:
-            ablage.ersetzen(uri, entwurf.neu)
+            q.uebernehmen(entwurf)
         except FileNotFoundError:  # weggeräumt — nichts hat sich geändert
             zeichnen()
             melden("Die neue Fassung ist nicht mehr da — bitte noch einmal erstellen.")
             return
-        state.paketmedium_titel[dateiname(entwurf.neu) or ""] = titel
         melden("Übernommen — das Original bleibt auf dem Gerät.")
         await page.push_route(zurueck_ziel(page, ansicht))
 
     async def original_nehmen(_e: Any = None) -> None:
-        if original is None or ablage is None:
+        if q.original_bytes is None:
             return
-        ablage.ersetzen(uri, original, original_behalten=False)
+        q.original_nehmen()
         melden("Wieder das Original.")
         await page.push_route(zurueck_ziel(page, ansicht))
 
@@ -744,7 +1044,7 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
             schliessen(dialog)
 
         def loeschen_jetzt() -> None:
-            weg = ablage.original_vergessen(uri) if ablage is not None else False
+            weg = q.original_loeschen()
             melden(
                 "Original gelöscht."
                 if weg
@@ -770,17 +1070,16 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
     kopf: list[ft.Control] = [
         ft.Text(titel, size=18, weight=ft.FontWeight.W_600),
         ft.Text(
-            " · ".join(
-                t for t in ("Jetzt", info.text() if info else "", groesse_text(groesse)) if t
-            )
+            " · ".join(t for t in ("Jetzt", _info_text(info, q.bild), groesse_text(groesse)) if t)
             if da
-            else "Die Datei fehlt — das Paket neu importieren.",
+            else q.fehlt,
             size=13,
             opacity=0.75,
             data="verkleinern_original",
         ),
     ]
-    if original is not None and ablage is not None:
+    if q.original_bytes is not None:
+        gebunden = q.gebunden
         knoepfe: list[ft.Control] = [
             ft.TextButton(
                 "Original wieder nehmen",
@@ -802,7 +1101,7 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         kopf.append(
             karte(
                 ft.Text(
-                    f"Verkleinert aus einem Original ({groesse_text(ablage.groesse(original))}),"
+                    f"Verkleinert aus einem Original ({groesse_text(q.original_bytes)}),"
                     " das noch auf dem Gerät liegt."
                     + (
                         " Ein Paket nennt es noch (für „Auf Paketstand“ und Updates) — es bleibt,"
@@ -847,11 +1146,19 @@ def verkleinern_view(page: Any, state: AppState, basis: str, datei_name: str) ->
         lauf.zeichnen, lauf.balken = zeichnen, balken_zeigen  # diese Ansicht zeigt den Lauf
     zeichnen()
     ansicht = ft.View(
-        route=route,
+        route=q.route,
         appbar=ft.AppBar(title=ft.Text("Verkleinern")),
         controls=[sicher(ft.Container(padding=16, expand=True, content=inhalt))],
     )
     return ansicht
 
 
-__all__ = ["SEGMENT", "verkleinern_route", "verkleinern_view"]
+__all__ = [
+    "SEGMENT",
+    "anhang_geht",
+    "anhang_verkleinern_route",
+    "anhang_verkleinern_view",
+    "paketdatei_geht",
+    "verkleinern_route",
+    "verkleinern_view",
+]

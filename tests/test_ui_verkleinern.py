@@ -379,7 +379,7 @@ async def test_lauf_uebersteht_zurueck_und_wieder_hinein(page, state, monkeypatc
     weiter = asyncio.Event()
     auftraege: list[object] = []
 
-    async def ausfuehren(_s, _quelle, _ziel, _z, *, dauer_s, fortschritt, abbruch):
+    async def ausfuehren(_s, _quelle, _ziel, _z, *, dauer_s, fortschritt, abbruch, frontbild=None):
         auftraege.append(abbruch)
         fortschritt(0.4)
         await weiter.wait()
@@ -407,3 +407,142 @@ async def test_lauf_uebersteht_zurueck_und_wieder_hinein(page, state, monkeypatc
     # Der Entwurf ist vor dem Aufräumen sicher, bis er übernommen oder verworfen ist
     state.pakete.ablage.aufraeumen()
     assert state.pakete.ablage.vorhanden(vk._ENTWUERFE[name].neu)
+
+
+# -- Fotos und Anhänge (Ben, 19.11.2026: „Videos/Fotos sollen überall komprimiert und gecroppt
+# werden können“, `docs/plan_medien_einheitlich.md` §2.6) --------------------------------------
+
+
+def _echtes_foto(tmp_path, groesse: str = "1600x1200") -> bytes:
+    quelle = tmp_path / "quelle.jpg"
+    befehl = ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi"]
+    befehl += ["-i", f"testsrc2=size={groesse}", "-frames:v", "1", "-update", "1", "-q:v", "2"]
+    subprocess.run([*befehl, str(quelle)], check=True)
+    return quelle.read_bytes()
+
+
+def _ablegen_als(state: AppState, daten: bytes, endung: str) -> str:
+    import hashlib
+
+    name = name_fuer(hashlib.sha256(daten).hexdigest(), endung)
+    pfad = state.pakete.ablage.pfad(name)
+    pfad.parent.mkdir(parents=True, exist_ok=True)
+    pfad.write_bytes(daten)
+    return name
+
+
+def test_foto_vorlagen_ohne_bildrate_und_ton(page, state, monkeypatch) -> None:
+    """Ein Foto aus dem Paket: die Stufen der Kamera und „Volle Größe“, kein „Genauer …“, kein
+    Kürzen; am Telefon ohne Ausschnitt und ohne „Volle Größe“."""
+    from trainingsapp.core.dokument import beispielseite
+
+    name = _ablegen_als(state, beispielseite(4000, 3000), "jpg")
+    assert vk.paketdatei_geht(name)
+    monkeypatch.setattr(weg, "weg", lambda _s: "ffmpeg")
+    ansicht = vk.verkleinern_view(page, state, "/uebung/u", dateiname(name))
+    keys = [x.data[1] for x in _alle(ansicht) if isinstance(getattr(x, "data", None), tuple)]
+    assert keys == ["klein", "mittel", "gross", "voll"]
+    texte = _texte(ansicht)
+    assert "960 × 720 · JPEG 85" in texte and "4000 × 3000 · JPEG 90" in texte
+    assert "BILDAUSSCHNITT" in texte and "KÜRZEN · ANFANG UND ENDE" not in texte
+    assert _daten(ansicht, "verkleinern_genauer").visible is False
+    assert "Neu 960 × 720 · jetzt 4000 × 3000" in _daten(ansicht, "verkleinern_schaetzung").value
+    assert _daten(ansicht, "verkleinern_erstellen").disabled is False
+    # ein Ausschnitt: die Maße der Vorlagen gehen mit
+    _daten(ansicht, "ausschnitt_breite").end_value = 50
+    _daten(ansicht, "ausschnitt_breite").on_change_end(None)
+    assert "Neu 720 × 1080" in _daten(ansicht, "verkleinern_schaetzung").value
+    assert _daten(ansicht, "verkleinern_erstellen").content == "Zuschneiden und erstellen"
+
+    monkeypatch.setattr(weg, "weg", lambda _s: "android")
+    telefon = vk.verkleinern_view(page, state, "/uebung/u", dateiname(name))
+    keys = [x.data[1] for x in _alle(telefon) if isinstance(getattr(x, "data", None), tuple)]
+    assert keys == ["klein", "mittel", "gross"] and "BILDAUSSCHNITT" not in _texte(telefon)
+
+    # Was die App nicht verkleinert: Vektorbild, PDF, Ton, ein Link
+    assert not vk.paketdatei_geht(name[:-3] + "svg") and not vk.paketdatei_geht("https://x.org/a")
+
+
+@ffmpeg_da
+async def test_foto_zuschneiden_uebernehmen_und_original(page, state, tmp_path) -> None:
+    name = _ablegen_als(state, _echtes_foto(tmp_path), "jpg")
+    u = Exercise(
+        name="Brücke",
+        media=[Media(kind=MediaKind.IMAGE, source=MediaSource.PAKET, uri=name, title="Bild")],
+    )
+    state.uebungen.speichern(u)
+    ablage = state.pakete.ablage
+    seite = SimpleNamespace(**{**vars(page), "run_task": lambda f, *a: None})
+    vorher = ft.View(route="/uebung/u")
+    ansicht = vk.verkleinern_view(seite, state, "/uebung/u", dateiname(name))
+    seite.views = [vorher, ansicht]
+    _daten(ansicht, ("verkleinern_vorlage", "klein")).on_click(None)
+    _daten(ansicht, "ausschnitt_hoehe").start_value = 50  # die untere Hälfte
+    _daten(ansicht, "ausschnitt_hoehe").on_change_end(None)
+    await _daten(ansicht, "verkleinern_erstellen").on_click(None)
+    entwurf = vk._ENTWUERFE[name]
+    assert entwurf.neu.endswith(".jpg") and ablage.vorhanden(name)
+    assert (entwurf.info.breite, entwurf.info.hoehe) == (1280, 480)
+    assert 0 < entwurf.bytes < ablage.groesse(name)
+    assert any(getattr(x, "data", None) == "verkleinern_bild" for x in _alle(ansicht))
+    await _daten(ansicht, "verkleinern_uebernehmen").on_click(None)
+    assert [m.uri for m in state.uebungen.laden(u.id).media] == [entwurf.neu]
+    assert ablage.original(entwurf.neu) == name and seite.wege[-1] == "/uebung/u"
+
+
+@ffmpeg_da
+async def test_anhang_verkleinern_original_bleibt(page, state, tmp_path) -> None:
+    """Ein Video an der Notiz zum Tag: Die Kopie ersetzt die Datei, das Original bleibt vermerkt
+    (Frage g) — „Original wieder nehmen“ und „Original löschen“."""
+    from trainingsapp.core.anhaenge import VIDEO, Qualitaet, Ziel, neuer_anhang, verwaiste
+    from trainingsapp.ui.views.anhang import anhang_view
+
+    repo = state.anhaenge
+    notiz = state.tagesnotizen.anlegen(state.profil.id, state.heute(), "")
+    a = neuer_anhang(
+        Ziel.fuer_notiz(state.profil.id, state.heute(), notiz.id), VIDEO, Qualitaet.GROSS
+    )
+    video = _echtes_video(tmp_path)
+    repo.anlegen(a, video, _echtes_foto(tmp_path, "320x180"))
+    erste = a.pfad
+    seite = SimpleNamespace(**{**vars(page), "run_task": lambda f, *a: None})
+
+    # der Knopf in der Ansicht des Anhangs führt her
+    gross = anhang_view(seite, state, "/", a)
+    knopf = next(x for x in gross.appbar.actions if getattr(x, "data", None) == "anhang_bearbeiten")
+    await knopf.on_click(None)
+    assert seite.wege[-1] == f"/anhang/{a.id}/verkleinern"
+
+    ansicht = vk.anhang_verkleinern_view(seite, state, "/", a)
+    seite.views = [gross, ansicht]
+    _daten(ansicht, ("verkleinern_vorlage", "klein")).on_click(None)
+    await _daten(ansicht, "verkleinern_erstellen").on_click(None)
+    entwurf = vk._ENTWUERFE[f"anhang/{a.id}"]
+    assert entwurf.frontbild is not None and entwurf.frontbild.is_file()
+    assert repo.laden(a.id).pfad == erste  # noch nichts übernommen
+    await _daten(ansicht, "verkleinern_uebernehmen").on_click(None)
+    neu = repo.laden(a.id)
+    assert neu.pfad.endswith("_k1.mp4") and neu.original == erste
+    assert neu.bytes < len(video) and neu.hoehe == 480
+    assert repo.datei(neu).is_file() and repo.bild(neu).is_file()
+    assert (repo.wurzel / erste).is_file() and seite.wege[-1] == f"/anhang/{a.id}"
+    assert verwaiste(repo.dateien(), repo.alle_zeilen()) == []
+
+    # wieder hinein: das Original liegt noch da
+    wieder = vk.anhang_verkleinern_view(seite, state, "/", neu)
+    seite.views = [gross, wieder]
+    assert any("Verkleinert aus einem Original" in t for t in _texte(wieder))
+    await _daten(wieder, "verkleinern_original_nehmen").on_click(None)
+    zurueck = repo.laden(a.id)
+    assert zurueck.pfad == erste and zurueck.original is None and zurueck.bytes == len(video)
+    assert (zurueck.breite, zurueck.hoehe) == (1280, 720)
+    assert verwaiste(repo.dateien(), repo.alle_zeilen()) == []
+
+
+def test_anhang_was_sich_verkleinern_laesst() -> None:
+    from trainingsapp.core.anhaenge import AUDIO, BILD, DOKUMENT, VIDEO, Anhang
+
+    assert vk.anhang_geht(Anhang("e", VIDEO, pfad="a.mp4"))
+    assert vk.anhang_geht(Anhang("e", BILD, pfad="a.jpg"))
+    assert not vk.anhang_geht(Anhang("e", AUDIO, pfad="a.m4a"))
+    assert not vk.anhang_geht(Anhang("e", DOKUMENT, pfad="a.pdf"))

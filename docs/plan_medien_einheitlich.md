@@ -24,7 +24,8 @@ Ben, 19.11.2026 („Zur Bereitstellung der Medien in der App“):
 
 **Stand 19.11.2026:** Ben: „Empfehlungen a–h gelten, bau E1 und E2. Wenn alles geklappt hat,
 mach den ganzen Rest danach gleich mit, außer es gibt Skizzen mit Alternativen und einer
-erforderlichen Auswahl.“ **Gebaut: E1–E5 und E6 Teil 1** — was gebaut ist und wo es abweicht, steht in **§5**.
+erforderlichen Auswahl.“ **Gebaut: E1–E6** (20.11.2026; ohne den Ausschnitt am Telefon, Frage i) — was gebaut
+ist und wo es abweicht, steht in **§5**.
 Fragen im Katalog als **P227** (a–h entschieden wie empfohlen).
 
 Gesucht im Katalog (Entscheidungszeilen): medien, medium, verkleiner, zuschneid, crop, begleit.
@@ -257,6 +258,10 @@ Zuschneiden am Handy.
   Paketdateien, bis man es löscht) oder gleich ersetzen? *Behalten, mit „Original löschen“.*
 - **h)** Marken im Ablauf: die Lage aus §2.3 (oben rechts = vorher, unten rechts = nachher, Griff =
   Weg) — und Zugang zu leeren Stellen über das Menü der Kachel? *Ja; Skizzen vorab.*
+- **i)** *(neu, 20.11.2026, offen)* **Ausschnitt am Telefon:** Der Umwandler kann nur mittig auf
+  ein Seitenverhältnis zuschneiden. „Format wählen“ (quadratisch · 4:3 · 16:9 · hochkant) für
+  Videos am Telefon bauen — oder Zuschneiden nur am Rechner lassen? *Nur am Rechner lassen*,
+  bis es jemand am Telefon vermisst.
 
 ## 5. Gebaut — und wo es vom Vorschlag abweicht
 
@@ -268,12 +273,39 @@ Zuschneiden am Handy.
 | E4 | **Der Weg trägt echte Stücke:** im Wege-Formular (Reiter „Ablauf“ und „Im Plan einstellen“) dasselbe Menü — Link · Foto · Video · Fotoauswahl · Datei · Audio · aus vorhandenen Medien (die Stücke des Plans vorn); je Stück Titel und Beschriftung. Im Workout steht eine Datei als Medienzeile (ein Tipp öffnet sie in der App). Ablage (Aufräumen, Verkleinern) und Paket-Export lesen die Dateien an Wegen mit; der Reiter „Medien“ zeigt sie mit Größe | `core.bedingung.Stueck` (`kind`, `source`, `text`), `core.ablauf.wegdateien`, `core.pakete.paketmedien_in`, `data/paketmedien._ABFRAGEN`, `components/wege_form.py` (`WegMedien`, `stuecke_abholen`), `views/workout.inhalt_karte` |
 | E5 | **Marken im Ablaufbild:** am rechten Rand der Kachel von oben nach unten vorher (Punkt) · dabei (▶) · bei … (Blitz) · nachher (Punkt); ein Weg mit Inhalt trägt einen Ring um seinen Punkt; an „Start“ eine Marke für die Medien des Plans (leer als „+“). Tipp auf eine Marke oder „Medien …“ im Menü der Kachel öffnet das **Blatt „Medien an dieser Stelle“**: die Stellen untereinander, je Stück Stift (zum Editor) und ✕, je Stelle „Medium hinzufügen“ — das neue Stück bekommt Rolle und Zeitpunkt der Stelle und kommt dort von selbst. In der **Liste** (Plan bearbeiten) dieselben vier Marken in der Zeile der Planübung, gefüllt oder als Umriss | `core/medien_stellen.py`, `components/medien_stellen.py` (`stellen_blatt`, `marken_knopf`, `abholen`), `components/ablaufbild.py` (`marken`, `wege_mit_inhalt`, `on_marke`), `views/ablauf.py`, `views/plan.py` |
 | E6, Teil 1 | **Bildausschnitt für Videos** in der Ansicht „Verkleinern“: zwei Regler (Breite, Höhe) und das Bild als Schema, dieselbe Kopie wie beim Verkleinern und Kürzen — **nur am Rechner** (ffmpeg `crop` vor `scale`; mit echtem ffmpeg-Lauf getestet). **Erreichbar von überall:** Knopf in der Ansicht jeder Paket-Videodatei (dort landet, wer ein Video antippt), an der Datei-Zeile in „Übung bearbeiten“ und „Im Plan einstellen“, wie bisher im Reiter „Medien“ und auf der Übungsseite; Dateien an Wegen und in Kurs-Blöcken ziehen beim Übernehmen mit | `core/verkleinern.py` (`Ausschnitt`, `ausschnitt`, `Ziel.ausschnitt`, `ffmpeg_befehl`), `views/verkleinern.py`, `views/paketmedium.py`, `data/paketmedien.ersetzen` |
+| E6, Teil 2 | **Fotos** (JPEG, PNG) in derselben Ansicht: die drei Stufen der Kamera (Klein · Mittel · Groß) und am Rechner „Volle Größe“ (nur zuschneiden) mit demselben Ausschnitt; die Kopie behält ihr Format, die Drehung aus dem Kopf wird angewandt, Metadaten fallen weg. **Anhänge** (Foto, Video an Notiz und Eintrag): Knopf in der Ansicht des Anhangs → `…/anhang/<id>/verkleinern`; „Übernehmen“ setzt die Kopie an die Stelle der Datei, das **Original bleibt vermerkt** (Migration 073, `entry_media.original`) mit „Original wieder nehmen“ und „Original löschen“ (Frage g); Aufräumen lässt es liegen, Löschen des Anhangs nimmt es mit. Der Knopf steht jetzt auch an Fotos: Paketdatei, beide Editoren, Reiter „Medien“, Übungsseite | `core/verkleinern.py` (`bildziel`, `bild_befehl`), `views/verkleinern.py` (`Quelle`, `_paket`, `_anhang`), `data/anhaenge.AnhangRepo.ersetzen`, `tests/test_ui_verkleinern.py`, `tests/test_anhaenge.py` |
 
-**Stand E6 — was fehlt:**
+**Stand E6 — geprüft und offen:**
 
-- **Ausschnitt am Telefon:** nicht gebaut. Der Umwandler in `flet_hochladen` bekommt keinen
-  Ausschnitt; ob seine Bibliothek zuschneiden kann, ist weiter **ungeprüft** (braucht Kotlin und
-  eine APK, die sich hier nicht ausprobieren lässt). Am Telefon fehlt der Abschnitt darum ganz.
+- **Geprüft mit echtem ffmpeg (8.1.3):** Foto 1600 × 1200 mit Drehung im Kopf → Mittel 720 × 960,
+  Ausschnitt und „Volle Größe“ mit den erwarteten Maßen; Video-Anhang 720p → Klein mit eigenem
+  Frontbild; Tests `test_foto_zuschneiden_…`, `test_anhang_verkleinern_original_bleibt`.
+- **Ausschnitt am Telefon: nicht gebaut — Frage i.** Nachgesehen im Umwandler der APK
+  (`com.otaliastudios:transcoder:0.10.5`, Klassen in `resize/`): Es gibt nur
+  `AspectRatioResizer` — ein **mittiger** Zuschnitt auf ein Seitenverhältnis, kein freies
+  Rechteck. Der Bildverkleinerer für Fotos (`flutter_image_compress`) schneidet gar nicht zu.
+  Möglich wäre am Telefon also nur „Format wählen“ (wie jetzt · quadratisch · 4:3 · 16:9 ·
+  hochkant, immer mittig) für Videos — oder nichts. Das ist eine andere Bedienung als am
+  Rechner und braucht Kotlin und eine APK: **Bens Wahl** (Katalog P227 i).
+- **Fotos am Telefon verkleinern: ungeprüft.** Derselbe Aufruf wie in der Fotoauswahl
+  (`art = "bild"`), hier mit einer Datei der App statt einer gewählten; immer JPEG (ein PNG wird
+  dort zum JPEG), ohne „Volle Größe“. Gerätetest T154.
+- **Am Bildschirm** (Web-Foto, 412 px) geprüft: die Foto-Fassung der Ansicht (Ausschnitt,
+  vier Vorlagen, Satz zur Größe) und ihr Ergebnis. Nicht fotografiert: der neue Knopf in der
+  Titelleiste des Anhangs; Bilder selbst zeigt das Web-Werkzeug nicht.
+
+**Abweichungen (E6):**
+
+- **Die Größe eines Fotos steht erst nach dem Erstellen da** (JPEG lässt sich nicht vorab
+  schätzen); ist die Kopie nicht kleiner, sagt die Ansicht das in Rot — übernehmen kann man
+  trotzdem.
+- **Kein „Quadrat“-Knopf** für Symbole (§2.6): Symbole haben ihr eigenes Blatt mit Zuschnitt.
+- **Im Kurs** steht kein eigener Knopf: Wer die Datei antippt, landet in der Ansicht der
+  Paketdatei, dort ist er.
+- **Der Speicher unter Einstellungen → Anhänge** zählt die Kopie, nicht das behaltene Original.
+- **Audio und Dokumente** lassen sich nicht verkleinern, GIF, WebP und SVG auch nicht.
+- **Ein Entwurf zu einem Anhang** liegt bis „Übernehmen“ oder „Verwerfen“ im Ordner der
+  Fotoauswahl; bricht die App vorher ab, zeigt ihn „Aufräumen“ als verwaiste Datei.
 
 **Abweichungen (E5):**
 

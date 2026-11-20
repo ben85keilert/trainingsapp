@@ -31,7 +31,6 @@ from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.beschreibung import abschnitte
 from trainingsapp.core.bewegungsbild import png_masse
 from trainingsapp.core.links import erlaubt as link_erlaubt
-from trainingsapp.core.material import VIDEO
 from trainingsapp.core.medien_uebersicht import (
     ANIMATION,
     AUS_PLAN,
@@ -63,7 +62,7 @@ from trainingsapp.ui.components.material_rolle import gelesen, rollen_zeile, wer
 from trainingsapp.ui.components.medienliste import SYMBOLE, oeffner
 from trainingsapp.ui.components.plan_reiter import ohne_uebergang, plan_reiter
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.views.verkleinern import verkleinern_route
+from trainingsapp.ui.views.verkleinern import paketdatei_geht, verkleinern_route
 
 _log = logging.getLogger(__name__)
 
@@ -508,7 +507,7 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
             # Ein Video aus dem Paket lässt sich verkleinern (Stufe 3) — die Größe ist der Weg
             # dorthin, bei „groß“ betont
             verkleinern: Any = None
-            if z.paketdatei and z.art == VIDEO and z.medium is not None:
+            if z.paketdatei and z.medium is not None and paketdatei_geht(z.medium.uri):
                 medium = z.medium
 
                 def verkleinern(_e: Any = None, m: Media = medium, titel: str = z.titel) -> None:

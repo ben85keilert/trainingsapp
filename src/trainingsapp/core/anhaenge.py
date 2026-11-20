@@ -469,6 +469,26 @@ class Anhang:
     notiz_id: str | None = None
     #: Seiten eines in der App aufgenommenen Dokuments (Migration 061) — sonst ``None``
     seiten: int | None = None
+    #: Die Datei von vor dem Verkleinern (Migration 073), relativ wie `pfad` — ``None``, wenn
+    #: nichts verkleinert wurde oder das Original gelöscht ist
+    original: str | None = None
+
+    @property
+    def original_vorschau(self) -> str | None:
+        """Wo das Frontbild des Originals liegt (läge) — nur bei Arten mit Frontbild.
+
+        >>> a = Anhang("e", VIDEO, pfad="2026/10/a_k1.mp4", vorschau="2026/10/a_k1_bild.jpg")
+        >>> a.original_vorschau is None
+        True
+        >>> a.original = "2026/10/a.mp4"; a.original_vorschau
+        '2026/10/a_bild.jpg'
+        >>> Anhang("e", BILD, pfad="x_k1.jpg", original="x.jpg").original_vorschau is None
+        True
+        """
+        if not self.original or not self.vorschau:
+            return None
+        ordner, _, name = self.original.rpartition("/")
+        return f"{ordner}/{vorschau_name(name)}" if ordner else vorschau_name(name)
 
     @property
     def ist_video(self) -> bool:
@@ -1052,18 +1072,46 @@ def aufraeumen_vorschlag(
     ]
 
 
+def verkleinert_pfad(pfad: str, belegt: Iterable[str] = ()) -> str:
+    """Wohin die verkleinerte Kopie eines Anhangs kommt: neben die Datei, mit ``_k1``, ``_k2`` …
+    — der erste Name, den es noch nicht gibt; ``endung`` wie die Datei.
+
+    >>> verkleinert_pfad("2026/10/20261020_1430_ab12cd.mp4")
+    '2026/10/20261020_1430_ab12cd_k1.mp4'
+    >>> verkleinert_pfad("2026/10/a_k1.mp4", ["2026/10/a_k1.mp4", "2026/10/a_k2.mp4"])
+    '2026/10/a_k3.mp4'
+    """
+    stamm, _, endung = pfad.rpartition(".")
+    kopf, trenner, zahl = stamm.rpartition("_k")
+    if trenner and zahl.isdigit():
+        stamm = kopf
+    vergeben = set(belegt)
+    n = 1
+    while (neu := f"{stamm}_k{n}.{endung}") in vergeben or neu == pfad:
+        n += 1
+    return neu
+
+
 def verwaiste(dateien: Iterable[str], anhaenge: Iterable[Anhang]) -> list[str]:
     """Dateien (relativ) ohne Zeile — nach einem Absturz zwischen Schreiben und Eintragen.
+    Das Original eines verkleinerten Anhangs (und sein Frontbild) gehört zur Zeile.
 
     >>> a = Anhang("e", VIDEO, pfad="2026/10/a.mp4", vorschau="2026/10/a_bild.jpg")
     >>> verwaiste(["2026/10/a.mp4", "2026/10/a_bild.jpg", "2026/10/b.jpg"], [a])
     ['2026/10/b.jpg']
+    >>> k = Anhang("e", VIDEO, pfad="a_k1.mp4", vorschau="a_k1_bild.jpg", original="a.mp4")
+    >>> verwaiste(["a.mp4", "a_bild.jpg", "a_k1.mp4", "a_k1_bild.jpg", "a_k2.mp4"], [k])
+    ['a_k2.mp4']
     """
     bekannt: set[str] = set()
     for a in anhaenge:
         bekannt.add(a.pfad)
         if a.vorschau:
             bekannt.add(a.vorschau)
+        if a.original:
+            bekannt.add(a.original)
+            if a.original_vorschau:
+                bekannt.add(a.original_vorschau)
     return sorted(d for d in dateien if d not in bekannt)
 
 
@@ -1130,6 +1178,7 @@ __all__ = [
     "relativer_pfad",
     "timer_text",
     "timer_weiter",
+    "verkleinert_pfad",
     "verwaiste",
     "video_max_lesen",
     "vorschau_name",

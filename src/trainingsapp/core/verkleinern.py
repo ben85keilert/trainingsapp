@@ -37,6 +37,8 @@ from pathlib import Path
 from typing import Final
 
 from .anhaenge import Qualitaet
+from .bewegungsbild import png_masse
+from .dokument import gezeigte_masse
 from .videoinfo import Videoinfo
 
 #: Die Auflösungen zur Wahl — Pixel der kürzeren Seite
@@ -142,6 +144,9 @@ class Ziel:
     bis_s: float = 0.0
     #: Der Bildausschnitt (`Ausschnitt`) — nur am Rechner (ffmpeg)
     ausschnitt: Ausschnitt = GANZ
+    #: Ein **Foto** statt eines Videos: die JPEG-Qualität (1–100), 0 = Video. Bei einem Foto
+    #: heißt ``kurze_seite = 0``: Die Größe bleibt (nur zuschneiden bzw. neu packen)
+    jpeg: int = 0
 
     @property
     def gekuerzt(self) -> bool:
@@ -547,11 +552,185 @@ def mit_ffmpeg(
         fortschritt(1.0)
 
 
+# -- Fotos (Ben, 19.11.2026: „Videos/Fotos sollen überall komprimiert und gecroppt werden
+# können“, `docs/plan_medien_einheitlich.md` §2.6) ----------------------------------------------
+
+#: „Volle Größe“ — nur zuschneiden bzw. neu packen, nichts kleiner rechnen
+VOLL: Final = "voll"
+#: Die Vorlagen für Fotos: die drei Stufen der Kamera (kurze Seite, JPEG-Qualität) und `VOLL`
+BILD_VORLAGEN: Final[dict[str, tuple[int, int]]] = {
+    **{q.value: (q.kurze_seite, q.jpeg_qualitaet) for q in Qualitaet},
+    VOLL: (0, Qualitaet.GROSS.jpeg_qualitaet),
+}
+BILD_VORLAGE_NAMEN: Final[dict[str, str]] = {**VORLAGE_NAMEN, VOLL: "Volle Größe"}
+#: Diese Fotos lassen sich verkleinern — die Kopie behält ihr Format (PNG bleibt PNG, mit
+#: Durchsicht; dort zählt nur die Größe in Pixeln, eine Qualitätsstufe gibt es nicht)
+BILD_ENDUNGEN: Final = ("jpg", "jpeg", "png")
+
+
+def bild_masse_lesen(pfad: Path) -> tuple[int, int] | None:
+    """Breite und Höhe eines Fotos, **wie man es sieht** (ein JPEG nach der Drehung aus seinem
+    Kopf) — ``None``, wenn es sich nicht lesen lässt."""
+    try:
+        daten = pfad.read_bytes()
+    except OSError:
+        return None
+    if daten.startswith(b"\xff\xd8"):
+        try:
+            return gezeigte_masse(daten)
+        except ValueError:
+            return None
+    return png_masse(daten)
+
+
+def bildziel(vorlage: str, breite: int, hoehe: int, bild: Ausschnitt = GANZ) -> Ziel:
+    """Was eine Vorlage aus einem Foto von ``breite`` × ``hoehe`` macht — nie größer als das
+    Original bzw. sein Ausschnitt (dann bleibt die Größe: ``kurze_seite = 0``).
+
+    >>> z = bildziel("mittel", 3000, 4000)
+    >>> z.kurze_seite, z.jpeg, bild_masse(z, 3000, 4000)
+    (720, 85, (720, 960))
+    >>> z = bildziel("gross", 3000, 4000, (0.0, 0.0, 0.25, 0.5))
+    >>> z.kurze_seite, bild_masse(z, 3000, 4000)
+    (0, (750, 2000))
+    >>> bildziel("voll", 800, 600).kurze_seite, bildziel("quatsch", 800, 600).kurze_seite
+    (0, 0)
+    """
+    kurz, jpeg = BILD_VORLAGEN.get(vorlage, BILD_VORLAGEN[VOLL])
+    b, h = breite * (bild[2] - bild[0]), hoehe * (bild[3] - bild[1])
+    if kurz and kurz >= int(min(b, h)):
+        kurz = 0
+    return Ziel(kurz, 0, 0, 0, 0, ausschnitt=bild, jpeg=jpeg)
+
+
+def bild_masse(z: Ziel, breite: int, hoehe: int) -> tuple[int, int]:
+    """Breite und Höhe der Kopie (gerundet; ffmpeg rechnet die lange Seite auf gerade Zahlen).
+
+    >>> bild_masse(Ziel(480, 0, 0, 0, 0, jpeg=80), 4000, 3000)
+    (640, 480)
+    >>> bild_masse(Ziel(0, 0, 0, 0, 0, ausschnitt=(0.5, 0.0, 1.0, 1.0), jpeg=80), 4000, 3000)
+    (2000, 3000)
+    """
+    li, ob, re, un = z.ausschnitt
+    b, h = breite * (re - li), hoehe * (un - ob)
+    if z.kurze_seite and min(b, h) > 0:
+        faktor = z.kurze_seite / min(b, h)
+        b, h = b * faktor, h * faktor
+    return max(1, round(b)), max(1, round(h))
+
+
+def _jpeg_q(qualitaet: int) -> int:
+    """Die Stufe von ffmpeg (``-q:v``, 2 = beste … 31) zu einer JPEG-Qualität von 1–100 —
+    eine Annäherung: 90 → 2, 85 → 4, 80 → 5.
+
+    >>> [_jpeg_q(q) for q in (100, 90, 85, 80, 50, 1)]
+    [2, 2, 4, 5, 12, 25]
+    """
+    return max(2, min(31, round((100 - qualitaet) / 4)))
+
+
+def bild_befehl(quelle: Path, ziel_pfad: Path, z: Ziel, programm: str = "ffmpeg") -> list[str]:
+    """Der Aufruf für ein Foto: erst zuschneiden, dann auf die kurze Seite rechnen, **keine
+    Metadaten** (Ort, Gerät). Die Drehung aus dem Kopf eines JPEG wendet ffmpeg vorher an —
+    der Ausschnitt gilt für das Bild, wie man es sieht. Das Format bestimmt die Endung von
+    ``ziel_pfad``.
+
+    >>> z = Ziel(720, 0, 0, 0, 0, ausschnitt=(0.1, 0.25, 0.9, 0.75), jpeg=85)
+    >>> b = bild_befehl(Path("a.jpg"), Path("b.jpg"), z)
+    >>> b[b.index("-vf") + 1]
+    "crop=iw*0.8000:ih*0.5000:iw*0.1000:ih*0.2500,scale='if(gt(iw,ih),-2,720)':'if(gt(iw,ih),720,-2)'"
+    >>> b[b.index("-q:v") + 1], b[b.index("-map_metadata") + 1], b[-1]
+    ('4', '-1', 'b.jpg')
+
+    Volle Größe ohne Ausschnitt: kein Filter; ein PNG hat keine Qualitätsstufe.
+
+    >>> b = bild_befehl(Path("a.png"), Path("b.png"), Ziel(0, 0, 0, 0, 0, jpeg=85))
+    >>> "-vf" in b, "-q:v" in b
+    (False, False)
+    """
+    k = z.kurze_seite
+    li, ob, re, un = z.ausschnitt
+    filter_: list[str] = []
+    if z.zugeschnitten:
+        filter_.append(f"crop=iw*{re - li:.4f}:ih*{un - ob:.4f}:iw*{li:.4f}:ih*{ob:.4f}")
+    if k:
+        filter_.append(f"scale='if(gt(iw,ih),-2,{k})':'if(gt(iw,ih),{k},-2)'")
+    jpeg = ziel_pfad.suffix.lower() in (".jpg", ".jpeg")
+    return [
+        programm,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(quelle),
+        *(["-vf", ",".join(filter_)] if filter_ else []),
+        "-frames:v",
+        "1",
+        "-update",
+        "1",
+        *(["-q:v", str(_jpeg_q(z.jpeg or 85))] if jpeg else []),
+        "-map_metadata",
+        "-1",
+        str(ziel_pfad),
+    ]
+
+
+def frontbild_befehl(video: Path, ziel_pfad: Path, programm: str = "ffmpeg") -> list[str]:
+    """Das erste Bild eines Videos als JPEG — das Frontbild zu einer verkleinerten Kopie.
+
+    >>> frontbild_befehl(Path("a.mp4"), Path("a_bild.jpg"))[-7:]
+    ['-frames:v', '1', '-update', '1', '-q:v', '4', 'a_bild.jpg']
+    """
+    return [
+        programm,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(video),
+        "-frames:v",
+        "1",
+        "-update",
+        "1",
+        "-q:v",
+        "4",
+        str(ziel_pfad),
+    ]
+
+
+def einmal_mit_ffmpeg(befehl: list[str], ziel_pfad: Path, *, wartezeit_s: float = 120) -> None:
+    """Ein kurzer Aufruf (Foto, Frontbild) — blockiert (im Thread aufrufen). Wirft
+    `RuntimeError` mit der letzten Zeile von ffmpeg; die halbe Datei bleibt nie liegen."""
+    try:
+        lauf = subprocess.run(
+            befehl,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=wartezeit_s,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as fehler:
+        ziel_pfad.unlink(missing_ok=True)
+        raise RuntimeError(str(fehler)) from fehler
+    if lauf.returncode != 0 or not ziel_pfad.is_file():
+        ziel_pfad.unlink(missing_ok=True)
+        text = lauf.stderr.decode("utf-8", errors="replace")
+        letzte = [x for x in text.splitlines() if x.strip()]
+        raise RuntimeError(letzte[-1] if letzte else "ffmpeg brach ab")
+
+
 __all__ = [
     "BASIS",
     "BILD",
     "BILDRATEN",
+    "BILD_ENDUNGEN",
     "BILD_NAMEN",
+    "BILD_VORLAGEN",
+    "BILD_VORLAGE_NAMEN",
     "GANZ",
     "GUT",
     "KURZE_SEITEN",
@@ -563,6 +742,7 @@ __all__ = [
     "SPRACHE",
     "TON",
     "TON_NAMEN",
+    "VOLL",
     "VORGABE",
     "VORLAGEN",
     "VORLAGE_NAMEN",
@@ -571,9 +751,15 @@ __all__ = [
     "Schema",
     "Ziel",
     "ausschnitt",
+    "bild_befehl",
+    "bild_masse",
+    "bild_masse_lesen",
+    "bildziel",
+    "einmal_mit_ffmpeg",
     "ffmpeg",
     "ffmpeg_befehl",
     "fortschritt_aus",
+    "frontbild_befehl",
     "mit_ffmpeg",
     "schnitt",
     "wahl",

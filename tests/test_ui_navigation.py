@@ -588,3 +588,32 @@ def test_nachtragen_uebung_ansehen_fuehrt_nicht_ins_leere(umgebung) -> None:
     assert seite.routen() == ["/", nachtrag, f"/uebung/{u}"]
     seite.zurueck()
     assert seite.routen() == ["/", nachtrag]
+
+
+def test_anhang_verkleinern_liegt_ueber_dem_anhang(umgebung) -> None:
+    """``…/anhang/<id>/verkleinern`` (Ben, 19.11.2026: Fotos und Videos überall verkleinern):
+    erst die Ansicht des Anhangs, darüber „Verkleinern“; ein Anhang, den es nicht gibt, und
+    eine Audioaufnahme fallen aus dem Weg."""
+    from trainingsapp.core.anhaenge import AUDIO, BILD, Qualitaet, Ziel, neuer_anhang
+    from trainingsapp.core.dokument import beispielseite
+
+    seite, state = umgebung()
+    notiz = state.tagesnotizen.anlegen(state.profil.id, state.heute(), "")
+    ziel = Ziel.fuer_notiz(state.profil.id, state.heute(), notiz.id)
+    foto = neuer_anhang(ziel, BILD, Qualitaet.MITTEL)
+    state.anhaenge.anlegen(foto, beispielseite(4000, 3000))
+    ton = neuer_anhang(ziel, AUDIO, Qualitaet.MITTEL)
+    state.anhaenge.anlegen(ton, b"0" * 100)
+    weg = f"/anhang/{foto.id}/verkleinern"
+    seite.gehe(f"/anhang/{foto.id}")
+    seite.gehe(weg)
+    assert seite.routen() == ["/", f"/anhang/{foto.id}", weg]
+    assert seite.views[-1].appbar.title.value == "Verkleinern"
+    # was sich nicht verkleinern lässt oder fehlt, fällt aus dem Weg
+    seite.gehe(f"/anhang/{ton.id}/verkleinern")
+    assert seite.routen()[-1] == weg
+    seite.gehe("/anhang/gibt-es-nicht/verkleinern")
+    assert seite.routen()[-1] == weg
+    # Kaltstart auf der tiefen Route: der Anhang liegt darunter
+    kalt, _ = umgebung(weg)
+    assert kalt.routen() == ["/", f"/anhang/{foto.id}", weg]

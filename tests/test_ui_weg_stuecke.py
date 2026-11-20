@@ -61,6 +61,47 @@ def test_weiteres_medium_am_weg() -> None:
     assert stand["a"].kanten[0].inhalt.medien == ()
 
 
+def test_leerer_link_laesst_sich_wieder_entfernen() -> None:
+    """Ben, 20.11.2026: „Link kann hinzugefügt werden, aber wenn leer nicht mehr entfernt“ —
+    jedes Stück hat sein ✕, auch das neue ohne Adresse und der eine Link von früher."""
+    kante = Kante("i1", "i2", inhalt=Inhalt("", "https://x.org/alt"))
+    stand = {"a": Ablauf(an=True, start="i1", kanten=(kante,))}
+    merken: dict = {}
+
+    def karte():
+        return wege_karte(
+            "i1",
+            lambda: stand["a"],
+            lambda neu: stand.update(a=neu),
+            lambda: None,
+            namen={"i1": "1 · Kniebeuge", "i2": "2 · Planke"},
+            merken=merken,
+        )
+
+    def daten(wert) -> list:
+        return [x for x in _alle(karte()) if getattr(x, "data", None) == wert]
+
+    # Das Feld heißt, was es tut — kein „Inhalt (Text, Auftrag)“ mehr
+    assert daten("weg_hinweis")[0].label == "Hinweis (optional)"
+    _daten(karte(), "weg_stueck_dazu").on_click(None)
+    assert daten(("weg_stueck_uri", 0)) and not daten("weg_stueck_dazu")
+    _daten(karte(), ("weg_stueck_weg", 0)).on_click(None)  # das leere neue Stück: weg
+    assert not daten(("weg_stueck_uri", 0)) and daten("weg_stueck_dazu")
+    assert stand["a"].kanten[0].inhalt.medien == ()
+    # Ein Stück mit Adresse: ✕ statt „Adresse leeren“
+    _daten(karte(), "weg_stueck_dazu").on_click(None)
+    _verlassen(_daten(karte(), ("weg_stueck_uri", 0)), "https://x.org/wade")
+    _daten(karte(), ("weg_stueck_weg", 0)).on_click(None)
+    assert stand["a"].kanten[0].inhalt.medien == ()
+    # Der Link von früher steht nur da, wenn es ihn gibt — und geht mit ✕
+    assert daten("weg_link")[0].value == "https://x.org/alt"
+    _daten(karte(), "weg_link_weg").on_click(None)
+    assert stand["a"].kanten[0].inhalt.url == "" and not daten("weg_link")
+    # Leer ist der Weg wieder zugeklappt — bis man ihn öffnet
+    merken.clear()
+    assert daten("weg_inhalt_auf") and not daten("weg_hinweis")
+
+
 FILM = "medien/" + "a" * 64 + ".mp4"
 
 

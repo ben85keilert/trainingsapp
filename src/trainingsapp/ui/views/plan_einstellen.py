@@ -44,7 +44,9 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import ablauf as ab
+from trainingsapp.core import medien_stellen as ms
 from trainingsapp.core import varianten as var
+from trainingsapp.core import weg_eingabe
 from trainingsapp.core import zaehlen as zl
 from trainingsapp.core.anhaenge import Ziel
 from trainingsapp.core.bedingung import Bedingung
@@ -120,6 +122,7 @@ from trainingsapp.ui.components.wege_form import (
     ablage_schluessel,
     stuecke_abholen,
     wege_karte,
+    ziel_name,
 )
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
@@ -643,6 +646,164 @@ def plan_einstellen(
         """Hat die Planübung keinen Timer, gilt „Zeit ab“ mit „Fertig“ (erfüllbar, Frage 6)."""
         return timer_fuer(uebung, plan_jetzt, eingestellt()) is None
 
+    def weg_pruefung(k: ab.Kante) -> ft.Control | None:
+        """Unter dem Auslöser eines Wegs: Lässt sich eintragen, was er zählt? (Ben, 20.11.2026,
+        `core/weg_eingabe.py`) — fehlt der Parameter, schaltet ein Tipp ihn ein; bei „Zeit ab“
+        dazu, ob die Uhr hier läuft und ihre Zeit zählt."""
+        if k.von != item.id:
+            return None
+        art = weg_eingabe.braucht(k)
+        if art is None:
+            return None
+        zeilen: list[ft.Control] = []
+
+        def zeile(text: str, knopf: str, tun: Callable[[], None], kennung: str) -> None:
+            def handler(_e: Any = None) -> None:
+                ziel_werte()
+                tun()
+                neu_zeichnen()
+
+            zeilen.append(
+                ft.Row(
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color=ft.Colors.TERTIARY),
+                        ft.Text(text, size=12, expand=True),
+                        ft.TextButton(knopf, on_click=handler, data=("weg_eingabe", kennung)),
+                    ],
+                )
+            )
+
+        angeboten = [f for f in planbar if f.key in aktiv]
+        if weg_eingabe.fehlt(k, angeboten) is not None:
+            feld = weg_eingabe.kandidat(art, planbar)
+            if feld is not None:
+                zeile(
+                    f"Dieser Weg zählt {weg_eingabe.NAMEN[art]} — eingetragen wird sie nur mit "
+                    "einem Parameter dafür."
+                    if art != weg_eingabe.WDH
+                    else "Dieser Weg zählt Wiederholungen — eingetragen werden sie nur mit "
+                    "einem Parameter dafür.",
+                    f"„{feld.label}“ an",
+                    lambda: aktiv.add(feld.key),
+                    art,
+                )
+        if art == weg_eingabe.ZEIT:
+            uhr_an = uhr_wert() == "an" or (uhr_wert() == "uebung" and uebung.uhr)
+            if not uhr_an:
+                zeile(
+                    "Die Uhr ist in dieser Planübung aus — im Workout läuft für den Weg eine "
+                    "Stoppuhr, beim Üben in der Liste keine.",
+                    "Uhr an",
+                    lambda: setattr(uhr_wahl, "selected", ["an"]),
+                    "uhr",
+                )
+            zaehlt = zaehlt_wert() == "an" or (zaehlt_wert() == "uebung" and uebung.zeit_zaehlt)
+            if not zaehlt:
+                zeile(
+                    "Die Zeit der Uhr zählt hier nicht — sie erfüllt den Weg, wird aber nicht "
+                    "eingetragen.",
+                    "Zeit zählt",
+                    lambda: setattr(zaehlt_wahl, "selected", ["an"]),
+                    "zaehlt",
+                )
+        if not zeilen:
+            return None
+        return ft.Container(
+            padding=ft.Padding.only(left=8, right=2, top=2, bottom=2),
+            border_radius=10,
+            bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.TERTIARY),
+            content=ft.Column(spacing=0, tight=True, controls=zeilen),
+            data="weg_eingabe_hinweis",
+        )
+
+    def wege_mit_medien() -> list[tuple[int, ab.Kante]]:
+        """Die Wege dieser Planübung, an denen etwas liegt — mit ihrer Nummer (Weg 1 …)."""
+        raus = [k for k in ablauf_stand["a"].kanten if k.von == item.id]
+        return [(n, k) for n, k in enumerate(raus, start=1) if not k.inhalt.leer]
+
+    def medien_ueberblick(*, im_reiter_medien: bool) -> list[ft.Control]:
+        """Wo an dieser Planübung Medien liegen — **eine** Übersicht für beide Reiter (Ben,
+        20.11.2026: „Was im Ablauf dort steht, müsste in diesem Reiter mit zu finden sein …
+        gute nicht redundante Verbindung zwischen Reiter Übung–Medien“). Bearbeitet wird je
+        Stück an einem Ort: was zur Übung gehört (vorher · dabei · bei … · nachher) im Reiter
+        „Medien“, was an einem Weg hängt am Weg im Reiter „Übung“ — der andere Reiter zeigt es
+        nur und führt hin. Dieselben Stellen wie die Marken im Ablaufbild
+        (`core/medien_stellen.py`)."""
+
+        def titel(stuecke: Any) -> str:
+            namen_ = [str(getattr(x, "title", "") or "ohne Titel") for x in stuecke]
+            return ", ".join(namen_[:3]) + (f" +{len(namen_) - 3}" if len(namen_) > 3 else "")
+
+        def zeile(kopf_: str, text: str) -> ft.Control:
+            return ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+                controls=[
+                    ft.Text(kopf_, size=12, weight=ft.FontWeight.W_600, width=92),
+                    ft.Text(text, size=12, expand=True, opacity=0.85),
+                ],
+            )
+
+        zeilen: list[ft.Control] = []
+        if not im_reiter_medien:
+            stellen = ms.stellen_von(uebung, eingestellt())
+            zeilen += [
+                zeile(ms.NAMEN[s_], titel(stellen.an(s_))) for s_ in ms.STELLEN if stellen.an(s_)
+            ]
+        ziele = namen()
+        for n, k in wege_mit_medien():
+            teile_ = []
+            if k.inhalt.text.strip():
+                teile_.append("Hinweis")
+            if k.inhalt.stuecke:
+                teile_.append(titel(k.inhalt.stuecke))
+            zeilen.append(zeile(f"Weg {n}", f"→ {ziel_name(k, ziele)}: " + " · ".join(teile_)))
+        if not zeilen:
+            if im_reiter_medien:
+                return []
+            zeilen.append(ft.Text("Noch keine Medien an dieser Planübung.", size=12, opacity=0.7))
+        wohin = er.UEBUNG if im_reiter_medien else er.MATERIAL
+
+        def hin(_e: Any = None) -> None:
+            reiter.zeigen(wohin)
+            with contextlib.suppress(Exception):
+                page.update()
+
+        return [
+            abschnitt("AN DEN WEGEN" if im_reiter_medien else "MEDIEN"),
+            ft.Container(
+                padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                border_radius=14,
+                bgcolor=KARTE,
+                ink=True,
+                on_click=hin,
+                data="medien_ueberblick_wege" if im_reiter_medien else "medien_ueberblick",
+                content=ft.Column(
+                    spacing=6,
+                    tight=True,
+                    controls=[
+                        *zeilen,
+                        ft.Row(
+                            spacing=4,
+                            alignment=ft.MainAxisAlignment.END,
+                            controls=[
+                                ft.Text(
+                                    "Am Weg bearbeiten (Reiter „Übung“)"
+                                    if im_reiter_medien
+                                    else "Bearbeiten im Reiter „Medien“ — Wege: am Weg oben",
+                                    size=12,
+                                    color=ft.Colors.PRIMARY,
+                                ),
+                                ft.Icon(ft.Icons.CHEVRON_RIGHT, size=16, color=ft.Colors.PRIMARY),
+                            ],
+                        ),
+                    ],
+                ),
+            ),
+        ]
+
     def bedingung_karte() -> ft.Control:
         """Im Workout: alle Wege der Übung wie im Reiter „Ablauf“ (P108) — in einer Liste nur
         der Hinweis, dass es dort keine Bedingungen gibt."""
@@ -660,6 +821,7 @@ def plan_einstellen(
                     ohne_timer=ohne_timer(),
                     merken=wege_merken,
                     medien=WegMedien(page, state, weg_aufnehmen, plan_stuecke),
+                    pruefung=weg_pruefung,
                 ),
             )
         # Eine Liste hat keine Bedingungen (Ben, 10.11.2026: „Bedingungen machen bei der linearen
@@ -1260,6 +1422,7 @@ def plan_einstellen(
             *aus_der_uebung(),
             abschnitt("NUR IN DIESEM PLAN", hilfe_knopf(page, thema="anweisungen")),
             anweisungen_block,
+            *medien_ueberblick(im_reiter_medien=True),
         ]
         teile: list[ft.Control] = [
             abschnitt("PARAMETER", hilfe_knopf(page, thema="parameter")),
@@ -1360,6 +1523,7 @@ def plan_einstellen(
                 hilfe_knopf(page, thema="ablauf" if plan_jetzt.ablauf.an else "workout"),
             ),
             bedingung_karte(),
+            *medien_ueberblick(im_reiter_medien=False),
             ft.Divider(),
             ft.Row(
                 wrap=True,

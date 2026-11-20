@@ -7,7 +7,8 @@ Dasselbe Formular steht in „Im Plan einstellen“ (Abschnitt WEGE) und im Reit
 (Routing → „Wege einstellen …“, ein Blatt): alle Wege einer Übung auf einmal, untereinander —
 „Planke: ‚Rücken tut weh‘ → Langsitzdehnung, ‚Arme tun weh‘ → Armdehnung“. Je Weg: Ziel (eine
 Übung mit Nummer, eine Frage, „◀ zurück“ oder das Ende), wann (frei · Zeit ab · Wiederholungen ·
-in einer Zeit · Skala), anbieten oder ausführen, Pflicht, Beschriftung, Inhalt. Der erste Weg
+in einer Zeit · Skala), anbieten oder ausführen, Pflicht, Beschriftung und was aufgeht, wenn
+der Weg gegangen wird (ein Hinweis in Worten, Medien — jedes Stück eine Zeile mit ✕). Der erste Weg
 ist der **Hauptweg** (er spiegelt sich in die Bedingung), ↑ macht einen anderen dazu — mehrere
 gleichwertige Wege fragt das Workout ab (`core.ablauf.wahl_offen`). ``fokus``: das Blatt steht
 auf diesem Weg, die anderen sind zugeklappt; mit ``allein`` (der Griff eines Wegs im Bild
@@ -115,9 +116,11 @@ def wege_karte(
     fokus: str | None = None,
     allein: bool = False,
     medien: WegMedien | None = None,
+    pruefung: Callable[[Kante], ft.Control | None] | None = None,
 ) -> ft.Control:
     """Herkunft und Wege von ``knoten``. ``medien``: die Wege zum Hinzufügen von Stücken an
-    einem Weg (`WegMedien`) — ohne sie nur Links.
+    einem Weg (`WegMedien`) — ohne sie nur Links. ``pruefung``: je Weg ein Hinweis unter dem
+    Auslöser — „Im Plan einstellen“ sagt dort, ob sich die Bedingung eintragen lässt.
 
     ``namen``: jeder Knoten mit Nummer („3 · Planke“), in
     Planfolge, Fragen dahinter; ``ohne_timer``: die Übung hat keinen Timer (Hinweis zu „Zeit
@@ -358,6 +361,7 @@ def wege_karte(
             ohne_timer,
             a,
             medien,
+            pruefung,
         )
         if gewaehlt and isinstance(karte, ft.Container):
             karte.border = ft.Border.all(2, ft.Colors.PRIMARY)
@@ -758,6 +762,7 @@ def _weg(
     ohne_timer: bool,
     ablauf: Ablauf | None = None,
     medien: WegMedien | None = None,
+    pruefung: Callable[[Kante], ft.Control | None] | None = None,
 ) -> ft.Control:
     """Ein Weg als Karte — Ziel, wann, anbieten/ausführen, Pflicht, Danach, Beschriftung.
     Kommt er **aus einer Frage** (``ablauf`` kennt sie), fragt die Karte, bei welcher Antwort
@@ -966,29 +971,76 @@ def _weg(
             on_submit=lambda e: aendern(i, text=(e.control.value or "").strip()),
         )
     )
+    if pruefung is not None and (hinweis := pruefung(k)) is not None:
+        zeilen.append(hinweis)
     if k.pflicht or not k.inhalt.leer or offen.get(f"inhalt{i}"):
+        # Was aufgeht, wenn dieser Weg gegangen wird (Ben, 20.11.2026: „Inhalt bei diesem Weg:
+        # Was käme hier rein?“) — ein Hinweis in Worten und Medien, jedes Stück eine Zeile mit ✕
         zeilen += [
+            ft.Column(
+                spacing=0,
+                tight=True,
+                controls=[
+                    ft.Text(
+                        "WENN DIESER WEG GEGANGEN WIRD",
+                        size=11,
+                        weight=ft.FontWeight.W_700,
+                        opacity=0.65,
+                    ),
+                    ft.Text(
+                        "Geht im Workout auf, sobald der Weg frei ist: ein Hinweis und Medien.",
+                        size=12,
+                        opacity=0.7,
+                    ),
+                ],
+            ),
             ft.TextField(
-                label="Inhalt bei diesem Weg (Text, Auftrag)",
+                label="Hinweis (optional)",
+                hint_text="Wade 30 Sekunden dehnen, dann weiter",
                 value=k.inhalt.text,
                 dense=True,
                 multiline=True,
                 min_lines=1,
                 max_lines=3,
+                data="weg_hinweis",
                 on_blur=lambda e: aendern(
                     i, inhalt=replace(k.inhalt, text=(e.control.value or "").strip())
                 ),
             ),
-            ft.TextField(
-                label="Link (Video, https://…)",
-                value=k.inhalt.url,
-                dense=True,
-                keyboard_type=ft.KeyboardType.URL,
-                on_blur=lambda e: aendern(
-                    i, inhalt=replace(k.inhalt, url=(e.control.value or "").strip())
-                ),
-            ),
         ]
+        if k.inhalt.url.strip():
+            # Der eine Link von früher — eine Zeile wie die anderen, mit ✕
+            zeilen.append(
+                ft.Row(
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Icon(ft.Icons.LINK, size=20),
+                        ft.TextField(
+                            label="Link (https://…)",
+                            value=k.inhalt.url,
+                            dense=True,
+                            expand=True,
+                            keyboard_type=ft.KeyboardType.URL,
+                            data="weg_link",
+                            on_blur=lambda e: aendern(
+                                i,
+                                inhalt=replace(k.inhalt, url=(e.control.value or "").strip()),
+                                zeichnen=True,
+                            ),
+                        ),
+                        ft.IconButton(
+                            ft.Icons.CLOSE,
+                            icon_size=18,
+                            tooltip="Vom Weg nehmen",
+                            on_click=lambda _e=None: aendern(
+                                i, inhalt=replace(k.inhalt, url=""), zeichnen=True
+                            ),
+                            data="weg_link_weg",
+                        ),
+                    ],
+                )
+            )
         # Weitere Stücke am Weg (Ben, 18.11.2026: bisher nur ein Link) — je Stück Titel und
         # Adresse; eine leere Adresse fällt beim Verlassen des Felds heraus
         weitere = list(k.inhalt.medien)
@@ -1011,7 +1063,12 @@ def _weg(
             )
 
         def stueck_weg(n: int) -> Callable[[Any], None]:
+            """✕ an einem Stück — auch an dem neuen, das noch keine Adresse hat (Ben,
+            20.11.2026: „Link kann hinzugefügt werden, aber wenn leer nicht mehr entfernt“)."""
+
             def handler(_e: Any = None) -> None:
+                offen.pop(f"stueck{i}", None)
+                offen.pop(f"stuecktitel{i}", None)
                 liste = [x for m, x in enumerate(k.inhalt.medien) if m != n]
                 aendern(i, inhalt=replace(k.inhalt, medien=tuple(liste)), zeichnen=True)
 
@@ -1053,10 +1110,11 @@ def _weg(
                 zeilen.append(
                     ft.Row(
                         spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
                             titel,
                             ft.TextField(
-                                label="Weiterer Link (https://…)",
+                                label="Link (https://…)",
                                 value=s.uri,
                                 dense=True,
                                 expand=3,
@@ -1065,6 +1123,13 @@ def _weg(
                                 on_blur=lambda e, n=n: stueck_setzen(
                                     n, uri=(e.control.value or "").strip()
                                 ),
+                            ),
+                            ft.IconButton(
+                                ft.Icons.CLOSE,
+                                icon_size=18,
+                                tooltip="Vom Weg nehmen",
+                                on_click=stueck_weg(n),
+                                data=("weg_stueck_weg", n),
                             ),
                         ],
                     )
@@ -1150,7 +1215,14 @@ def _weg(
             offen[f"inhalt{i}"] = True
             aendern(i, zeichnen=True)
 
-        zeilen.append(ft.TextButton("Inhalt bei diesem Weg …", on_click=inhalt_auf))
+        zeilen.append(
+            ft.TextButton(
+                "Hinweis oder Medium bei diesem Weg …",
+                icon=ft.Icons.ADD,
+                on_click=inhalt_auf,
+                data="weg_inhalt_auf",
+            )
+        )
     return ft.Container(
         padding=ft.Padding.symmetric(horizontal=12, vertical=8),
         border_radius=12,

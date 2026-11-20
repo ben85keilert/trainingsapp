@@ -1022,6 +1022,76 @@ def test_wege_blatt_spiegelt_in_die_bedingung_und_im_plan_einstellen(umgebung) -
     assert any(t.startswith("3 · Planke") for t in texte)
 
 
+def test_im_plan_einstellen_weg_laesst_sich_eintragen_und_medien_im_ueberblick(umgebung) -> None:
+    """Ben, 20.11.2026: „wenn Wiederholungen als Ziel formuliert sind, müssen diese verfügbar
+    sein in Parameter zum Eintragen … gegenchecken, ob Bedingung durch Eingabe erfüllt werden
+    kann“ und „Was im Ablauf dort steht, müsste in diesem Reiter mit zu finden sein“."""
+    from trainingsapp.core.bedingung import Inhalt, Stueck
+    from trainingsapp.core.models import Media
+    from trainingsapp.ui.components import editor_reiter as er
+
+    state, plan = umgebung
+    basis = f"/plan/{plan.id}/bearbeiten"
+    iw, ik, ip, _id = (it.id for it in plan.items)
+    wade = Inhalt("Erst lockern", medien=(Stueck("https://x.org/wade", "Wade dehnen"),))
+    state.plaene.ablauf_setzen(
+        plan.id,
+        ab.Ablauf(
+            True,
+            iw,
+            (Kante(iw, ik, ab.WDH, 12), Kante(iw, ip, ab.ZEIT, 30, inhalt=wade), Kante(ik, ip)),
+        ),
+    )
+    item = state.plaene.item_laden(iw)
+    item.media = [Media(uri="https://x.org/vorher", title="So geht es")]
+    state.plaene.item_speichern(item)
+    plan = state.plaene.laden(plan.id)
+    u = state.uebungen.laden(plan.items[0].exercise_id)  # „Wandsitz“ ohne Parameter
+    seite = plan_einstellen(_Seite(), state, plan, plan.items[0], u, basis=basis)
+
+    def hinweise() -> list[str]:
+        return [
+            x.data[1]
+            for x in _alle(seite)
+            if isinstance(getattr(x, "data", None), tuple) and x.data[:1] == ("weg_eingabe",)
+        ]
+
+    # Weg 1 zählt Wiederholungen, Weg 2 eine Zeit — für beides fehlt der Parameter
+    assert hinweise().count("wdh") == 1 and hinweise().count("zeit") == 1
+
+    def knopf(kennung: str):
+        return next(x for x in _alle(seite) if getattr(x, "data", None) == ("weg_eingabe", kennung))
+
+    assert knopf("wdh").content == "„Wiederholungen“ an"
+    _klick(knopf("wdh").on_click, None)
+    assert "wdh" not in hinweise() and "zeit" in hinweise()
+    _klick(knopf("zeit").on_click, None)
+    for rest in list(hinweise()):  # Uhr und „Zeit zählt“, wo sie aus sind
+        _klick(knopf(rest).on_click, None)
+    assert hinweise() == []
+
+    # Der Überblick im Reiter „Übung“: was zur Übung gehört und was an den Wegen liegt
+    karte = next(x for x in _alle(seite) if getattr(x, "data", None) == "medien_ueberblick")
+    texte = _texte(karte)
+    assert "Vorher" in texte and "So geht es" in texte
+    assert "Weg 2" in texte and any("Hinweis · Wade dehnen" in t for t in texte)
+    assert not any(t == "Weg 1" for t in texte)  # dort liegt nichts
+    # Ein Tipp führt in den Reiter „Medien“; dort stehen die Wege zum Zurückfinden
+    _klick(karte.on_click, None)
+    sichtbar = {
+        x.data
+        for x in _alle(seite)
+        if str(getattr(x, "data", "")).startswith("reiter_") and x.visible
+    }
+    assert sichtbar == {f"reiter_{er.MATERIAL}"}
+    wege = next(x for x in _alle(seite) if getattr(x, "data", None) == "medien_ueberblick_wege")
+    assert "Weg 2" in _texte(wege) and "Vorher" not in _texte(wege)
+    _klick(wege.on_click, None)
+    assert next(
+        x for x in _alle(seite) if getattr(x, "data", None) == f"reiter_{er.UEBUNG}"
+    ).visible
+
+
 def test_entfernen_fragt_luecke_oder_nachfolgereihe(umgebung) -> None:
     state, plan = umgebung
     iw, ik, ip, id_ = (it.id for it in plan.items)

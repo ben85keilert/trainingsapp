@@ -44,6 +44,17 @@ def test_hochkant_ohne_ton_kopf_vorn_und_ntsc_bildrate(tmp_path) -> None:
     assert aus_bytes(ntsc).bildrate == 23.976  # type: ignore[union-attr]
 
 
+def test_gedrehtes_handyvideo_ist_hochkant() -> None:
+    """Ein Telefon speichert hochkant Gefilmtes quer, mit Drehung im Kopf (Ben, 20.11.2026)."""
+    daten = mp4(spur(b"vide", breite=1920, hoehe=1080, bilder=90, gedreht=True))
+    info = aus_bytes(daten)
+    assert info is not None
+    assert (info.breite, info.hoehe, info.hochkant, info.aufloesung) == (1080, 1920, True, "1080p")
+    quer = aus_bytes(mp4(spur(b"vide", breite=1920, hoehe=1080, bilder=90)))
+    assert quer is not None and quer.hochkant is False
+    assert Videoinfo(dauer_s=3.0).hochkant is None
+
+
 def test_version_1_und_64_bit_laenge(tmp_path) -> None:
     daten = mp4(
         spur(b"vide", breite=1280, hoehe=720, dauer_s=130.5, bilder=3915, version=1),

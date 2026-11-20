@@ -109,6 +109,12 @@ das jüngste seine Übungen, die älteren klappen auf Tipp auf.
 - **Stufe 3 (gebaut 10.11.2026 abends):** „Zuletzt“, alle Durchläufe als Reihe, eigene Skalen je
   Workout, der gegangene Weg im Ablaufbild, Workouts im Tagebuch, Einklappen in der Zeitleiste.
 
+- **Löschen (gebaut 20.11.2026, Ben: „Abgeschlossene Workouts werden im Tagesverlauf gelistet.
+  Diese müssen gelöscht werden können“):** Papierkorb in der Titelleiste der Seite, Rückfrage.
+  Gelöscht wird der Durchlauf (die Einheit, weich — mit Verlauf, Anstrengung, Notiz). Werte
+  gehören der Übung: Ihre Einträge bleiben im Tag, außer die Person hakt „Auch die Einträge der
+  Übungen löschen“ an (Vorgabe aus). Messung und Strecke bleiben immer. Kein „Rückgängig“.
+
 ## 8. Offen
 
 - P179: Soll der höchste Workout-Wert des Tags zusätzlich ins Tagesfeld gespiegelt werden, damit

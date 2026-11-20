@@ -30,12 +30,14 @@ from trainingsapp.core.models import SessionEntry, tagesgrenzen
 from trainingsapp.core.verlauf import tageszeilen
 from trainingsapp.ui.components.ablaufbild import ablaufbild
 from trainingsapp.ui.components.blatt import blatt_spalte
+from trainingsapp.ui.components.dialoge import Nachher, meldung, schliessen
 from trainingsapp.ui.components.karte import karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.kurve import Reihe, kurve
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.notizeditor import Textnotiz
 from trainingsapp.ui.components.srpe import workout_skala_zeile, workout_srpe_zeile
+from trainingsapp.ui.components.zurueck import zurueck_ziel
 from trainingsapp.ui.plan_ablauf import GRUENDE
 from trainingsapp.ui.state import AppState
 
@@ -690,17 +692,90 @@ def workout_eintrag_view(page: Any, state: AppState, einheit_id: str) -> ft.View
 
         page.run_task(laden)
 
+    def loeschen_fragen(_e: Any = None) -> None:
+        """Den Durchlauf löschen (Ben, 20.11.2026: „Abgeschlossene Workouts werden im
+        Tagesverlauf gelistet. Diese müssen gelöscht werden können“). Gelöscht wird der
+        Workout-Eintrag — Verlauf, Anstrengung, Notiz. **Werte gehören der Übung**: Die
+        Einträge der Übungen bleiben, außer die Person hakt sie mit an; eine Messung und eine
+        Strecke bleiben immer."""
+        lauf = durchlauf_laden(state, einheit_id)
+        if lauf is None:
+            return
+        ids = aktuelle_eintrag_ids(state, lauf)
+        nachher = Nachher()
+        auch = ft.Checkbox(
+            label=(
+                "Auch den Eintrag der Übung löschen"
+                if len(ids) == 1
+                else f"Auch die {len(ids)} Einträge der Übungen löschen"
+            ),
+            value=False,
+            data="workout_loeschen_eintraege",
+        )
+
+        def ja(_e: Any = None) -> None:
+            mit = bool(auch.value)
+            nachher.danach(lambda: loeschen(ids if mit else set()))
+            schliessen(dialog)
+
+        text = (
+            f"„Workout {lauf.name}“ vom {lauf.beginn.astimezone():%d.%m.%Y}, {_uhr(lauf.beginn)} "
+            "wird gelöscht — mit Verlauf, Anstrengung und Notiz. "
+            + ("Was bei den Übungen eingetragen wurde, bleibt im Tag stehen. " if ids else "")
+            + "Eine Messung oder Strecke aus dieser Zeit bleibt."
+        )
+        dialog: ft.AlertDialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Workout-Eintrag löschen?"),
+            content=ft.Column(
+                tight=True,
+                spacing=8,
+                controls=[ft.Text(text), *([auch] if ids else [])],
+            ),
+            actions=[
+                ft.TextButton("Abbrechen", on_click=lambda _e=None: schliessen(dialog)),
+                ft.FilledButton(
+                    "Löschen", icon=ft.Icons.DELETE_OUTLINE, on_click=ja, data="workout_loeschen_ja"
+                ),
+            ],
+            on_dismiss=nachher.bei_schliessen,
+        )
+        page.show_dialog(dialog)
+
+    async def loeschen(eintraege: set[str]) -> None:
+        for i in eintraege:
+            state.sitzungen.eintrag_loeschen(i)
+        state.einheiten.loeschen(einheit_id)
+        ziel = zurueck_ziel(page, ansicht)
+        await page.push_route(ziel)
+        page.show_dialog(meldung("Workout-Eintrag gelöscht"))
+
     d = durchlauf_laden(state, einheit_id)
     spalte.controls = inhalt()
     if d is not None:
         hf_laden_starten(d)
-    return ft.View(
+    ansicht = ft.View(
         route=route(einheit_id),
-        appbar=ft.AppBar(title=ft.Text(f"Workout {d.name}" if d is not None else "Workout")),
+        appbar=ft.AppBar(
+            title=ft.Text(f"Workout {d.name}" if d is not None else "Workout"),
+            actions=(
+                [
+                    ft.IconButton(
+                        ft.Icons.DELETE_OUTLINE,
+                        tooltip="Workout-Eintrag löschen …",
+                        on_click=loeschen_fragen,
+                        data="workout_loeschen",
+                    )
+                ]
+                if d is not None
+                else []
+            ),
+        ),
         scroll=ft.ScrollMode.AUTO,
         padding=0,
         controls=[sicher(ft.Container(padding=16, content=spalte), expand=False)],
     )
+    return ansicht
 
 
 def workout_alle_view(page: Any, state: AppState, einheit_id: str) -> ft.View:

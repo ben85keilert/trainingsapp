@@ -2,8 +2,9 @@
 
 Flets Dienst ``Wakelock`` (``wakelock_plus``: Android, iOS, macOS, Windows, Linux, Web)
 kennt nur an und aus. Hier hält ihn, wer ihn braucht, mit seinem **Grund**: der Timer
-(Einstellung „Bildschirm an“), der GPS-Test, das Querformat (`ui.ausrichtung`). Der
-Bildschirm geht erst wieder aus, wenn kein Grund mehr übrig ist — sonst schaltete das Ende
+(Einstellung „Bildschirm an“), der GPS-Test, das Querformat (`ui.ausrichtung`), ein laufendes
+Video. Der Bildschirm geht erst wieder aus, wenn kein Grund mehr übrig ist — sonst schaltete das
+Ende
 des Timers den Bildschirm im Live-Vollbild ab. Kein flet: läuft auch in den Tests.
 """
 
@@ -15,6 +16,8 @@ from typing import Any
 TIMER = "timer"
 GPS_TEST = "gps_test"
 QUER = "quer"
+#: Ein Video läuft (`components/videospieler.py`)
+VIDEO = "video"
 
 
 async def wach_setzen(state: Any, an: bool, grund: str = TIMER) -> None:
@@ -33,4 +36,4 @@ async def wach_setzen(state: Any, an: bool, grund: str = TIMER) -> None:
         await (dienst.enable() if gruende else dienst.disable())
 
 
-__all__ = ["GPS_TEST", "QUER", "TIMER", "wach_setzen"]
+__all__ = ["GPS_TEST", "QUER", "TIMER", "VIDEO", "wach_setzen"]

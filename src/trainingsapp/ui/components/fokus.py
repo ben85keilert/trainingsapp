@@ -384,7 +384,15 @@ class Fokus:
         """Den Spieler in die Fläche — 320 × 180, nicht über die ganze Breite (Ben)."""
         try:
             self.spieler = Videospieler(
-                pfade, autoplay=spielen, hoehe=180, breite=320, beim_spielen=self._video_getippt
+                pfade,
+                autoplay=spielen,
+                hoehe=180,
+                breite=320,
+                schleife=self._video_schleife(pfade),
+                beim_spielen=self._video_getippt,
+                beim_schliessen=self._video_weg,
+                bei_schleife=self._video_schleife_gestellt,
+                state=self.state,
             )
         except ImportError:  # ein Build ohne flet-video: das Video bleibt im Blatt
             self.spieler = None
@@ -393,6 +401,38 @@ class Fokus:
 
     def _video_getippt(self, spielt: bool) -> None:
         self._video_von_hand_aus = not spielt
+
+    def _video_schleife(self, pfade: list[str]) -> bool:
+        """Endlosschleife (Ben, 20.11.2026: „wenn die Begleitung kein Ganzvideo ist, sondern nur
+        ein Ausschnitt, der sich wiederholt“): Was die Person an dieser Übung gestellt hat,
+        gilt; sonst läuft ein kurzes Video (`core.videoinfo.ist_ausschnitt`) von selbst als
+        Schleife, ein langes einmal durch."""
+        from pathlib import Path
+
+        from trainingsapp.core import videoinfo
+
+        wahl = None
+        with contextlib.suppress(Exception):
+            wahl = self.state.video_schleife(self.uebung.id)
+        if wahl is not None:
+            return bool(wahl)
+        dauer = 0.0
+        for p in pfade:
+            info = videoinfo.lesen(Path(p))
+            if info is None or not info.dauer_s:
+                return False
+            dauer += info.dauer_s
+        return videoinfo.ist_ausschnitt(dauer)
+
+    def _video_schleife_gestellt(self, an: bool) -> None:
+        with contextlib.suppress(Exception):
+            self.state.video_schleife_setzen(self.uebung.id, an)
+
+    def _video_weg(self) -> None:
+        """Das ✕ im Bild (Ben, 20.11.2026: „direkt weggeklickt … zusätzlich zur Checkbox im
+        Menü“) — dasselbe wie der Haken „Video“ im Ebenen-Menü, dort kommt es auch wieder."""
+        if FOKUS_VIDEO in self.ebenen:
+            self._ebene_umschalten(FOKUS_VIDEO)(None)
 
     def _video_laden_zeile(self, offen: list[Media]) -> ft.Control:
         """Ein Begleitvideo hinter einem Link, das noch nicht auf dem Gerät liegt: ein Knopf

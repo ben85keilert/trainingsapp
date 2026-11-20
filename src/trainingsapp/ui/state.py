@@ -987,6 +987,24 @@ class AppState:
             teile.append(OHNE_VIDEO)
         self.einstellungen.setzen(SettingRepo.FOKUS_EBENEN, ",".join(teile) or "-")
 
+    def video_schleife(self, uebung_id: str) -> bool | None:
+        """Läuft das Begleitvideo dieser Übung als Endlosschleife? ``None``, solange die Person
+        es nicht gestellt hat — dann entscheidet die Länge (`core.videoinfo.ist_ausschnitt`)."""
+        wahl = self._video_schleifen().get(uebung_id)
+        return None if wahl is None else bool(wahl)
+
+    def video_schleife_setzen(self, uebung_id: str, an: bool) -> None:
+        wahl = self._video_schleifen()
+        wahl[uebung_id] = 1 if an else 0
+        self.einstellungen.setzen(SettingRepo.VIDEO_SCHLEIFE, json.dumps(wahl))
+
+    def _video_schleifen(self) -> dict[str, Any]:
+        try:
+            wahl = json.loads(self.einstellungen.lesen(SettingRepo.VIDEO_SCHLEIFE, "") or "{}")
+        except ValueError:
+            return {}
+        return wahl if isinstance(wahl, dict) else {}
+
     def fokus_kurven(self) -> list[str]:
         """Welche Reihen die Kurven-Einblendung im Fokus zeigt (`FOKUS_KURVEN`), in deren
         Reihenfolge — Vorgabe HF und RMSSD."""

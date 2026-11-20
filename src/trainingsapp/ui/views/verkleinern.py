@@ -662,7 +662,7 @@ def _ansicht(page: Any, state: AppState, q: Quelle) -> ft.View:
             from trainingsapp.ui.components.videospieler import Videospieler
 
             # Knöpfe unter dem Bild, die stehen bleiben (Ben, 18.11.2026)
-            return Videospieler([str(datei)], hoehe=220).control
+            return Videospieler([str(datei)], hoehe=220, state=state).control
         except ImportError:
             return ft.Text("Video-Erweiterung fehlt in diesem Build.", opacity=0.7)
 
@@ -777,7 +777,7 @@ def _ansicht(page: Any, state: AppState, q: Quelle) -> ft.View:
         try:
             from trainingsapp.ui.components.videospieler import Videospieler
 
-            schnitt_spieler = Videospieler([str(pfad)], hoehe=200)
+            schnitt_spieler = Videospieler([str(pfad)], hoehe=200, state=state)
             schnitt_bild = schnitt_spieler.control
         except ImportError:
             schnitt_bild = ft.Text(

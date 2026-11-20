@@ -871,6 +871,9 @@ class SettingRepo:
     PLAN_VORSCHLAEGE = "plan_vorschlaege"
     #: Fokus: welche Ebenen gezeigt werden (`ui.state.FOKUS_EBENEN`, Komma-Liste)
     FOKUS_EBENEN = "fokus_ebenen"
+    #: Begleitvideo im Fokus: Endlosschleife je Übung, wo die Person sie gestellt hat (JSON
+    #: ``{übung: 0|1}``, `ui.state.AppState.video_schleife`) — je Gerät
+    VIDEO_SCHLEIFE = "video_schleife"
     #: Fokus: welche Reihen die Kurven-Einblendung zeigt (`ui.state.FOKUS_KURVEN`)
     FOKUS_KURVEN = "fokus_kurven"
     #: Taktgeber (`core.takt`): eigene Takte (JSON-Liste, `takte_lesen`) und ob am

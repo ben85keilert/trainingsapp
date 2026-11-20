@@ -95,6 +95,35 @@ def anwenden(page: Any, state: Any, modus: str) -> None:
     page.run_task(setzen)
 
 
+def fuer_video(page: Any, hochkant: bool | None) -> None:
+    """Das Vollbild eines Videos richtet sich nach dem **Video** (Ben, 20.11.2026: „ein hochkant
+    aufgenommenes Handy-Video wird im Vollbild gedreht“). media_kit stellt beim Eintritt immer
+    das Querformat ein (`media_kit_video` 2.0.1, `video_texture.dart`:
+    ``defaultEnterNativeFullscreen``) — der Spieler ruft danach hierher: hochkant → hochkant,
+    quer → quer, unbekannt → frei drehbar. Der Aufruf kommt nach dem von media_kit an (er geht
+    erst auf dessen Ereignis hin los) und gilt darum."""
+    modus = FREI if hochkant is None else HOCHKANT if hochkant else QUER
+    _setzen(page, modus)
+
+
+def nach_video(page: Any) -> None:
+    """Nach dem Vollbild gilt wieder die Ausrichtung der Ansicht — media_kit gibt beim Verlassen
+    **alle** Richtungen frei (``setPreferredOrientations([])``), die Listen drehten danach mit."""
+    _setzen(page, modus_fuer_route(str(getattr(page, "route", "") or "/")))
+
+
+def _setzen(page: Any, modus: str) -> None:
+    if getattr(page, "platform", None) not in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS):
+        return
+
+    async def setzen() -> None:
+        with contextlib.suppress(Exception):
+            await page.set_allowed_device_orientations(_ORIENTIERUNGEN[modus])
+
+    with contextlib.suppress(Exception):
+        page.run_task(setzen)
+
+
 def wach_pruefen(page: Any, state: Any, modus: str | None = None) -> None:
     """Im Querformat bleibt der Bildschirm an (Ben, 28.10.2026: „Wenn das Querformat
     aktiviert ist, brauche ich die Always-on-Funktion“): im Live-Vollbild immer, in den
@@ -127,4 +156,14 @@ def querformat(page: Any) -> bool:
     return bool(breite and hoehe and breite > hoehe)
 
 
-__all__ = ["FREI", "HOCHKANT", "QUER", "anwenden", "modus_fuer_route", "querformat", "wach_pruefen"]
+__all__ = [
+    "FREI",
+    "HOCHKANT",
+    "QUER",
+    "anwenden",
+    "fuer_video",
+    "modus_fuer_route",
+    "nach_video",
+    "querformat",
+    "wach_pruefen",
+]

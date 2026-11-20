@@ -365,3 +365,27 @@ Zuschneiden am Handy.
 - **Was die App nicht selbst abspielt**, bleibt eine Zeile mit einem Tipp: ein Link auf eine Seite,
   ein Video hinter einem Link, das noch nicht geladen ist, PDF und Ton.
 - Das Blatt „Medien“ außerhalb des Übens (Plan, Übungsseite) zeigt weiter alles.
+
+## 6. „Im Plan einstellen“: Wege, Medien und Eingabe (Ben, 20.11.2026)
+
+Anlass (Bildschirmfoto des Reiters „Übung“): „Inhalt bei diesem Weg: Was käme hier rein? … Was
+im Ablauf dort steht, müsste in diesem Reiter mit zu finden sein … gute nicht redundante
+Verbindung zwischen Reiter Übung–Medien … Link kann hinzugefügt werden, aber wenn leer nicht
+mehr entfernt … gegenchecken, ob Bedingung durch Eingabe erfüllt werden kann“.
+
+- **Der Weg sagt, was aufgeht** (`components/wege_form.py`, auch im Blatt des Ablaufs): statt
+  „Inhalt bei diesem Weg (Text, Auftrag)“ die Überschrift „Wenn dieser Weg gegangen wird“, das
+  Feld „Hinweis (optional)“ und je Stück **eine Zeile mit ✕** — auch das neue ohne Adresse.
+  Das feste Feld „Link (Video …)“ gibt es nicht mehr; der eine Link von früher (`Inhalt.url`)
+  steht nur da, wenn es ihn gibt. Zugeklappt: „Hinweis oder Medium bei diesem Weg …“.
+- **Ein Ort je Stück, der andere Reiter zeigt nur:** Was zur Übung gehört (vorher · dabei ·
+  bei … · nachher), wird im Reiter „Medien“ bearbeitet; was an einem Weg hängt, am Weg im Reiter
+  „Übung“. Der Reiter „Übung“ hat dazu die Karte „MEDIEN“ (dieselben Stellen wie die Marken im
+  Ablaufbild, `core/medien_stellen.py`, dazu die Wege mit Inhalt) — ein Tipp führt in den Reiter
+  „Medien“; dort steht „AN DEN WEGEN“ und führt zurück (`plan_einstellen.medien_ueberblick`).
+- **Lässt sich die Bedingung eintragen?** (`core/weg_eingabe.py`): Im Workout ist jede
+  Bedingung erfüllbar (Wiederholungen von Hand, Skala, Uhr des Schritts) — eingetragen wird aber
+  nur mit einem Parameter dafür. Zählt ein Weg Wiederholungen, eine Zeit oder eine Skala und die
+  Planübung bietet kein passendes Feld an, steht am Weg ein Hinweis mit Knopf („‚Wiederholungen‘
+  an“); bei „Zeit ab“ dazu „Uhr an“ und „Zeit zählt“, wo sie aus sind. Nichts wird von selbst
+  eingeschaltet.

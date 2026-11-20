@@ -458,6 +458,9 @@ def test_foto_vorlagen_ohne_bildrate_und_ton(page, state, monkeypatch) -> None:
     telefon = vk.verkleinern_view(page, state, "/uebung/u", dateiname(name))
     keys = [x.data[1] for x in _alle(telefon) if isinstance(getattr(x, "data", None), tuple)]
     assert keys == ["klein", "mittel", "gross"] and "BILDAUSSCHNITT" not in _texte(telefon)
+    # … und sagt, dass und warum der Ausschnitt dort fehlt (Ben, 20.11.2026)
+    assert "nur am Rechner" in _daten(telefon, "ausschnitt_fehlt").value
+    assert all(getattr(x, "data", None) != "ausschnitt_fehlt" for x in _alle(ansicht))
 
     # Was die App nicht verkleinert: Vektorbild, PDF, Ton, ein Link
     assert not vk.paketdatei_geht(name[:-3] + "svg") and not vk.paketdatei_geht("https://x.org/a")

@@ -258,10 +258,10 @@ Zuschneiden am Handy.
   Paketdateien, bis man es löscht) oder gleich ersetzen? *Behalten, mit „Original löschen“.*
 - **h)** Marken im Ablauf: die Lage aus §2.3 (oben rechts = vorher, unten rechts = nachher, Griff =
   Weg) — und Zugang zu leeren Stellen über das Menü der Kachel? *Ja; Skizzen vorab.*
-- **i)** *(neu, 20.11.2026, offen)* **Ausschnitt am Telefon:** Der Umwandler kann nur mittig auf
-  ein Seitenverhältnis zuschneiden. „Format wählen“ (quadratisch · 4:3 · 16:9 · hochkant) für
-  Videos am Telefon bauen — oder Zuschneiden nur am Rechner lassen? *Nur am Rechner lassen*,
-  bis es jemand am Telefon vermisst.
+- **i)** *(20.11.2026)* **Ausschnitt am Telefon:** Der Umwandler kann nur mittig auf ein
+  Seitenverhältnis zuschneiden. „Format wählen“ für Videos am Telefon bauen — oder Zuschneiden
+  nur am Rechner lassen? **Entschieden (Ben, 20.11.2026): „Lass das Zuschneiden nur am Rechner.
+  Vermerke aber, dass es am Smartphone fehlt und warum.“**
 
 ## 5. Gebaut — und wo es vom Vorschlag abweicht
 
@@ -280,13 +280,13 @@ Zuschneiden am Handy.
 - **Geprüft mit echtem ffmpeg (8.1.3):** Foto 1600 × 1200 mit Drehung im Kopf → Mittel 720 × 960,
   Ausschnitt und „Volle Größe“ mit den erwarteten Maßen; Video-Anhang 720p → Klein mit eigenem
   Frontbild; Tests `test_foto_zuschneiden_…`, `test_anhang_verkleinern_original_bleibt`.
-- **Ausschnitt am Telefon: nicht gebaut — Frage i.** Nachgesehen im Umwandler der APK
-  (`com.otaliastudios:transcoder:0.10.5`, Klassen in `resize/`): Es gibt nur
-  `AspectRatioResizer` — ein **mittiger** Zuschnitt auf ein Seitenverhältnis, kein freies
-  Rechteck. Der Bildverkleinerer für Fotos (`flutter_image_compress`) schneidet gar nicht zu.
-  Möglich wäre am Telefon also nur „Format wählen“ (wie jetzt · quadratisch · 4:3 · 16:9 ·
-  hochkant, immer mittig) für Videos — oder nichts. Das ist eine andere Bedienung als am
-  Rechner und braucht Kotlin und eine APK: **Bens Wahl** (Katalog P227 i).
+- **Ausschnitt am Telefon: fehlt, mit Absicht** (Frage i, Ben 20.11.2026: nur am Rechner).
+  **Warum:** Der Umwandler der APK (`com.otaliastudios:transcoder:0.10.5`, Klassen in
+  `resize/`, nachgesehen im Gradle-Cache) hat nur `AspectRatioResizer` — einen **mittigen**
+  Zuschnitt auf ein Seitenverhältnis, kein freies Rechteck; der Bildverkleinerer für Fotos
+  (`flutter_image_compress`) schneidet gar nicht zu. Ein freier Ausschnitt bräuchte einen
+  anderen Umwandler (eigener Kotlin-Teil, neue APK). Die Ansicht sagt es am Telefon in einem
+  Satz an der Stelle des Ausschnitts (`ausschnitt_fehlt`); Verkleinern und Kürzen gehen dort.
 - **Fotos am Telefon verkleinern: ungeprüft.** Derselbe Aufruf wie in der Fotoauswahl
   (`art = "bild"`), hier mit einer Datei der App statt einer gewählten; immer JPEG (ein PNG wird
   dort zum JPEG), ohne „Volle Größe“. Gerätetest T154.

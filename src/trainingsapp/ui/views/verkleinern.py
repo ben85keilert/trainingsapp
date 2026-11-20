@@ -971,6 +971,18 @@ def _ansicht(page: Any, state: AppState, q: Quelle) -> ft.View:
             ft.Row(spacing=8, controls=[ausschnitt_text, ganzes_bild]),
         ]
         if kann_schneiden
+        else [
+            # Am Telefon fehlt der Ausschnitt (Ben, 20.11.2026: „Lass das Zuschneiden nur am
+            # Rechner. Vermerke aber, dass es am Smartphone fehlt und warum“)
+            ft.Text(
+                "Zuschneiden geht nur am Rechner: Der Umwandler am Telefon kann ein Bild nur "
+                "mittig auf ein Format bringen, keinen frei gewählten Ausschnitt.",
+                size=12,
+                opacity=0.65,
+                data="ausschnitt_fehlt",
+            )
+        ]
+        if womit == weg_.ANDROID
         else []
     )
 

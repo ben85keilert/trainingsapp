@@ -1,10 +1,40 @@
 """Web-Fassung bauen — die App als statische Seite (Flutter zeichnet, Python über Pyodide).
 
-    uv run python scripts/web_bauen.py --basis /app/<ordner>/     # für den Server der Praxis
-    uv run python scripts/web_bauen.py --basis /       # lokal, dann: flet serve dist/web
+    uv run python scripts/web_bauen.py --basis /            # Wurzel einer Adresse — und lokal
+    uv run python scripts/web_bauen.py --basis /<ordner>/   # Unterordner eines Servers
 
 Ergebnis: ``dist/web/`` — ein Ordner mit ``index.html``, den jeder Webserver ausliefern kann,
 und darin ``stand.json`` (Version, Commit, Basisadresse; das Upload-Skript der Praxis prüft sie).
+
+**Welche Basisadresse?** Der Pfad, unter dem ``index.html`` später im Browser steht — nicht der
+Ordner auf dem Server und nicht die ganze Adresse:
+
+- ``https://beispiel.de/``            → ``--basis /``
+- ``https://beispiel.de/training/``   → ``--basis /training/``
+- lokal (``uv run flet serve dist/web``) → ``--basis /``
+
+Sie beginnt und endet mit „/“ und enthält sonst nur Buchstaben, Ziffern, ``-`` und ``_``
+(`basis_pruefen`). Sie ist fest in den Build eingebaut (Punkt 2 unten): Zieht die Seite um,
+wird neu gebaut — umbenennen oder verschieben des Ordners reicht nicht. Der Name des
+Ausgabeordners (``--ausgabe``, Vorgabe ``dist/web``) spielt dafür keine Rolle.
+
+**Die Web-Fassung der Praxis liegt an der Wurzel** (``https://trainingsapp.osteo-ebert.de/``,
+seit 14.11.2026), also ``--basis /``. Davor lag sie zur Probe unter ``/app/<zufallsname>/`` —
+diesen Pfad gibt es nicht mehr, das Upload-Skript weist jeden Build mit einer anderen Basis ab.
+
+**Hochladen** gehört nicht zu diesem Repository (`docs/plan_web.md` §0): Das Skript und die
+Anleitung liegen beim Server der Praxis (privates Repository der Homepage,
+``trainingsapp-web/hochladen.sh``, Runbook ``trainingsapp-web.md``). Der Ablauf:
+
+1. hier aus einem **sauberen, gepushten** Stand bauen (``stand.json``: ``sauber``, ``gepusht``;
+   ``../hrv-core`` und ``../hrv-watch`` auf dem Commit der ``.ref``-Dateien — sonst ein Hinweis),
+2. dort ``./hochladen.sh --probe`` (prüft ``stand.json`` und das App-Archiv, überträgt nichts),
+3. dort ``./hochladen.sh`` (rsync mit ``--delete``: auf dem Server liegt danach genau dieser Build),
+4. von außen ``<adresse>/stand.json`` abrufen — Version und Commit müssen die neuen sein.
+
+Ändert der Build, was die Seite im Browser ablegt oder wohin sie sich verbindet, geht **zuerst**
+die angepasste Datenschutzerklärung online, dann der Build. Wer die Seite auf einen eigenen
+Server legt: Der Inhalt von ``dist/web/`` ist alles; der Server muss nur Dateien ausliefern.
 
 **Die Web-Fassung ist eine Demo** (Ben, 13.11.2026): ohne Konten, die Daten bleiben im Browser,
 für das schnelle Üben eines Hausaufgabenprogramms. Was im Browser nicht geht oder nicht sein
@@ -106,18 +136,18 @@ ADRESSEN_MIT_RAUTE = 'routeUrlStrategy: "hash"'
 def basis_pruefen(basis: str) -> str:
     """Die Basisadresse: beginnt und endet mit „/“, sonst nur Buchstaben, Ziffern, - und _.
 
-    >>> basis_pruefen("/app/AbC-1_x/")
-    '/app/AbC-1_x/'
     >>> basis_pruefen("/")
     '/'
+    >>> basis_pruefen("/app/AbC-1_x/")
+    '/app/AbC-1_x/'
     >>> basis_pruefen("app/x")
     Traceback (most recent call last):
     ...
-    ValueError: Die Basisadresse beginnt und endet mit „/“ (/app/<ordner>/), nicht 'app/x'
+    ValueError: Die Basisadresse beginnt und endet mit „/“ (/ oder /<ordner>/), nicht 'app/x'
     """
     if not re.fullmatch(r"/(?:[A-Za-z0-9_-]+/)*", basis):
         raise ValueError(
-            f"Die Basisadresse beginnt und endet mit „/“ (/app/<ordner>/), nicht {basis!r}"
+            f"Die Basisadresse beginnt und endet mit „/“ (/ oder /<ordner>/), nicht {basis!r}"
         )
     return basis
 
@@ -405,7 +435,7 @@ def main() -> None:
     parser.add_argument(
         "--basis",
         required=True,
-        help="Adresse, unter der die Seite liegt: /app/<ordner>/ auf dem Server, / lokal",
+        help="Pfad, unter dem die Seite im Browser steht: / (Wurzel, auch lokal) oder /<ordner>/",
     )
     parser.add_argument("--ausgabe", type=Path, default=AUSGABE, help="Zielordner (dist/web)")
     parser.add_argument(

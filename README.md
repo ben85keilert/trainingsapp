@@ -164,6 +164,70 @@ installiert die Android-App das Update auch selbst (Stufe 2, siehe oben).
 
 ---
 
+## Web-Fassung bauen und hochladen
+
+Dieselbe App läuft auch als **statische Seite im Browser** (Flutter zeichnet,
+Python läuft über Pyodide im Browser). Ein Server liefert nur Dateien aus; die
+Daten bleiben im Browser des Geräts. Gedacht als Demo und für schnelles Üben
+ohne Installation — was dort anders ist, steht in `docs/plan_web.md`.
+
+**Bauen** — immer über das Skript, nie mit `flet build web` direkt (es baut ohne
+fremde Server, lagert Inline-Skripte aus, legt Schriften ein und prüft, dass im
+App-Archiv keine Daten dieses Rechners liegen). Dauert rund drei Minuten:
+
+```bash
+uv run python scripts/web_bauen.py --basis /            # Seite liegt an der Wurzel einer Adresse
+uv run python scripts/web_bauen.py --basis /<ordner>/   # Seite liegt in einem Unterordner
+uv run flet serve dist/web                              # lokal ansehen (nur mit --basis /)
+```
+
+Ergebnis: `dist/web/` mit `index.html` und `stand.json` (Version, Commit,
+Basisadresse, Prüfergebnisse).
+
+**Die Basisadresse (`--basis`)** ist der Pfad, unter dem die Seite später im
+Browser steht — nicht der Ordner auf dem Server und nicht die ganze Adresse:
+
+| Die Seite steht unter | `--basis` |
+|---|---|
+| `https://beispiel.de/` | `/` |
+| `https://beispiel.de/training/` | `/training/` |
+| lokal mit `flet serve` | `/` |
+
+Sie beginnt und endet mit „/“ (sonst nur Buchstaben, Ziffern, `-`, `_`) und ist
+fest in den Build eingebaut. Stimmt sie nicht, bleibt die Seite weiß (404 auf
+`canvaskit/…` und `pyodide/…`); zieht die Seite um, wird neu gebaut.
+
+**Die Web-Fassung der Praxis** liegt an der Wurzel von
+`https://trainingsapp.osteo-ebert.de/`, also `--basis /`. (Bis 14.11.2026 lag
+sie zur Probe unter `/app/<zufallsname>/` — das gilt nicht mehr.)
+
+**Hochladen** gehört nicht zu diesem Repo: Skript und Anleitung liegen beim
+Server der Praxis (privates Repo der Homepage, `trainingsapp-web/hochladen.sh`).
+Der Ablauf für eine neue Fassung:
+
+1. Hier aus einem **committeten und gepushten** Stand mit grüner CI bauen
+   (`--basis /`); `../hrv-core` und `../hrv-watch` stehen auf dem Commit der
+   `.ref`-Dateien.
+2. Im Homepage-Repo: `cd trainingsapp-web && ./hochladen.sh --probe` — prüft
+   den Build (Basisadresse, keine fremden Server, App-Archiv ohne Daten) und
+   zeigt, was übertragen würde.
+3. `./hochladen.sh` — überträgt per rsync mit `--delete`; auf dem Server liegt
+   danach genau dieser Build.
+4. Prüfen: `curl -s https://trainingsapp.osteo-ebert.de/stand.json` zeigt
+   Version und Commit, die online sind; im Browser die Konsole ansehen (keine
+   Zeile „Refused to …“, keine fremde Domain).
+
+Ändert die neue Fassung, was die Seite im Browser ablegt oder wohin sie sich
+verbindet (Speichern, Pakete laden): **erst** die angepasste
+Datenschutzerklärung veröffentlichen, **dann** die App. Sperren:
+`./hochladen.sh --sperren` leert den Ordner auf dem Server.
+
+Wer die Seite auf einen eigenen Server legt, braucht das Upload-Skript nicht:
+Der Inhalt von `dist/web/` ist alles. Der Server sollte keine Auffangregel auf
+`index.html` brauchen — die App baut ihre Adressen mit „#“ (`/#/einstellungen`).
+
+---
+
 ## Wo was liegt
 
 ```
@@ -183,6 +247,7 @@ docs/
   offene_fragen.md     Katalog offener Entscheidungen und Befunde
   nachschlagen.md      externe Links (Flet-Icons, Docs, Spezifikationen)
   dependabot.md        Abhängigkeiten überwachen: Alerts, Sicherheits- und Versionsupdates
+  plan_web.md          Web-Fassung: Bauen, was im Browser anders ist, Speichern im Browser
   recht/               DSGVO, MDR, Store-Freigaben
   tutorial/            der Lernpfad
 ```

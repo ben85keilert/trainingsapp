@@ -24,9 +24,13 @@ Wo sie liegt und wie sie dorthin kommt, steht nicht hier, sondern beim Server de
 ## 1. Bauen
 
 ```bash
-uv run python scripts/web_bauen.py --basis /                 # lokal: uv run flet serve dist/web
-uv run python scripts/web_bauen.py --basis /app/<ordner>/    # für einen Unterordner eines Servers
+uv run python scripts/web_bauen.py --basis /            # Wurzel einer Adresse; lokal: uv run flet serve dist/web
+uv run python scripts/web_bauen.py --basis /<ordner>/   # für einen Unterordner eines Servers
 ```
+
+Die Basisadresse ist der Pfad, unter dem `index.html` im Browser steht. Die Web-Fassung der
+Praxis liegt seit 14.11.2026 an der Wurzel (`--basis /`); der Pfad `/app/<zufallsname>/` der
+Probe gilt nicht mehr. Einzelheiten und der Ablauf des Hochladens: Kopf von `scripts/web_bauen.py`.
 
 Ergebnis `dist/web/` mit `stand.json` (Version, Commit, `sauber`, `gepusht`, Basisadresse,
 `ohne_cdn`, `archiv_geprueft`). Was das Skript über `flet build web` hinaus tut, steht in seinem Kopf; kurz:

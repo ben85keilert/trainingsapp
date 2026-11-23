@@ -555,7 +555,8 @@ async def test_verwerfen_traegt_nichts_ein(umgebung) -> None:
     (lauf,) = _laeufe(state, kaefer)
     assert lauf.abgebrochen and lauf.eintrag_id is None and not lauf.offen
     assert lauf.nachtragbar and [z.sekunden for z in lauf.zeiten] == [50.0]
-    assert "Noch nicht gemacht, seit du dieses Kapitel öffnest." in _texte(_kapitel(u, kurs, kapitel))
+    texte = _texte(_kapitel(u, kurs, kapitel))
+    assert "Noch nicht gemacht, seit du dieses Kapitel öffnest." in texte
 
 
 async def test_kreuz_im_lauf_bricht_ab_und_nochmal_ist_bereit(umgebung) -> None:

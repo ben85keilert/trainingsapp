@@ -592,7 +592,9 @@ def kapitel_bloecke(
             else:
                 teile.append(
                     hinweis(
-                        "Noch kein Test, seit du dieses Kapitel öffnest."
+                        "Noch nicht gemacht, seit du dieses Kapitel öffnest."
+                        if als_lauf and freiwillig(block)
+                        else "Noch kein Test, seit du dieses Kapitel öffnest."
                         if als_lauf
                         else f"Noch kein Eintrag bei „{name}“, seit du dieses Kapitel öffnest."
                     )

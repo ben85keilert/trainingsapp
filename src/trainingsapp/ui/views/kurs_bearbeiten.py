@@ -1765,7 +1765,8 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             ],
         )
         sensor = ft.Checkbox(
-            label=f"Startet erst mit: {BRAUCHT[BRAUCHT_MESSUNG]}",
+            label="Sensor nötig: Herzfrequenz",
+            tooltip=f"Der Lauf startet erst mit: {BRAUCHT[BRAUCHT_MESSUNG]}",
             value=BRAUCHT_MESSUNG in block.braucht,
             data="test_braucht",
         )

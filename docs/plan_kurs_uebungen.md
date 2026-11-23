@@ -474,4 +474,10 @@ die Übung ein Feld Variante hat — nicht nachgestellt.
 - **Tests:** `tests/test_ui_kurs_fragen.py`, `tests/test_ui_kurs_test.py` (Lauf mit Fragen,
   Sensor, Ziel aus Antwort), `tests/test_kurse.py`, `tests/test_paket_kursplan.py`, Doctests
   in `core/kursbloecke.py`, `core/kursplan.py`, `core/kursbau.py`, `core/kurswerte.py`.
-  **Nicht geprüft:** Web-Fotos der neuen Ansichten, Gerät (T156).
+- **Web-Fotos** (412 × 860, 23.11.2026): Kapitel mit Frage, eingeblendetem Text und
+  Sammelkarte mit Grund · Seite „bereit“ mit Medium und Frage vorher · Lauf mit den Ebenen
+  des Fokus · Ergebnis · „Deine Werte“ · Dialog „Übung machen“ im Editor (dort zwei
+  Layoutfehler gefunden und behoben: abgeschnittene Sensor-Zeile, überlaufendes Label).
+  **Nicht am Foto geprüft:** Lauf mit verbundenem Sensor und Kurven, Begleitvideo, „bei …“,
+  Ziel aus einer Antwort, die Blätter der neuen Bausteine, „Was soll folgen?“ — und nichts
+  davon am Gerät (T156).

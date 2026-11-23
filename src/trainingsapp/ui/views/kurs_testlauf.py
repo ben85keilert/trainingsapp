@@ -761,12 +761,19 @@ def _seite(oben: Sequence[ft.Control], unten: Sequence[ft.Control]) -> ft.Contro
 
 
 def _kopf(
-    v: Vorgabe | None, f: kurstest.Felder, timer: TimerProfil | None, *, ausfuehrung: str = ""
+    v: Vorgabe | None,
+    f: kurstest.Felder,
+    timer: TimerProfil | None,
+    *,
+    ausfuehrung: str = "",
+    gebraucht: bool = True,
 ) -> ft.Control:
     """„VORGABE“, die Vorgabe groß, darunter der Satz der Anleitung — ohne Vorgabe der Timer
     bzw. die Aufforderung (`core.kurstest.kopf`). ``ausfuehrung``: im Lauf steht statt der
     Anleitung, wie der Test gemacht wird („auf Knien · beide · 10 kg“, Skizze F3)."""
     klein, gross = kurstest.kopf(v, timer, f.skala_name)
+    if not gebraucht and klein.casefold() == "test":
+        klein = "Übung"  # „nur ausprobieren“: derselbe Lauf, kein Test (23.11.2026)
     darunter = (
         ft.Text(ausfuehrung, size=15, weight=ft.FontWeight.W_600, data="test_ausfuehrung")
         if ausfuehrung
@@ -1051,7 +1058,7 @@ def kurs_test_view(
         fehlt = sensor_fehlt(state, block)
         return _seite(
             [
-                _kopf(v, f, timer),
+                _kopf(v, f, timer, gebraucht=gebraucht),
                 # der Hinweis des Kurses vor dem Start (`Block.text`)
                 *(
                     [
@@ -1325,7 +1332,7 @@ def kurs_test_view(
         knopf = kurstest.knopf_text(v, timer=timer)
         return _seite(
             [
-                _kopf(v, f, timer, ausfuehrung=s.ausfuehrung_text),
+                _kopf(v, f, timer, ausfuehrung=s.ausfuehrung_text, gebraucht=gebraucht),
                 ft.Container(
                     padding=ft.Padding.symmetric(vertical=12),
                     content=ft.Column(

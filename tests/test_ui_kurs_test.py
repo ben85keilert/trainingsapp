@@ -232,7 +232,7 @@ async def test_karte_mit_vorgabe_startet_den_testlauf(umgebung) -> None:
         "Mach 30 am Stück. Die App misst die Zeit, du sagst danach, wie anstrengend es war."
         in texte
     )
-    assert "Noch kein Test, seit du dieses Kapitel öffnest." in texte
+    assert "Noch nicht gemacht, seit du dieses Kapitel öffnest." in texte
     knopf = _daten(ansicht, ("test_starten", "test"))
     assert knopf.content == "Übung starten" and not _hat(ansicht, ("test_oeffnen", "test"))
     # Auch die Ansicht des Testlaufs startet nichts: Sie ist bereit
@@ -555,7 +555,7 @@ async def test_verwerfen_traegt_nichts_ein(umgebung) -> None:
     (lauf,) = _laeufe(state, kaefer)
     assert lauf.abgebrochen and lauf.eintrag_id is None and not lauf.offen
     assert lauf.nachtragbar and [z.sekunden for z in lauf.zeiten] == [50.0]
-    assert "Noch kein Test, seit du dieses Kapitel öffnest." in _texte(_kapitel(u, kurs, kapitel))
+    assert "Noch nicht gemacht, seit du dieses Kapitel öffnest." in _texte(_kapitel(u, kurs, kapitel))
 
 
 async def test_kreuz_im_lauf_bricht_ab_und_nochmal_ist_bereit(umgebung) -> None:
@@ -867,7 +867,7 @@ async def test_gestalteter_test_oeffnet_sich_bereit_und_zeigt_wie_er_laeuft(umge
         "Läuft mit dem Timer „Intervall“ (1:00) und im Takt Kniebeuge 2-1-2. "
         "Ausführung: links. Gewicht wählst du vor dem Start."
     )
-    assert "Noch kein Test, seit du dieses Kapitel öffnest." in texte
+    assert "Noch nicht gemacht, seit du dieses Kapitel öffnest." in texte
     knopf = _daten(karte, ("test_starten", "test"))
     assert knopf.content == "Übung starten" and not _hat(karte, ("test_oeffnen", "test"))
     await klick(knopf)
@@ -1183,7 +1183,7 @@ async def test_vorgegebene_ausfuehrung_ohne_vorgabe_endet_mit_fertig(umgebung) -
     await _starten(u, kurs, kapitel)
     bereit = _ansicht(u, kurs, kapitel, block, planke)
     texte = _texte(bereit)
-    assert "TEST" in texte and _daten(bereit, "test_vorgabe").value == "Was schaffst du?"
+    assert "ÜBUNG" in texte and _daten(bereit, "test_vorgabe").value == "Was schaffst du?"
     assert (
         "Die App misst die Zeit, bis du „Fertig“ tippst. Danach sagst du, wie anstrengend es "
         "war." in texte

@@ -102,8 +102,8 @@ class FrageForm:
         self.skala = ft.Row(spacing=8, controls=[self.von, self.bis])
         eigene = frage.antworten if frage is not None and frage.art == ab.F_AUSWAHL else ()
         self.antworten = ft.TextField(
-            label="Antworten — eine je Zeile"
-            + (" · „Antwort = 30“ schlägt dieses Ziel vor" if mit_zielen else ""),
+            label="Antworten — eine je Zeile",
+            helper="„Antwort = 30“ schlägt dieses Ziel vor" if mit_zielen else None,
             value=antworten_zeilen(eigene, feste),
             multiline=True,
             min_lines=2,

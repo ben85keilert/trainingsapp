@@ -17,8 +17,10 @@ und die Übung“ —
    eingegebenen Variablen Wdh/Zeit/Haltezeit/Skala/Ja-Nein usw. zu speichern und für später
    verfügbar zu machen.“
 
-**Stand: Plan, nichts gebaut.** Verhalten von Kursen ändert sich erst auf Bens Wort (§8 Fragen,
-Katalog P229). Skizzen als Handy-Bilder folgen nach den Antworten, vor dem Bau.
+**Stand: Plan, nichts gebaut.** Bens Antworten vom 23.11.2026 stehen in **§10 — er geht den
+Abschnitten §2–§9 vor**, wo sie sich widersprechen. Skizzen als Handy-Bilder: Design-Artifact
+„Übungen im Kurs — Skizzen“ (Reihen A–C, zwölf Bilder; privat bei Ben:
+https://claude.ai/artifact/36d4wbyy6sWDu31itDw21E); gebaut wird nach Bens Wort zu den Skizzen und den Resten in §10.4.
 
 ## 0. Wonach gesucht, was gelesen wurde
 
@@ -177,7 +179,7 @@ Sammelkarte „Das ändert sich an deinem Plan“.
 - **Web-Fassung:** keine neue Abzweigung erwartet; kommt eine, gehört sie ins Register
   `docs/web_abzweigungen.toml`.
 
-## 8. Fragen an Ben (Katalog P229)
+## 8. Fragen an Ben (Katalog P229) — beantwortet am 23.11.2026, siehe §10
 
 1. **Ein Baustein statt zwei?** „Übung machen“ mit dem Schalter „Nur ausprobieren · Als Test“
    (§2) — oder ein eigener Block „Übung ausprobieren“ neben „Test“? Empfehlung: ein Baustein.
@@ -206,3 +208,90 @@ Sammelkarte „Das ändert sich an deinem Plan“.
 Je Stufe: Tests zuerst für die flet-freie Rechnung, dann die Ansicht, Web-Fotos, Gerätetest im
 Katalog, Vertrag (`plan_kurs_ablauf.md` §7, `plan_kurse.md` §7, `uebungspakete.md`) nachführen.
 Voller Testlauf vor dem Zusammenführen (Migration, Modelle in `core/`).
+
+## 10. Bens Antworten (23.11.2026) und was daraus folgt
+
+### 10.1 Antworten auf §8
+
+| Frage | Antwort | Folge für den Plan |
+|---|---|---|
+| 1 Ein Baustein? | **Ein Baustein.** Die Übung wird vorher eingestellt (Parameter, Varianten, Medien …); vorher ist benannt, welche Variablen mitgehen, welche Fragen kommen, welche Auswirkung auf den Plan. „Je weniger zusätzliche Einstellungen nötig sind, desto besser.“ | Der Dialog des Bausteins zeigt drei Zeilen, die sich **aus dem Kurs ergeben** statt eingestellt zu werden: „Geht mit“ (alle Werte, ohne Wahl), „Fragen“, „Wirkt auf den Plan“ (welche Bausteine ihn verwenden). Kein Schalter `zweck` — siehe 3. |
+| 2 Eintrag? | Ergebnisse einer Übung kommen ins Tagebuch (aus Antwort 4). Bei „Nochmal“ mehrere Einträge. | Jeder Lauf ist ein gewöhnlicher Eintrag; die Variable hält den jüngsten. |
+| 3 Freiwillig oder Pflicht? | **Freiwillig als Vorgabe. Pflicht, wenn der Wert gebraucht wird** — „Planke → Haltezeit messen. Das wird ganz / anteilig / manuell der neue Zielwert.“ | **Abgeleitet, nicht eingestellt:** Nennt ein Baustein den Wert (`ziel_aus`), ist der Lauf ein Test — Pflicht vor „Plan anlegen“, mit der Karte „Wert für den Plan“ (Ganz · Anteil · Von Hand, wie heute). Sonst ist er ein Eindruck. `zweck` aus §2 entfällt als Feld; Rechnung `core.kursbloecke.gebraucht(block, bloecke)`. Offen: 10.4 Punkt 1. |
+| 4 Antworten ins Tagebuch? | Antworten in den Kurs; Ergebnisse der Übung ins Tagebuch. | wie §5: Karte „Deine Werte“ im Kurs. |
+| 5 Ziel aus einer Frage | „Eine Antwort soll ein festes Ziel setzen können, aber manuell.“ | Gelesen als: Die Autorin trägt je Antwort einen festen Wert ein; die Person sieht ihn in „Wert für den Plan“ **vorgewählt unter „Von Hand“** und kann ihn ändern — nichts ohne Tipp. Offen, ob so gemeint: 10.4 Punkt 2. |
+| 6 `wenn` als einziger Mechanismus | „Wenn es sich lohnt, ja.“ | Es lohnt sich — 10.3. |
+| 7 Reihenfolge | aus den Antworten ermitteln | 10.5. |
+
+### 10.2 Antworten auf die Nachfragen
+
+- **Fragen mit Folge, ganz allgemein** (auch nach Beschwerden): „Es wird etwas gefragt, das hat
+  eine Folge. Plan ändern, Medium abspielen usw.“ Die App kennt keine Beschwerde-Frage, nur
+  Frage → Antwort → Folge. **Einordnung** (`docs/recht/00_zweckbestimmung.md`, Zeilen 114–127
+  und 156–169, am 23.11.2026 gelesen): Den Rahmen gibt es schon — „Vorschlag an einer Frage im
+  Workout“ (17.11.2026): nur Selbstauskunft, die App nennt die Regel und deutet nichts, Frage
+  und Antworten sind Worte der Autorin, der Plan ändert sich nur auf Tipp. Im selben Rahmen
+  bleibt die Kurs-Frage, wenn (a) die Folge in der Sammelkarte als Zeile mit ihrem Grund steht
+  („weil du ‚schwer‘ geantwortet hast“) und einzeln abwählbar ist, (b) die App die Antwort
+  nirgends bewertet. **Warnung bleibt** für das Umfeld (Zeile 156–169): Ein Kurs, der sich an
+  Beschwerden richtet und aus der Antwort das Training senkt, rückt die App als Ganzes näher an
+  eine medizinische Zweckbestimmung — das entscheidet der Kurstext, nicht dieser Mechanismus.
+- **Mehrfachauswahl:** Jede Antwort darf ihre eigene Folge haben; sind mehrere gewählt, gelten
+  die Folgen aller gewählten („A ist dabei“).
+- **„Katalog an Ereignissen, mit denen sich der Plan steuern lässt“ — gibt es schon, es fehlt
+  nur die Bedingung.** Die Bausteine am Kursplan (`core/kursbloecke.py:64–66`, Zeilen der
+  Sammelkarte `core/kursplan.py:91–98`) können heute: Übung hinzufügen (fest oder „die
+  gewählte“, hinter einer Marke) · Ziel setzen (fest oder aus einem Test × Faktor) · Parameter
+  wählen · Timer · Takt · Übergang hart/weich · Pause ohne Timer · Weg zwischen zwei Übungen.
+  **Es fehlt:** (a) die Bedingung `wenn` an Block und Baustein, (b) Übung **herausnehmen** oder
+  **tauschen**, (c) Variante setzen als eigene Zeile (`grep -n variant core/kursplan.py
+  core/kursbloecke.py`: kein Treffer; ob sie über `ziel` mitgeht, ist nicht nachgestellt).
+- **Mehrere Einträge bei Wiederholung:** ja. **„Von vorn beginnen“:** Variablen weg, Läufe bleiben.
+- **Einmalige Übung im Katalog:** erst einmal ja, wie jede andere.
+- **Backup:** Die Werte **sind** in der Datenbank (`course_variable`, Migration 065), und das
+  Geräte-Backup nimmt die ganze Datenbank mit (`core/sicherung.py`, Android Auto Backup,
+  Vorgabe aus, einschaltbar). „Gerätelokal“ heißt nur: nicht in Paket, Export oder Sync. Die
+  Nachfrage war unbegründet — nichts zu tun.
+- **Formatversion:** Ein Paket mit den neuen Feldern trägt die nächste Formatversion; eine
+  ältere App lehnt es ab, der Kurs muss aktualisiert werden (App-Update).
+
+### 10.3 `wenn` — ein Mechanismus, geschrieben von der Frage aus
+
+Gespeichert wird die Bedingung am Block oder Baustein, der von ihr abhängt (`wenn`, §6 Punkt 3).
+**Im Editor** legt die Autorin sie von der Frage aus an: an jeder Antwort „+ Folge“ →
+„Text oder Medium zeigen“ · „Plan ändern“ (ein Baustein aus dem Katalog oben) · „Ziel
+vorschlagen“. So braucht es keine eigene Einstellung „Bedingung“; wer einen Baustein öffnet,
+sieht oben „nur wenn: Frage … = …“ und kann es dort lösen.
+
+**Fehlt die Antwort** (die Frage hängt an einem freiwilligen Lauf, den die Person ausgelassen
+hat): Beispiel — Kapitel 2 lässt den Seitstütz ausprobieren und fragt danach „Wie war das? leicht
+· mittel · schwer“; Kapitel 3 bringt den Seitstütz nur bei „leicht“ in den Plan. Wer den Lauf
+ausließ, hat keine Antwort. Vorschlag: Die Zeile steht in der Sammelkarte als **offen** („Probier
+zuerst den Seitstütz aus“, Stand `OFFEN`, den es für fehlende Wahl und fehlenden Test schon
+gibt) — nicht verborgen, nicht Pflicht. Texte und Medien mit `wenn` bleiben verborgen.
+
+### 10.4 Was noch offen ist (in den Skizzen als Varianten)
+
+1. **Test = „wird gebraucht“** (10.1 Antwort 3): Ein Test eines bestehenden Kurses, dessen Wert
+   kein Baustein nennt, würde vom Pflicht-Test zum freiwilligen Eindruck. Ob es das in den
+   Kursen von `trainingsapp-inhalte` gibt, ist nicht nachgesehen. Ausweg: am Baustein der
+   Schalter „muss gemacht sein“ (Vorgabe aus), den der Import für solche Tests setzt.
+2. **Festes Ziel je Antwort** (Antwort 5): als Vorwahl „Von Hand“ richtig gelesen?
+3. **Übung herausnehmen / tauschen, Variante setzen** als Folge — gebraucht? (Neue Bausteine,
+   eigene Stufe U5.)
+4. **Seite „bereit“:** erst Medien „vorher“, dann Fragen „vorher“, dann „Starten“ (Skizze B1).
+5. **Fehlende Antwort** als „offen“ in der Sammelkarte (10.3).
+
+### 10.5 Reihenfolge
+
+**U1 → U3 → U4 → U2** (statt U1 → U2 → U3 → U4):
+
+- **U1** zuerst: Lauf ohne Testpflicht, alle Werte als Variablen, „Deine Werte“ — darauf baut alles.
+- **U3** (Fragen, Antworten als Variablen) und gleich danach **U4** (Folgen: `wenn`, „+ Folge“
+  an der Antwort, Ziel aus Antwort, `ziel_aus` mit Feld): Das ist der Kern von Bens Antworten —
+  „es wird etwas gefragt, das hat eine Folge“. U3 allein fragt, ohne dass etwas folgt.
+- **U2** (Medien an vier Stellen im Lauf) zuletzt: Nichts anderes hängt daran, es löst Code aus
+  dem Fokus heraus (das größte Risiko für Bestehendes) und braucht einen Gerätetest. Das
+  Medium „bei der Antwort“ im Lauf wandert von U3 nach U2; im Kapitel geht es schon mit U4
+  (Block `medium` mit `wenn`). Drängen die Videos im Lauf, kann U2 ohne Umbau vorgezogen werden.
+- **U5** nur bei Ja zu 10.4 Punkt 3.

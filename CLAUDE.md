@@ -238,6 +238,12 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   das Datenverzeichnis liegt auf IDBFS und gleicht sich mit der IndexedDB ab; geholt wird **vor**
   dem Öffnen der Datenbank (`ui/app.py:einstieg`). Vorgaben der Web-Fassung (Gast, hell,
   Nachtblau): `config.WEB.vorgaben`.
+  **Pakete per Link** (Ben, 23.11.2026, `docs/plan_web_pakete.md`): Im Browser holt
+  `ui/browsernetz.py` Paketdateien mit `fetch` — nur vom eigenen Server — und reicht sie dem
+  Kern als Bytes (`ausfuehren` statt `asyncio.to_thread` an jeder Stelle, die aus dem Netz
+  liest); private Pakete öffnet scrypt aus ``cryptography`` (`scripts/web_bauen.py` legt es
+  neben Pyodide), der Link ``#/paket/p/<ordner>`` öffnet ein privates Paket. Bilder aus Dateien
+  zeigt der Browser nur über `components/bildquelle.bildquelle` (Bytes statt Pfad).
   **Keine Zahl über 0xFFFFFFFF zwischen Dart und Python** (dart2js: das Ereignis geht still
   verloren) — gilt für jede Erweiterung.
 

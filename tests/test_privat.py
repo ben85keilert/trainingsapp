@@ -175,6 +175,40 @@ def test_werkzeug_baut_privat_und_laesst_es_aus_dem_index(tmp_path, capsys) -> N
     assert paket_lesen(json.loads(offen.read_text("utf-8"))).paket.name == "Offen"
 
 
+def test_zugangskarte_nennt_mit_web_url_den_link_fuer_den_browser(tmp_path, capsys) -> None:
+    """Mit ``--web-url`` (Web-Fassung auf demselben Server, `docs/plan_web_pakete.md` §2.3) steht
+    auf der Karte auch der Link, der das Paket im Browser öffnet — der Ordner hinter „#“, der
+    Code nie im Link. Ohne die Angabe bleibt die Karte, wie sie war."""
+    from trainingsapp.core.paketquelle import ordner_aus_route
+    from trainingsapp.paket_werkzeug import main
+
+    toml = tmp_path / "max.toml"
+    toml.write_text(
+        '[paket]\nname = "Für Max"\nversion = "1.0.0"\n\n[privat]\nfuer = "Max"\n\n'
+        '[[exercises]]\nkey = "a"\nname = "Übung für Max"\ndescription = "Langsam."\n',
+        encoding="utf-8",
+    )
+    karte = tmp_path / "max.zugangskarte.txt"
+    basis = [
+        "bauen",
+        str(toml),
+        "--ziel",
+        str(tmp_path / "dist"),
+        "--basis-url",
+        "https://x.org/pakete",
+    ]
+    assert main(basis) == 0
+    assert "Im Browser" not in karte.read_text("utf-8")
+    assert main([*basis, "--web-url", "https://x.org/"]) == 0
+    capsys.readouterr()
+    zugang = json.loads((tmp_path / "max.zugang.json").read_text("utf-8"))
+    text = karte.read_text("utf-8")
+    zeile = next(z for z in text.splitlines() if z.startswith("Im Browser: "))
+    assert zeile == f"Im Browser: https://x.org/#/paket/p/{zugang['ordner']}"
+    assert ordner_aus_route(zeile.split("#", 1)[1]) == zugang["ordner"]  # die App liest ihn so
+    assert zugang["code"] not in zeile and code_text(zugang["code"]) not in zeile
+
+
 def test_werkzeug_laesst_die_zugangsdatei_aus(tmp_path, capsys) -> None:
     """``pakete/*.json`` sammelt neben der TOML auch ``<name>.zugang.json`` ein
     (``veroeffentlichen.sh``, CI des Inhalte-Repos) — pruefen, bauen und index lassen sie aus,

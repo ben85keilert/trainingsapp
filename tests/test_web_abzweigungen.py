@@ -28,7 +28,7 @@ REGISTER = PROJEKT / "docs" / "web_abzweigungen.toml"
 #: Woran eine Abzweigung im Quelltext zu erkennen ist (dieselbe Liste steht im Register)
 MARKE_PY = re.compile(
     r'\bim_browser\(|"emscripten"|\b_web\b|\bweb_verweise\(|\bweb_vorgabe\(|TRAININGSAPP_WEB'
-    r"|\bbrowserspeicher\b"
+    r"|\bbrowserspeicher\b|\bbrowsernetz\b"
 )
 MARKE_DART = re.compile(r"\bkIsWeb\b")
 
@@ -124,7 +124,9 @@ def test_vorgaben_der_web_fassung_gast_hell_blau(tmp_path, monkeypatch) -> None:
     from trainingsapp.ui.state import STANDARD_PROFILNAME, AppState
 
     vorgaben = dict(config.WEB.vorgaben)
-    assert set(vorgaben) == {"profilname", "palette", "helligkeit"}  # Neues braucht eine Stelle
+    # Neues braucht eine Stelle — `app_update_hinweis`: Seite „Updates“, Karte „App“
+    # (`tests/test_ui_browsernetz.py::test_updates_seite_im_browser_…`)
+    assert set(vorgaben) == {"profilname", "palette", "helligkeit", "app_update_hinweis"}
     assert vorgaben["palette"] in PALETTEN and vorgaben["helligkeit"] in HELLIGKEITEN
 
     monkeypatch.delenv("TRAININGSAPP_WEB", raising=False)
@@ -194,7 +196,10 @@ def test_einstellungen_zeigen_rechtliches_nur_im_browser(tmp_path, monkeypatch) 
         # das Menü darüber: dieselben Zeilen ohne das, was es im Browser nicht gibt
         routen = [z.data for z in zeilen if str(z.data).startswith("/")]
         assert routen == [z.route for z in MENUE if z.sichtbar()]
-        assert "/einstellungen/updates" not in routen
+        # „Updates“ gibt es auch im Browser (seit 23.11.2026, `docs/plan_web_pakete.md` §2.4):
+        # Pakete per Link bekommen dort ihre neuen Fassungen — ohne Quellenliste und ohne
+        # App-Update (`tests/test_ui_browsernetz.py`)
+        assert "/einstellungen/updates" in routen
 
         for zeile in verweise:
             asyncio.run(zeile.on_click())

@@ -28,6 +28,11 @@ Was dieses Skript über ``flet build web`` hinaus tut — jeder Punkt hat einmal
    Prüfsumme und legt sie an den Ort, an dem Flutter sie sucht. Braucht die App ein Zeichen aus
    einer weiteren Schrift: Die Konsole des Browsers nennt die Datei — hier eintragen.
 
+   Ebenso die **Pyodide-Pakete zum Nachladen** (`NACHLADEN`: ``cryptography`` für private
+   Pakete, `docs/plan_web_pakete.md` §2.2): Sie kommen beim Bauen von jsdelivr, mit der
+   Prüfsumme aus Pyodides ``pyodide-lock.json``, und liegen dann neben Pyodide auf dem eigenen
+   Server — die Seite lädt sie erst, wenn jemand ein privates Paket öffnet.
+
 5. **Das App-Archiv prüfen.** `flet build` packt den ganzen Ordner ``src/`` ein — auch den
    Datenordner der Desktop-Vorschau (``src/trainingsapp/ui/.flet/``: Datenbank, Messungen,
    GPS-Strecken). ``pyproject.toml`` schließt ihn aus (``[tool.flet.app] exclude``), und
@@ -77,6 +82,15 @@ SCHRIFTEN: tuple[tuple[str, str, str], ...] = (
         "08202e258ea583254c036cff46a7077bb5af4f82c41a6c0a6775f6e44d99f1aa",
     ),
 )
+
+#: Pyodide-Pakete, die die Seite erst bei Bedarf nachlädt — nicht im App-Archiv, sondern neben
+#: Pyodide (``pyodide/``), wo `pyodide_js.loadPackage` sie sucht. ``cryptography``: scrypt für
+#: private Pakete (`ui/browsernetz.privat_bereit`; dem Python im Browser fehlt `hashlib.scrypt`).
+#: Dateinamen, Prüfsummen und was sie selbst brauchen, stehen in Pyodides ``pyodide-lock.json``.
+NACHLADEN: tuple[str, ...] = ("cryptography",)
+#: Von dort kommen die Pakete beim Bauen — dieselbe Pyodide-Version wie die im Web-Ordner
+PYODIDE_QUELLE = "https://cdn.jsdelivr.net/pyodide/v{version}/full/{datei}"
+PYODIDE_ABLAGE = PROJEKT / "build" / "web-pyodide"
 
 #: Das App-Archiv im Web-Ordner: der Inhalt von ``src/`` und die Python-Pakete
 APP_ARCHIV = Path("assets") / "app" / "app.zip"
@@ -155,6 +169,73 @@ def schriften_einlegen(ordner: Path, ablage: Path = SCHRIFT_ABLAGE) -> int:
         ziel.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(schrift_holen(quelle, sha256, ablage), ziel)
     return len(SCHRIFTEN)
+
+
+def nachlade_dateien(ordner: Path, namen: tuple[str, ...] | None = None) -> list[tuple[str, str]]:
+    """``(Dateiname, SHA-256)`` der Pakete aus `NACHLADEN` und von allem, was sie brauchen —
+    aus ``pyodide/pyodide-lock.json`` des Web-Ordners. Wirft `ValueError`, wenn die Datei fehlt
+    oder ein Paket dort nicht steht (andere Pyodide-Version)."""
+    sperre = ordner / "pyodide" / "pyodide-lock.json"
+    try:
+        pakete = json.loads(sperre.read_text(encoding="utf-8"))["packages"]
+    except (OSError, ValueError, KeyError) as fehler:
+        raise ValueError(f"{sperre} fehlt oder ist unlesbar") from fehler
+    offen, gesehen, dateien = list(NACHLADEN if namen is None else namen), set(), []
+    while offen:
+        name = offen.pop(0)
+        if name in gesehen:
+            continue
+        gesehen.add(name)
+        if name not in pakete:
+            raise ValueError(f"Pyodide kennt das Paket „{name}“ nicht ({sperre})")
+        dateien.append((str(pakete[name]["file_name"]), str(pakete[name]["sha256"])))
+        offen.extend(pakete[name].get("depends") or [])
+    return dateien
+
+
+def pyodide_version(ordner: Path) -> str:
+    """Die Version des Pyodide im Web-Ordner (``pyodide/package.json``)."""
+    try:
+        return str(
+            json.loads((ordner / "pyodide" / "package.json").read_text(encoding="utf-8"))["version"]
+        )
+    except (OSError, ValueError, KeyError) as fehler:
+        raise ValueError(
+            "Die Version von Pyodide ist nicht zu lesen (pyodide/package.json)"
+        ) from fehler
+
+
+def nachladen_einlegen(ordner: Path, ablage: Path = PYODIDE_ABLAGE) -> int:
+    """Die Pakete aus `NACHLADEN` neben Pyodide legen — beim Bauen geladen, Prüfsumme aus
+    Pyodides eigener Liste; liefert ihre Zahl. Was schon dort liegt und stimmt, bleibt."""
+    dateien = nachlade_dateien(ordner)
+    version = pyodide_version(ordner) if dateien else ""
+    for name, sha256 in dateien:
+        ziel = ordner / "pyodide" / name
+        if ziel.is_file() and hashlib.sha256(ziel.read_bytes()).hexdigest() == sha256:
+            continue
+        quelle = PYODIDE_QUELLE.format(version=version, datei=name)
+        shutil.copyfile(schrift_holen(quelle, sha256, ablage), ziel)
+    return len(dateien)
+
+
+def nachladen_befunde(ordner: Path) -> list[str]:
+    """Liegt jedes Paket zum Nachladen neben Pyodide, mit der Prüfsumme aus dessen Liste?"""
+    try:
+        dateien = nachlade_dateien(ordner)
+    except ValueError as fehler:
+        return [f"Pakete zum Nachladen nicht prüfbar: {fehler}"]
+    liste = []
+    for name, sha256 in dateien:
+        datei = ordner / "pyodide" / name
+        if not datei.is_file():
+            liste.append(
+                f"Paket zum Nachladen fehlt: pyodide/{name} — private Pakete ließen sich im "
+                "Browser nicht öffnen"
+            )
+        elif hashlib.sha256(datei.read_bytes()).hexdigest() != sha256:
+            liste.append(f"Prüfsumme stimmt nicht: pyodide/{name}")
+    return liste
 
 
 def _startseite(ordner: Path) -> str:
@@ -249,6 +330,7 @@ def befunde(ordner: Path) -> list[str]:
     for pfad, _quelle, _sha in SCHRIFTEN:
         if not (ordner / "assets" / "fonts" / pfad).is_file():
             liste.append(f"Ersatzschrift fehlt: assets/fonts/{pfad}")
+    liste += nachladen_befunde(ordner)
     liste += archiv_befunde(ordner / APP_ARCHIV, versionierte_dateien())
     return liste
 
@@ -300,11 +382,15 @@ def nachbearbeiten(ordner: Path, basis: str) -> None:
     """Schritte 3 und 4 aus dem Kopf dieser Datei, dann ``stand.json`` — und die Prüfung."""
     n = skripte_auslagern(ordner)
     m = schriften_einlegen(ordner)
+    k = nachladen_einlegen(ordner)
     werte = stand(basis, ordner)
     (ordner / "stand.json").write_text(
         json.dumps(werte, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
     )
-    print(f"Nachbearbeitet: {n} Inline-Skripte ausgelagert, {m} Ersatzschrift(en) eingelegt")
+    print(
+        f"Nachbearbeitet: {n} Inline-Skripte ausgelagert, {m} Ersatzschrift(en) eingelegt, "
+        f"{k} Pyodide-Paket(e) zum Nachladen"
+    )
     if fehler := befunde(ordner):
         sys.exit("Der Web-Ordner ist nicht in Ordnung:\n  - " + "\n  - ".join(fehler))
     for name, schwester in werte["schwestern"].items():  # type: ignore[union-attr]

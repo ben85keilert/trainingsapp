@@ -39,6 +39,7 @@ from trainingsapp.core.bewegungsbild import (
 from trainingsapp.core.models import Exercise, MediaSource, PlanItem
 from trainingsapp.core.takt import Lage, Takt
 from trainingsapp.data.uebungsbilder import Uebungsbild
+from trainingsapp.ui.components.bildquelle import bildquelle
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
@@ -68,7 +69,9 @@ def bewegungsbild_control(
         height=hoehe,
         border_radius=16,
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-        content=ft.Image(src=pfad, height=hoehe, fit=ft.BoxFit.CONTAIN, gapless_playback=True),
+        content=ft.Image(
+            src=bildquelle(pfad), height=hoehe, fit=ft.BoxFit.CONTAIN, gapless_playback=True
+        ),
     )
 
 
@@ -84,7 +87,7 @@ class Bildfolge:
     def __init__(self, pfad: str, anzahl: int, *, hoehe: float = HOEHE_WAEHREND) -> None:
         self.anzahl, self.hoehe = max(anzahl, 1), hoehe
         self.bild = ft.Image(
-            src=pfad,
+            src=bildquelle(pfad),
             width=hoehe * self.anzahl,
             height=hoehe,
             fit=ft.BoxFit.FILL,
@@ -134,7 +137,9 @@ def _bewegung_control(pfad: str, hoehe: float) -> tuple[ft.Control, Bildfolge | 
             height=hoehe,
             border_radius=16,
             clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-            content=ft.Image(src=pfad, height=hoehe, fit=ft.BoxFit.CONTAIN, gapless_playback=True),
+            content=ft.Image(
+                src=bildquelle(pfad), height=hoehe, fit=ft.BoxFit.CONTAIN, gapless_playback=True
+            ),
         ),
         None,
     )
@@ -301,7 +306,7 @@ def bewegungsbild_blatt(
                     tooltip=", ".join(n for _, n in b.uebungen) or "ungenutzt",
                     on_click=bild_waehler(b),
                     content=ft.Image(
-                        src=str(state.bewegungsbilder.datei(b.pfad)),
+                        src=bildquelle(state.bewegungsbilder.datei(b.pfad)),
                         width=KACHEL,
                         height=KACHEL,
                         fit=ft.BoxFit.COVER,

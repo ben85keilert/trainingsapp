@@ -121,6 +121,7 @@ from trainingsapp.core.paketquelle import (
     index_laden,
     link_lesen,
     paket_laden,
+    seitenroute,
     stand_json,
 )
 from trainingsapp.core.paketquelle import _laden as netz_laden
@@ -1429,10 +1430,14 @@ def _zugang(datei: Path) -> dict[str, str]:
     return zugang
 
 
-def privat_bauen(datei: Path, ziel: Path, basis_url: str = "") -> tuple[Path, str]:
+def privat_bauen(
+    datei: Path, ziel: Path, basis_url: str = "", web_url: str = ""
+) -> tuple[Path, str]:
     """Ein privates Paket (U7, TOML mit ``[privat] fuer = "…"``): bauen wie immer, dann
     verschlüsselt nach ``<ziel>/p/<ordner>/paket.json`` (bzw. ``.zip``) — ``(Datei,
-    Zugangskarte)``. Die Karte (Link + Code) steht zusätzlich neben der TOML."""
+    Zugangskarte)``. Die Karte (Link + Code) steht zusätzlich neben der TOML. Mit ``web_url``
+    (Adresse der Web-Fassung auf demselben Server) nennt sie auch den Link, der das Paket im
+    Browser öffnet (`paketquelle.seitenroute`, `docs/plan_web_pakete.md` §2.3)."""
     roh = tomllib.loads(datei.read_text("utf-8"))
     fuer = " ".join(str((roh.get("privat") or {}).get("fuer") or "").split())
     zugang = _zugang(datei)
@@ -1451,12 +1456,21 @@ def privat_bauen(datei: Path, ziel: Path, basis_url: str = "") -> tuple[Path, st
     pfad.with_name(pfad.stem + STAND_ENDUNG).write_bytes(
         stand_json(gebaut.version, sha256_datei(pfad), pfad.stat().st_size)
     )
+    # Im Browser: die Web-Fassung mit der Route hinter „#“ — den Teil schickt der Browser nie
+    # an den Server, und die Seite lädt das Paket von dort selbst
+    web_link = f"{web_url.rstrip('/')}/#{seitenroute(zugang['ordner'])}" if web_url else ""
     karte = "\n".join(
         [
             f"Privates Paket „{name}“" + (f" für {fuer}" if fuer else ""),
             f"Link: {link}",
+            *([f"Im Browser: {web_link}"] if web_link else []),
             f"Code: {code_text(zugang['code'])}",
             "Link und Code getrennt weitergeben (z. B. Link per Nachricht, Code mündlich).",
+            *(
+                ["„Link“ ist für die App (Importieren → Link), „Im Browser“ öffnet die Seite."]
+                if web_link
+                else []
+            ),
         ]
     )
     datei.with_name(datei.stem + ".zugangskarte.txt").write_text(karte + "\n", "utf-8")
@@ -1464,6 +1478,8 @@ def privat_bauen(datei: Path, ziel: Path, basis_url: str = "") -> tuple[Path, st
         import segno
 
         segno.make(link).save(str(datei.with_name(datei.stem + ".zugang.svg")), scale=6)
+        if web_link:
+            segno.make(web_link).save(str(datei.with_name(datei.stem + ".zugang.web.svg")), scale=6)
     except ImportError:
         pass
     return pfad, karte
@@ -2725,6 +2741,12 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("dateien", nargs="+", type=Path)
     b.add_argument("--ziel", type=Path, default=Path("dist"))
     b.add_argument("--basis-url", default="", help="für die Zugangskarte privater Pakete")
+    b.add_argument(
+        "--web-url",
+        default="",
+        help="Adresse der Web-Fassung auf demselben Server — die Zugangskarte privater Pakete "
+        "nennt dann auch den Link, der das Paket im Browser öffnet",
+    )
     i = sub.add_parser("index", help="Index einer Paketquelle schreiben")
     i.add_argument("dateien", nargs="*", type=Path, help="keine = leerer Index (nur Privates)")
     i.add_argument("--ziel", type=Path, default=Path("dist/index.json"))
@@ -2817,7 +2839,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             try:
                 if datei.suffix == ".toml" and "privat" in tomllib.loads(datei.read_text("utf-8")):
-                    pfad, karte = privat_bauen(datei, args.ziel, args.basis_url)
+                    pfad, karte = privat_bauen(datei, args.ziel, args.basis_url, args.web_url)
                     # Ordner (der Link) und Code nur am Terminal — umgeleitet (CI,
                     # Protokolldatei) stünden sie sonst in einem Log, das andere lesen
                     if sys.stdout.isatty():

@@ -676,6 +676,52 @@ def paket_laden(
     return inhalt
 
 
+#: Unter diesem Pfad einer Paketquelle liegen die privaten Pakete, je eines in einem Ordner mit
+#: Zufallsnamen (`privat.ordner_neu`, `paket_werkzeug.privat_bauen`)
+PRIVAT_ORDNER: Final = "p"
+_ORDNER = re.compile(r"[A-Za-z0-9_-]{16,64}")
+#: Route der Web-Fassung, die ein privates Paket vom eigenen Server öffnet (Ben, 23.11.2026,
+#: `docs/plan_web_pakete.md` §2.3): ``https://<seite>/#/paket/p/<ordner>``
+SEITENROUTE: Final = "/paket/p/"
+
+
+def seitenroute(ordner: str) -> str:
+    """Die Route, unter der die Web-Fassung ein privates Paket öffnet.
+
+    >>> seitenroute("7Hq3vX9aBcDeFgHiJkLmNo")
+    '/paket/p/7Hq3vX9aBcDeFgHiJkLmNo'
+    """
+    return SEITENROUTE + ordner
+
+
+def ordner_aus_route(route: str) -> str | None:
+    """Der Ordner eines privaten Pakets aus einer Route der Web-Fassung — ``None``, wenn die
+    Route keine solche ist oder der Ordner nicht wie einer aussieht (nichts davon wird sonst
+    Teil einer Adresse).
+
+    >>> ordner_aus_route("/paket/p/7Hq3vX9aBcDeFgHiJkLmNo")
+    '7Hq3vX9aBcDeFgHiJkLmNo'
+    >>> ordner_aus_route("/paket/p/7Hq3vX9aBcDeFgHiJkLmNo/"), ordner_aus_route("/pakete")
+    ('7Hq3vX9aBcDeFgHiJkLmNo', None)
+    >>> ordner_aus_route("/paket/p/../../geheim"), ordner_aus_route("/paket/p/kurz")
+    (None, None)
+    """
+    if not route.startswith(SEITENROUTE):
+        return None
+    ordner = route[len(SEITENROUTE) :].split("?")[0].strip("/")
+    return ordner if _ORDNER.fullmatch(ordner) else None
+
+
+def privat_pfade(ordner: str) -> tuple[str, str]:
+    """Wo das private Paket dieses Ordners auf dem Server liegt, relativ zur Paketquelle — als
+    JSON und, mit Dateien, als ZIP.
+
+    >>> privat_pfade("abc")
+    ('p/abc/paket.json', 'p/abc/paket.zip')
+    """
+    return f"{PRIVAT_ORDNER}/{ordner}/paket.json", f"{PRIVAT_ORDNER}/{ordner}/paket.zip"
+
+
 def pruefen(
     quellen: Iterable[str],
     installierte: Iterable[Paket],
@@ -724,7 +770,9 @@ __all__ = [
     "INDEX_FORMAT",
     "INDEX_VERSION",
     "MAX_INDEX_BYTES",
+    "PRIVAT_ORDNER",
     "QUELLE_VORGABE",
+    "SEITENROUTE",
     "STAND_ENDUNG",
     "STAND_FORMAT",
     "IndexEintrag",
@@ -738,9 +786,12 @@ __all__ = [
     "index_laden",
     "index_lesen",
     "link_lesen",
+    "ordner_aus_route",
     "paket_laden",
+    "privat_pfade",
     "pruefen",
     "quelle_passt",
+    "seitenroute",
     "stand_json",
     "stand_lesen",
     "stand_url",

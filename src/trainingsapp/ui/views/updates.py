@@ -26,15 +26,16 @@ import contextlib
 import functools
 import json
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import flet as ft
 
-from trainingsapp.config import app_version, importverzeichnis, ist_aktiv
+from trainingsapp.config import app_version, importverzeichnis, ist_aktiv, web_vorgabe
 from trainingsapp.core.pakete import MAX_PAKET_BYTES, Paket, PaketFehler, Paketinhalt
 from trainingsapp.core.paketmedien import groesse_text
 from trainingsapp.core.paketquelle import (
+    DATEI,
     INDEX,
     IndexEintrag,
     Pruefung,
@@ -49,7 +50,7 @@ from trainingsapp.core.paketstufe import MITTEL, STUFE_TEXT, Stufe, automatisch,
 from trainingsapp.core.paketversion import MANUELL, UPDATE_MODI, version_text
 from trainingsapp.core.update import UpdateFehler, ist_neuer, neuestes_release
 from trainingsapp.data.repositories import SettingRepo
-from trainingsapp.ui import app_update
+from trainingsapp.ui import app_update, browsernetz
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
@@ -110,6 +111,12 @@ def _lader(eintrag: IndexEintrag, code: str | None) -> Callable[[], Paketinhalt]
     return functools.partial(paket_laden, eintrag, code=code, arbeit=arbeit)
 
 
+def _mit_link(pakete: Iterable[Paket]) -> bool:
+    """Gibt es ein aktives Paket, das an einem Datei-Link hängt (`paketquelle.pruefen` fragt
+    dessen Adresse)?"""
+    return any(p.quelle and p.quelle_art == DATEI and p.aktiv for p in pakete)
+
+
 def _eintrag_aus_paket(p: Paket) -> IndexEintrag | None:
     """Das vorgemerkte Update eines Pakets (Modus „manuell“) als Index-Eintrag."""
     if p.verfuegbar is None or not p.verfuegbar_url:
@@ -132,15 +139,18 @@ async def pruefung_ausfuehren(state: AppState, *, gross: bool = False) -> Update
     sehen (`paketquelle.pruefen`) — nur auf „Jetzt prüfen“, nie beim Start."""
     quellen = state.paketquellen() if ist_aktiv("paket_quellen") else []
     installierte = [p for p, _ in state.pakete.alle()]
+    # Pakete aus einem Datei-Link fragen ihre eigene Adresse — auch ohne Quellenliste (die
+    # Web-Fassung hat keine; dort geht es über `browsernetz` an den eigenen Server)
+    links = ist_aktiv("paket_links") and _mit_link(installierte)
     ergebnis = (
-        await asyncio.to_thread(
+        await browsernetz.ausfuehren(
             functools.partial(
                 pruefen, quellen, installierte, gross=True, arbeit=importverzeichnis()
             )
             if gross
             else functools.partial(pruefen, quellen, installierte)
         )
-        if quellen
+        if quellen or links
         else Pruefung()
     )
     stand = UpdateStand(ergebnis)
@@ -184,7 +194,7 @@ async def pruefung_ausfuehren(state: AppState, *, gross: bool = False) -> Update
             offen.append(u)
             continue
         try:
-            inhalt = await asyncio.to_thread(_lader(u.eintrag, u.installiert.zugangscode))
+            inhalt = await browsernetz.ausfuehren(_lader(u.eintrag, u.installiert.zugangscode))
         except QuellenFehler as e:
             ergebnis.fehler.append(f"{u.eintrag.name}: {e}")
             offen.append(u)
@@ -267,9 +277,17 @@ def hinweis_dialog(page: ft.Page, state: AppState) -> ft.AlertDialog:
 
 async def beim_start(page: ft.Page, state: AppState) -> None:
     """Aus `app.py` nach dem Zeichnen: Hinweis beim ersten Mal, sonst leise prüfen."""
-    if not (ist_aktiv("paket_quellen") or ist_aktiv("update_pruefung")):
+    nur_links = not (ist_aktiv("paket_quellen") or ist_aktiv("update_pruefung"))
+    if nur_links and not ist_aktiv("paket_links"):
         return
     if not state.update_pruefung():
+        return
+    if nur_links:
+        # Web-Fassung: gefragt wird nur der Server, von dem die Seite selbst kommt, und nur für
+        # Pakete, die die Person von dort per Link geholt hat (die Rückfrage beim Import sagt
+        # es) — kein Hinweis auf „Quellen und GitHub“, die es hier nicht gibt
+        if _mit_link(p for p, _ in state.pakete.alle()):
+            await _starten(page, state)
         return
     if state.einstellungen.lesen(SettingRepo.HINWEIS_UPDATES, "0") != "1":
         page.show_dialog(hinweis_dialog(page, state))
@@ -328,7 +346,7 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
             vorhanden = state.pakete.laden(eintrag.id)  # privat (U7): mit dem gemerkten Code
             code = vorhanden.zugangscode if vorhanden is not None else None
             try:
-                inhalt = await asyncio.to_thread(_lader(eintrag, code))
+                inhalt = await browsernetz.ausfuehren(_lader(eintrag, code))
             except QuellenFehler as e:
                 melden(f"„{eintrag.name}“ nicht geladen: {e}")
                 return
@@ -370,7 +388,13 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
         else []
     )
     if not ist_aktiv("update_pruefung"):
-        app_zeilen.append(hinweis("Updates der App kommen in dieser Edition von der Praxis."))
+        app_zeilen.append(
+            hinweis(
+                web_vorgabe(
+                    "app_update_hinweis", "Updates der App kommen in dieser Edition von der Praxis."
+                )
+            )
+        )
     elif stand is not None and stand.app is not None:
         release = stand.app
         ziel = release.apk_url if android else release.seite
@@ -656,24 +680,32 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
                             else []
                         ),
                         *([karte(titel("Neuigkeiten"), *neuigkeiten)] if neuigkeiten else []),
-                        karte(
-                            titel("Quellen"),
-                            *quellen_zeilen,
-                            ft.Row(
-                                spacing=8,
-                                controls=[
-                                    neue_quelle,
-                                    ft.IconButton(
-                                        ft.Icons.ADD,
-                                        tooltip="Hinzufügen",
-                                        on_click=quelle_hinzufuegen,
+                        # ohne Quellenliste (Web-Fassung: nur Pakete per Link) keine Karte
+                        *(
+                            [
+                                karte(
+                                    titel("Quellen"),
+                                    *quellen_zeilen,
+                                    ft.Row(
+                                        spacing=8,
+                                        controls=[
+                                            neue_quelle,
+                                            ft.IconButton(
+                                                ft.Icons.ADD,
+                                                tooltip="Hinzufügen",
+                                                on_click=quelle_hinzufuegen,
+                                            ),
+                                        ],
                                     ),
-                                ],
-                            ),
-                            hinweis(
-                                "Eine Quelle ist eine Adresse, unter der ein Paketindex liegt — "
-                                "dein eigener Server oder später eine gemeinsame Quelle. Nur https."
-                            ),
+                                    hinweis(
+                                        "Eine Quelle ist eine Adresse, unter der ein Paketindex "
+                                        "liegt — dein eigener Server oder später eine gemeinsame "
+                                        "Quelle. Nur https."
+                                    ),
+                                )
+                            ]
+                            if ist_aktiv("paket_quellen")
+                            else []
                         ),
                         karte(
                             titel("Einstellungen"),

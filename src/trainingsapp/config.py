@@ -93,6 +93,11 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
     # Paketquellen (core/paketquelle.py): Übungspakete online auf neue Stände prüfen.
     # Die Praxis-Edition bekommt ihre Pakete von der Praxis.
     "paket_quellen": {Edition.SOLO},
+    # Ein Paket aus einem Datei-Link fragt beim Start seine Adresse nach einer neueren Fassung
+    # (`paketquelle.pruefen`, Standdatei). Eigener Schalter neben `paket_quellen` (Ben,
+    # 23.11.2026, `docs/plan_web_pakete.md` §2.4): In der Web-Fassung gibt es keine Quellenliste,
+    # aber Pakete per Link vom eigenen Server — und die sollen dort ihre Updates bekommen.
+    "paket_links": {Edition.SOLO},
     # Videos hinter Links in der App laden und abspielen (Stufe 7, Ben 17.11.2026)
     "link_videos": {Edition.SOLO, Edition.PRAXIS},
     # Diagnosemodus: Rohmitschnitt, Zusatzströme, Marken (docs/plan_diagnosemodus.md) — in
@@ -134,7 +139,9 @@ class WebProfil:
 
 WEB: Final[WebProfil] = WebProfil(
     # - ``update_pruefung``: fragte GitHub, einen fremden Server; eine Seite braucht kein Update.
-    # - ``paket_quellen``: der Netzzugriff der App (`urllib`) geht im Browser-Python nicht.
+    # - ``paket_quellen``: Die Quellenliste (Paketindex, auch fremder Server) gibt es im Browser
+    #   nicht — die Seite fragt nur ihren eigenen Server. Einzelne Pakete per Link gehen dort
+    #   seit 23.11.2026 (`ui/browsernetz.py`, Schalter ``paket_links`` bleibt an).
     # - ``hrv_bewertung``: Die Web-Fassung steht unter dem Namen der Praxis und dient dem
     #   Hausaufgabenprogramm — dort gilt die Grenze des Patientenmodus: anzeigen ja, Messwerte
     #   einordnen nein (`docs/recht/00_zweckbestimmung.md`). Stand 14.11.2026 hängt nichts
@@ -162,6 +169,12 @@ WEB: Final[WebProfil] = WebProfil(
         ("profilname", "Gast"),
         ("palette", "nachtblau"),
         ("helligkeit", "hell"),
+        # Seite „Updates“, Karte „App“: Eine Seite hat kein Update zum Installieren
+        (
+            "app_update_hinweis",
+            "Die Seite ist immer auf dem Stand des Servers — neu laden genügt. Pakete, die du "
+            "per Link geholt hast, fragt sie beim Start nach einer neueren Fassung.",
+        ),
     ),
 )
 

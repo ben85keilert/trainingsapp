@@ -197,7 +197,7 @@ MENUE: tuple[Zeile, ...] = (
         ft.Icons.SYSTEM_UPDATE,
         "/einstellungen/updates",
         _updates,
-        schalter=("update_pruefung", "paket_quellen"),
+        schalter=("update_pruefung", "paket_quellen", "paket_links"),
     ),
     Zeile(INHALTE, "Anhänge", ft.Icons.ATTACH_FILE, "/einstellungen/anhaenge", _anhaenge),
     Zeile(INHALTE, "Daten und Sicherung", ft.Icons.BACKUP_OUTLINED, "/einstellungen/daten", _daten),

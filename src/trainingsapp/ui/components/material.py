@@ -38,6 +38,7 @@ from trainingsapp.core.models import (
 )
 from trainingsapp.data.material import MaterialRepo
 from trainingsapp.ui import einheit as einheit_ui
+from trainingsapp.ui.components.bildquelle import bildquelle
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.medienliste import medium_zeile
@@ -202,7 +203,7 @@ def _faellig_inhalt(
                 border_radius=12,
                 clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
                 alignment=ft.Alignment.CENTER,
-                content=ft.Image(src=str(pfad), fit=ft.BoxFit.CONTAIN),
+                content=ft.Image(src=bildquelle(pfad), fit=ft.BoxFit.CONTAIN),
             )
         if stueck is None:
             controls.append(medium_zeile(page, state, x, uebergeben=uebergeben))

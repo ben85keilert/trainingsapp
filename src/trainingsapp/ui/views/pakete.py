@@ -69,7 +69,7 @@ from trainingsapp.core.paketstufe import GROSS, KEINE, STUFE_TEXT, stufen_text
 from trainingsapp.core.paketversion import MODUS_TEXT, UPDATE_MODI, version_text
 from trainingsapp.core.privat import code_text
 from trainingsapp.data.pakete import ARCHIV, KATALOG, PAPIERKORB, Status, Uebungsstand, Vorschau
-from trainingsapp.ui import systemdialog
+from trainingsapp.ui import browsernetz, systemdialog
 from trainingsapp.ui.components.code_dialog import code_dialog
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
@@ -554,6 +554,8 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
         # (importiert oder abgebrochen, `Paketinhalt.raeumen`); Liegengebliebenes räumt der
         # Start (`AppState`)
         arbeit = importverzeichnis()
+        if code:  # im Browser: scrypt nachladen, bevor die Datei mit ihrem Code geöffnet wird
+            await browsernetz.privat_bereit()
         try:
             if pfad:
                 inhalt = paket_oeffnen(

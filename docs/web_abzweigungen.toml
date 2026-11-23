@@ -12,6 +12,7 @@
 # Als Stelle zählt eine Zeile (ohne reine Kommentarzeilen) mit einer dieser Marken:
 #   Python:  im_browser(   "emscripten"   _web   web_verweise(   web_vorgabe(   TRAININGSAPP_WEB
 #            browserspeicher (als Wort: der Speicher im Browser, `ui/browserspeicher.py`)
+#            browsernetz (als Wort: Pakete laden im Browser, `ui/browsernetz.py`)
 #   Dart:    kIsWeb
 #
 # Wer eine Abzweigung baut: zuerst prüfen, ob sie sich als Wert im Web-Profil ausdrücken lässt
@@ -39,7 +40,8 @@ TRAININGSAPP_WEB — als Flet-Web-Server am Rechner hat die App die Erweiterunge
 Speicher im Browser (`ui/browserspeicher.py`, das ganze Modul gibt es nur dort): `einstieg` \
 holt vor `main` das Gespeicherte, `main` startet den Schreibtakt, schreibt beim Wechsel in \
 den Hintergrund und sagt beim Start, wenn nicht gespeichert wird; `notausgang`, wenn die App \
-mit dem Gespeicherten nicht startet."""
+mit dem Gespeicherten nicht startet. (Die Route ``/paket/p/<ordner>`` der Web-Fassung trägt \
+keine Marke: `zeige_route` gibt sie an `paket_link.seitenlink_oeffnen`, dort steht der Zweig.)"""
 test = [
     "tests/test_browserspeicher.py::test_einstieg_in_der_app_ist_main_im_browser_die_huelle",
     "tests/test_browserspeicher.py::test_huelle_holt_erst_und_bietet_bei_kaputtem_stand_das_loeschen_an",
@@ -83,10 +85,77 @@ geraetetest = "T140"
 datei = "src/trainingsapp/ui/views/einstellungen.py"
 stellen = 1
 was = """Karte „Rechtliches“ mit Impressum, Datenschutzerklärung und Quelltext \
-(`config.WEB.verweise`) — in der App gibt es sie nicht."""
+(`config.WEB.verweise`) — in der App gibt es sie nicht. Die Zeile „Updates“ steht auch im \
+Browser (Schalter `paket_links`, seit 23.11.2026)."""
 test = [
     "tests/test_web_abzweigungen.py::test_einstellungen_zeigen_rechtliches_nur_im_browser",
 ]
+
+[[abzweigung]]
+datei = "src/trainingsapp/ui/browsernetz.py"
+stellen = 2
+was = """Pakete laden im Browser (Ben, 23.11.2026, `docs/plan_web_pakete.md`): Das ganze Modul ist die Abzweigung — `ausfuehren` lässt eine Funktion des Kerns in der App im Thread über `urllib` laufen, im Browser (Pyodide, `im_pyodide`) mit vorab über `fetch` geholten Bytes (`vorab`); nur der eigene Server, Obergrenze, scrypt aus ``cryptography`` nachladen (`privat_bereit`). `PyodideNetz` gibt es nur dort."""
+test = [
+    "tests/test_browsernetz.py::test_link_lesen_holt_genau_die_eine_adresse",
+    "tests/test_browsernetz.py::test_fremder_server_wird_nie_gefragt",
+    "tests/test_browsernetz.py::test_pruefen_holt_standdatei_und_bei_fehlender_die_datei_selbst",
+    "tests/test_browsernetz.py::test_in_der_app_laeuft_die_funktion_unveraendert_im_thread",
+    "tests/test_browsernetz.py::test_scrypt_wird_erst_geladen_wenn_ein_privates_paket_da_ist",
+]
+geraetetest = "T155"
+
+[[abzweigung]]
+datei = "src/trainingsapp/core/privat.py"
+stellen = 1
+was = """scrypt für private Pakete: aus `hashlib` — oder, wo das fehlt (Pyodide), aus ``cryptography``, das die Web-Fassung nachlädt. Keine Abfrage „bin ich im Browser?“, es zählt, was die Laufzeit kann."""
+test = [
+    "tests/test_browsernetz.py::test_scrypt_aus_cryptography_rechnet_wie_hashlib",
+    "tests/test_browsernetz.py::test_zu_grosse_schluesselparameter_sind_eine_verfaelschte_datei",
+]
+geraetetest = "T155"
+
+[[abzweigung]]
+datei = "src/trainingsapp/ui/components/paket_link.py"
+stellen = 6
+was = """Link-Import über `browsernetz.ausfuehren` (im Browser nur vom eigenen Server); eine Paketquelle per Link lehnt die Web-Fassung ab (Schalter `paket_quellen`); `seitenlink_oeffnen` für die Route ``#/paket/p/<ordner>`` — in der App führt sie nur nach Hause; im zweiten Tab (`browserspeicher` schreibt nicht) kein Import."""
+test = [
+    "tests/test_ui_browsernetz.py::test_link_import_im_browser_holt_vom_eigenen_server_und_fragt_den_code",
+    "tests/test_ui_browsernetz.py::test_fremder_link_im_browser_wird_abgelehnt_ohne_anfrage",
+    "tests/test_ui_browsernetz.py::test_paketquelle_per_link_gibt_es_in_der_web_fassung_nicht",
+    "tests/test_ui_browsernetz.py::test_seitenlink_laedt_das_paket_fragt_den_code_und_laesst_die_route_nicht_stehen",
+    "tests/test_ui_browsernetz.py::test_seitenlink_im_zweiten_tab_importiert_nicht",
+    "tests/test_ui_browsernetz.py::test_seitenlink_in_der_app_fuehrt_nur_nach_hause",
+]
+geraetetest = "T155"
+
+[[abzweigung]]
+datei = "src/trainingsapp/ui/views/pakete.py"
+stellen = 2
+was = """Datei-Import eines privaten Pakets: vor dem Öffnen mit einem Code lädt die Web-Fassung scrypt nach (`browsernetz.privat_bereit`); in der App geschieht dort nichts."""
+test = [
+    "tests/test_browsernetz.py::test_scrypt_wird_erst_geladen_wenn_ein_privates_paket_da_ist",
+    "tests/test_browsernetz.py::test_scheitert_das_nachladen_sagt_es_der_kern_beim_oeffnen",
+]
+geraetetest = "T155"
+
+[[abzweigung]]
+datei = "src/trainingsapp/ui/views/updates.py"
+stellen = 5
+was = """Prüfung und Laden der Updates über `browsernetz.ausfuehren`. Im Browser ohne Quellenliste und App-Update: `beim_start` fragt nur für Pakete aus einem Datei-Link (Schalter `paket_links`), ohne den Hinweis auf Quellen und GitHub; die Seite zeigt keine Karte „Quellen“ und in der Karte „App“ den Text aus dem Web-Profil (`app_update_hinweis`)."""
+test = [
+    "tests/test_ui_browsernetz.py::test_beim_start_im_browser_kommt_die_neue_fassung_ohne_quellen_und_ohne_hinweis",
+    "tests/test_ui_browsernetz.py::test_beim_start_abgeschaltet_fragt_auch_im_browser_nicht",
+    "tests/test_ui_browsernetz.py::test_updates_seite_im_browser_ohne_quellen_und_mit_eigenem_hinweis",
+]
+
+[[abzweigung]]
+datei = "src/trainingsapp/ui/components/bildquelle.py"
+stellen = 1
+was = """Bilder aus Paketen (Erklärbild, Bewegung, Symbol): in der App liest Flutter die Datei über ihren Pfad, im Browser bekommt `ft.Image` die Bytes — an Pythons Dateisystem kommt Flutter dort nicht heran. Bildfolge der Bewegung und SVG-Symbol sind im Browser nicht angesehen."""
+test = [
+    "tests/test_browsernetz.py::test_bild_aus_dem_paket_in_der_app_als_pfad_im_browser_als_bytes",
+]
+geraetetest = "T155"
 
 [[abzweigung]]
 datei = "erweiterungen/flet_ble/src/flutter/flet_ble/lib/src/ble_service.dart"

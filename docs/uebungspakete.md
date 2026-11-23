@@ -217,6 +217,15 @@ betreffen … vor allem gegen Bots und andere absichern.“ Zwei Schlösser:
   Der Paketmanager zeigt „privat · für Max · x.de/pakete/p/7Hq3…/paket.json“ und **„Zugang
   anzeigen“** (Link und Code für ein zweites Gerät). Große private ZIPs entschlüsselt die App
   über `<Daten>/Import/` — der Klartext liegt dort nur, bis die Rückfrage zu ist.
+- **Im Browser** (Web-Fassung, Ben 23.11.2026, `docs/plan_web_pakete.md`): Liegt die
+  Web-Fassung auf demselben Server wie die Pakete, öffnet
+  `https://<seite>/#/paket/p/<ordner>` das private Paket dort — die Seite lädt
+  `/pakete/p/<ordner>/paket.json` (mit Dateien `paket.zip`), fragt nach dem Code, importiert
+  und fragt beim Start die Standdatei nach neuen Fassungen. `trainingsapp-paket bauen
+  --web-url https://<seite>` schreibt den Link als Zeile „Im Browser“ auf die Zugangskarte
+  (und als zweiten QR-Code `<name>.zugang.web.svg`). Der Ordner steht hinter „#“ — der Browser
+  schickt ihn nicht mit der Seite an den Server —, der Code nie im Link. Pakete von fremden
+  Servern und Paketquellen (Index) lädt die Web-Fassung nicht.
 - **Standdatei** (Durchsicht 10.11.2026): Neben jedem privaten Paket schreibt das Werkzeug
   `paket.stand.json` — Version, Prüfsumme und Größe der verschlüsselten Datei, kein Name, kein
   Inhalt (`paketquelle.stand_url`/`stand_json`). Die Prüfung beim Start fragt für ein Paket aus

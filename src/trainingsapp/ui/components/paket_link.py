@@ -4,8 +4,9 @@ Ben: „Es muss möglich sein, auch Links zu importieren. Die App soll das erken
 Link in den Einstellungen mit hinterlegen, aber das mit einem Dialog gegenfragen und
 Bescheid geben, wo das hinkommt.“ Plan: `docs/plan_import_links_plaene.md` §1.
 
-`link_importieren` lädt den Link (`core.paketquelle.link_lesen`, nur https://, im Thread)
-und fragt je nachdem, was darunter liegt:
+`link_importieren` lädt den Link (`core.paketquelle.link_lesen`, nur https://, im Thread —
+in der Web-Fassung über `ui/browsernetz.py`, nur vom eigenen Server) und fragt je nachdem,
+was darunter liegt:
 
 - **Paketindex** → „Als Quelle eintragen?“ mit dem Ort (Einstellungen → Updates →
   Quellen); eingetragen, geprüft, die Seite Updates geöffnet.
@@ -23,19 +24,23 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import urllib.error
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 import flet as ft
 
-from trainingsapp.config import importverzeichnis
+from trainingsapp.config import importverzeichnis, ist_aktiv
+from trainingsapp.core.pakete import MAX_PAKET_BYTES
 from trainingsapp.core.paketquelle import (
     DATEI,
     QuellenFehler,
     ZugangNoetig,
     link_lesen,
+    privat_pfade,
     url_pruefen,
 )
+from trainingsapp.ui import browsernetz
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.code_dialog import code_dialog
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -68,12 +73,15 @@ async def link_importieren(
         # Eine ZIP geht über eine Datei im Importordner, nicht durch den Arbeitsspeicher (K33);
         # die Rückfrage räumt sie weg, wenn sie zu ist
         arbeit = importverzeichnis()
-        lesen = (
-            functools.partial(link_lesen, url, laden, code, arbeit)
-            if laden is not None
-            else functools.partial(link_lesen, url, code=code, arbeit=arbeit)
-        )
-        art, daten = await asyncio.to_thread(lesen)
+        if laden is not None:
+            art, daten = await asyncio.to_thread(
+                functools.partial(link_lesen, url, laden, code, arbeit)
+            )
+        else:
+            # in der App im Thread über `urllib`, im Browser über `fetch` vom eigenen Server
+            art, daten = await browsernetz.ausfuehren(
+                functools.partial(link_lesen, url, code=code, arbeit=arbeit)
+            )
     except ZugangNoetig:
 
         async def nochmal(eingegeben: str) -> None:
@@ -114,7 +122,60 @@ async def link_importieren(
         )
         return
     name, eintraege = daten
+    if not ist_aktiv("paket_quellen"):
+        # Web-Fassung, Praxis-Edition: keine Quellenliste — nur einzelne Pakete per Link
+        page.show_dialog(
+            ft.SnackBar(
+                ft.Text(
+                    "Unter diesem Link liegt eine Paketquelle. Hier lassen sich nur einzelne "
+                    "Pakete per Link laden."
+                )
+            )
+        )
+        return
     page.show_dialog(quelle_rueckfrage(page, state, url, name, len(eintraege)))
+
+
+async def seitenlink_oeffnen(page: Any, state: AppState, ordner: str) -> None:
+    """Web-Fassung: Die Seite wurde mit ``#/paket/p/<ordner>`` geöffnet (Ben, 23.11.2026,
+    `docs/plan_web_pakete.md` §2.3) — das private Paket dieses Ordners vom eigenen Server laden,
+    nach dem Code fragen, importieren. Ist es schon da, nur seine Seite zeigen. Die Route selbst
+    bleibt nicht stehen: Der Ordner ist der halbe Zugang und gehört nicht in die Adresszeile."""
+    netz = browsernetz.zugang()
+    if netz is None:  # in der App gibt es diese Route nicht
+        await page.push_route("/")
+        return
+    json_pfad, zip_pfad = privat_pfade(ordner)
+    urls = [
+        browsernetz.adresse(f"{browsernetz.QUELLE_PFAD}/{pfad}", netz.ursprung)
+        for pfad in (json_pfad, zip_pfad)
+    ]
+    for paket, _ in state.pakete.alle():
+        if paket.quelle in urls and not paket.entfernt:
+            await page.push_route(f"/pakete/{paket.id}")
+            return
+    await page.push_route("/pakete")
+    speicher = state.browserspeicher
+    if speicher is not None and not speicher.aktiv:
+        # zweiter Tab, voller Speicher: Der Import wäre nach dem Neuladen weg
+        page.show_dialog(
+            ft.SnackBar(
+                ft.Text(
+                    "Hier wird gerade nicht gespeichert — das Paket bitte in dem Fenster "
+                    "öffnen, in dem die Seite schon läuft."
+                )
+            )
+        )
+        return
+    url = urls[0]
+    try:  # mit Dateien liegt das Paket als ZIP dort
+        await netz.holen(url, MAX_PAKET_BYTES)
+    except urllib.error.HTTPError as fehler:
+        if fehler.code == 404:
+            url = urls[1]
+    except (OSError, ValueError):
+        pass  # `link_importieren` sagt es in Worten
+    await link_importieren(page, state, url)
 
 
 def quelle_rueckfrage(
@@ -236,4 +297,11 @@ def import_blatt(
     return blatt
 
 
-__all__ = ["ORT_PAKETE", "ORT_QUELLEN", "import_blatt", "link_importieren", "quelle_rueckfrage"]
+__all__ = [
+    "ORT_PAKETE",
+    "ORT_QUELLEN",
+    "import_blatt",
+    "link_importieren",
+    "quelle_rueckfrage",
+    "seitenlink_oeffnen",
+]

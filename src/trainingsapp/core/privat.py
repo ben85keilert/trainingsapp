@@ -7,7 +7,8 @@ Zufallsnamen (nicht zu erraten, nicht im öffentlichen Index), die **Datei** ist
 **Code** verschlüsselt — 8 Zeichen ohne Verwechsler (`K7QM-9XA2`), getrennt vom Link
 weitergegeben. Der Server prüft nichts; wer die Datei ohne Code hat, sieht Zeichensalat.
 
-Mit Bordmitteln von Python, ohne neues Paket in der App:
+Mit Bordmitteln von Python, ohne neues Paket in der App (im Browser fehlt `hashlib.scrypt`,
+dort rechnet ``cryptography`` dasselbe — `moeglich`):
 
 - **Schlüssel:** scrypt(Code, Salz; N = 2¹⁵, r = 8, p = 1) → 64 Bytes: 32 zum Verschlüsseln, 32
   für die Prüfsumme. scrypt braucht Speicher — Durchprobieren mit Grafikkarten lohnt nicht.
@@ -29,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import importlib.util
 import secrets
 from collections.abc import Iterator
 from pathlib import Path
@@ -44,6 +46,8 @@ _SALZ: Final = 16
 _KOPF: Final = len(MAGIC) + 5 + _SALZ
 _TAG: Final = 32
 _BLOCK: Final = 1 << 20
+#: Mehr Speicher bekommt scrypt nicht — was der Kopf einer Datei darüber verlangt, ist verfälscht
+_MAXMEM: Final = 256 * 1024 * 1024
 #: Die Zeichen eines Codes — ohne 0/O und 1/I, nur Großbuchstaben
 ALPHABET: Final = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 CODE_LAENGE: Final = 8
@@ -72,8 +76,21 @@ class PrivatNichtMoeglich(Exception):
 
 
 def moeglich() -> bool:
-    """Kann diese Python-Umgebung private Pakete öffnen (scrypt aus OpenSSL)?"""
-    return hasattr(hashlib, "scrypt")
+    """Kann diese Python-Umgebung private Pakete öffnen? scrypt kommt aus `hashlib` (OpenSSL)
+    — oder, wo das fehlt, aus dem Paket ``cryptography``: Dem Python im Browser (Pyodide) fehlt
+    `hashlib.scrypt`, die Web-Fassung lädt ``cryptography`` nach, bevor sie ein privates Paket
+    öffnet (`ui/browsernetz.privat_bereit`, `docs/plan_web_pakete.md` §2.2)."""
+    return hasattr(hashlib, "scrypt") or importlib.util.find_spec("cryptography") is not None
+
+
+def _scrypt(code: bytes, salz: bytes, n: int, r: int, p: int) -> bytes:
+    """scrypt → 64 Bytes, aus `hashlib` oder aus ``cryptography`` — beide rechnen dasselbe
+    (`tests/test_privat.py`). Wirft `ValueError` bei Parametern, die das Verfahren ablehnt."""
+    if hasattr(hashlib, "scrypt"):
+        return hashlib.scrypt(code, salt=salz, n=n, r=r, p=p, maxmem=_MAXMEM, dklen=64)
+    from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+
+    return bytes(Scrypt(salt=salz, length=64, n=n, r=r, p=p).derive(code))
 
 
 def ist_privat(kopf: bytes) -> bool:
@@ -129,19 +146,14 @@ def _schluessel(code: str, salz: bytes, log2n: int, r: int, p: int) -> tuple[byt
         raise PrivatNichtMoeglich("Dieses Gerät kann private Pakete nicht öffnen (scrypt fehlt).")
     if not (10 <= log2n <= 20 and 1 <= r <= 16 and 1 <= p <= 4):
         raise CodeFalsch("unbekannte Schlüsselparameter")
+    # Der Kopf ist nicht geprüft, bevor der Schlüssel steht: Parameter, die mehr Speicher
+    # verlangen als erlaubt (etwa N = 2²⁰ mit r = 16), sind eine verfälschte Datei. Die Grenze
+    # steht hier und nicht nur in `hashlib.scrypt(maxmem=…)`, damit sie für beide Wege gilt.
+    if 128 * r * 2**log2n * p > _MAXMEM:
+        raise CodeFalsch("unbekannte Schlüsselparameter")
     try:
-        roh = hashlib.scrypt(
-            code.encode("utf-8"),
-            salt=salz,
-            n=2**log2n,
-            r=r,
-            p=p,
-            maxmem=256 * 1024 * 1024,
-            dklen=64,
-        )
+        roh = _scrypt(code.encode("utf-8"), salz, 2**log2n, r, p)
     except ValueError:
-        # Der Kopf ist nicht geprüft, bevor der Schlüssel steht: Parameter, die mehr Speicher
-        # verlangen als erlaubt (etwa N = 2²⁰ mit r = 16), sind eine verfälschte Datei
         raise CodeFalsch("unbekannte Schlüsselparameter") from None
     return roh[:32], roh[32:]
 

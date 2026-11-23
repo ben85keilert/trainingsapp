@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import sys
 import zipfile
 from pathlib import Path
@@ -40,6 +41,34 @@ INDEX = """<!DOCTYPE html>
 def _ordner(tmp_path: Path, html: str = INDEX) -> Path:
     (tmp_path / "index.html").write_text(html, encoding="utf-8")
     return tmp_path
+
+
+def _pyodide(ordner: Path, pakete: dict[str, tuple[bytes, list[str]]], einlegen: bool) -> None:
+    """``pyodide/`` wie im Web-Ordner: Liste der Pakete (Name → Inhalt, was es braucht) und,
+    mit ``einlegen``, die Dateien selbst."""
+    ziel = ordner / "pyodide"
+    ziel.mkdir(parents=True, exist_ok=True)
+    liste = {}
+    for name, (inhalt, braucht) in pakete.items():
+        liste[name] = {
+            "file_name": f"{name}-1.0.whl",
+            "sha256": hashlib.sha256(inhalt).hexdigest(),
+            "depends": braucht,
+        }
+        if einlegen:
+            (ziel / f"{name}-1.0.whl").write_bytes(inhalt)
+    (ziel / "pyodide-lock.json").write_text(json.dumps({"packages": liste}), encoding="utf-8")
+    (ziel / "package.json").write_text(json.dumps({"version": "9.9.9"}), encoding="utf-8")
+
+
+#: Was `NACHLADEN` nennt, mit dem, was es braucht — wie Pyodide es führt
+KRYPTO = {
+    "cryptography": (b"krypto", ["six", "cffi"]),
+    "cffi": (b"cffi", ["pycparser"]),
+    "six": (b"six", []),
+    "pycparser": (b"pycparser", []),
+    "numpy": (b"numpy", []),  # steht in der Liste, wird aber nicht nachgeladen
+}
 
 
 def _archiv(ordner: Path, namen: list[str]) -> Path:
@@ -111,9 +140,47 @@ def test_fertiger_ordner_ohne_befund(web_bauen, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         web_bauen, "versionierte_dateien", lambda: {"main.py", "trainingsapp/config.py"}
     )
+    _pyodide(ordner, KRYPTO, einlegen=True)
     web_bauen.skripte_auslagern(ordner)
     assert web_bauen.schriften_einlegen(ordner, ablage) == len(schriften)
     assert web_bauen.befunde(ordner) == []
+
+
+def test_pakete_zum_nachladen_mit_allem_was_sie_brauchen(web_bauen, tmp_path) -> None:
+    """``cryptography`` (scrypt für private Pakete) liegt neben Pyodide — mit `cffi`, `six`,
+    `pycparser`, Prüfsummen aus Pyodides eigener Liste; ohne Netz aus der Ablage."""
+    (tmp_path / "web").mkdir()
+    ordner = _ordner(tmp_path / "web")
+    _pyodide(ordner, KRYPTO, einlegen=False)
+    namen = {name for name, _ in web_bauen.nachlade_dateien(ordner)}
+    assert namen == {"cryptography-1.0.whl", "cffi-1.0.whl", "six-1.0.whl", "pycparser-1.0.whl"}
+    fehlend = web_bauen.nachladen_befunde(ordner)
+    assert len(fehlend) == 4 and all("fehlt: pyodide/" in f for f in fehlend)
+
+    ablage = tmp_path / "ablage"
+    ablage.mkdir()
+    for name in ("cryptography", "cffi", "six", "pycparser"):
+        inhalt = KRYPTO[name][0]
+        (ablage / hashlib.sha256(inhalt).hexdigest()).write_bytes(inhalt)
+    assert web_bauen.nachladen_einlegen(ordner, ablage) == 4
+    assert web_bauen.nachladen_befunde(ordner) == []
+    assert not (ordner / "pyodide" / "numpy-1.0.whl").exists()
+
+    (ordner / "pyodide" / "cffi-1.0.whl").write_bytes(b"verfaelscht")
+    assert web_bauen.nachladen_befunde(ordner) == ["Prüfsumme stimmt nicht: pyodide/cffi-1.0.whl"]
+    assert web_bauen.nachladen_einlegen(ordner, ablage) == 4  # legt die richtige wieder hin
+    assert web_bauen.nachladen_befunde(ordner) == []
+
+
+def test_pakete_zum_nachladen_ohne_liste_oder_unbekannt_ist_ein_befund(web_bauen, tmp_path) -> None:
+    ordner = _ordner(tmp_path)
+    (befund,) = web_bauen.nachladen_befunde(ordner)
+    assert "nicht prüfbar" in befund and "pyodide-lock.json" in befund
+    _pyodide(ordner, {"numpy": (b"numpy", [])}, einlegen=True)
+    (befund,) = web_bauen.nachladen_befunde(ordner)
+    assert "kennt das Paket „cryptography“ nicht" in befund
+    with pytest.raises(ValueError, match="cryptography"):
+        web_bauen.nachladen_einlegen(ordner, tmp_path / "ablage")
 
 
 def test_stand_ohne_git_ist_nie_sauber(web_bauen, monkeypatch) -> None:

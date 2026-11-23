@@ -92,6 +92,7 @@ from trainingsapp.core import varianten
 from trainingsapp.core.anhaenge import AUDIO, DOKUMENT, Ziel, ziel_lesen
 from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
+from trainingsapp.core.paketquelle import ordner_aus_route
 from trainingsapp.core.plan_durchlauf import startet_als_workout
 from trainingsapp.core.result_spec import ResultSpec
 from trainingsapp.core.timer import EINMAL
@@ -103,6 +104,7 @@ from trainingsapp.ui.components import diagnose_punkt, marken_leiste
 from trainingsapp.ui.components.dialoge import dialog_offen
 from trainingsapp.ui.components.dialoge import schliessen as dialog_schliessen
 from trainingsapp.ui.components.fokus import FOKUS_ANSICHT
+from trainingsapp.ui.components.paket_link import seitenlink_oeffnen
 from trainingsapp.ui.components.startleiste import (
     leiste_auffrischen,
     leiste_einsetzen,
@@ -1126,6 +1128,10 @@ def main(page: ft.Page, browserspeicher: Browserspeicher | None = None) -> None:
                 gebaut["nachholen"] = True
                 page.run_task(nachholen)
             return
+        # Web-Fassung: mit dem Link auf ein privates Paket geöffnet (`#/paket/p/<ordner>`) —
+        # laden, nach dem Code fragen; die Route wechselt dabei auf den Paketmanager
+        if (ordner := ordner_aus_route(page.route)) is not None and gebaut["route"] != page.route:
+            page.run_task(seitenlink_oeffnen, page, state, ordner)
         erster = gebaut["route"] is None
         gebaut["route"] = page.route
         state.route_nummer += 1

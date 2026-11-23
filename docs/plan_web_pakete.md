@@ -1,8 +1,10 @@
 # Web-Fassung: Pakete per Link laden, auch private
 
-Stand 23.11.2026 — **Plan, nichts gebaut.** Ergänzt `docs/plan_web.md` („Was noch fehlt“:
-„Pakete laden: ein Netzadapter für den Browser; für private Pakete fehlt der Laufzeit
-`hashlib.scrypt`“).
+Stand 23.11.2026 — **Stufen 0–5 gebaut und im Browser gemessen** (§6); am Handy offen
+(Gerätetest T155), auf dem Server erst nach einem neuen Web-Build. Ergänzt `docs/plan_web.md`
+(„Was noch fehlt“: „Pakete laden: ein Netzadapter für den Browser; für private Pakete fehlt
+der Laufzeit `hashlib.scrypt`“). §1–§4 sind der Plan, wie er vor dem Bauen stand; wo das
+Gebaute abweicht, steht es in §6.
 
 ## 0. Wozu
 
@@ -150,3 +152,56 @@ Stufe 1–3 sind das, was der Auftrag braucht (ein Kurs, Pläne, ohne Dateien). 
 
 Öffentliche Paketquellen (Index) und fremde Server im Browser; Videos aus Paketen in der
 Web-Fassung abspielen (`link_videos`, T139); ein neues Verschlüsselungsverfahren.
+
+## 6. Gebaut und gemessen (23.11.2026)
+
+**Stufe 0 — gemessen** (kopfloses Chromium am Laptop, Pyodide 314.0.7 / Python 3.14.2 aus dem
+Build 0.3.94, hinter `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src
+'self'; …`):
+
+| Frage | Ergebnis |
+|---|---|
+| `hashlib.scrypt` im Browser | fehlt — ebenso `hashlib.pbkdf2_hmac`; SHAKE-256 und HMAC sind da |
+| `fetch` einer Datei unter `/pakete/`, binär | geht (9 ms lokal); fremder Server und eine Weiterleitung dorthin: von der CSP blockiert |
+| `cryptography` nachladen | 47.0.0 aus Pyodides Liste, mit `cffi`, `six`, `pycparser` — zusammen 2,4 MB, 0,7 s |
+| scrypt N = 2¹⁵, r = 8 | 0,14–0,20 s; derselbe Schlüssel wie `hashlib` (eine Datei des Werkzeugs entschlüsselt) |
+| `asyncio.to_thread` in Pyodide | läuft (ohne echten Thread) |
+| Route hinter „#“ beim Start | Flet liest sie; auch ein Wechsel bei offener Seite kommt als Routenwechsel an |
+
+Gewählt: **Weg A** (`cryptography`). Nicht im App-Archiv, sondern **neben Pyodide**
+(`scripts/web_bauen.py`, `NACHLADEN`): beim Bauen von jsdelivr geladen, Prüfsumme aus Pyodides
+`pyodide-lock.json`; die Seite lädt es erst, wenn ein privates Paket geholt ist — wer keins
+hat, lädt die 2,4 MB nie.
+
+**Was gebaut ist:**
+
+| Stufe | Wo | Abweichung vom Plan |
+|---|---|---|
+| 1 Link | `ui/browsernetz.py` (`vorab`, `ausfuehren`, `PyodideNetz`), `components/paket_link.link_importieren` | Obergrenze im Browser 40 MB je Datei (`MAX_BYTES`), höchstens 64 Adressen je Lauf; eine Paketquelle (Index) per Link lehnt die Web-Fassung mit einem Satz ab |
+| 2 Privat | `core/privat._scrypt`, `moeglich`; `browsernetz.privat_bereit` | geladen wird beim Holen eines privaten Pakets (Kopf `TAPRIV`), beim Datei-Import mit dem Code; die Speichergrenze von scrypt steht jetzt vor dem Rechnen, für beide Wege |
+| 3 Ein Link | `core/paketquelle.seitenroute`, `ordner_aus_route`; `paket_link.seitenlink_oeffnen`; `ui/app.py:zeige_route`; `trainingsapp-paket bauen --web-url` | die Route bleibt nicht stehen (`#/pakete` bzw. die Paketseite); zweiter QR-Code `<name>.zugang.web.svg`; im zweiten Tab kein Import |
+| 4 Updates | `views/updates.py` (`beim_start`, `pruefung_ausfuehren`), Schalter `paket_links` | `paket_quellen` bleibt im Browser aus, `paket_links` ist an; die Seite „Updates“ gibt es jetzt auch im Browser (ohne Karte „Quellen“, eigener Text zur App); kein Hinweisdialog — gefragt wird nur der eigene Server. Auch in der App werden Datei-Links jetzt geprüft, wenn die Quellenliste leer ist |
+| 5 Dateien | `components/bildquelle.py` in `paketmedium`, `material`, `bewegungsbild`, `uebungsbild` | Befund beim Messen: Flutter fragte den Dateipfad beim Server an (404), das Bild blieb leer — im Browser bekommt `ft.Image` die Bytes |
+
+**Gemessen im Browser** (Probekopie des Builds 0.3.94 mit diesem Quelltext als App-Archiv,
+Pakete mit `trainingsapp-paket bauen --web-url` gebaut):
+
+| Probe | Ergebnis |
+|---|---|
+| Seite mit `#/paket/p/<ordner>` öffnen | Paketmanager, „Privates Paket — Code?“; Adresszeile danach `#/pakete` |
+| Code eingeben | `cryptography` kommt vom eigenen Server, Rückfrage „… importieren?“ mit Kurs und Plan, importiert |
+| Version heben, bauen, Seite neu laden | Anfragen: `paket.stand.json`, dann `paket.json`; das Paket steht auf 0.2.0, ohne Rückfrage, ohne erneutes Laden von `cryptography` bei unverändertem Stand |
+| derselbe Link noch einmal | Paketseite, keine Anfrage außer den Standdateien |
+| privates Paket mit Bild (ZIP, 44 kB) | erst `paket.json` → 404, dann `paket.zip`; importiert, das Bild erscheint (vor `bildquelle`: leer) |
+| Anfragen an fremde Server | keine |
+
+**Nicht gemessen:** am Handy, Safari, Firefox; Bildfolge einer Bewegung und SVG-Symbol aus
+einem Paket; große ZIPs nahe der Grenze; der Build selbst (`flet build web` und das Einlegen
+der Pakete sind nur über `nachladen_einlegen` an der Probekopie gelaufen) — T155.
+
+**Zu §4:** (1) Braucht-Angabe — das Werkzeug schreibt die Adresse des gebrauchten Pakets in
+den Kopf (`paket.braucht[].quelle`); „… laden“ im Kapitel oder Plan geht im Browser über
+denselben Weg, weil die Datei auf demselben Server liegt. Das eingebaute Standardpaket der
+Seite ist das des Builds; verlangt ein Paket ein neueres, steht es dort als „wartet“.
+(2) gemeinsame Geräte und (3) Datenschutzerklärung: **offen, Bens Entscheidung** — vor dem
+Hochladen eines Builds mit diesem Stand. (4) zweiter Tab: gebaut. (5) Gerätetest: T155.

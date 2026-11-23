@@ -17,6 +17,7 @@ from trainingsapp.core.models import MediaKind
 from trainingsapp.core.paketmedien import MIME, ORDNER, art_fuer, dateiname, name_lesen
 from trainingsapp.core.verkleinern import BILD_ENDUNGEN
 from trainingsapp.ui import einheit as einheit_ui
+from trainingsapp.ui.components.bildquelle import bildquelle
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.tonspieler import Tonspieler
 from trainingsapp.ui.components.videospieler import Videospieler
@@ -104,7 +105,7 @@ def paketmedium_view(page: Any, state: AppState, basis: str, datei_name: str) ->
             min_scale=1,
             max_scale=5,
             expand=True,
-            content=ft.Image(src=str(pfad), fit=ft.BoxFit.CONTAIN),
+            content=ft.Image(src=bildquelle(pfad), fit=ft.BoxFit.CONTAIN),
         )
     elif spieler is not None:
         spieler.anlegen()

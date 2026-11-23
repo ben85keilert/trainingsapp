@@ -59,7 +59,7 @@ Funktionen `False`:
 | Funktion | Warum nicht |
 |---|---|
 | `update_pruefung` | fragte GitHub; eine Seite braucht kein Update |
-| `paket_quellen` | der Netzzugriff der App (`urllib`) geht im Browser-Python nicht |
+| `paket_quellen` | die Quellenliste (Paketindex, auch fremde Server) gibt es im Browser nicht — die Seite fragt nur ihren eigenen Server. **Einzelne Pakete per Link gehen** (seit 23.11.2026, `ui/browsernetz.py`, Schalter `paket_links` bleibt an; `docs/plan_web_pakete.md`) |
 | `hrv_bewertung` | die Web-Fassung dient dem Hausaufgabenprogramm — Grenze des Patientenmodus: anzeigen ja, Messwerte einordnen nein (`docs/recht/00_zweckbestimmung.md`). Stand 14.11.2026 hängt in der Oberfläche nichts an dem Schalter |
 | `geraete_sicherung` | Androids Geräte-Backup gibt es dort nicht |
 | `link_videos` | Videos hinter Links lädt die App über `urllib` (Stufe 7, `docs/plan_rueckweg_handy.md`) — das geht im Browser-Python nicht; ein Videolink öffnet dort wie bisher im Browser |
@@ -115,8 +115,11 @@ Tabelle oben (der Test prüft, dass jede Funktion aus `WEB.ohne` dort steht).
   und App sichtbar und ist überall als „experimentell“ gekennzeichnet (`core/experimentell.py`
   — keine Abzweigung für den Browser). Der Schalter bleibt für alles, was Messwerte künftig
   einordnen würde.
-- **Pakete laden:** ein Netzadapter für den Browser; für private Pakete fehlt der Laufzeit
-  `hashlib.scrypt` (`core/privat.moeglich()` meldet es). Plan dafür (23.11.2026): `docs/plan_web_pakete.md`.
+- **Pakete laden:** erledigt am 23.11.2026 — `docs/plan_web_pakete.md`: Pakete per Link vom
+  eigenen Server (`ui/browsernetz.py`), private mit scrypt aus ``cryptography``
+  (nachgeladen, wenn ein privates Paket da ist), der Seitenlink ``#/paket/p/<ordner>``, Updates
+  über die Standdatei, Bilder aus Paketen (`ui/components/bildquelle.py`). Offen: Paketquellen
+  (Index), fremde Server, Videos aus Paketen; Gerätetest T155.
 - Kamera, Mikrofon und Ortung hängen am Server: Eine `Permissions-Policy` kann sie sperren.
 
 ## 3. Bluetooth im Browser (Web Bluetooth)
@@ -156,8 +159,9 @@ Sekundentakt und Pulsintervalle; keine Anfrage an fremde Server von der Hauptsei
 unter `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'
 'unsafe-inline'; …` ohne Verstoß.
 
-Nicht geprüft: Bluetooth am Handy über HTTPS, H10 mit EKG, iPhone, Videos und Bilder aus
-Paketen, lange Messungen — Gerätetest T139.
+Nicht geprüft: Bluetooth am Handy über HTTPS, H10 mit EKG, iPhone, Videos aus Paketen, lange
+Messungen — Gerätetest T139. Pakete per Link und Bilder aus Paketen: gemessen am 23.11.2026
+(`docs/plan_web_pakete.md` §3), am Handy offen (T155).
 
 ## 5. Speichern im Browser
 

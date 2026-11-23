@@ -20,6 +20,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import SYMBOL, Media, MediaSource
+from trainingsapp.ui.components.bildquelle import bildquelle
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.state import AppState
 
@@ -57,7 +58,7 @@ def uebungsbild(
     pfad = paketsymbol_pfad(state, medien)
     if pfad is not None and pfad.endswith(".svg"):
         return ft.Image(
-            src=pfad,
+            src=bildquelle(pfad),
             width=groesse,
             height=groesse,
             fit=ft.BoxFit.CONTAIN,
@@ -72,7 +73,9 @@ def uebungsbild(
             border_radius=groesse * ECKE,
             clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
             opacity=opacity,
-            content=ft.Image(src=pfad, width=groesse, height=groesse, fit=ft.BoxFit.COVER),
+            content=ft.Image(
+                src=bildquelle(pfad), width=groesse, height=groesse, fit=ft.BoxFit.COVER
+            ),
         )
     return ft.Icon(symbol(icon_key), size=groesse, opacity=opacity, color=color)
 

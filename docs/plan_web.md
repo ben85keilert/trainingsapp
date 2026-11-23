@@ -116,7 +116,7 @@ Tabelle oben (der Test prüft, dass jede Funktion aus `WEB.ohne` dort steht).
   — keine Abzweigung für den Browser). Der Schalter bleibt für alles, was Messwerte künftig
   einordnen würde.
 - **Pakete laden:** ein Netzadapter für den Browser; für private Pakete fehlt der Laufzeit
-  `hashlib.scrypt` (`core/privat.moeglich()` meldet es).
+  `hashlib.scrypt` (`core/privat.moeglich()` meldet es). Plan dafür (23.11.2026): `docs/plan_web_pakete.md`.
 - Kamera, Mikrofon und Ortung hängen am Server: Eine `Permissions-Policy` kann sie sperren.
 
 ## 3. Bluetooth im Browser (Web Bluetooth)

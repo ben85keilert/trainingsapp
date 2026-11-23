@@ -68,6 +68,11 @@ from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.kursbau import (
     AUSFUEHRUNG_WAHL,
     EIGEN,
+    F_ALT,
+    M_VORHER,
+    M_WDH,
+    M_ZEIT,
+    MEDIEN_STELLEN,
     OHNE,
     SKALA_FORMEN,
     STANDARD,
@@ -84,6 +89,8 @@ from trainingsapp.core.kursbau import (
     faktor_text,
     folgen_anwenden,
     kurs_kopie,
+    medium_an_stelle,
+    medium_stelle,
     neue_id,
     timer_einbetten,
     vergebene_ids,
@@ -95,6 +102,8 @@ from trainingsapp.core.kursbloecke import (
     ARTEN,
     AUSWAHL,
     BAUSTEINE,
+    BRAUCHT,
+    BRAUCHT_MESSUNG,
     FRAGE,
     MEDIUM,
     MENGE,
@@ -110,7 +119,9 @@ from trainingsapp.core.kursbloecke import (
     ZU_ENDE,
     Antwort,
     Block,
+    Wenn,
     abnehmer,
+    antwort_name,
 )
 from trainingsapp.core.kurse import (
     FREISCHALTUNGEN,
@@ -139,12 +150,14 @@ from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte, titel
+from trainingsapp.ui.components.kursfrage_form import FrageForm, FragenListe
 from trainingsapp.ui.components.kursplan_bild import kursplan_bild_karte
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.takt_blatt import takt_blatt
 from trainingsapp.ui.components.timer_editor import timer_editor
 from trainingsapp.ui.components.timer_zeile import neuer_timer
+from trainingsapp.ui.components.wenn_form import wenn_fehler, wenn_teil
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 
@@ -168,6 +181,14 @@ ART_SYMBOL: dict[str, ft.IconData] = {
     PLAN_WEG: ft.Icons.ALT_ROUTE,
     PLAN_ENTFERNEN: ft.Icons.REMOVE_CIRCLE_OUTLINE,
     PLAN_TAUSCHEN: ft.Icons.SWAP_HORIZ,
+}
+#: Der Hinweis unter einer Frage im Kapitel — wahr: die alte Verständnisfrage
+FRAGE_HINWEIS: dict[bool, str] = {
+    True: "Die Frage erklärt — nichts wird gespeichert oder gezählt.",
+    False: (
+        "Die Antwort wird gespeichert — nur auf dem Gerät, ohne Wertung. Mit „Folge“ hängt "
+        "daran ein Text, ein Medium oder eine Änderung am Plan („Nur wenn“ an dem Block)."
+    ),
 }
 KEIN_KURSPLAN = (
     "Der Kurs baut keinen Plan — Bausteine bewirken dann nichts. Einschalten: zurück zu „Kurs "
@@ -378,7 +399,7 @@ def block_fehler(block: Block) -> str | None:
         or not (ist_paketmedium(block.medium) or links.erlaubt(block.medium.uri))
     ):
         return "Ein Medium braucht eine https-Adresse oder eine Datei."
-    if block.art == FRAGE and (not block.titel or not block.antworten):
+    if block.art == FRAGE and (not block.titel or not (block.antworten or block.frage)):
         return "Eine Frage braucht einen Text und mindestens eine Antwort."
     if block.art == TEST and not block.uebung and not block.aus:
         return "Ein Test braucht eine Übung."
@@ -1451,6 +1472,29 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             multiline=True,
             min_lines=3,
         )
+
+        # Die Frage in den Arten des Ablaufs (Ben, 23.11.2026, `docs/plan_kurs_uebungen.md` §4):
+        # Skala · Ja/Nein · Auswahl — ihre Antwort wird gespeichert und kann eine Folge haben.
+        # Die alte Verständnisfrage (Antworten mit * und Hinweis) bleibt die Vorgabe
+        def frage_art_gewaehlt(art: str) -> None:
+            antworten.visible = art == F_ALT
+            frage_hinweis.value = FRAGE_HINWEIS[art == F_ALT]
+            frage_folge.visible = art != F_ALT
+            for c in (antworten, frage_hinweis, frage_folge):
+                with contextlib.suppress(Exception):
+                    c.update()
+
+        frage_form = FrageForm(
+            block.frage, kennung="block_frage", mit_alt=True, bei_art=frage_art_gewaehlt
+        )
+        antworten.visible = block.frage is None
+        frage_hinweis = hinweis(FRAGE_HINWEIS[block.frage is None])
+        #: „Nur wenn …“ — die Bedingungen des Blocks (`core.kursbloecke.Wenn`); die Liste des
+        #: Entwurfs, die der Teil an Ort und Stelle ändert
+        wenn_liste: list[Wenn] = list(block.wenn)
+        wenn_feld = wenn_teil(sicht().fragen(block.id), wenn_liste, kennung="block_wenn")
+        #: Was beim Lesen der Fragen nicht ging — „Übernehmen“ zeigt es
+        lesefehler: dict[str, str] = {}
         # Der Test misst eine feste Übung — oder „die gewählte“ einer Auswahl dieses oder (im
         # Kursplan-Kurs) eines früheren Kapitels (Ben, 16.11.2026; `Block.aus`), auch einer noch
         # ungespeicherten
@@ -1578,6 +1622,162 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 ],
             ),
         )
+        # -- Übung machen: Medien, Sensor, Fragen am Lauf (Ben, 23.11.2026) ------------------
+        lauf_medien: list[Media] = list(block.medien)
+        medien_spalte = ft.Column(spacing=6, tight=True, data="lauf_medien")
+
+        def medien_zeichnen() -> None:
+            zeilen: list[ft.Control] = []
+            for n, m in enumerate(lauf_medien):
+                stelle_jetzt, zahl_jetzt = medium_stelle(m)
+                wo = ft.Dropdown(
+                    value=stelle_jetzt,
+                    options=[ft.DropdownOption(key=k, text=t) for k, t in MEDIEN_STELLEN.items()],
+                    dense=True,
+                    expand=True,
+                    data=("lauf_medium_stelle", n),
+                )
+                wie_viel = ft.TextField(
+                    value=str(zahl_jetzt or ""),
+                    width=72,
+                    dense=True,
+                    keyboard_type=ft.KeyboardType.NUMBER,
+                    visible=stelle_jetzt in (M_ZEIT, M_WDH),
+                    data=("lauf_medium_zahl", n),
+                )
+
+                def gestellt(
+                    _e: Any = None, n: int = n, wo: Any = wo, zahl: Any = wie_viel
+                ) -> None:
+                    try:
+                        wert = int(float(str(zahl.value or "0").replace(",", ".")))
+                    except ValueError:
+                        wert = 0
+                    lauf_medien[n] = medium_an_stelle(lauf_medien[n], str(wo.value), wert)
+                    frisch(medien_spalte, medien_zeichnen)
+
+                def weg(_e: Any = None, n: int = n) -> None:
+                    del lauf_medien[n]
+                    frisch(medien_spalte, medien_zeichnen)
+
+                wo.on_select = gestellt
+                wie_viel.on_blur = gestellt
+                zeilen.append(
+                    ft.Column(
+                        spacing=2,
+                        tight=True,
+                        controls=[
+                            ft.Text(m.title or m.uri, size=13, max_lines=1),
+                            ft.Row(
+                                spacing=6,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                controls=[
+                                    wo,
+                                    wie_viel,
+                                    ft.IconButton(
+                                        ft.Icons.CLOSE,
+                                        tooltip="Medium herausnehmen",
+                                        on_click=weg,
+                                        data=("lauf_medium_weg", n),
+                                    ),
+                                ],
+                            ),
+                        ],
+                    )
+                )
+            medien_spalte.controls = zeilen
+
+        def lauf_medium_dazu(m: Media) -> None:
+            if all(x.uri != m.uri for x in lauf_medien):
+                lauf_medien.append(medium_an_stelle(m, M_VORHER))
+                frisch(medien_spalte, medien_zeichnen)
+
+        async def lauf_medium_datei() -> None:
+            pfad = await paketdatei.datei_waehlen(page)
+            if pfad is None:
+                return
+            try:
+                name = await paketdatei.ablegen(state, pfad, pfad.suffix)
+            except (NichtBereinigbar, OSError) as fehler:
+                meldung.value, meldung.visible = f"Nicht übernommen: {fehler}", True
+                with contextlib.suppress(Exception):
+                    meldung.update()
+                return
+            state.pakete.ablage.entwurf_merken(name)  # bis der Kurs gespeichert ist
+            lauf_medium_dazu(paketdatei.medium_fuer(name, pfad.stem))
+
+        lauf_link = ft.TextField(
+            label="Link (https://…)",
+            dense=True,
+            expand=True,
+            keyboard_type=ft.KeyboardType.URL,
+            data="lauf_medium_link",
+        )
+
+        def lauf_link_dazu(_e: Any = None) -> None:
+            adresse_neu = str(lauf_link.value or "").strip()
+            if not links.erlaubt(adresse_neu):
+                meldung.value, meldung.visible = "Ein Link braucht eine https-Adresse.", True
+                with contextlib.suppress(Exception):
+                    meldung.update()
+                return
+            lauf_link.value = ""
+            with contextlib.suppress(Exception):
+                lauf_link.update()
+            lauf_medium_dazu(Media(uri=adresse_neu))
+
+        medien_zeichnen()
+        lauf_medien_teil = ft.Column(
+            spacing=8,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            controls=[
+                ft.Text("MEDIEN AM LAUF", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                medien_spalte,
+                ft.Row(
+                    spacing=6,
+                    controls=[
+                        lauf_link,
+                        ft.IconButton(
+                            ft.Icons.ADD_LINK,
+                            tooltip="Link dazu",
+                            on_click=lauf_link_dazu,
+                            data="lauf_medium_link_dazu",
+                        ),
+                    ],
+                ),
+                ft.Row(
+                    controls=[
+                        medium_dazu.menue(
+                            page,
+                            state,
+                            medium_dazu.Wege(datei=lauf_medium_datei, vorhandenes=lauf_medium_dazu),
+                            text="Datei oder vorhandenes Medium",
+                            vorhandene=lambda: medium_dazu.vorrat_von(state),
+                            kennung="lauf_medium_dazu",
+                        )
+                    ]
+                ),
+                hinweis(
+                    "Die Medien der Übung zeigt der Lauf ohnehin — diese kommen dazu. Ein Medium "
+                    "für eine bestimmte Antwort ist ein Block „Medium“ mit „Nur wenn“."
+                ),
+            ],
+        )
+        sensor = ft.Checkbox(
+            label=f"Startet erst mit: {BRAUCHT[BRAUCHT_MESSUNG]}",
+            value=BRAUCHT_MESSUNG in block.braucht,
+            data="test_braucht",
+        )
+        fragen_liste = FragenListe(
+            block.fragen,
+            block.fragen_vorher,
+            block.ziele,
+            # ein festes Ziel schlägt eine Antwort nur vor, wo aus dem Lauf ein Ziel wird
+            mit_zielen=bool(nehmer or not nur_liefern),
+            folge=lambda frage_id: folge_von(frage_id),
+        )
+
         vorschau_spalte = ft.Column(spacing=6, tight=True)
         vorschau_kasten = ft.Container(
             padding=14,
@@ -1655,9 +1855,26 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 neuer.text = ""
             else:
                 neuer.titel = wort
-            if block.art == FRAGE:
+            neuer.wenn = list(wenn_liste)
+            lesefehler.clear()
+            if block.art == FRAGE and frage_form.art_jetzt == F_ALT:
+                neuer.frage = None
                 neuer.antworten = antworten_lesen(str(antworten.value or ""))
+            elif block.art == FRAGE:
+                gelesen = frage_form.lesen(wort)
+                if isinstance(gelesen, str):
+                    lesefehler["frage"] = gelesen
+                else:
+                    # die Antwort steht unter der Block-ID — die Frage trägt sie
+                    neuer.frage, neuer.antworten = replace(gelesen[0], id=neuer.id), []
             if block.art == TEST:
+                neuer.medien = list(lauf_medien)
+                neuer.braucht = [BRAUCHT_MESSUNG] if sensor.value else []
+                am_lauf = fragen_liste.lesen()
+                if isinstance(am_lauf, str):
+                    lesefehler["fragen"] = am_lauf
+                else:
+                    neuer.fragen, neuer.fragen_vorher, neuer.ziele = am_lauf
                 neuer.uebung, neuer.aus = uebung_jetzt()
                 neuer.feld = str(feld.value or "hold")
                 neuer.faktor = faktor_jetzt()
@@ -2112,9 +2329,14 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             kopf.on_blur = vorschau_neu  # die Aufforderung ist die Überschrift der Testkarte
             test_zeichnen()
 
-        def uebernehmen(_e: Any = None) -> None:
+        nach_dem_block = Nachher()
+
+        def uebernehmen(_e: Any = None, *, danach: Callable[[Block], Any] | None = None) -> None:
+            """„Übernehmen“. ``danach``: läuft mit dem übernommenen Block, sobald der Dialog
+            zu ist („+ Folge“ öffnet dann die Wahl, was folgen soll)."""
             neuer = entwurf()
-            grund = block_fehler(neuer)
+            grund = block_fehler(neuer) or next(iter(lesefehler.values()), None)
+            grund = grund or wenn_fehler(neuer.wenn)
             if grund is None and block.art == TEST:
                 grund = wahl_jetzt().fehler()
             if grund is not None:
@@ -2127,17 +2349,47 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 bloecke.append(neuer)
             else:
                 bloecke[bloecke.index(stelle if stelle is not None else block)] = neuer
+            if danach is not None:
+                nach_dem_block.danach(lambda: danach(neuer))
             schliessen(dialog)
             listen_frisch()
 
+        def folge_von(frage_id: str = "") -> None:
+            """„+ Folge“ an einer Frage: Der Block wird übernommen, dann fragt ein Dialog, was
+            folgen soll — ein Text, ein Medium oder (im Kurs mit Kursplan) eine Änderung am
+            Plan. Der neue Block trägt die Bedingung auf diese Frage; bei welcher Antwort er
+            gilt, wählt man in seinem „Nur wenn“."""
+
+            def weiter(fertig: Block) -> None:
+                name = antwort_name(fertig.id, frage_id) if frage_id else fertig.id
+                folge_dialog(name)
+
+            uebernehmen(danach=weiter)
+
+        frage_folge = ft.Row(
+            visible=block.frage is not None,
+            controls=[
+                ft.TextButton(
+                    "Folge",
+                    icon=ft.Icons.ADD,
+                    tooltip="Was bei einer Antwort folgt: ein Text, ein Medium, eine Änderung "
+                    "am Plan",
+                    on_click=lambda _e=None: folge_von(),
+                    data="block_frage_folge",
+                )
+            ],
+        )
         felder: dict[str, list[ft.Control]] = {
-            TEXT: [kopf, text],
-            MEDIUM: [kopf, adresse, datei_text, medium_wege, beschriftung],
+            TEXT: [kopf, text, wenn_feld],
+            MEDIUM: [kopf, adresse, datei_text, medium_wege, beschriftung, wenn_feld],
             FRAGE: [
                 kopf,
                 text,
+                frage_form.control,
                 antworten,
-                hinweis("Die Frage erklärt — nichts wird gespeichert oder gezählt."),
+                frage_hinweis,
+                frage_folge,
+                wenn_feld,
             ],
             # Der Test (Skizzen T5 und F1): unter der Übung die Vorgabe, dann „So läuft der
             # Test“ (Uhr · Takt · Ausführung · Hinweis vor dem Start), was der Lauf misst, was
@@ -2184,6 +2436,10 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 test_hinweis,
                 wirkung,
                 vorschau_kasten,
+                lauf_medien_teil,
+                sensor,
+                fragen_liste.control,
+                wenn_feld,
             ],
             AUSWAHL: [
                 kopf,
@@ -2199,6 +2455,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                     else "Ab zwei Gewählten stehen sie im Workout als Wege hinter der "
                     "genannten Planübung."
                 ),
+                wenn_feld,
             ],
         }
         inhalt = ft.Column(
@@ -2220,6 +2477,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             inset_padding=ft.Padding.symmetric(horizontal=24, vertical=24)
             if block.art == TEST
             else None,
+            on_dismiss=nach_dem_block.bei_schliessen,
             actions=[
                 ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
                 ft.FilledButton("Übernehmen", on_click=uebernehmen, data="block_uebernehmen"),
@@ -2390,6 +2648,55 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             block_dialog(Block(art), neu=True)
 
         return handler
+
+    def folge_dialog(name: str) -> None:
+        """„Was soll folgen?“ — nach „+ Folge“ an einer Frage (Ben, 23.11.2026: „Es wird etwas
+        gefragt, das hat eine Folge. Plan ändern, Medium abspielen usw.“). Jede Wahl legt
+        einen neuen Block oder Baustein dieses Kapitels an, der die Bedingung auf die Frage
+        ``name`` schon trägt; bei welcher Antwort er gilt, wählt man in seinem Formular unter
+        „Nur wenn“. Eine Änderung am Plan gibt es nur im Kurs mit Kursplan."""
+        nachher = Nachher()
+        dialog: ft.AlertDialog
+
+        def anlegen(art: str) -> Callable[..., None]:
+            def handler(_e: Any = None) -> None:
+                def oeffnen() -> None:
+                    if art in BAUSTEINE:
+                        stein = neuer_baustein(art)
+                        stein.wenn = [Wenn(name)]
+                        baustein_oeffnen(stein, neu=True)
+                    else:
+                        block_dialog(Block(art, wenn=[Wenn(name)]), neu=True)
+
+                nachher.danach(oeffnen)
+                schliessen(dialog)
+
+            return handler
+
+        arten = [(TEXT, "Text zeigen"), (MEDIUM, "Medium zeigen")]
+        if baut_plan:
+            arten += [(art, f"Plan ändern: {titel_}") for art, titel_ in BAUSTEINE.items()]
+        dialog = ft.AlertDialog(
+            title=ft.Text("Was soll folgen?"),
+            content=ft.Column(
+                tight=True,
+                spacing=0,
+                scroll=ft.ScrollMode.AUTO,
+                controls=[
+                    ft.ListTile(
+                        leading=ft.Icon(ART_SYMBOL[art]),
+                        title=ft.Text(text_),
+                        on_click=anlegen(art),
+                        data=("folge_neu", art),
+                    )
+                    for art, text_ in arten
+                ],
+            ),
+            actions=[ft.TextButton("Abbrechen", on_click=lambda _e=None: schliessen(dialog))],
+            on_dismiss=nachher.bei_schliessen,
+            data=("folge_dialog", name),
+        )
+        page.show_dialog(dialog)
 
     # -- Bausteine am Kursplan ------------------------------------------------------------
 

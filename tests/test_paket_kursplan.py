@@ -1008,3 +1008,53 @@ def test_gestalteter_test_wird_geprueft(tmp_path) -> None:
     assert any("`wie_uebung`: „wetter“ ist unbekannt" in f for f in fehler)
     assert any("`ziel`: „reps“ misst der Lauf des Tests" in f for f in fehler)
     assert any("die Vorgabe „Zeit“ gilt dann nicht" in h for h in hinweise)
+
+
+def test_wenn_ins_leere_ist_ein_fehler() -> None:
+    """``wenn`` muss eine Frage des Kurses nennen (Ben, 23.11.2026, Formatversion 8) — sonst
+    gälte der Block nie, und niemand merkte es."""
+    from trainingsapp.core.pakete import paket_lesen
+    from trainingsapp.paket_werkzeug import kursplan_pruefen
+
+    def roh(wenn: dict) -> dict:
+        return {
+            "paket": {"name": "Q"},
+            "exercises": [{"key": "planke", "name": "Planke"}],
+            "kurse": [
+                {
+                    "name": "Rumpf",
+                    "kapitel": [
+                        {
+                            "titel": "Eins",
+                            "bloecke": [
+                                {
+                                    "art": "frage",
+                                    "id": "q",
+                                    "titel": "Wie?",
+                                    "frage": {"art": "ja_nein"},
+                                },
+                                {
+                                    "art": "test",
+                                    "id": "t",
+                                    "uebung": "planke",
+                                    "fragen": [{"id": "n", "text": "Und?", "art": "ja_nein"}],
+                                },
+                                {"art": "text", "id": "x", "text": "Gut.", "wenn": [wenn]},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def fehler(wenn: dict) -> list[str]:
+        daten = roh(wenn)
+        return kursplan_pruefen(daten, paket_lesen(daten))[0]
+
+    assert fehler({"frage": "q", "antworten": ["Ja"]}) == []
+    assert fehler({"frage": "t.f:n", "antworten": ["Ja"]}) == []
+    assert fehler({"frage": "t.hold", "ab": 30}) == []
+    (text,) = fehler({"frage": "weg", "antworten": ["Ja"]})
+    assert text.endswith("`wenn` nennt die Frage „weg“ — die gibt es im Kurs nicht")
+    (text,) = fehler({"frage": "t.f:x", "antworten": ["Ja"]})
+    assert "der Lauf „t“ hat keine Frage „x“" in text

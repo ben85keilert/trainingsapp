@@ -149,3 +149,118 @@ def test_von_vorn_loescht_die_antworten(state) -> None:
     state.kurse.antwort_setzen(kurs.id, profil, "q", text="leicht")
     state.kurse.zuruecksetzen(kurs, profil)
     assert state.kurse.antworten(kurs.id, profil) == {}
+
+
+# -- Im Kurs-Editor --------------------------------------------------------------------------
+
+
+def _alle_dialog(c):
+    yield c
+    for name in ("content", "controls", "title", "subtitle", "actions", "label", "items"):
+        kind = getattr(c, name, None)
+        for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
+            if isinstance(k, ft.BaseControl):
+                yield from _alle_dialog(k)
+
+
+def _d(c, wert):
+    return next(x for x in _alle_dialog(c) if getattr(x, "data", None) == wert)
+
+
+def _felder(dialog) -> dict[str, object]:
+    return {
+        str(x.label): x
+        for x in _alle_dialog(dialog)
+        if isinstance(x, ft.TextField | ft.Dropdown) and isinstance(x.label, str)
+    }
+
+
+def _speichern(ansicht) -> None:
+    import asyncio
+
+    knopf = next(
+        x
+        for x in _alle_dialog(ansicht.appbar)
+        if isinstance(x, ft.TextButton) and x.content == "Speichern"
+    )
+    asyncio.run(knopf.on_click())
+
+
+def test_editor_frage_mit_folge_und_uebung_machen(page, state) -> None:
+    """Im Editor: eine Frage als Auswahl, „+ Folge“ legt einen Text an, der nur bei „leicht“
+    gilt; „Übung machen“ bekommt Sensor, ein Medium nachher und eine Frage am Lauf, die bei
+    „schwer“ 30 vorschlägt — gespeichert und wieder geladen steht alles da."""
+    import asyncio
+
+    from trainingsapp.core.kursbloecke import TEST
+    from trainingsapp.ui.views.kurs_bearbeiten import kapitel_bearbeiten, kurs_anlegen
+
+    planke = Exercise(name="Planke", result_spec=ResultSpec(fields=[vorrat_feld("hold")]))
+    state.uebungen.speichern(planke)
+    kurs = kurs_anlegen(state)
+    kurs.kursplan = Kursplan("Rumpf")
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+
+    # Eine Frage in der Art „Auswahl“ — dann „+ Folge“
+    _d(ansicht, ("block_neu", FRAGE)).on_click()
+    dialog = page.dialoge[-1]
+    _felder(dialog)["Frage"].value = "Wie war das?"
+    art = _d(dialog, ("block_frage", "art"))
+    art.value = "auswahl"
+    art.on_select()
+    _d(dialog, ("block_frage", "antworten")).value = "leicht\nschwer"
+    _d(dialog, "block_frage_folge").on_click()
+    asyncio.run(dialog.on_dismiss())  # der Dialog ist zu — „Was soll folgen?“ geht auf
+    wahl = page.dialoge[-1]
+    assert wahl.title.value == "Was soll folgen?"
+    arten = [x.data[1] for x in _alle_dialog(wahl) if isinstance(x, ft.ListTile)]
+    assert arten[:2] == ["text", "medium"] and "plan_tauschen" in arten  # mit Kursplan
+    _d(wahl, ("folge_neu", TEXT)).on_click()
+    asyncio.run(wahl.on_dismiss())
+    folge = page.dialoge[-1]
+    _felder(folge)["Text (Markdown)"].value = "Dann geht es weiter."
+    # „Nur wenn“ nennt die Frage schon — die Antwort fehlt noch
+    _d(folge, "block_uebernehmen").on_click()
+    assert any(
+        "mindestens eine Antwort" in str(x.value)
+        for x in _alle_dialog(folge)
+        if isinstance(x, ft.Text)
+    )
+    _d(folge, ("block_wenn", "antwort", 0, "leicht")).on_select()
+    _d(folge, "block_uebernehmen").on_click()
+
+    # Übung machen: Sensor, Medium nachher, eine Frage am Lauf mit festem Ziel
+    _d(ansicht, ("block_neu", TEST)).on_click()
+    dialog = page.dialoge[-1]
+    felder = _felder(dialog)
+    felder["Übung"].value = planke.id
+    felder["Übung"].on_select()
+    _d(dialog, "test_braucht").value = True
+    _d(dialog, "lauf_medium_link").value = "https://example.org/danach"
+    _d(dialog, "lauf_medium_link_dazu").on_click()
+    stelle = _d(dialog, ("lauf_medium_stelle", 0))
+    stelle.value = "nachher"
+    stelle.on_select()
+    _d(dialog, "lauf_frage_dazu").on_click()
+    karte = next(
+        x
+        for x in _alle_dialog(dialog)
+        if isinstance(getattr(x, "data", None), tuple) and x.data[0] == "lauf_frage"
+    )
+    f = _felder(karte)
+    f["Frage"].value = "Und jetzt?"
+    next(v for k, v in f.items() if k.startswith("Antworten")).value = "leicht\nschwer = 30"
+    _d(dialog, "block_uebernehmen").on_click()
+    _speichern(ansicht)
+
+    frage, text, test = state.kurse.laden(kurs.id).kapitel[0].bloecke
+    assert frage.frage.wahl == ("leicht", "schwer") and frage.frage.id == frage.id
+    assert text.wenn == [Wenn(frage.id, ("leicht",))] and text.text == "Dann geht es weiter."
+    assert test.braucht == ["messung"] and test.laeuft
+    assert [(m.uri, m.wann) for m in test.medien] == [("https://example.org/danach", "nachher")]
+    (lauffrage,) = test.fragen
+    assert lauffrage.text == "Und jetzt?" and test.fragen_vorher == []
+    # kein Baustein nimmt den Wert — ein festes Ziel hängt nur an einem Lauf, der gebraucht wird
+    assert test.ziele == {}

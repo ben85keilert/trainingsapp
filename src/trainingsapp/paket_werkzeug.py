@@ -1036,6 +1036,38 @@ def _kurs_pruefen(
             else:
                 je_id[s.id] = s
 
+    # ``wenn`` (Formatversion 8, `docs/plan_kurs_uebungen.md` §10.3): Die Bedingung nennt eine
+    # Frage, die es im Kurs gibt — eine Frage im Kapitel mit gespeicherter Antwort (ihre
+    # `id`) oder eine Frage an einem Lauf (`<test>.f:<frage>`); ein Feld eines Laufs
+    # (`<test>.<feld>`) geht mit `ab`/`bis`. Ein Verweis ins Leere gälte nie
+    for s in stellen:
+        bedingungen = s.roh.get("wenn")
+        for w in bedingungen if isinstance(bedingungen, list) else []:
+            name = _marke_roh(w.get("frage")) if isinstance(w, dict) else ""
+            block_id, _, rest = name.partition(".")
+            quelle = je_id.get(block_id)
+            if not name or quelle is None:
+                fehler.append(
+                    f"{s.ort}: `wenn` nennt die Frage „{name}“ — die gibt es im Kurs nicht"
+                )
+                continue
+            fragen = quelle.roh.get("fragen")
+            ids = {
+                str(f.get("id"))
+                for f in (fragen if isinstance(fragen, list) else [])
+                if isinstance(f, dict)
+            }
+            if rest.startswith("f:") and rest[2:] not in ids:
+                fehler.append(
+                    f"{s.ort}: `wenn` nennt die Frage „{name}“ — der Lauf „{block_id}“ hat keine "
+                    f"Frage „{rest[2:]}“"
+                )
+            elif not rest and not isinstance(quelle.roh.get("frage"), dict):
+                fehler.append(
+                    f"{s.ort}: `wenn` nennt „{name}“ — das ist keine Frage, deren Antwort "
+                    "gespeichert wird (`frage` mit `art`)"
+                )
+
     steine = [s for s in stellen if s.art in BAUSTEINE]
     for s in steine:
         b = s.roh
@@ -1297,6 +1329,10 @@ def kursplan_pruefen(roh: Mapping[str, Any], inhalt: Paketinhalt) -> tuple[list[
     - ``kursplan.grundlage`` ohne Plan dieses Schlüssels in ``plaene[]``; ``grundlage`` und
       ``vorlage`` zugleich;
     - in der ``kante`` eines Wegs, was `core.ablauf.ablauf_pruefen` als Fehler meldet.
+
+    - ``wenn`` an einem Block, das eine Frage nennt, die es im Kurs nicht gibt (Formatversion 8,
+      `docs/plan_kurs_uebungen.md` §10.3); ``plan_entfernen``/``plan_tauschen`` ohne ``an``,
+      ``plan_tauschen`` ohne ``uebung``.
 
     **Hinweise:** Bausteine in einem Kurs ohne ``kursplan`` (sie bewirken dort nichts),
     Kapitel-Vorlagen (``plaene``) neben einem ``kursplan`` (beides gilt nebeneinander), ein

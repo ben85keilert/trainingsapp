@@ -102,7 +102,17 @@ from .kurstest import (
     vorgabe_text,
 )
 from .kurstest import felder as lauf_felder
-from .models import Exercise, new_id
+from .models import (
+    BEGLEITUNG,
+    BEI,
+    E_WDH,
+    E_ZEIT,
+    NACHHER,
+    Ereignis,
+    Exercise,
+    Media,
+    new_id,
+)
 from .result_spec import (
     FELDVORRAT,
     FieldSpec,
@@ -141,6 +151,173 @@ VERWEISFELDER: Final[dict[str, tuple[str, ...]]] = {
     PLAN_TAUSCHEN: ("an",),
     TEST: ("aus",),
 }
+#: Die Arten einer Frage im Kurs-Editor (Ben, 23.11.2026, `docs/plan_kurs_uebungen.md` §4):
+#: die alte Verständnisfrage (Antworten mit richtig/Hinweis, nichts wird gespeichert) — und
+#: die Arten des Ablaufs (`core.ablauf.Frage`), deren Antwort gespeichert wird und eine Folge
+#: haben kann. Am Lauf einer Übung gibt es die Verständnisfrage nicht
+F_ALT: Final = ""
+F_MEHRFACH: Final = "mehrfach"
+FRAGE_ARTEN: Final[dict[str, str]] = {
+    F_ALT: "Verständnisfrage — nichts wird gespeichert",
+    ab.F_SKALA: "Skala",
+    ab.F_JA_NEIN: "Ja / Nein",
+    ab.F_AUSWAHL: "Auswahl — eine Antwort",
+    F_MEHRFACH: "Auswahl — mehrere Antworten",
+}
+
+
+def frage_art(frage: ab.Frage | None) -> str:
+    """Die Art einer Frage, wie der Editor sie nennt (`FRAGE_ARTEN`).
+
+    >>> frage_art(None), frage_art(ab.Frage("q")), frage_art(ab.Frage("q", art=ab.F_JA_NEIN))
+    ('', 'skala', 'ja_nein')
+    >>> frage_art(ab.Frage("q", art=ab.F_AUSWAHL, antworten=("a",), mehrfach=True))
+    'mehrfach'
+    """
+    if frage is None:
+        return F_ALT
+    return F_MEHRFACH if frage.mehrere else frage.art
+
+
+def antworten_mit_zielen(text: str) -> tuple[list[str], dict[str, float]]:
+    """Die Antworten einer Frage aus dem Editor — eine je Zeile; ``Antwort = 30`` hängt ein
+    **festes Ziel** an (die Antwort wählt es im Lauf nur vor, „Von Hand“). Doppelte fallen weg.
+
+    >>> antworten_mit_zielen("\\n".join(["leicht", "", "schwer = 30", "leicht", "mittel= 1,5"]))
+    (['leicht', 'schwer', 'mittel'], {'schwer': 30.0, 'mittel': 1.5})
+    >>> antworten_mit_zielen("a = viel")  # keine Zahl: die ganze Zeile ist die Antwort
+    (['a = viel'], {})
+    """
+    antworten: list[str] = []
+    ziele: dict[str, float] = {}
+    for zeile in text.splitlines():
+        roh = " ".join(zeile.split())
+        if not roh:
+            continue
+        wort, gleich, zahl = roh.rpartition("=")
+        wert: float | None = None
+        if gleich and wort.strip():
+            try:
+                wert = float(zahl.strip().replace(",", "."))
+            except ValueError:
+                wert = None
+        antwort = wort.strip() if wert is not None else roh
+        if antwort not in antworten:
+            antworten.append(antwort)
+            if wert is not None and wert > 0:
+                ziele[antwort] = wert
+    return antworten, ziele
+
+
+def antworten_zeilen(antworten: Iterable[str], ziele: Mapping[str, float] | None = None) -> str:
+    """Das Gegenstück zu `antworten_mit_zielen`.
+
+    >>> antworten_zeilen(["leicht", "schwer"], {"schwer": 30.0}).splitlines()
+    ['leicht', 'schwer = 30']
+    """
+    feste = ziele or {}
+    return "\n".join(f"{a} = {feste[a]:g}" if a in feste else a for a in antworten)
+
+
+def frage_bauen(
+    frage_id: str, text: str, art: str, antworten: Sequence[str], von: int = 0, bis: int = 10
+) -> ab.Frage | str:
+    """Die Frage, wie sie im Editor steht — oder der Grund, warum es so nicht geht.
+
+    >>> frage_bauen("q", "Wie war das?", "auswahl", ["leicht", "schwer"]).wahl
+    ('leicht', 'schwer')
+    >>> frage_bauen("q", "Wie war das?", "mehrfach", ["a", "b"]).mehrere
+    True
+    >>> frage_bauen("q", "Druck?", "skala", [], 1, 5).kurz()
+    'Skala 1–5'
+    >>> frage_bauen("q", "Ja?", "ja_nein", []).wahl
+    ('Ja', 'Nein')
+    >>> frage_bauen("q", "", "ja_nein", []), frage_bauen("q", "Was?", "auswahl", [])
+    ('Die Frage braucht einen Text.', 'Eine Auswahl braucht mindestens eine Antwort.')
+    >>> frage_bauen("q", "Druck?", "skala", [], 5, 5)
+    'Die Skala braucht „von“ kleiner als „bis“ (höchstens 20 Stufen).'
+    """
+    wort = " ".join(text.split())
+    if not wort:
+        return "Die Frage braucht einen Text."
+    if art == ab.F_SKALA:
+        if bis <= von or bis - von > 20:
+            return "Die Skala braucht „von“ kleiner als „bis“ (höchstens 20 Stufen)."
+        return ab.Frage(frage_id, wort, von, bis)
+    if art == ab.F_JA_NEIN:
+        return ab.Frage(frage_id, wort, art=ab.F_JA_NEIN)
+    liste = tuple(dict.fromkeys(a for a in antworten if a))[: ab.ANTWORTEN_MAX]
+    if not liste:
+        return "Eine Auswahl braucht mindestens eine Antwort."
+    return ab.Frage(frage_id, wort, art=ab.F_AUSWAHL, antworten=liste, mehrfach=art == F_MEHRFACH)
+
+
+#: Wo ein Medium am Lauf einer Übung steht (Ben, 23.11.2026: „vorher/währenddessen/bei
+#: Ereignis/nachher … kohärenter Aufbau wie bei Ablauf“) — dieselben vier Stellen wie an der
+#: Planübung (`core.medien_stellen`), hier als eine Wahl je Stück. „Bei …“ kennt im Lauf die
+#: Uhr und die Zählung
+M_VORHER: Final = "vorher"
+M_DABEI: Final = "dabei"
+M_ZEIT: Final = "zeit"
+M_WDH: Final = "wdh"
+M_NACHHER: Final = "nachher"
+MEDIEN_STELLEN: Final[dict[str, str]] = {
+    M_VORHER: "Vorher — vor dem Start",
+    M_DABEI: "Dabei — läuft mit",
+    M_ZEIT: "Bei … Sekunden",
+    M_WDH: "Bei … Wiederholungen",
+    M_NACHHER: "Nachher — im Ergebnis",
+}
+
+
+def medium_stelle(m: Media) -> tuple[str, int]:
+    """An welcher Stelle des Laufs ein Stück steht — und bei „bei …“ die Zahl dazu.
+
+    >>> from trainingsapp.core.models import BEGLEITUNG, BEI, E_ZEIT, NACHHER, Ereignis
+    >>> medium_stelle(Media(uri="https://x/v")), medium_stelle(Media(uri="u", wann=NACHHER))
+    (('vorher', 0), ('nachher', 0))
+    >>> medium_stelle(Media(uri="u", rolle=BEGLEITUNG))
+    ('dabei', 0)
+    >>> medium_stelle(Media(uri="u", wann=BEI, bei=Ereignis(E_ZEIT, sekunden=20)))
+    ('zeit', 20)
+    """
+    if m.wann == BEI and m.bei is not None and m.bei.art == E_WDH:
+        return M_WDH, m.bei.n
+    if m.wann == BEI and m.bei is not None and m.bei.art == E_ZEIT:
+        return M_ZEIT, round(m.bei.sekunden)
+    if m.wann == NACHHER:
+        return M_NACHHER, 0
+    if m.rolle == BEGLEITUNG:
+        return M_DABEI, 0
+    return M_VORHER, 0
+
+
+def medium_an_stelle(m: Media, stelle: str, zahl: int = 0) -> Media:
+    """Das Stück an eine Stelle des Laufs gesetzt (`MEDIEN_STELLEN`) — das Gegenstück zu
+    `medium_stelle`. Eine Begleitung, die woanders hinkommt, wird wieder eine Erklärung.
+
+    >>> from trainingsapp.core.models import BEGLEITUNG
+    >>> m = medium_an_stelle(Media(uri="u", rolle=BEGLEITUNG), "wdh", 10)
+    >>> m.wann, m.bei.n, m.rolle, medium_stelle(m)
+    ('bei', 10, '', ('wdh', 10))
+    >>> d = medium_an_stelle(m, "dabei")
+    >>> d.wann, d.bei, d.rolle
+    ('', None, 'begleitung')
+    >>> medium_stelle(medium_an_stelle(m, "zeit", 0))  # ohne Zahl: gleich nach dem Start
+    ('zeit', 1)
+    """
+    rolle = "" if m.rolle == BEGLEITUNG else m.rolle
+    if stelle == M_DABEI:
+        return replace(m, wann="", bei=None, rolle=BEGLEITUNG)
+    if stelle == M_NACHHER:
+        return replace(m, wann=NACHHER, bei=None, rolle=rolle)
+    if stelle == M_ZEIT:
+        return replace(m, wann=BEI, bei=Ereignis(E_ZEIT, sekunden=float(max(zahl, 1))), rolle=rolle)
+    if stelle == M_WDH:
+        return replace(m, wann=BEI, bei=Ereignis(E_WDH, n=max(zahl, 1)), rolle=rolle)
+    return replace(m, wann="", bei=None, rolle=rolle)
+
+
 #: Felder, die ein Test messen kann (Art aus dem Feldvorrat)
 TESTFELDER: Final[tuple[str, ...]] = ("hold", "duration", "reps", "weight", "distance")
 #: Wie ein Verweisfeld im Formular heißt (für „Verweis fehlt: …“)

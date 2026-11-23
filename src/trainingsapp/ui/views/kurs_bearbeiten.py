@@ -331,6 +331,41 @@ def block_kurz(block: Block, katalog: dict[str, Exercise], sicht: Kurssicht | No
     return f"{menge} · {', '.join(namen)}" if namen else f"{menge} Übungen"
 
 
+def block_schluessel(kapitel_id: str) -> str:
+    """Unter diesem Schlüssel wartet ein neu aufgenommenes Stück für den Block „Medium“, der
+    im Kapitel gerade offen war (`core.anhaenge.Ziel.fuer_ablage`).
+
+    >>> block_schluessel("k1")
+    'kursblock-k1'
+    """
+    return f"kursblock-{kapitel_id}"
+
+
+def block_mit_stueck(block: Block, neues: Media | None) -> Block:
+    """Der Entwurf eines Blocks „Medium“ mit dem Stück, das Kamera, Rekorder oder Fotoauswahl
+    geliefert haben. Titel und Beschriftung, die im Dialog schon standen, bleiben; sonst
+    gelten die von der Seite der Aufnahme. Ohne neues Stück bleibt der Entwurf.
+
+    >>> alt = Block("medium", medium=Media(uri="", title="Atmung"))
+    >>> m = block_mit_stueck(alt, Media(uri="medien/x.mp4", title="Video", text="ruhig")).medium
+    >>> (m.uri, m.title, m.text)
+    ('medien/x.mp4', 'Atmung', 'ruhig')
+    >>> block_mit_stueck(alt, None) is alt
+    True
+    """
+    if neues is None:
+        return block
+    alt = block.medium
+    return replace(
+        block,
+        medium=replace(
+            neues,
+            title=(alt.title if alt is not None and alt.title else neues.title),
+            text=(alt.text if alt is not None and alt.text else neues.text),
+        ),
+    )
+
+
 def block_fehler(block: Block) -> str | None:
     """Was einem Block zum Speichern fehlt — ``None`` = vollständig."""
     if block.art == MEDIUM and (
@@ -1274,8 +1309,10 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
 
     # -- Blöcke ---------------------------------------------------------------------------
 
-    def block_dialog(block: Block, neu: bool) -> None:
-        """Die Felder zur Art des Blocks; „Übernehmen“ schreibt in die Liste des Formulars."""
+    def block_dialog(block: Block, neu: bool, *, stelle: Block | None = None) -> None:
+        """Die Felder zur Art des Blocks; „Übernehmen“ schreibt in die Liste des Formulars.
+        ``stelle``: der Block der Liste, den „Übernehmen“ ersetzt, wenn ``block`` ein Entwurf
+        von ihm ist (zurück von Kamera, Rekorder oder Fotoauswahl)."""
         kopf = ft.TextField(
             label={TEXT: "Überschrift", FRAGE: "Frage", MEDIUM: "Titel"}.get(
                 block.art, "Aufforderung (leer = Vorgabe)"
@@ -1295,9 +1332,10 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             min_lines=4 if block.art == TEXT else 1,
             data="block_text",
         )
-        # Das Stück des Blocks — ein Link (Adresse) oder eine Datei bzw. ein Stück, das es
-        # schon gibt (Ben, 19.11.2026: überall dieselben Wege, `components/medium_dazu.py`);
-        # Art, Quelle und Rolle bleiben beim Bearbeiten erhalten
+        # Das Stück des Blocks — ein Link (Adresse), eine Datei, eine Aufnahme oder ein Stück,
+        # das es schon gibt (Ben, 19.11.2026: überall dieselben Wege,
+        # `components/medium_dazu.py`; seit 23.11.2026 auch Kamera, Rekorder und Fotoauswahl
+        # wie am Plan); Art, Quelle und Rolle bleiben beim Bearbeiten erhalten
         stueck: dict[str, Media | None] = {"m": block.medium}
 
         def ist_datei() -> bool:
@@ -1349,12 +1387,56 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             state.pakete.ablage.entwurf_merken(name)  # bis der Kurs gespeichert ist
             stueck_setzen(paketdatei.medium_fuer(name, pfad.stem))
 
+        def block_link() -> None:
+            """Zurück zur Adresse — auch von einer Datei, die schon gewählt war."""
+            stueck["m"] = None
+            adresse.visible, datei_text.visible = True, False
+            for c in (adresse, datei_text):
+                with contextlib.suppress(Exception):
+                    c.update()
+            with contextlib.suppress(Exception):
+                page.run_task(adresse.focus)
+
+        async def block_aufnehmen(art: str | None) -> None:
+            """Zur Kamera, zum Rekorder (``art``) oder in die Fotoauswahl (``None``), wie am
+            Plan (Ben, 23.11.2026: „In Kurse sollen die gleichen Medientypen wie in Pläne
+            bereitgestellt werden können“). Der Dialog überlebt den Wechsel nicht — darum
+            speichert das Kapitel erst (wie „Im Plan einstellen“ vor der Kamera am Weg), der
+            Block wartet als Entwurf (`AppState.block_entwurf`), und das Formular öffnet ihn
+            beim Zurückkommen wieder, mit dem neuen Stück (`block_fortsetzen`)."""
+            from trainingsapp.core.anhaenge import Ziel
+            from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
+            from trainingsapp.ui.views.anhang_hochladen import hochladen_route
+
+            grund = speichern()
+            if grund is not None:
+                meldung.value = f"Vor der Aufnahme speichert das Kapitel — {grund}"
+                meldung.visible = True
+                with contextlib.suppress(Exception):
+                    meldung.update()
+                return
+            state.block_entwurf[kapitel.id] = (entwurf(), neu)
+            ziel = Ziel.fuer_ablage(block_schluessel(kapitel.id))
+            schliessen(dialog)
+            await page.push_route(
+                hochladen_route(route, ziel) if art is None else aufnahme_route(route, ziel, art)
+            )
+
+        async def block_fotoauswahl() -> None:
+            await block_aufnehmen(None)
+
         medium_wege = medium_dazu.menue(
             page,
             state,
-            medium_dazu.Wege(datei=block_datei, vorhandenes=stueck_setzen),
-            text="Datei oder vorhandenes Medium",
-            tooltip="Statt einer Adresse: eine Datei vom Gerät oder ein Stück, das es schon gibt",
+            medium_dazu.Wege(
+                link=block_link,
+                datei=block_datei,
+                aufnehmen=block_aufnehmen,
+                fotoauswahl=block_fotoauswahl,
+                vorhandenes=stueck_setzen,
+            ),
+            text="Medium wählen",
+            tooltip="Link, Foto, Video, Ton oder Datei — oder eines, das es schon gibt",
             vorhandene=lambda: medium_dazu.vorrat_von(state),
             kennung="block_medium_dazu",
         )
@@ -1998,7 +2080,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             if neu:
                 bloecke.append(neuer)
             else:
-                bloecke[bloecke.index(block)] = neuer
+                bloecke[bloecke.index(stelle if stelle is not None else block)] = neuer
             schliessen(dialog)
             listen_frisch()
 
@@ -2775,11 +2857,29 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             page.show_dialog(ft.SnackBar(ft.Text("Gespeichert")))
             await zurueck()
 
+    def block_fortsetzen() -> None:
+        """Zurück von Kamera, Rekorder oder Fotoauswahl: Der Block, dessen Dialog dafür zuging,
+        steht wieder offen — mit dem neuen Stück, wenn eines entstand (`block_aufnehmen`).
+        Nur wenn diese Seite oben liegt: Unter der Kamera entsteht sie auch, dort bliebe der
+        Dialog ungesehen und der Entwurf wäre verbraucht."""
+        if str(getattr(page, "route", route) or route).rstrip("/") != route:
+            return
+        wartet = state.block_entwurf.pop(kapitel.id, None)
+        neues = paketdatei.abholen(state, block_schluessel(kapitel.id))
+        if wartet is None:
+            return
+        entwurf_block, war_neu = wartet
+        stelle = None if war_neu else next((b for b in bloecke if b.id == entwurf_block.id), None)
+        if not war_neu and stelle is None:
+            return  # den Block gibt es nicht mehr
+        block_dialog(block_mit_stueck(entwurf_block, neues), war_neu, stelle=stelle)
+
     bloecke_zeichnen()
     bausteine_zeichnen()
     bild_zeichnen()
     plaene_zeichnen()
     bedingung_zeichnen()
+    block_fortsetzen()
     ansicht = ft.View(
         route=route,
         appbar=formular_leiste(

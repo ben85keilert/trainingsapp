@@ -346,9 +346,17 @@ Zuschneiden am Handy.
 - **Kein eigener Schritt „Benennen“:** Titel und Beschriftung stehen dort, wo das Stück entsteht —
   auf der Seite von Kamera, Fotoauswahl und Rekorder, in der Zeile des Editors, am Plan im Blatt
   des Stücks (es öffnet sich nach „Datei wählen“ und „aus Vorhandenem“ von selbst).
-- **Im Kurs-Block keine Kamera:** Der Dialog des Blocks überlebt den Wechsel zur Kamera nicht.
-  Dort gibt es Adresse, „Datei wählen“ und „aus vorhandenen Medien“ — ein Foto oder Video nimmt
-  man an Übung oder Plan auf und holt es dann hierher.
+- **Im Kurs-Block keine Kamera** — **aufgehoben am 23.11.2026** (Ben: „In Kurse sollen die
+  gleichen Medientypen wie in Pläne bereitgestellt werden können“): Der Block „Medium“ hat
+  dieselbe Reihe wie der Plan (Link · Foto · Video · Fotoauswahl · Datei · Audio · aus
+  Vorhandenem). Der Dialog überlebt den Wechsel zur Kamera weiter nicht; darum speichert das
+  Kapitel erst (wie „Im Plan einstellen“ vor der Kamera am Weg), der Block wartet als Entwurf
+  (`AppState.block_entwurf`), und das Formular öffnet ihn beim Zurückkommen wieder, mit dem
+  neuen Stück — in den Kurs kommt es erst mit „Übernehmen“ und „Speichern“
+  (`views/kurs_bearbeiten.py`: `block_aufnehmen`, `block_fortsetzen`; Tests in
+  `tests/test_ui_kursbloecke.py`). Fehlt dem Kapitel etwas zum Speichern, bleibt der Dialog und
+  sagt es. „Link …“ führt von einer gewählten Datei zurück zur Adresse. Bis dahin: Adresse,
+  „Datei wählen“ und „aus vorhandenen Medien“. Am Gerät nicht geprüft (T154 b).
 - **Anhänge** (Notiz, Eintrag) behalten ihre Form (Symbolzeile, Büroklammer, Knopfzeile) — gleich
   sind Reihe, Namen und Symbole; ein Link und „aus Vorhandenem“ gibt es dort nicht (Frage a).
 - **Ein Link behält in „Übung bearbeiten“ nicht seine Art** (er wird wie bisher als Video

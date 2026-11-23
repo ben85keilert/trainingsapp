@@ -415,6 +415,11 @@ def _felder(dialog) -> dict[str, object]:
     }
 
 
+def _weg(dialog, weg: str):
+    """Der Eintrag ``weg`` im Menü „Medium wählen“ des Blocks (`components/medium_dazu.py`)."""
+    return next(i for i in _daten(dialog, "block_medium_dazu").items if i.data[1] == weg)
+
+
 def _speichern(ansicht):
     import asyncio
 
@@ -687,7 +692,8 @@ def test_medium_block_nimmt_vorhandenes_und_behaelt_art_und_rolle(page, state) -
     _daten(dialog, "block_uebernehmen").on_click()
     assert "Ein Medium braucht eine https-Adresse oder eine Datei." in _texte(dialog)
     menue = _daten(dialog, "block_medium_dazu")
-    assert [i.data[1] for i in menue.items] == ["datei", "vorhandenes"]
+    # dieselbe Reihe wie am Plan; Kamera und Fotoauswahl fehlen nur, wo das Gerät sie nicht hat
+    assert [i.data[1] for i in menue.items] == ["link", "datei", "ton", "vorhandenes"]
     menue.items[-1].on_click(None)
     _daten(page.dialoge[-1], ("vorhandenes", film)).on_click(None)
     assert _felder(dialog)["Titel"].value == "Film"
@@ -705,3 +711,174 @@ def test_medium_block_nimmt_vorhandenes_und_behaelt_art_und_rolle(page, state) -
         "Film",
         "erst ansehen",
     )
+
+
+def test_medium_block_nimmt_auf_wie_der_plan_und_steht_danach_wieder_offen(page, state) -> None:
+    """Ben, 23.11.2026: „In Kurse sollen die gleichen Medientypen wie in Pläne bereitgestellt
+    werden können.“ Der Block „Medium“ bietet Kamera, Rekorder und Fotoauswahl; das Kapitel
+    speichert, der Dialog geht zu, und beim Zurückkommen steht der Block wieder offen — mit dem
+    neuen Stück und dem Titel, der schon im Dialog stand."""
+    import asyncio
+
+    from trainingsapp.core.anhaenge import AUDIO, Ziel
+    from trainingsapp.core.kursbloecke import MEDIUM
+    from trainingsapp.core.models import MediaKind, MediaSource
+    from trainingsapp.ui import paketdatei
+    from trainingsapp.ui.components import medium_dazu
+    from trainingsapp.ui.views import anhang_aufnahme
+    from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
+    from trainingsapp.ui.views.kurs_bearbeiten import (
+        block_schluessel,
+        kapitel_bearbeiten,
+        kurs_anlegen,
+    )
+
+    page.run_task = lambda f, *a: asyncio.run(f(*a))
+    kurs = kurs_anlegen(state)
+    kapitel = kurs.kapitel[0]
+    route = f"/kurse/{kurs.id}/{kapitel.id}/bearbeiten"
+    page.route = route
+
+    # Mit Kamera und Fotoauswahl steht im Block dieselbe Reihe wie am Plan
+    wege = medium_dazu.Wege(
+        link=lambda: None,
+        datei=lambda: None,
+        aufnehmen=lambda art: None,
+        fotoauswahl=lambda: None,
+        vorhandenes=lambda m: None,
+    )
+    alt_kamera, alt_hochladen = anhang_aufnahme.kamera_moeglich, state.hochladen
+    anhang_aufnahme.kamera_moeglich = lambda _page: True
+    state.hochladen = object()
+    try:
+        am_plan = [e[0] for e in medium_dazu.eintraege(page, state, wege, vorhandene=lambda: [])]
+        ansicht = kapitel_bearbeiten(page, state, kurs, kapitel)
+        _daten(ansicht, ("block_neu", MEDIUM)).on_click()
+        im_block = [i.data[1] for i in _daten(page.dialoge[-1], "block_medium_dazu").items]
+    finally:
+        anhang_aufnahme.kamera_moeglich, state.hochladen = alt_kamera, alt_hochladen
+    assert im_block == am_plan
+    assert im_block == ["link", "foto", "video", "fotoauswahl", "datei", "ton", "vorhandenes"]
+    page.dialoge.clear()
+
+    ansicht = kapitel_bearbeiten(page, state, kurs, kapitel)
+    _daten(ansicht, ("block_neu", MEDIUM)).on_click()
+    dialog = page.dialoge[-1]
+    dialog.open = True
+    _felder(dialog)["Titel"].value = "Atmung"
+    ton = _weg(dialog, "ton")
+
+    # Ohne Titel speichert das Kapitel nicht — der Dialog bleibt und sagt, warum
+    _felder(ansicht)["Titel"].value = ""
+    ton.on_click(None)
+    assert page.route == route and dialog.open
+    assert any("Das Kapitel braucht einen Titel." in t for t in _texte(dialog))
+
+    _felder(ansicht)["Titel"].value = "Rumpf"
+    ton.on_click(None)
+    ziel = Ziel.fuer_ablage(block_schluessel(kapitel.id))
+    assert page.route == aufnahme_route(route, ziel, AUDIO)
+    assert dialog.open is False
+    gespeichert = state.kurse.laden(kurs.id)
+    assert gespeichert.kapitel[0].titel == "Rumpf" and gespeichert.kapitel[0].bloecke == []
+
+    # Unter dem Rekorder entsteht die Seite auch — dort bleibt der Entwurf liegen
+    page.dialoge.clear()
+    kapitel_bearbeiten(page, state, gespeichert, gespeichert.kapitel[0])
+    assert page.dialoge == [] and kapitel.id in state.block_entwurf
+
+    # Der Rekorder legt das Stück bereit; zurück auf der Seite steht der Block wieder offen
+    datei = "medien/" + "a" * 64 + ".m4a"
+    assert paketdatei.anhaengen(state, ziel, paketdatei.medium_mit(datei, "Aufnahme", "ruhig"))
+    page.route = route
+    ansicht = kapitel_bearbeiten(page, state, gespeichert, gespeichert.kapitel[0])
+    (dialog,) = page.dialoge
+    assert _felder(dialog)["Titel"].value == "Atmung"
+    assert _daten(dialog, "block_beschriftung").value == "ruhig"
+    assert _daten(dialog, "block_adresse").visible is False
+    assert state.block_entwurf == {}
+    _daten(dialog, "block_uebernehmen").on_click()
+    _speichern(ansicht)
+    (block,) = state.kurse.laden(kurs.id).kapitel[0].bloecke
+    m = block.medium
+    assert (m.uri, m.source, m.kind, m.title, m.text) == (
+        datei,
+        MediaSource.PAKET,
+        MediaKind.AUDIO,
+        "Atmung",
+        "ruhig",
+    )
+
+
+def test_medium_block_aendern_kommt_von_der_aufnahme_an_seine_stelle_zurueck(page, state) -> None:
+    """Ein Block, den es schon gibt: Das neue Stück ersetzt das alte an derselben Stelle, erst
+    mit „Übernehmen“ — „Abbrechen“ lässt den Block, wie er war. „Link …“ führt von der Datei
+    zurück zur Adresse."""
+    import asyncio
+
+    from trainingsapp.core.anhaenge import Ziel
+    from trainingsapp.core.kursbloecke import MEDIUM
+    from trainingsapp.core.models import Media
+    from trainingsapp.ui import paketdatei
+    from trainingsapp.ui.views.kurs_bearbeiten import (
+        block_schluessel,
+        kapitel_bearbeiten,
+        kurs_anlegen,
+    )
+
+    page.run_task = lambda f, *a: asyncio.run(f(*a)) if asyncio.iscoroutinefunction(f) else None
+    kurs = kurs_anlegen(state)
+    kapitel = kurs.kapitel[0]
+    kapitel.titel = "Rumpf"
+    kapitel.bloecke = [
+        Block(TEXT, id="t", titel="Vorweg"),
+        Block(MEDIUM, id="m", medium=Media(uri="https://x.org/alt", title="Alt")),
+    ]
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    kapitel = kurs.kapitel[0]
+    route = f"/kurse/{kurs.id}/{kapitel.id}/bearbeiten"
+    page.route = route
+
+    ansicht = kapitel_bearbeiten(page, state, kurs, kapitel)
+    _daten(ansicht, ("block", "m")).on_click()
+    dialog = page.dialoge[-1]
+    dialog.open = True
+    _weg(dialog, "ton").on_click(None)
+    assert page.route != route
+
+    datei = "medien/" + "b" * 64 + ".m4a"
+    ziel = Ziel.fuer_ablage(block_schluessel(kapitel.id))
+    paketdatei.anhaengen(state, ziel, paketdatei.medium_mit(datei, "Aufnahme"))
+    page.route = route
+    page.dialoge.clear()
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    (dialog,) = page.dialoge
+    assert _felder(dialog)["Titel"].value == "Alt"  # der Titel, der schon dastand, bleibt
+    # „Link …“ führt zurück zur Adresse
+    _weg(dialog, "link").on_click(None)
+    assert _daten(dialog, "block_adresse").visible is True
+    # ohne „Übernehmen“ bleibt der Block, wie er war
+    _speichern(ansicht)
+    bloecke = state.kurse.laden(kurs.id).kapitel[0].bloecke
+    assert [b.id for b in bloecke] == ["t", "m"] and bloecke[1].medium.uri == "https://x.org/alt"
+
+    # noch einmal, diesmal übernommen: dieselbe Stelle, das neue Stück
+    page.dialoge.clear()
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    _daten(ansicht, ("block", "m")).on_click()
+    dialog = page.dialoge[-1]
+    dialog.open = True
+    _weg(dialog, "ton").on_click(None)
+    paketdatei.anhaengen(state, ziel, paketdatei.medium_mit(datei, "Aufnahme"))
+    page.route = route
+    page.dialoge.clear()
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    _daten(page.dialoge[-1], "block_uebernehmen").on_click()
+    _speichern(ansicht)
+    bloecke = state.kurse.laden(kurs.id).kapitel[0].bloecke
+    assert [b.id for b in bloecke] == ["t", "m"]
+    assert (bloecke[1].medium.uri, bloecke[1].medium.title) == (datei, "Alt")

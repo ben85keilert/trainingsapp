@@ -512,6 +512,10 @@ class AppState:
     #: 19.11.2026, `core.anhaenge.Ziel.ablage`): Schlüssel → Medium; die Ansicht, die geschickt
     #: hat, holt es beim nächsten Aufbau ab (`ui/paketdatei.abholen`)
     medium_dazu: dict[str, Any] = field(default_factory=dict)
+    #: Der Block „Medium“ eines Kapitels, dessen Dialog für Kamera, Rekorder oder Fotoauswahl
+    #: zuging (Ben, 23.11.2026): Kapitel-ID → (Block, wie er im Dialog stand; neu?) — das
+    #: Formular des Kapitels öffnet ihn beim Zurückkommen wieder (`views/kurs_bearbeiten.py`)
+    block_entwurf: dict[str, Any] = field(default_factory=dict)
     #: Die Uhr, die für das Material angehalten ist, während eine Paketdatei offen ist — sie
     #: läuft weiter, wenn man aus der Ansicht zurückgeht (`components/material.py`)
     material_lauf: Any = None

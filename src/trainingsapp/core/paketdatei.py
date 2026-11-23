@@ -602,7 +602,10 @@ def export_schreiben(
                         media=medien_umbenennen(kap.media, umbenennung),
                         plaene=[plan_neu(PaketPlan("k", v)).vorlage for v in kap.plaene],
                         bloecke=[
-                            b if b.medium is None else replace(b, medium=neu[0])
+                            replace(
+                                b if b.medium is None else replace(b, medium=neu[0]),
+                                medien=medien_umbenennen(b.medien, umbenennung),
+                            )
                             for b in kap.bloecke
                             if b.medium is None
                             or (neu := medien_umbenennen([b.medium], umbenennung))

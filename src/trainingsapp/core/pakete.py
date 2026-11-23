@@ -90,7 +90,7 @@ FORMAT = "trainingsapp-uebungspaket"
 #: (``ablauf.fragen[].art``: Ja/Nein, Auswahl — Ben, 17.11.2026). Geschrieben wird immer die
 #: kleinste, die der Inhalt braucht (`noetige_version`): eine Datei ohne Kurse weiter als
 #: Version 1
-FORMAT_VERSION = 7
+FORMAT_VERSION = 8
 
 #: Namensraum der UUIDv5-IDs — derselbe wie für den Seed vor den Paketen.
 #: Einmal gewählt, nie ändern, sonst bekäme jede Übung eine neue ID.
@@ -1029,6 +1029,8 @@ def _bloecke_lesen(roh: list[Any], schluessel: Mapping[str, str]) -> list[Block]
             if not geprueft:
                 continue
             block.medium = geprueft[0]
+        if block.medien:  # die Medien am Lauf: dieselbe Prüfung (Links, keine lokalen Dateien)
+            block.medien = medien_from_list([m.als_dict() for m in block.medien])
         _werte_pruefen(block.ziel, "ziel")  # Baustein am Kursplan (`core.kursbloecke`)
         if block.baustein:
             for feld in ("hinter", "an", "von", "zu"):
@@ -1620,6 +1622,7 @@ def paketmedien_in(
         for kap in k.kapitel:
             medien.extend(kap.media)
             medien.extend(b.medium for b in kap.bloecke if b.medium is not None)
+            medien.extend(m for b in kap.bloecke for m in b.medien)  # Medien am Lauf
             vorlagen.extend(kap.plaene)
     medien.extend(m for v in vorlagen for item in v.items for m in item.medien)
     namen = {m.uri for m in medien if ist_paketmedium(m)}
@@ -1669,6 +1672,37 @@ def nutzt_kursplan(kurs: Kurs) -> bool:
     )
 
 
+def nutzt_uebung_machen(kurs: Kurs) -> bool:
+    """Nutzt der Kurs, was es erst seit Formatversion 8 gibt (Ben, 23.11.2026,
+    `docs/plan_kurs_uebungen.md`): Medien, Fragen oder einen Sensor am Lauf, eine Frage im
+    Kapitel, deren Antwort gespeichert wird, eine Bedingung (``wenn``), ein Ziel aus einem
+    Feld des Laufs (``ziel_aus = "<test>.<feld>"``) oder die Bausteine „herausnehmen“ und
+    „tauschen“? Eine ältere App ließe das fallen — sie lehnt die Datei darum ab.
+
+    >>> from trainingsapp.core.kursbloecke import Wenn
+    >>> def kurs(block):
+    ...     return Kurs(name="K", kapitel=[Kapitel(titel="A", bloecke=[block])])
+    >>> nutzt_uebung_machen(kurs(Block("test", id="t", uebung="u")))
+    False
+    >>> nutzt_uebung_machen(kurs(Block("test", id="t", uebung="u", braucht=["messung"])))
+    True
+    >>> nutzt_uebung_machen(kurs(Block("text", id="x", wenn=[Wenn("q", ("ja",))])))
+    True
+    >>> nutzt_uebung_machen(kurs(Block("plan_uebung", id="b", uebung="u", ziel_aus="t.reps")))
+    True
+    >>> nutzt_uebung_machen(kurs(Block("plan_entfernen", id="y", an="b")))
+    True
+    """
+    return any(
+        bool(b.medien or b.braucht or b.fragen or b.wenn)
+        or b.frage is not None
+        or "." in b.ziel_aus
+        or b.art in ("plan_entfernen", "plan_tauschen")
+        for kap in kurs.kapitel
+        for b in kap.bloecke
+    )
+
+
 def nutzt_antworten(kurse: Iterable[Kurs], plaene: Iterable[PaketPlan]) -> bool:
     """Steht in einem Plan des Pakets — oder in einer Plan-Vorlage eines Kurses (Kapitelplan,
     Vorlage des Kursplans) — ein Ablauf mit einer Frage, die Antworten zum Antippen hat
@@ -1692,7 +1726,9 @@ def noetige_version(
     geschrieben, damit ältere Apps alles weiter lesen, was sie verstehen: 1 nur Übungen ·
     2 Kurse · 3 Pläne · 4 Dateien aus dem Paket (ZIP, U3) · 5 Ergänzungen (U5) · 6 ein Kurs
     mit Kursplan oder Bausteinen (`nutzt_kursplan`) · 7 ein Ablauf mit einer Frage, die
-    Antworten zum Antippen hat (`nutzt_antworten`). Das Höchste zählt.
+    Antworten zum Antippen hat (`nutzt_antworten`) · 8 „Übung machen“ im Kurs: Medien,
+    Fragen, Sensor am Lauf, Bedingungen, neue Bausteine (`nutzt_uebung_machen`). Das Höchste
+    zählt.
 
     Version 6 ist mit Absicht eine Schranke: Eine App, die den Kursplan nicht kennt, zeigte
     den Kurs sonst ohne seinen Plan — sie lehnt die Datei ab („… neuer als diese App“,
@@ -1707,10 +1743,15 @@ def noetige_version(
     (6, True)
     >>> frage = {"fragen": [{"id": "?1", "art": "ja_nein"}]}
     >>> plan = PaketPlan("p", PlanVorlage("Runde", ablauf=frage))
-    >>> noetige_version(plaene=[plan]) == 7 == FORMAT_VERSION
+    >>> noetige_version(plaene=[plan])
+    7
+    >>> k.kapitel[0].bloecke = [Block("test", id="t", uebung="u", braucht=["messung"])]
+    >>> noetige_version(kurse=[k]) == 8 == FORMAT_VERSION
     True
     """
     kurse, plaene = list(kurse), list(plaene)
+    if any(nutzt_uebung_machen(k) for k in kurse):
+        return 8
     if nutzt_antworten(kurse, plaene):
         return 7
     if any(nutzt_kursplan(k) for k in kurse):

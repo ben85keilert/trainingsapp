@@ -50,15 +50,23 @@ from typing import TYPE_CHECKING, Any, Final
 from . import ablauf as ab
 from .bedingung import Bedingung
 from .kursbloecke import (
+    FRAGE,
     HART,
     PLAN_EINSTELLEN,
+    PLAN_ENTFERNEN,
+    PLAN_TAUSCHEN,
     PLAN_UEBUNG,
     PLAN_WEG,
     TEST,
     WEICH,
     ZU_ENDE,
     Block,
+    Gegeben,
     Planwert,
+    feld_schluessel,
+    gegeben_zu,
+    wenn_grund,
+    wenn_stand,
     wert_schluessel,
     ziel_im_plan,
 )
@@ -98,6 +106,10 @@ PAUSE: Final = "pause_ohne_timer"
 WEG: Final = "weg"
 #: ein ``plan_einstellen`` als Ganzes — nur in den Zeilen „entfällt“ und „offen“
 EINSTELLEN: Final = "einstellen"
+#: eine Planübung geht aus dem Plan (``plan_entfernen``) bzw. wird eine andere Übung
+#: (``plan_tauschen``) — Ben, 23.11.2026, `docs/plan_kurs_uebungen.md` §11.3 Punkt 3
+ENTFERNEN: Final = "entfernen"
+TAUSCHEN: Final = "tauschen"
 
 #: Die Marke des Plans selbst im Kurs-Stand
 DER_PLAN: Final = ""
@@ -292,6 +304,7 @@ def aenderungen(
     bezug: Sequence[Block] = (),
     zusatz: Mapping[str, str] | None = None,
     planwerte: Mapping[str, Planwert] | None = None,
+    antworten: Mapping[str, Gegeben] | None = None,
 ) -> list[Aenderung]:
     """Die Zeilen „Das ändert sich an deinem Plan“ zu den Bausteinen **eines** Kapitels.
 
@@ -386,8 +399,48 @@ Plan. | anker_fehlt
     ({'reps': [20]}, ['b7#ziel', 'b7#ziel@s1'])
     >>> [z.stand for z in aenderungen(mit20, fuenf, {"t": 25}, {}, stand20, namen)]  # neuer Test
     ['uebernommen', 'uebernommen']
+
+    **Wenn** (Ben, 23.11.2026: „Es wird etwas gefragt, das hat eine Folge“): Ein Baustein mit
+    ``wenn`` steht nur bei der passenden Antwort in der Karte und nennt dann seinen Grund.
+    Fehlt die Antwort noch, ist die Zeile offen und sagt, was fehlt; bei einer anderen Antwort
+    gibt es sie nicht. ``antworten``: die gespeicherten Antworten (`KursRepo.antworten`).
+
+    >>> from trainingsapp.core.kursbloecke import PLAN_ENTFERNEN, PLAN_TAUSCHEN, Wenn
+    >>> sechs = [Block(TEST, id="e", uebung="b"),
+    ...          Block(PLAN_UEBUNG, id="b8", uebung="b", wenn=[Wenn("e.f:q", ("leicht",))])]
+    >>> zeigen(aenderungen(Plan(), sechs, {}, {}, {}, namen))
+    b8 | Brücke kommt dazu | Dazu fehlt deine Antwort — probier zuerst Brücke aus. | offen
+    >>> zeigen(aenderungen(Plan(), sechs, {}, {}, {}, namen,
+    ...                    antworten={"e.f:q": Gegeben(text="leicht")}))
+    b8 | Brücke kommt dazu | ans Ende · weil du „leicht“ geantwortet hast | neu
+    >>> aenderungen(Plan(), sechs, {}, {}, {}, namen, antworten={"e.f:q": Gegeben(text="schwer")})
+    []
+
+    **Herausnehmen und tauschen** (``plan_entfernen``, ``plan_tauschen``): Die Planübung einer
+    Marke geht aus dem Plan bzw. wird eine andere Übung — ihr Ziel und ihre Parameter beginnen
+    dann neu, sie folgt der neuen Übung.
+
+    >>> basis, bstand = anwenden(Plan(), eins, {}, {}, {"b1", "b1#ziel"}, (), {})
+    >>> sieben = [Block(PLAN_TAUSCHEN, id="x", an="b1", uebung="b")]
+    >>> zeigen(aenderungen(basis, sieben, {}, {}, bstand, namen))
+    x#tauschen | Planke wird zu Brücke | Ziel und Parameter beginnen neu | neu
+    >>> neu, nstand = anwenden(basis, sieben, {}, {}, {"x#tauschen"}, (), bstand)
+    >>> [(i.exercise_id, i.target) for i in neu.items], nstand["b1"]["uebung"]
+    ([('b', None)], 'b')
+    >>> [z.stand for z in aenderungen(neu, sieben, {}, {}, nstand, namen)]
+    ['uebernommen']
+    >>> acht = [Block(PLAN_ENTFERNEN, id="y", an="b1")]
+    >>> zeigen(aenderungen(basis, acht, {}, {}, bstand, namen))
+    y#entfernen | Planke geht aus deinem Plan | deine Einträge bleiben | neu
+    >>> leer, lstand = anwenden(basis, acht, {}, {}, {"y#entfernen"}, (), bstand)
+    >>> leer.items, [z.stand for z in aenderungen(leer, acht, {}, {}, lstand, namen)]
+    ([], ['uebernommen'])
+    >>> [z.stand for z in aenderungen(leer, eins, {}, {}, lstand, namen)]  # kommt nicht wieder
+    ['uebernommen']
     """
-    lauf = _Lauf(plan, bloecke, werte, wahl, kurs_stand, namen, feld_von, bezug, zusatz, planwerte)
+    lauf = _Lauf(
+        plan, bloecke, werte, wahl, kurs_stand, namen, feld_von, bezug, zusatz, planwerte, antworten
+    )
     # Zur Vorschau gilt jede neue Zeile als gewählt: Ein Baustein darf sich auf die Planübung
     # eines Bausteins davor beziehen, auch wenn beide noch nicht übernommen sind
     lauf.gehen(lambda zeile: zeile.stand in (NEU, ANKER_FEHLT))
@@ -409,6 +462,7 @@ def anwenden(
     lassen: Collection[str] = (),
     zusatz: Mapping[str, str] | None = None,
     planwerte: Mapping[str, Planwert] | None = None,
+    antworten: Mapping[str, Gegeben] | None = None,
 ) -> tuple[Plan, KursStand]:
     """Wendet die gewählten Zeilen an — und nur sie. ``gewaehlt`` sind ihre IDs
     (`Aenderung.id`); eine Zeile, in der der Plan abweicht, gilt nur, wenn ihre ID auch in
@@ -467,7 +521,9 @@ def anwenden(
     >>> [z.stand for z in aenderungen(neu, drei, {}, {}, stand3, {"p": "Planke"})]
     ['uebernommen']
     """
-    lauf = _Lauf(plan, bloecke, werte, wahl, kurs_stand, namen, feld_von, bezug, zusatz, planwerte)
+    lauf = _Lauf(
+        plan, bloecke, werte, wahl, kurs_stand, namen, feld_von, bezug, zusatz, planwerte, antworten
+    )
     bleibt = set(lassen)
     ja, auch = set(gewaehlt), set(trotz) - bleibt
     lauf.gehen(
@@ -532,8 +588,11 @@ class _Lauf:
         bezug: Sequence[Block],
         zusatz: Mapping[str, str] | None = None,
         planwerte: Mapping[str, Planwert] | None = None,
+        antworten: Mapping[str, Gegeben] | None = None,
     ) -> None:
         self.plan = copy.deepcopy(plan)
+        #: die gespeicherten Antworten — worauf ``wenn`` an einem Baustein schaut
+        self.antworten = antworten or {}
         self.stand: KursStand = {
             str(marke): copy.deepcopy(dict(eintrag))
             for marke, eintrag in (kurs_stand or {}).items()
@@ -552,6 +611,8 @@ class _Lauf:
         self.planwerte = planwerte or {}
         alle = (*bezug, *bloecke)
         self.tests = {b.id: b for b in alle if b.art == TEST}
+        #: Block-ID → Test oder Frage: wo eine Antwort herkommt, die noch fehlt (`_wenn_fehlt`)
+        self.quellen = {b.id: b for b in alle if b.art in (TEST, FRAGE)}
         #: Block-ID → die feste Übung eines ``plan_uebung`` (für den Namen einer Marke)
         self.feste = {b.id: b.uebung for b in alle if b.art == PLAN_UEBUNG and b.uebung}
         #: Block-ID → die Auswahl, aus der ein ``plan_uebung`` seine Übung nimmt (`_fehlt`)
@@ -571,12 +632,141 @@ class _Lauf:
         self.nimmt = nimmt
         self.lassen = lassen
         for block in self.bloecke:
+            if not block.baustein:
+                continue
+            # ``wenn``: Der Baustein gilt nur bei der passenden Antwort (Selbstauskunft, nie
+            # ein Messwert). Bei einer anderen gibt es ihn nicht; fehlt sie, ist er offen
+            gilt = wenn_stand(block.wenn, self.antworten)
+            if gilt is False:
+                continue
+            if gilt is None:
+                self.offen.add(block.id)
+                self._zeile(
+                    Aenderung(
+                        block.id,
+                        block.id,
+                        UEBUNG if block.art == PLAN_UEBUNG else EINSTELLEN,
+                        self._wenn_titel(block),
+                        self._wenn_fehlt(block),
+                        OFFEN,
+                    )
+                )
+                continue
+            anfang = len(self.zeilen)
             if block.art == PLAN_UEBUNG:
                 self._uebung(block)
             elif block.art == PLAN_EINSTELLEN:
                 self._einstellen(block)
             elif block.art == PLAN_WEG:
                 self._weg(block)
+            elif block.art == PLAN_ENTFERNEN:
+                self._entfernen(block)
+            elif block.art == PLAN_TAUSCHEN:
+                self._tauschen(block)
+            if block.wenn and (grund := wenn_grund(block.wenn, self.antworten)):
+                # jede Zeile nennt, warum sie da steht — die Regel des Kurses, ohne Wertung
+                for n in range(anfang, len(self.zeilen)):
+                    z = self.zeilen[n]
+                    if z.stand != UEBERNOMMEN:
+                        unter = f"{z.unter} · {grund}" if z.unter else grund
+                        self.zeilen[n] = replace(z, unter=unter)
+
+    def _wenn_titel(self, b: Block) -> str:
+        """Wie die offene Zeile eines Bausteins heißt, dessen Antwort noch fehlt."""
+        if b.art == PLAN_UEBUNG:
+            wer = self._name(b.uebung) if b.uebung else "Deine Auswahl"
+            return f"{wer} kommt dazu"
+        if b.art == PLAN_WEG:
+            return "Ein Weg"
+        if b.art == PLAN_ENTFERNEN:
+            return "Eine Übung geht aus deinem Plan"
+        if b.art == PLAN_TAUSCHEN:
+            return f"Eine Übung wird zu {self._name(b.uebung)}"
+        return "Eine Einstellung"
+
+    def _wenn_fehlt(self, b: Block) -> str:
+        """Der Satz, welche Antwort fehlt — und wo sie herkommt: aus einem Lauf („probier
+        zuerst … aus“) oder aus einer Frage im Kapitel."""
+        for w in b.wenn:
+            if gegeben_zu(w.frage, self.antworten):
+                continue
+            quelle = self.quellen.get(w.frage.partition(".")[0])
+            if quelle is not None and quelle.art == TEST:
+                wer = self._name(quelle.uebung) if quelle.uebung else "die Übung"
+                return f"Dazu fehlt deine Antwort — probier zuerst {wer} aus."
+            if quelle is not None and quelle.titel:
+                return f"Dazu fehlt deine Antwort auf „{quelle.titel}“."
+            break
+        return "Dazu fehlt noch eine Antwort."
+
+    # -- plan_entfernen, plan_tauschen ---------------------------------------------------------
+
+    def _entfernen(self, b: Block) -> None:
+        zid = f"{b.id}#{ENTFERNEN}"
+        gruppe = self._gruppe(b.an)
+        if b.an in self.offen:
+            titel = "Deine Auswahl geht aus deinem Plan"
+            self._zeile(Aenderung(zid, b.id, ENTFERNEN, titel, _WAHL_FEHLT, OFFEN))
+            return
+        if not gruppe:
+            wer = self._marke_name(b.an)
+            schon = zid in self._erledigt(b.id)
+            unter = "ist herausgenommen" if schon else "steht nicht in deinem Plan"
+            titel = f"{wer} geht aus deinem Plan"
+            self._zeile(Aenderung(zid, b.id, ENTFERNEN, titel, unter, UEBERNOMMEN))
+            return
+        namen = " und ".join(dict.fromkeys(self._name(i.exercise_id) for i in gruppe))
+        zeile = Aenderung(
+            zid, b.id, ENTFERNEN, f"{namen} geht aus deinem Plan", "deine Einträge bleiben", NEU
+        )
+        if not self._zeile(zeile):
+            return
+        for item in gruppe:
+            self.plan.items.remove(item)
+            if not self.folgt:
+                self.plan.ablauf = self.plan.ablauf.ohne_knoten(item.id)
+            # der Baustein, der sie gebracht hat, bringt sie nicht wieder („lassen“)
+            self._merken(item.kurs_marke, item.kurs_marke)
+        for n, planuebung in enumerate(self.plan.items):
+            planuebung.order = n
+        if self.folgt:
+            self.plan.ablauf = ab.kette_der_liste(self._paare())
+        self._merken(b.id, zid)
+
+    def _tauschen(self, b: Block) -> None:
+        gruppe = self._gruppe(b.an)
+        neu = self._name(b.uebung)
+        if b.an in self.offen:
+            zid = f"{b.id}#{TAUSCHEN}"
+            titel = f"Deine Auswahl wird zu {neu}"
+            self._zeile(Aenderung(zid, b.id, TAUSCHEN, titel, _WAHL_FEHLT, OFFEN))
+            return
+        if self.namen is not None and b.uebung not in self.namen:
+            return  # die neue Übung gibt es hier nicht — keine Zeile, wie bei ``plan_uebung``
+        if not gruppe:
+            zid = f"{b.id}#{TAUSCHEN}"
+            titel = "Ein Tausch entfällt"
+            self._zeile(Aenderung(zid, b.id, TAUSCHEN, titel, self._fehlt(b.an), ENTFAELLT))
+            return
+        for item in gruppe:
+            marke = item.kurs_marke
+            zid = f"{b.id}#{TAUSCHEN}" + (f":{marke}" if len(gruppe) > 1 else "")
+            alt = self._name(item.exercise_id)
+            if item.exercise_id == b.uebung or zid in self._erledigt(b.id):
+                titel = f"{alt} wird zu {neu}" if item.exercise_id != b.uebung else f"{neu} im Plan"
+                self._zeile(Aenderung(zid, b.id, TAUSCHEN, titel, "steht so", UEBERNOMMEN))
+                continue
+            zeile = Aenderung(
+                zid, b.id, TAUSCHEN, f"{alt} wird zu {neu}", "Ziel und Parameter beginnen neu", NEU
+            )
+            if not self._zeile(zeile):
+                continue
+            item.exercise_id = b.uebung
+            item.target = None
+            item.felder = None
+            erledigt = self._erledigt(marke)
+            self.stand[marke] = {**_item_stand(item), "erledigt": list(erledigt)}
+            self._merken(b.id, zid)
 
     # -- Hilfen ------------------------------------------------------------------------------
 
@@ -827,9 +1017,16 @@ class _Lauf:
         Test schon übernommen war. Nichts ändert sich ohne Tipp; steht im Plan inzwischen ein
         eigener Wert, fragt die Zeile wie jede andere (`_wert`: „weicht ab“)."""
         name = self._name(uebung)
-        test = self.tests.get(b.ziel_aus)
+        # ``ziel_aus`` nennt den Test — oder eines seiner Felder (``<test>.<feld>``; Ben,
+        # 23.11.2026: alle eingegebenen Werte bleiben benennbar): Dann kommt die Zahl aus
+        # diesem Feld des Laufs und wird das Ziel in diesem Feld
+        test_id, _, eigenes = b.ziel_aus.partition(".")
+        test = self.tests.get(test_id)
         # ein Test, der „die gewählte“ misst, hat je Übung einen Wert — der dieser Planübung zählt
         schluessel = wert_schluessel(test, uebung) if test is not None else ""
+        if test is not None and eigenes and eigenes != test.feld:
+            test = replace(test, feld=eigenes)
+            schluessel = feld_schluessel(schluessel, eigenes)
         wert = self.werte.get(schluessel) if test is not None else None
         gewaehlt = self.planwerte.get(schluessel) if wert is not None else None
         erledigt = self._erledigt(marke)

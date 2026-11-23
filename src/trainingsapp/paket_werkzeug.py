@@ -60,6 +60,8 @@ from trainingsapp.core.kursbloecke import (
     BAUSTEINE,
     MENGE,
     PLAN_EINSTELLEN,
+    PLAN_ENTFERNEN,
+    PLAN_TAUSCHEN,
     PLAN_UEBUNG,
     PLAN_WEG,
     SKALA,
@@ -813,6 +815,8 @@ _MARKENFELDER: dict[str, tuple[str, ...]] = {
     PLAN_UEBUNG: ("hinter",),
     PLAN_EINSTELLEN: ("an",),
     PLAN_WEG: ("von", "zu"),
+    PLAN_ENTFERNEN: ("an",),
+    PLAN_TAUSCHEN: ("an",),
 }
 
 
@@ -1070,6 +1074,10 @@ def _kurs_pruefen(
                 probleme.append(
                     f"`{feld}` fehlt — ein Weg braucht `von` und `zu`, der Baustein fällt weg"
                 )
+            elif s.art in (PLAN_ENTFERNEN, PLAN_TAUSCHEN):
+                probleme.append(f"`{feld}` fehlt — welche Planübung? Der Baustein fällt weg")
+        if s.art == PLAN_TAUSCHEN and not str(b.get("uebung") or "").strip():
+            probleme.append("`uebung` fehlt — wogegen getauscht wird. Der Baustein fällt weg")
         if s.art == PLAN_EINSTELLEN and Block.from_dict(b) is None:
             hinweise.append(f"{s.ort}: stellt nichts ein — der Baustein fällt weg")
         if s.art in (PLAN_UEBUNG, PLAN_EINSTELLEN):

@@ -589,7 +589,8 @@ FEHLER: list[tuple[Callable[[dict[str, Any]], None], str]] = [
     (
         _baustein_unbekannt,
         "Kurs „Rumpf-Kurs“: Kapitel „Erweiterung“, Block 5 „pause“: unbekannter Baustein "
-        "`plan_pause` (bekannt: plan_uebung, plan_einstellen, plan_weg) — der Block fällt weg",
+        "`plan_pause` (bekannt: plan_uebung, plan_einstellen, plan_weg, plan_entfernen, "
+        "plan_tauschen) — der Block fällt weg",
     ),
     (
         _gewaehlte_nicht_zur_wahl,

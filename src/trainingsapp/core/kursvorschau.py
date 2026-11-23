@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from . import kursplan as kp
-from .kursbloecke import AUSWAHL, PLAN_UEBUNG, ZU_ENDE, Block, Planwert
+from .kursbloecke import AUSWAHL, PLAN_UEBUNG, ZU_ENDE, Block, Gegeben, Planwert
 from .kurse import Kurs
 from .models import Plan
 
@@ -91,11 +91,13 @@ def kommt_noch(
     namen: Mapping[str, str],
     feld_von: kp.Feldsuche | None = None,
     planwerte: Mapping[str, Planwert] | None = None,
+    antworten: Mapping[str, Gegeben] | None = None,
 ) -> list[KapitelVorschau]:
     """Je Kapitel **nach** dem aktuellen, das am Plan noch etwas vorschlägt, seine Zeilen.
     ``planwerte``: der Wert für den Plan je Test, den die Person gewählt hat (W3, wie in
     `core.kursplan.aenderungen`) — die Vorschau rechnet mit denselben Zielen wie die
-    Sammelkarte.
+    Sammelkarte. ``antworten``: die gespeicherten Antworten — ein Baustein mit ``wenn`` steht
+    nur bei der passenden da; fehlt sie noch, sagt sein Satz, welche.
 
     Args:
         kurs: der Kurs; ohne Kursplan gibt es keine Vorschau.
@@ -187,6 +189,7 @@ def kommt_noch(
             feld_von,
             bezug=alle,
             planwerte=planwerte,
+            antworten=antworten,
         )
         # „wenn du alles übernimmst“: jede Zeile gilt als gewählt — wo der Plan abweicht,
         # bleibt der Wert der Person (kein ``trotz``). `anwenden` arbeitet auf einer Kopie
@@ -202,6 +205,7 @@ def kommt_noch(
             feld_von,
             bezug=alle,
             planwerte=planwerte,
+            antworten=antworten,
         )
         # auch die Kapitel bis zum aktuellen gehen durch: Was dort auf eine Wahl wartet,
         # müssen die späteren wissen
@@ -285,6 +289,11 @@ class _Saetze:
                 yield Zeile(WEG, _klein(z.titel))
             else:
                 yield Zeile(WEG, _mit_grund(z))
+        elif z.art in (kp.ENTFERNEN, kp.TAUSCHEN):  # herausnehmen, tauschen — wie es dasteht
+            yield Zeile(EINSTELLEN, _mit_grund(z), offen=z.stand == kp.OFFEN)
+        elif z.art == kp.EINSTELLEN and z.stand == kp.OFFEN and block.wenn:
+            # der Baustein wartet auf eine Antwort (``wenn``): sein Satz sagt, auf welche
+            yield Zeile(EINSTELLEN, _mit_grund(z), offen=True)
         elif z.art == kp.EINSTELLEN:  # ein ``plan_einstellen`` als Ganzes: offen oder entfällt
             if z.stand == kp.OFFEN or haengt:
                 yield from _angaben(block, self._wartende(block.an))

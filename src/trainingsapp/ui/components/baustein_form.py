@@ -51,6 +51,8 @@ from trainingsapp.core.kursbau import (
 from trainingsapp.core.kursbloecke import (
     HART,
     PLAN_EINSTELLEN,
+    PLAN_ENTFERNEN,
+    PLAN_TAUSCHEN,
     PLAN_UEBUNG,
     PLAN_WEG,
     TEST,
@@ -71,12 +73,15 @@ from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.takt_blatt import takt_blatt, takt_zeile_text
 from trainingsapp.ui.components.timer_editor import TimerEditor, timer_editor
 from trainingsapp.ui.components.timer_zeile import neuer_timer
+from trainingsapp.ui.components.wenn_form import wenn_fehler, wenn_teil
 
 #: Titel des Blatts je Art
 BLATT_TITEL: Final[dict[str, str]] = {
     PLAN_UEBUNG: "Übung in den Plan",
     PLAN_EINSTELLEN: "Am Plan einstellen",
     PLAN_WEG: "Weg im Plan",
+    PLAN_ENTFERNEN: "Übung aus dem Plan nehmen",
+    PLAN_TAUSCHEN: "Übung im Plan tauschen",
 }
 
 #: Schlüssel in den Auswahlfeldern für „nichts“ — eine Marke beginnt nie so
@@ -287,6 +292,8 @@ def baustein_blatt(
         if b.art == PLAN_WEG:
             b.kante = kante_dict(zustand["kante"])
             return b
+        if b.art in (PLAN_ENTFERNEN, PLAN_TAUSCHEN):
+            return b
         if b.art == PLAN_UEBUNG and b.aus:
             b.uebung = ""
         ohne_uebung = b.art == PLAN_EINSTELLEN and not b.an
@@ -320,6 +327,12 @@ def baustein_blatt(
             return "Wähle eine Übung."
         if b.art == PLAN_WEG and (not b.von or not b.zu):
             return "Ein Weg braucht „Von“ und „Zu“."
+        if b.art in (PLAN_ENTFERNEN, PLAN_TAUSCHEN) and not b.an:
+            return "Wähle die Planübung."
+        if b.art == PLAN_TAUSCHEN and not b.uebung:
+            return "Wähle die Übung, die an ihre Stelle tritt."
+        if grund := wenn_fehler(b.wenn):
+            return grund
         if b.art == PLAN_EINSTELLEN and not b.stellt_ein:
             return "Stell mindestens eines ein — Ziel, Parameter, Timer, Takt, Übergang oder Pause."
         form = zustand["form"]
@@ -975,14 +988,78 @@ def baustein_blatt(
             )
         return teile
 
+    def entfernen_form() -> list[ft.Control]:
+        """Herausnehmen (Ben, 23.11.2026): welche Planübung geht — mehr braucht es nicht."""
+
+        def an_setzen(key: str) -> None:
+            entwurf.an = "" if key == KEIN else key
+
+        return [
+            wahl(
+                "Welche Planübung",
+                entwurf.an or KEIN,
+                marken_optionen(entwurf.an),
+                an_setzen,
+                "baustein_an",
+            ),
+            ft.Text(
+                "Sie geht aus dem Plan — auf Tipp in der Karte „Das ändert sich an deinem "
+                "Plan“. Die Einträge der Übung bleiben.",
+                size=12,
+                opacity=0.7,
+            ),
+        ]
+
+    def tauschen_form() -> list[ft.Control]:
+        """Tauschen: Die Planübung wird eine andere Übung; Ziel und Parameter beginnen neu."""
+
+        def an_setzen(key: str) -> None:
+            entwurf.an = "" if key == KEIN else key
+
+        def uebung_setzen(key: str) -> None:
+            entwurf.uebung = key[2:] if key.startswith("u:") else ""
+
+        optionen = [(f"u:{u.id}", u.name) for u in uebungen]
+        wert = f"u:{entwurf.uebung}" if entwurf.uebung else KEIN
+        if entwurf.uebung and wert not in dict(optionen):
+            optionen.append((wert, f"{jetzt().name(entwurf.uebung)} (archiviert)"))
+        return [
+            wahl(
+                "Welche Planübung",
+                entwurf.an or KEIN,
+                marken_optionen(entwurf.an),
+                an_setzen,
+                "baustein_an",
+            ),
+            wahl("Wird zu", wert, optionen, uebung_setzen, "baustein_uebung", filtern=True),
+            ft.Text(
+                "Die Planübung bleibt an ihrer Stelle und folgt der neuen Übung — ihr Ziel und "
+                "ihre Parameter beginnen neu.",
+                size=12,
+                opacity=0.7,
+            ),
+        ]
+
     def bauen() -> list[ft.Control]:
         # Zielmaske und Timer-Editor gibt es nur, wenn ihr Teil sie neu anlegt
         zustand["form"] = zustand["editor"] = None
         if entwurf.art == PLAN_UEBUNG:
-            return uebung_form()
-        if entwurf.art == PLAN_EINSTELLEN:
-            return einstellen_form()
-        return weg_form()
+            teile = uebung_form()
+        elif entwurf.art == PLAN_EINSTELLEN:
+            teile = einstellen_form()
+        elif entwurf.art == PLAN_ENTFERNEN:
+            teile = entfernen_form()
+        elif entwurf.art == PLAN_TAUSCHEN:
+            teile = tauschen_form()
+        else:
+            teile = weg_form()
+        # „Nur wenn …“ (Ben, 23.11.2026): Der Baustein gilt nur bei bestimmten Antworten
+        return [
+            *teile,
+            wenn_teil(
+                jetzt().fragen(entwurf.id), entwurf.wenn, vorschau_neu, kennung="baustein_wenn"
+            ),
+        ]
 
     # -- Knöpfe --------------------------------------------------------------------------
 

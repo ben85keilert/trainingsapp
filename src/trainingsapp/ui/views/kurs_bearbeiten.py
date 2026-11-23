@@ -99,6 +99,8 @@ from trainingsapp.core.kursbloecke import (
     MEDIUM,
     MENGE,
     PLAN_EINSTELLEN,
+    PLAN_ENTFERNEN,
+    PLAN_TAUSCHEN,
     PLAN_UEBUNG,
     PLAN_WEG,
     SKALA,
@@ -164,6 +166,8 @@ ART_SYMBOL: dict[str, ft.IconData] = {
     PLAN_UEBUNG: ft.Icons.ADD,
     PLAN_EINSTELLEN: ft.Icons.TUNE,
     PLAN_WEG: ft.Icons.ALT_ROUTE,
+    PLAN_ENTFERNEN: ft.Icons.REMOVE_CIRCLE_OUTLINE,
+    PLAN_TAUSCHEN: ft.Icons.SWAP_HORIZ,
 }
 KEIN_KURSPLAN = (
     "Der Kurs baut keinen Plan — Bausteine bewirken dann nichts. Einschalten: zurück zu „Kurs "

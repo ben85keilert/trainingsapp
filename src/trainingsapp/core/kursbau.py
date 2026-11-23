@@ -51,8 +51,11 @@ from .kursbloecke import (
     ARTEN,
     AUSWAHL,
     BAUSTEINE,
+    FRAGE,
     MENGE,
     PLAN_EINSTELLEN,
+    PLAN_ENTFERNEN,
+    PLAN_TAUSCHEN,
     PLAN_UEBUNG,
     PLAN_WEG,
     SKALA,
@@ -67,6 +70,8 @@ from .kursbloecke import (
     ZU_ENDE,
     Block,
     Vorgabe,
+    Wenn,
+    antwort_name,
     gemessene_uebungen,
     wert_schluessel,
 )
@@ -123,6 +128,8 @@ ID_VORSATZ: Final[dict[str, str]] = {
     PLAN_UEBUNG: "uebung",
     PLAN_EINSTELLEN: "einstellen",
     PLAN_WEG: "weg",
+    PLAN_ENTFERNEN: "heraus",
+    PLAN_TAUSCHEN: "tausch",
 }
 #: Welche Felder eines Blocks auf andere Blöcke zeigen — die Bausteine und der Test, der „die
 #: gewählte“ einer Auswahl misst (``aus``, Ben 16.11.2026)
@@ -130,6 +137,8 @@ VERWEISFELDER: Final[dict[str, tuple[str, ...]]] = {
     PLAN_UEBUNG: ("aus", "hinter", "ziel_aus"),
     PLAN_EINSTELLEN: ("an", "ziel_aus"),
     PLAN_WEG: ("von", "zu"),
+    PLAN_ENTFERNEN: ("an",),
+    PLAN_TAUSCHEN: ("an",),
     TEST: ("aus",),
 }
 #: Felder, die ein Test messen kann (Art aus dem Feldvorrat)
@@ -1676,7 +1685,56 @@ class Kurssicht:
             if kante.ausfuehren:
                 teile.append("von selbst")
             return " · ".join(teile)
+        if block.art == PLAN_ENTFERNEN:
+            return f"{self.marke_name(block.an) if block.an else '?'} geht aus dem Plan"
+        if block.art == PLAN_TAUSCHEN:
+            wer = self.marke_name(block.an) if block.an else "?"
+            return f"{wer} wird zu {self.name(block.uebung) if block.uebung else '?'}"
         return ""
+
+    # -- Fragen und Bedingungen (Ben, 23.11.2026, `docs/plan_kurs_uebungen.md` §10.3) -----------
+
+    def fragen(self, ohne: str = "") -> list[tuple[str, str, ab.Frage]]:
+        """Die Fragen, an deren Antwort ein Block hängen kann (``wenn``): Name der Antwort
+        (`core.kursbloecke.antwort_name` bzw. die Block-ID), wie sie in der Liste heißt, und
+        die Frage selbst — die Fragen im Kapitel, die ihre Antwort speichern, und die Fragen
+        an den Läufen, bis zu diesem Kapitel. ``ohne``: die ID des Blocks, der gerade
+        bearbeitet wird (eine Frage hängt nicht an sich selbst)."""
+        ergebnis: list[tuple[str, str, ab.Frage]] = []
+        for b in self.bis_hier():
+            if b.id == ohne:
+                continue
+            if b.art == FRAGE and b.frage is not None:
+                ergebnis.append((b.id, b.titel or "Frage", b.frage))
+            elif b.art == TEST:
+                wer = self.wer(b)
+                ergebnis.extend((antwort_name(b.id, f.id), f"{wer}: {f.text}", f) for f in b.fragen)
+        return ergebnis
+
+    def wenn_text(self, wenn: Sequence[Wenn]) -> str:
+        """Die Bedingungen eines Blocks in einer Zeile: „nur wenn „Wie war das?“ = leicht“."""
+        namen = {name: text for name, text, _ in self.fragen()}
+        teile: list[str] = []
+        for w in wenn:
+            frage = namen.get(w.frage, "eine Frage, die es hier nicht gibt")
+            if w.antworten:
+                was = " oder ".join(w.antworten)
+            elif w.ab is not None and w.bis is not None:
+                was = f"{w.ab:g}–{w.bis:g}"
+            elif w.ab is not None:
+                was = f"ab {w.ab:g}"
+            else:
+                was = f"bis {w.bis:g}"
+            teile.append(f"„{frage}“ = {was}")
+        return "nur wenn " + " und ".join(teile) if teile else ""
+
+    def folgen_der_antwort(self, name: str, antwort: str) -> list[Block]:
+        """Die Blöcke, die bei dieser Antwort gelten — was im Editor unter ihr steht."""
+        return [
+            b
+            for b in self.alle()
+            if any(w.frage == name and antwort in w.antworten for w in b.wenn)
+        ]
 
     def test_kurz(
         self, block: Block, *, kapitelplan: bool = False, fehlt: str = "Übung fehlt"

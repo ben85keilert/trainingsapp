@@ -34,11 +34,27 @@ hat, oder ``g:<n>`` für die n-te Planübung der Grundlage. Was aus ihnen wird �
 „Das ändert sich an deinem Plan“ —, rechnet `core/kursplan.py`. In einem Kurs ohne Kursplan
 tun sie nichts.
 
+**Übung machen** (Ben, 23.11.2026, `docs/plan_kurs_uebungen.md`): Der Block ``test`` heißt
+so — derselbe Lauf, ob als Test (ein Baustein braucht seinen Wert, `wert_wird_ziel`) oder nur
+zum Ausprobieren. Dazu kommen am Lauf: ``medien`` (vorher · dabei · bei … · nachher, wie an
+der Planübung), ``braucht`` (ein Sensor als Startbedingung), ``fragen`` (vorher oder nachher,
+die Arten von `core.ablauf.Frage`) und ``ziele`` (eine Antwort schlägt ein festes Ziel vor).
+Der Block ``frage`` kann dieselben Arten (``frage``); seine Antwort wird dann gespeichert.
+
+**Wenn** (``wenn`` an jedem Block und Baustein): Der Block gilt nur bei bestimmten Antworten
+— ein Text oder Medium erscheint erst dann, ein Baustein steht nur dann in der Sammelkarte.
+„Es wird etwas gefragt, das hat eine Folge“; gerechnet wird aus der **Selbstauskunft**, nie
+aus Messwerten, und am Plan ändert sich nichts ohne Tipp.
+
+Zwei weitere Bausteine: ``plan_entfernen`` (eine Planübung herausnehmen) und
+``plan_tauschen`` (eine Planübung durch eine andere Übung ersetzen).
+
 Dieses Modul kennt kein flet und keine Datenbank.
 """
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -64,6 +80,8 @@ ARTEN: Final[dict[str, str]] = {
 PLAN_UEBUNG: Final = "plan_uebung"
 PLAN_EINSTELLEN: Final = "plan_einstellen"
 PLAN_WEG: Final = "plan_weg"
+PLAN_ENTFERNEN: Final = "plan_entfernen"
+PLAN_TAUSCHEN: Final = "plan_tauschen"
 #: Die Bausteine — Blöcke, die den Kursplan ändern. Eine eigene Liste neben `ARTEN`: Jene sind,
 #: was man im Kapitel liest und tut, diese, was sich am Plan ändert (Kurs-Editor: „Im Kapitel“
 #: und „Am Plan“)
@@ -71,7 +89,19 @@ BAUSTEINE: Final[dict[str, str]] = {
     PLAN_UEBUNG: "Übung dazu",
     PLAN_EINSTELLEN: "Einstellen",
     PLAN_WEG: "Weg",
+    PLAN_ENTFERNEN: "Übung herausnehmen",
+    PLAN_TAUSCHEN: "Übung tauschen",
 }
+#: ``test``: ein Sensor als **Startbedingung** (Ben, 23.11.2026: „Ein Sensor soll auch als
+#: notwendige Startbedingung gesetzt werden können“) — der Lauf startet erst, wenn er da ist.
+#: Nur, dass er verbunden ist: Aus seinen Werten rechnet der Kurs nie
+BRAUCHT_MESSUNG: Final = "messung"
+BRAUCHT: Final[dict[str, str]] = {BRAUCHT_MESSUNG: "Herzfrequenz (eine Messung läuft)"}
+#: ``test``: wann eine Frage am Lauf kommt — vor dem Start oder im Ergebnis (Vorgabe)
+VORHER: Final = "vorher"
+NACHHER: Final = "nachher"
+#: Vorsatz der Variable einer Antwort am Lauf: ``<test>.f:<frage>``
+FRAGE_VORSATZ: Final = "f:"
 #: ``plan_weg``: das Ziel „Ende des Plans“ statt einer Marke
 ZU_ENDE: Final = "ende"
 #: ``plan_einstellen``: die Vorgabe des Übergangs im Workout
@@ -205,6 +235,202 @@ class Antwort:
         return d
 
 
+@dataclass(frozen=True, slots=True)
+class Gegeben:
+    """Eine gespeicherte Antwort (Variable des Kurses): die Zahl einer Skala in ``wert``, eine
+    gewählte Antwort in ``text`` — mehrere als JSON-Liste, Ja/Nein als „Ja“/„Nein“."""
+
+    wert: float = 0.0
+    text: str | None = None
+
+    @property
+    def gewaehlt(self) -> tuple[str, ...]:
+        """Die gewählten Antworten — leer bei einer Skala.
+
+        >>> Gegeben(text="leicht").gewaehlt, Gegeben(text='["a", "b"]').gewaehlt
+        (('leicht',), ('a', 'b'))
+        >>> Gegeben(6).gewaehlt
+        ()
+        """
+        if self.text is None:
+            return ()
+        if self.text.startswith("["):
+            try:
+                liste = json.loads(self.text)
+            except ValueError:
+                liste = None
+            if isinstance(liste, list):
+                return tuple(str(a) for a in liste)
+        return (self.text,)
+
+
+def antwort_als_text(antworten: Sequence[str], mehrfach: bool = False) -> str:
+    """Wie eine gewählte Antwort gespeichert wird (`Gegeben.text`).
+
+    >>> antwort_als_text(["leicht"]), antwort_als_text(["a", "b"], mehrfach=True)
+    ('leicht', '["a", "b"]')
+    >>> antwort_als_text(["a"], mehrfach=True)
+    '["a"]'
+    """
+    if mehrfach:
+        return json.dumps(list(antworten), ensure_ascii=False)
+    return antworten[0] if antworten else ""
+
+
+@dataclass(frozen=True, slots=True)
+class Wenn:
+    """Eine Bedingung an einem Block: Er gilt nur bei dieser Antwort (Ben, 23.11.2026: „Es
+    wird etwas gefragt, das hat eine Folge. Plan ändern, Medium abspielen usw.“).
+
+    ``frage``: der Name der Antwort — die Block-ID einer Frage im Kapitel oder
+    ``<test>.f:<frage>`` für eine Frage am Lauf (`antwort_name`). ``antworten``: Eine davon
+    genügt (bei mehreren Angekreuzten: eine ist dabei). ``ab``/``bis``: der Bereich einer
+    Skala, Grenzen eingeschlossen."""
+
+    frage: str
+    antworten: tuple[str, ...] = ()
+    ab: float | None = None
+    bis: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """
+        >>> Wenn("q", ("leicht", "mittel")).to_dict()
+        {'frage': 'q', 'antworten': ['leicht', 'mittel']}
+        >>> Wenn("t.f:q", ab=7).to_dict()
+        {'frage': 't.f:q', 'ab': 7}
+        """
+        d: dict[str, Any] = {"frage": self.frage}
+        if self.antworten:
+            d["antworten"] = list(self.antworten)
+        for name, zahl in (("ab", self.ab), ("bis", self.bis)):
+            if zahl is not None:
+                d[name] = int(zahl) if float(zahl).is_integer() else zahl
+        return d
+
+    @classmethod
+    def from_dict(cls, roh: Any) -> Wenn | None:
+        """Unbrauchbares ist keine Bedingung — ohne Frage, oder ohne Antwort und Bereich.
+
+        >>> Wenn.from_dict({"frage": "q", "antworten": ["a", "a", " b "]})
+        Wenn(frage='q', antworten=('a', 'b'), ab=None, bis=None)
+        >>> Wenn.from_dict({"frage": "q", "ab": "7"}).ab, Wenn.from_dict({"frage": "q"})
+        (7.0, None)
+        """
+        if not isinstance(roh, Mapping) or not _marke(roh.get("frage")):
+            return None
+        antworten = tuple(
+            dict.fromkeys(str(a).strip() for a in (_liste(roh.get("antworten"))) if str(a).strip())
+        )
+
+        def grenze(key: str) -> float | None:
+            try:
+                zahl = float(roh[key])
+            except (KeyError, TypeError, ValueError):
+                return None
+            return zahl if math.isfinite(zahl) else None
+
+        ab_, bis = grenze("ab"), grenze("bis")
+        if not antworten and ab_ is None and bis is None:
+            return None
+        return cls(_marke(roh.get("frage")), antworten, ab_, bis)
+
+    def trifft(self, gegeben: Gegeben) -> bool:
+        """Erfüllt die Antwort die Bedingung?
+
+        >>> Wenn("q", ("leicht", "mittel")).trifft(Gegeben(text="mittel"))
+        True
+        >>> Wenn("q", ("leicht",)).trifft(Gegeben(text='["schwer", "leicht"]'))
+        True
+        >>> Wenn("q", ab=7).trifft(Gegeben(6)), Wenn("q", ab=7, bis=8).trifft(Gegeben(8))
+        (False, True)
+        """
+        if self.antworten:
+            return any(a in self.antworten for a in gegeben.gewaehlt)
+        if gegeben.text is not None:
+            return False
+        return (self.ab is None or gegeben.wert >= self.ab) and (
+            self.bis is None or gegeben.wert <= self.bis
+        )
+
+    def grund(self, gegeben: Gegeben) -> str:
+        """Der Grund in einem Halbsatz — die Regel, ohne Wertung.
+
+        >>> Wenn("q", ("leicht", "mittel")).grund(Gegeben(text="mittel"))
+        'weil du „mittel“ geantwortet hast'
+        >>> Wenn("q", ab=7).grund(Gegeben(8))
+        'weil du 8 angegeben hast'
+        """
+        if self.antworten:
+            dabei = [a for a in gegeben.gewaehlt if a in self.antworten]
+            return "weil du " + " und ".join(f"„{a}“" for a in dabei) + " geantwortet hast"
+        return f"weil du {gegeben.wert:g} angegeben hast"
+
+
+def antwort_name(test_name: str, frage_id: str) -> str:
+    """Der Name der Antwort auf eine Frage **am Lauf**: ``<test>.f:<frage>`` — ``test_name``
+    ist der Schlüssel des Tests (`wert_schluessel`) oder, in einer Bedingung, seine Block-ID.
+
+    >>> antwort_name("t", "q1"), antwort_name("t:x", "q1")
+    ('t.f:q1', 't:x.f:q1')
+    """
+    return f"{test_name}.{FRAGE_VORSATZ}{frage_id}"
+
+
+def gegeben_zu(name: str, antworten: Mapping[str, Gegeben]) -> list[Gegeben]:
+    """Die Antworten zu einem Namen aus einer Bedingung. Ein Test, der „die gewählte“ misst,
+    hat je Übung eine (``<test>:<übung>.f:<frage>``) — die Bedingung nennt nur den Test.
+
+    >>> a = {"t:x.f:q": Gegeben(text="leicht"), "q2": Gegeben(3)}
+    >>> gegeben_zu("t.f:q", a), gegeben_zu("q2", a), gegeben_zu("nix", a)
+    ([Gegeben(wert=0.0, text='leicht')], [Gegeben(wert=3, text=None)], [])
+    """
+    if name in antworten:
+        return [antworten[name]]
+    block, punkt, rest = name.partition(".")
+    if not punkt:
+        return []
+    return [
+        g for n, g in antworten.items() if n.startswith(f"{block}:") and n.partition(".")[2] == rest
+    ]
+
+
+def wenn_stand(wenn: Sequence[Wenn], antworten: Mapping[str, Gegeben]) -> bool | None:
+    """Gelten alle Bedingungen? ``None``: Eine Antwort **fehlt noch** — der Block ist offen
+    (ein Text bleibt verborgen, ein Baustein sagt in der Sammelkarte, was fehlt). Ohne
+    Bedingung gilt der Block immer.
+
+    >>> w = [Wenn("q", ("leicht",))]
+    >>> wenn_stand([], {}), wenn_stand(w, {}), wenn_stand(w, {"q": Gegeben(text="leicht")})
+    (True, None, True)
+    >>> wenn_stand(w, {"q": Gegeben(text="schwer")})
+    False
+    >>> wenn_stand([*w, Wenn("s", ab=7)], {"q": Gegeben(text="leicht")}) is None
+    True
+    """
+    offen = False
+    for w in wenn:
+        da = gegeben_zu(w.frage, antworten)
+        if not da:
+            offen = True
+        elif not any(w.trifft(g) for g in da):
+            return False
+    return None if offen else True
+
+
+def wenn_grund(wenn: Sequence[Wenn], antworten: Mapping[str, Gegeben]) -> str:
+    """Die Gründe aller Bedingungen, die gelten — für die Zeile der Sammelkarte.
+
+    >>> wenn_grund([Wenn("q", ("leicht",))], {"q": Gegeben(text="leicht")})
+    'weil du „leicht“ geantwortet hast'
+    """
+    teile = [
+        w.grund(g)
+        for w in wenn
+        if (g := next((x for x in gegeben_zu(w.frage, antworten) if w.trifft(x)), None))
+    ]
+    return " und ".join(teile)
+
+
 @dataclass(slots=True)
 class Block:
     """Ein Block eines Kapitels. Welche Felder zählen, sagt ``art``."""
@@ -275,6 +501,26 @@ class Block:
     #: Test (``timer``, ``takt``, ``ziel``/``felder``) geht vor. Leer = die Vorgaben: Stoppuhr,
     #: kein Takt, keine Ausführung
     wie_uebung: list[str] = field(default_factory=list)
+    # -- Übung machen (Ben, 23.11.2026, `docs/plan_kurs_uebungen.md` §3, §4, §11) --------------
+    #: ``test``: Medien am Lauf — dasselbe `Media` wie an der Planübung: ``wann`` (leer =
+    #: vorher · nachher · bei), ``rolle`` (Begleitung = dabei), ``bei`` (Ereignis). Sie kommen
+    #: zu denen der Übung dazu (`core.material.material_von`)
+    medien: list[Media] = field(default_factory=list)
+    #: ``test``: Sensoren als Startbedingung (`BRAUCHT`) — leer: keiner nötig
+    braucht: list[str] = field(default_factory=list)
+    #: ``test``: Fragen am Lauf, in ihrer Reihenfolge — und welche davon **vor** dem Start
+    #: kommen (IDs; alle anderen im Ergebnis)
+    fragen: list[ab.Frage] = field(default_factory=list)
+    fragen_vorher: list[str] = field(default_factory=list)
+    #: ``test``: Frage-ID → Antwort → ein festes Ziel im Feld des Tests. Die Antwort **wählt
+    #: nur vor** („Wert für den Plan → Von Hand“), die Person bestätigt oder ändert
+    ziele: dict[str, dict[str, float]] = field(default_factory=dict)
+    #: ``frage``: die Frage in einer der Arten von `core.ablauf.Frage` (Skala · Ja/Nein ·
+    #: Auswahl) — ihre Antwort wird gespeichert (Variable unter der Block-ID). ``None``: die
+    #: alte Form mit ``antworten`` (richtig/Hinweis), die nichts speichert
+    frage: ab.Frage | None = None
+    #: jeder Block: Er gilt nur, wenn alle Bedingungen erfüllt sind (`wenn_stand`)
+    wenn: list[Wenn] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Wie im Paket (`kapitel[].bloecke[]`) — nur, was zur Art gehört.
@@ -295,6 +541,21 @@ class Block:
         {'art': 'plan_uebung', 'id': 'b3', 'aus': 'b1', 'hinter': 'g:1', 'ziel_aus': 'b2'}
         >>> Block(PLAN_WEG, id="b4", von="g:1", zu="b3", kante={"ausloeser": "zeit"}).to_dict()
         {'art': 'plan_weg', 'id': 'b4', 'von': 'g:1', 'zu': 'b3', 'kante': {'ausloeser': 'zeit'}}
+
+        Übung machen: Fragen am Lauf, Sensor, Bedingung — und die Frage im Kapitel in den
+        Arten des Ablaufs:
+
+        >>> q = ab.Frage("q", "Wie war das?", art=ab.F_AUSWAHL, antworten=("leicht", "schwer"))
+        >>> lauf = Block(TEST, id="t", uebung="u", fragen=[q], braucht=["messung"],
+        ...              ziele={"q": {"schwer": 30}}).to_dict()
+        >>> lauf["braucht"], lauf["fragen"][0]["ziele"], lauf["fragen"][0]["antworten"]
+        (['messung'], {'schwer': 30}, ['leicht', 'schwer'])
+        >>> Block(FRAGE, id="f", titel="Schon gemacht?", frage=ab.Frage("f", art=ab.F_JA_NEIN),
+        ...       wenn=[Wenn("t.f:q", ("leicht",))]).to_dict()  # doctest: +NORMALIZE_WHITESPACE
+        {'art': 'frage', 'id': 'f', 'titel': 'Schon gemacht?', 'frage': {'art': 'ja_nein'},
+         'wenn': [{'frage': 't.f:q', 'antworten': ['leicht']}]}
+        >>> Block(PLAN_TAUSCHEN, id="x", an="b1", uebung="u2").to_dict()
+        {'art': 'plan_tauschen', 'id': 'x', 'an': 'b1', 'uebung': 'u2'}
         """
         d: dict[str, Any] = {"art": self.art, "id": self.id}
         if self.titel:
@@ -303,7 +564,10 @@ class Block:
             d["text"] = self.text
         if self.art == MEDIUM and self.medium is not None:
             d["medium"] = self.medium.als_dict()
-        if self.art == FRAGE:
+        if self.art == FRAGE and self.frage is not None:
+            f = self.frage.als_dict()
+            d["frage"] = {k: w for k, w in f.items() if k not in ("id", "text")}
+        elif self.art == FRAGE:
             d["antworten"] = [a.to_dict() for a in self.antworten]
         if self.art == TEST:
             if self.aus:
@@ -325,6 +589,17 @@ class Block:
                 d["felder"] = list(self.felder)
             if self.wie_uebung:
                 d["wie_uebung"] = list(self.wie_uebung)
+            if self.medien:
+                d["medien"] = [m.als_dict() for m in self.medien]
+            if self.braucht:
+                d["braucht"] = list(self.braucht)
+            if self.fragen:
+                vorher = set(self.fragen_vorher)
+                d["fragen"] = [
+                    {**f.als_dict(), **({"wann": VORHER} if f.id in vorher else {})}
+                    | ({"ziele": dict(self.ziele[f.id])} if self.ziele.get(f.id) else {})
+                    for f in self.fragen
+                ]
         if self.art == AUSWAHL:
             d["uebungen"] = list(self.uebungen)
             d["anzahl"] = self.anzahl
@@ -363,6 +638,12 @@ class Block:
             d["von"], d["zu"] = self.von, self.zu
             if self.kante:
                 d["kante"] = dict(self.kante)
+        if self.art in (PLAN_ENTFERNEN, PLAN_TAUSCHEN):
+            d["an"] = self.an
+        if self.art == PLAN_TAUSCHEN:
+            d["uebung"] = self.uebung
+        if self.wenn:
+            d["wenn"] = [w.to_dict() for w in self.wenn]
         return d
 
     @classmethod
@@ -412,6 +693,27 @@ class Block:
         ...                      "kante": {"ausloeser": "zeit", "pflicht": 1, "von": "x"}})
         >>> w.zu, w.kante
         ('ende', {'ausloeser': 'zeit', 'pflicht': True})
+
+        Übung machen — was `to_dict` schreibt, kommt wieder; Unbekanntes fällt weg:
+
+        >>> q = {"id": "q", "text": "Wie war das?", "art": "auswahl", "wann": "vorher",
+        ...      "antworten": ["leicht", "schwer"], "ziele": {"schwer": 30, "egal": 5}}
+        >>> t = Block.from_dict({"art": "test", "id": "t", "uebung": "u", "fragen": [q, q],
+        ...                      "braucht": ["messung", "radar"],
+        ...                      "medien": [{"uri": "https://x.org/v", "wann": "nachher"}]})
+        >>> [f.id for f in t.fragen], t.fragen_vorher, t.ziele, t.braucht, t.medien[0].wann
+        (['q'], ['q'], {'q': {'schwer': 30.0}}, ['messung'], 'nachher')
+        >>> Block.from_dict(t.to_dict()).to_dict() == t.to_dict()
+        True
+        >>> f = Block.from_dict({"art": "frage", "id": "f", "titel": "Schon gemacht?",
+        ...                      "frage": {"art": "ja_nein"}, "wenn": [{"frage": "t.f:q",
+        ...                      "antworten": ["leicht"]}, {"frage": ""}]})
+        >>> f.frage.wahl, f.wenn
+        (('Ja', 'Nein'), [Wenn(frage='t.f:q', antworten=('leicht',), ab=None, bis=None)])
+        >>> Block.from_dict({"art": "plan_entfernen", "id": "x"}) is None
+        True
+        >>> Block.from_dict({"art": "plan_tauschen", "an": "b1", "uebung": "k"}, {"k": "u9"}).uebung
+        'u9'
         """
         art = str(roh.get("art") or "")
         if art not in ARTEN and art not in BAUSTEINE:
@@ -428,7 +730,13 @@ class Block:
             block.medium = medium_aus_dict(roh.get("medium"))
             if block.medium is None:
                 return None
-        if art == FRAGE:
+        if art == FRAGE and isinstance(roh.get("frage"), Mapping):
+            block.frage = ab.Frage.aus_dict(
+                {**roh["frage"], "id": block.id, "text": block.titel or "Frage"}
+            )
+            if not block.titel or block.frage is None:
+                return None
+        elif art == FRAGE:
             for a in roh.get("antworten") or []:
                 if isinstance(a, Mapping) and str(a.get("text") or "").strip():
                     block.antworten.append(
@@ -461,6 +769,29 @@ class Block:
             wie = roh.get("wie_uebung")
             if isinstance(wie, list):
                 block.wie_uebung = [w for w in WIE_UEBUNG if w in {str(x) for x in wie}]
+            for m in _liste(roh.get("medien")):
+                medium = medium_aus_dict(m)
+                if medium is not None:
+                    block.medien.append(medium)
+            braucht = roh.get("braucht")
+            if isinstance(braucht, list):
+                block.braucht = [s for s in BRAUCHT if s in {str(x) for x in braucht}]
+            for f in _liste(roh.get("fragen")):
+                frage = ab.Frage.aus_dict(f)
+                if frage is None or any(x.id == frage.id for x in block.fragen):
+                    continue
+                block.fragen.append(frage)
+                if str(f.get("wann") or "") == VORHER:
+                    block.fragen_vorher.append(frage.id)
+                ziele = f.get("ziele")
+                if isinstance(ziele, Mapping) and frage.art != ab.F_SKALA and not frage.mehrere:
+                    feste = {
+                        str(a): _zahl(z, 0.0, 0.0, 1e6)
+                        for a, z in ziele.items()
+                        if str(a) in frage.wahl and _zahl(z, 0.0, 0.0, 1e6) > 0
+                    }
+                    if feste:
+                        block.ziele[frage.id] = feste
         if art == AUSWAHL:
             for u in roh.get("uebungen") or []:
                 uid = zu_id.get(str(u), str(u)).strip()
@@ -502,6 +833,19 @@ class Block:
             if not block.von or not block.zu:
                 return None
             block.kante = _kante_lesen(roh.get("kante"))
+        if art in (PLAN_ENTFERNEN, PLAN_TAUSCHEN):
+            block.an = _marke(roh.get("an"))
+            if not block.an:
+                return None
+        if art == PLAN_TAUSCHEN:
+            uebung = str(roh.get("uebung") or "").strip()
+            block.uebung = zu_id.get(uebung, uebung)
+            if not block.uebung:
+                return None
+        for w in _liste(roh.get("wenn")):
+            bedingung = Wenn.from_dict(w)
+            if bedingung is not None:
+                block.wenn.append(bedingung)
         return block
 
     @property
@@ -558,6 +902,11 @@ def _zahl(roh: Any, vorgabe: float, unten: float, oben: float) -> float:
     if not math.isfinite(wert):
         return vorgabe
     return min(max(wert, unten), oben)
+
+
+def _liste(roh: Any) -> list[Any]:
+    """Eine Liste aus dem Paket — alles andere ist keine."""
+    return roh if isinstance(roh, list) else []
 
 
 def _marke(roh: Any) -> str:
@@ -1045,13 +1394,19 @@ __all__ = [
     "ARTEN",
     "AUSWAHL",
     "BAUSTEINE",
+    "BRAUCHT",
+    "BRAUCHT_MESSUNG",
     "FRAGE",
+    "FRAGE_VORSATZ",
     "GANZ",
     "HAND",
     "HART",
     "MEDIUM",
     "MENGE",
+    "NACHHER",
     "PLAN_EINSTELLEN",
+    "PLAN_ENTFERNEN",
+    "PLAN_TAUSCHEN",
     "PLAN_UEBUNG",
     "PLAN_WEG",
     "SKALA",
@@ -1059,6 +1414,7 @@ __all__ = [
     "TEST",
     "TEXT",
     "VORGABEN",
+    "VORHER",
     "WEICH",
     "WIE_PARAMETER",
     "WIE_TAKT",
@@ -1069,23 +1425,30 @@ __all__ = [
     "ZU_ENDE",
     "Antwort",
     "Block",
+    "Gegeben",
     "Planwert",
     "Vorgabe",
+    "Wenn",
     "abnehmer",
     "anteil_runden",
     "anteil_schritt",
     "anteil_vorgabe",
+    "antwort_als_text",
+    "antwort_name",
     "bloecke_lesen",
     "bloecke_von",
     "braucht_eingabe",
     "feld_schluessel",
     "feldwerte",
     "fertig",
+    "gegeben_zu",
     "gemessene_uebungen",
     "ist_vorgabe",
     "planwert",
     "planwert_vorgabe",
     "vorlage_anwenden",
+    "wenn_grund",
+    "wenn_stand",
     "wert_im_test",
     "wert_schluessel",
     "wert_wird_ziel",

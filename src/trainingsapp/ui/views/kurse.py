@@ -364,6 +364,7 @@ def kurs_medien(kurs: Kurs, katalog: Mapping[str, Exercise]) -> list[Media]:
     for k in kurs.kapitel:
         medien += k.media
         medien += [b.medium for b in k.bloecke if b.medium is not None]
+        medien += [m for b in k.bloecke for m in b.medien]  # Medien am Lauf
     for v in vorlagen:
         for i in v.items:
             medien += i.medien

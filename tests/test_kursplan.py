@@ -1118,6 +1118,13 @@ def test_bausteine_lesen_paketschluessel_und_unbrauchbares() -> None:
 def test_bausteine_aendern_kurse_ohne_kursplan_nicht() -> None:
     """Die fünf Arten „im Kapitel“ bleiben, wie sie sind; ein Baustein ist keine Eingabe."""
     assert set(ARTEN) == {"text", "medium", "frage", "test", "auswahl"}
-    assert set(BAUSTEINE) == {PLAN_UEBUNG, PLAN_EINSTELLEN, PLAN_WEG}
+    # dazu seit 23.11.2026 „herausnehmen“ und „tauschen“ (`docs/plan_kurs_uebungen.md` §11.3)
+    assert set(BAUSTEINE) == {
+        PLAN_UEBUNG,
+        PLAN_EINSTELLEN,
+        PLAN_WEG,
+        "plan_entfernen",
+        "plan_tauschen",
+    }
     assert not braucht_eingabe([Block(PLAN_UEBUNG, id="a", uebung="planke")])
     assert braucht_eingabe(KAPITEL_2)

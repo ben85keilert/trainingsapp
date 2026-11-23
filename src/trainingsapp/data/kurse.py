@@ -40,9 +40,11 @@ from typing import Any
 from ..core import kursvorschau
 from ..core.kursbloecke import (
     AUSWAHL,
+    FRAGE_VORSATZ,
     HAND,
     TEST,
     Block,
+    Gegeben,
     Planwert,
     bloecke_lesen,
     feld_schluessel,
@@ -531,6 +533,47 @@ class KursRepo:
                     ),
                 )
 
+    # -- Antworten (Migration 074, `docs/plan_kurs_uebungen.md` §4, §6) ------------------
+
+    def antwort_setzen(
+        self,
+        kurs_id: str,
+        subject_id: str,
+        name: str,
+        *,
+        wert: float = 0.0,
+        text: str | None = None,
+        eintrag_id: str | None = None,
+    ) -> None:
+        """Die Antwort auf eine Frage des Kurses merken — Selbstauskunft, nur auf dem Gerät
+        (Ben, 16.11.2026 und 23.11.2026: Antworten werden gespeichert und dürfen eine Folge
+        haben). ``name``: die Block-ID einer Frage im Kapitel oder ``<test>.f:<frage>``
+        (`core.kursbloecke.antwort_name`). Eine Skala steht in ``wert``, eine gewählte
+        Antwort in ``text`` (mehrere als JSON-Liste, `antwort_als_text`). Eine neue Antwort
+        ersetzt die alte."""
+        with transaktion(self.con):
+            self.con.execute(
+                "INSERT INTO course_variable "
+                "(subject_id, course_id, name, value, entry_id, set_at, text) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(subject_id, course_id, name) DO UPDATE SET "
+                "value = excluded.value, entry_id = excluded.entry_id, "
+                "set_at = excluded.set_at, text = excluded.text, floating = 0",
+                (subject_id, kurs_id, name, float(wert), eintrag_id, jetzt().isoformat(), text),
+            )
+
+    def antworten(self, kurs_id: str | None, subject_id: str) -> dict[str, Gegeben]:
+        """Worauf ``wenn`` an einem Block schauen kann (`core.kursbloecke.wenn_stand`): jede
+        Variable des Kurses als `Gegeben` — die Antworten auf Fragen, dazu die Felder der
+        Läufe (``<test>.<feld>``: „Anstrengung ab 7“). Schwebende Zeilen zählen nicht."""
+        if not kurs_id:
+            return {}
+        return {
+            name: Gegeben(v.wert, v.text)
+            for name, v in self.variablen(kurs_id, subject_id).items()
+            if not v.schwebt
+        }
+
     # -- Wert für den Plan (Migration 066, W3; `docs/plan_kurs_ablauf.md` §17) ------------
 
     def planwerte(
@@ -912,6 +955,12 @@ class KursRepo:
             erreicht = staende.get(kapitel.id)
             if erreicht is not None:
                 werte.update(self.testwerte(kapitel, subject_id, erreicht.erreicht))
+        # … und je Feld eines Laufs sein Wert (``ziel_aus = "<test>.<feld>"``, Migration 074)
+        for name, variable in self.variablen(kurs.id, subject_id).items():
+            feld = name.partition(".")[2]
+            zahl = variable.text is None and not variable.schwebt
+            if feld and not feld.startswith(FRAGE_VORSATZ) and zahl:
+                werte.setdefault(name, variable.wert)
         bloecke = [b for kapitel in kurs.kapitel for b in kapitel.bloecke]
         katalog = {u.id: u for u in ExerciseRepo(self.con).alle(mit_archivierten=True)}
 
@@ -978,6 +1027,7 @@ class KursRepo:
             bezug=bloecke,
             zusatz=self._test_ausfuehrung(kurs, subject_id),
             planwerte=self.planwerte(kurs.id, subject_id, werte),
+            antworten=self.antworten(kurs.id, subject_id),
         )
 
     def plan_uebernehmen(
@@ -1024,6 +1074,7 @@ class KursRepo:
                 lassen=lassen,
                 zusatz=self._test_ausfuehrung(kurs, subject_id),
                 planwerte=self.planwerte(kurs.id, subject_id, werte),
+                antworten=self.antworten(kurs.id, subject_id),
             )
             if neu != plan:
                 plaene.speichern(neu)
@@ -1074,6 +1125,7 @@ class KursRepo:
             namen,
             feld_von,
             self.planwerte(kurs.id, subject_id, werte),
+            self.antworten(kurs.id, subject_id),
         )
 
     # -- Kapitelplan neu laden (U2, `docs/plan_paketinhalte.md` §9) ---------------------

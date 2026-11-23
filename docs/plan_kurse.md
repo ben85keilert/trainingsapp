@@ -127,8 +127,8 @@ statt Text und Medienliste eine Folge von **Blöcken** tragen (`core/kursbloecke
 |---|---|---|
 | `text` | `titel`, `text` (Markdown) | Überschrift und Text |
 | `medium` | `medium = {kind, source, uri, title, …}` | eine Zeile wie jedes Medium (Link oder Paketdatei) |
-| `frage` | `titel`, `text`, `antworten[] = {text, richtig, hinweis}` | **erklärt, prüft nicht** — Antippen zeigt den Hinweis; nichts wird gespeichert, keine Bedingung hängt daran |
-| `test` | `uebung`, `feld`, `faktor`, `plan` | der jüngste **Eintrag** der Übung seit dem Erreichen des Kapitels (bei Sätzen der beste Satz) wird ihr Ziel im Kapitelplan (× `faktor`) |
+| `frage` | `titel`, `text`, `antworten[] = {text, richtig, hinweis}` | **erklärt, prüft nicht** — Antippen zeigt den Hinweis; nichts wird gespeichert, keine Bedingung hängt daran. **Seit 23.11.2026** daneben `frage = {art}` (Skala · Ja/Nein · Auswahl): Die Antwort wird gespeichert und kann eine Folge haben (`wenn` an einem Block) — `docs/plan_kurs_uebungen.md` §12 |
+| `test` („Übung machen“, 23.11.2026: freiwillig, wenn kein Baustein den Wert braucht; mit `medien`, `braucht`, `fragen` — `docs/plan_kurs_uebungen.md` §12) | `uebung`, `feld`, `faktor`, `plan` | der jüngste **Eintrag** der Übung seit dem Erreichen des Kapitels (bei Sätzen der beste Satz) wird ihr Ziel im Kapitelplan (× `faktor`) |
 | `auswahl` | `uebungen[]`, `anzahl`, `nach`, `plan` | die Gewählten kommen hinter Planübung `nach` in den Plan; ab zwei als gleichwertige **Wege** im Ablauf (im Workout: „Wie geht es weiter?“) |
 
 - Ein Kapitel **mit `test` oder `auswahl`** legt seine Pläne nicht beim Erreichen an, sondern

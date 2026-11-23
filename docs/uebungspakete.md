@@ -709,6 +709,27 @@ verbunden werden sollte, entfällt; die Karte sagt beides. In einem Kurs **ohne*
 Bausteine nichts; hat ein Kapitel eines Kursplan-Kurses trotzdem `plaene`, entstehen sie wie
 bisher als Kapitelpläne neben dem Kursplan.
 
+### Übung machen, Fragen, Bedingungen (Formatversion 8, Ben 23.11.2026)
+
+Vertrag: `docs/plan_kurs_uebungen.md` §12. Alles hier ist optional; ein Paket, das nichts
+davon nutzt, bleibt bei seiner Formatversion.
+
+| Wo | Feld | Bedeutung |
+|---|---|---|
+| `test` | `medien[]` | Medien am Lauf, wie `media[]` einer Planübung: ohne `wann` vorher, `rolle = "begleitung"` dabei, `wann = "bei"` mit `bei = {art = "zeit", sekunden = 20}` oder `{art = "wdh", n = 10}` (auch `abschnitt`, `satz`), `wann = "nachher"` im Ergebnis. Sie kommen zu denen der Übung dazu |
+| `test` | `braucht = ["messung"]` | der Lauf startet erst, wenn ein Herzfrequenz-Sensor verbunden ist — nur das; aus Messwerten rechnet der Kurs nie |
+| `test` | `fragen[]` | Fragen am Lauf wie `fragen[]` im Ablauf eines Plans (`id`, `text`, `art` = `skala` (mit `min`, `max`) · `ja_nein` · `auswahl` (mit `antworten`, `mehrfach`)), dazu `wann = "vorher"` (sonst im Ergebnis) und `ziele = { schwer = 30 }` — die Antwort schlägt dieses Ziel im Feld des Tests vor (nur `ja_nein` und `auswahl` ohne `mehrfach`; die Person bestätigt oder ändert) |
+| `frage` | `frage = { art = "ja_nein" }` | die Frage in einer Art des Ablaufs (`skala` mit `min`/`max`, `ja_nein`, `auswahl` mit `antworten`, `mehrfach`); ihr Wortlaut ist `titel`, ihre Antwort wird gespeichert. Ohne `frage`: die Verständnisfrage mit `antworten[] = {text, richtig, hinweis}` wie bisher |
+| jeder Block | `wenn[]` | der Block gilt nur, wenn **alle** Bedingungen erfüllt sind: `{ frage = "<name>", antworten = ["leicht", "mittel"] }` (eine davon genügt) oder `{ frage = "<name>", ab = 7, bis = 10 }` (Skala). `<name>`: die `id` einer `frage` im Kapitel, `<test>.f:<frage>` für eine Frage am Lauf, `<test>.<feld>` für ein Feld des Laufs (nur mit `ab`/`bis`) |
+| `plan_uebung`, `plan_einstellen` | `ziel_aus = "<test>.<feld>"` | das Ziel kommt aus diesem Feld des Laufs und steht in diesem Feld |
+| Baustein | `art = "plan_entfernen"`, `an` | die Planübung dieser Marke geht aus dem Plan |
+| Baustein | `art = "plan_tauschen"`, `an`, `uebung` | die Planübung dieser Marke wird die Übung `uebung`; Ziel und Parameter beginnen neu |
+
+Antworten und Werte der Person stehen nie im Paket (gerätelokal, `course_variable`).
+`trainingsapp-paket pruefen`: ein `wenn`, dessen Frage es im Kurs nicht gibt, ist ein Fehler;
+ebenso `plan_entfernen`/`plan_tauschen` ohne `an` bzw. `uebung`. Eine ältere App lehnt ein
+Paket der Formatversion 8 ab („… neuer als diese App“).
+
 **Formatversion 6 — was eine ältere App tut:** Ein Paket mit einem `kursplan`, einem
 `plan_*`-Block oder einem `test` mit `aus` oder mit `vorgabe` wird als Version 6 geschrieben,
 alle anderen wie bisher. Die veröffentlichten

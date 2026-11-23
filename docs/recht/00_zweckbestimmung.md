@@ -127,6 +127,23 @@ schreibt die Person, die den Plan baut, die App deutet sie nicht; führt das Ang
 mehreren Wegen, wählt die Person. *Nicht anwaltlich geprüft; gehört mit dem „Vorschlag nach der
 Belastung“ in die fachanwaltliche Prüfung.*
 
+**Frage mit Folge im Kurs** (Ben, 23.11.2026: „Es wird etwas gefragt, das hat eine Folge. Plan
+ändern, Medium abspielen usw.“ — auch Fragen nach Beschwerden, „aber ganz allgemein“;
+`core.kursbloecke.Wenn`, `docs/plan_kurs_uebungen.md` §12.4): Ein Kurs kann fragen — im Kapitel
+oder nach einer Übung — und an die Antwort etwas hängen: einen Text, ein Medium, eine Zeile in
+„Das ändert sich an deinem Plan“ (Übung dazu, Ziel, herausnehmen, tauschen …) oder ein
+vorgeschlagenes Ziel. Dieselben Bedingungen wie beim Vorschlag im Workout: Grundlage ist nur
+die **Selbstauskunft**, nie ein Messwert (auch nicht, wenn beim Lauf ein Sensor mitläuft oder
+Startbedingung ist); die App nennt die Regel („weil du ‚schwer‘ geantwortet hast“) und deutet
+die Antwort nicht; Frage, Antworten und Folge schreibt die Person, die den Kurs baut; **am
+Plan ändert sich nichts ohne Tipp** — jede Zeile ist einzeln abwählbar, ein vorgeschlagenes
+Ziel steht als Zahl da und lässt sich ändern. Antworten bleiben auf dem Gerät. **Warnung
+(Claude, 23.11.2026):** Der Mechanismus ist neutral; ein Kurs, der sich an Beschwerden richtet
+und aus der Antwort („Schmerz 0–10“) das Training senkt oder Übungen herausnimmt, rückt die App
+als Ganzes näher an eine medizinische Zweckbestimmung (Punkt 3 unten: das Umfeld) — das
+entscheidet der Kurstext, und es gehört vor einer Veröffentlichung solcher Kurse in die
+fachanwaltliche Prüfung. *Nicht anwaltlich geprüft.*
+
 **Empfehlungen aus Messwerten** (Ben, 16.11.2026 — **Absicht, nicht gebaut, nicht
 freigegeben**): „Messwerte können aber Empfehlungen geben und Training anpassen, aber niemals
 harte Vorgabe. Rechtliche Überprüfung nochmal, ob das passt.“ Das geht über die Liste „Nicht

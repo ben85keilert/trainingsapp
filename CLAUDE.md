@@ -332,6 +332,10 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   (rechtlich wie `physiologische_steuerung`). Kurse reisen in Paketen
   (`kurse[]`, Formatversion 2). Vertrag: `docs/plan_kurse.md`.
 
+- **Übung machen, Fragen, Folgen** (Ben, 23.11.2026, Vertrag `docs/plan_kurs_uebungen.md` §12):
+  Der Block `test` ist „Übung machen“ — Pflicht nur, wenn ein Baustein seinen Wert braucht. Fragen
+  speichern ihre Antwort; `wenn` an Block und Baustein rechnet **nur aus Selbstauskunft**, nichts
+  ändert den Plan ohne Tipp. Ein Sensor darf Startbedingung sein, nie Rechengrundlage.
 - **Der Kurs baut einen Plan** (Ben, 16.11.2026, Vertrag `docs/plan_kurs_ablauf.md` §11): Ein Kurs
   mit `kursplan` baut **einen** Plan, der über die Kapitel wächst (Bausteine, Rechnung nur in
   `core/kursplan.py`). **Nichts ändert sich am Plan ohne Tipp; was die Person geändert hat, bleibt**

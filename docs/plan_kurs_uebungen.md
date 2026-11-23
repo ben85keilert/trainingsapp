@@ -17,7 +17,8 @@ und die Übung“ —
    eingegebenen Variablen Wdh/Zeit/Haltezeit/Skala/Ja-Nein usw. zu speichern und für später
    verfügbar zu machen.“
 
-**Stand: Plan, nichts gebaut.** Bens Antworten vom 23.11.2026 stehen in **§10 und §11 — sie gehen den
+**Stand: gebaut am 23.11.2026 (§12 — was gebaut ist, wo es vom Plan abweicht, was fehlt).**
+Davor: Bens Antworten vom 23.11.2026 stehen in **§10 und §11 — sie gehen den
 Abschnitten §2–§9 vor**, wo sie sich widersprechen. Skizzen als Handy-Bilder: Design-Artifact
 „Übungen im Kurs — Skizzen“ (Reihen A–C, zwölf Bilder; privat bei Ben:
 https://claude.ai/artifact/36d4wbyy6sWDu31itDw21E); gebaut wird auf Bens Wort. Die Reste aus §10.4 sind beantwortet (§11); die Skizzen B2 und B3
@@ -367,3 +368,110 @@ werden können.“ · „Parameter, Uhr, Medien werden voreingestellt und am bes
 F kommt vor den Fragen, weil Bens Vorgabe „dieselbe Umgebung“ die Ansicht festlegt, in die U3
 seine Fragen und U4 seine Medien „bei der Antwort“ einbauen — sonst würden beide zweimal gebaut.
 U1 bleibt davor: Es ändert nur die Ergebnis-Seite und die Daten, nicht den Lauf.
+
+## 12. Gebaut (23.11.2026) — das gilt
+
+Ben, 23.11.2026: „Setze den ganzen Plan um.“ Gebaut im Worktree `claude/kurs-uebungen`, Stufen
+U1 · F · U3 · U4 · U5 — hier steht, was der Code tut. Wo es von §2–§11 abweicht, gilt dieser
+Abschnitt.
+
+### 12.1 Übung machen (U1)
+
+- Der Block `test` heißt **„Übung machen“** (`core.kursbloecke.ARTEN`). Kein Feld `zweck`:
+  Ein Lauf ist ein **Test**, wenn aus seinem Wert ein Ziel wird (`wert_wird_ziel` — ein
+  Baustein nennt ihn in `ziel_aus`, oder das Kapitel hat Plan-Vorlagen); sonst „nur
+  ausprobieren“: Karte „Übung machen · freiwillig“, Knopf „Übung starten“, Ansicht
+  „Ausprobieren · …“, keine Karte „Wert für den Plan“, und „Plan anlegen“ wartet nicht auf ihn
+  (`fertig(…, ziel_tests)`). Der Editor zeigt unter dem Baustein „Ergibt sich aus dem Kurs“
+  (`abnehmer`): wie viele Bausteine den Wert nehmen — oder „Kein Baustein verwendet diesen
+  Wert“. In `trainingsapp-inhalte` gibt es keinen Kurs mit einem Test
+  (`grep -rn 'art = "test"' --include=*.toml`: kein Treffer) — kein Bestand ändert sich.
+- **Alle Werte als Variablen** (Migration 074, Spalte `text`): mit „Eintragen“ je Feld des
+  Eintrags `<test>.<feld>` (`KursRepo.feldwerte_setzen`, `core.kursbloecke.feldwerte`: Zahlen,
+  bei Sätzen der beste, Ja/Nein als 1/0, Text als Text). Ein Test ohne Lauf hinterlässt sie
+  beim Abschließen des Kapitels. „Nochmal“ ersetzt, „Von vorn beginnen“ löscht — die Einträge
+  bleiben.
+- **„Deine Werte“** auf der Kursseite (`core/kurswerte.py`, `views/kurse._deine_werte`): je
+  Kapitel die Läufe mit ihren Feldern, bei einem Test der Wert für den Plan, darunter die
+  Antworten. Der Tipp auf einen Lauf führt zu **seinem Tag** (`/tag/<datum>`), nicht zu einem
+  einzelnen Eintrag.
+
+### 12.2 Der Lauf (F)
+
+- **Ebenen des Fokus im Lauf** — nicht der ganze Fokus-Bildschirm: Der Lauf behält seine Uhr,
+  seine Vorgabe und seine Knöpfe (Skizzen T1–T4 vom 16.11.2026, 60 Tests hängen daran) und
+  zeigt darunter aus **derselben Komponente** (`components/fokus.Fokus`) das Ebenen-Menü, das
+  Bild der Bewegung, das Begleitvideo, die Herzfrequenz-Kachel, die Kurven und die Hinweise
+  „bei …“. Sensoren laufen mit, wie sonst (der Lauf startet über `ui.uebung_lauf.starten`).
+  **Offen für Ben:** ob der Lauf ganz auf den Fokus-Bildschirm umziehen soll (Zeit mit Takt
+  in einer Zeile, Sätze, „Eintragen“-Karte) — das hieße, die Vorgaben des Tests dort neu zu
+  bauen.
+- **Sensor als Startbedingung:** `Block.braucht = ["messung"]` — „Herzfrequenz — ein Sensor
+  ist verbunden“ (`Messlauf.verbunden`). Fehlt er, ist „Start“ aus und die Seite sagt, was
+  fehlt (`kurs_testlauf.sensor_fehlt`). **Nur diese eine Art**: Ob ein Gerät den
+  Bewegungssensor liefert, lässt sich vor dem Start nicht sicher sagen (nicht nachgebaut).
+- **Medien am Lauf:** `Block.medien` — vier Stellen wie an der Planübung (`core.kursbau`:
+  `MEDIEN_STELLEN`, `medium_stelle`, `medium_an_stelle`): vorher (Zeilen auf der Seite
+  „bereit“) · dabei (Begleitung im Lauf) · bei … Sekunden / Wiederholungen (Hinweis unter der
+  Uhr) · nachher (Zeilen im Ergebnis). Sie kommen zu den Medien der Übung dazu
+  (`material_item`, `Fokus(material_item=…)`). Kein Schalter „Material wie die Übung“ — die
+  Medien der Übung zeigt der Lauf immer. „Bei Abschnitt/Satz“ stellt der Editor nicht ein
+  (das Paket kann es: dasselbe `Media.bei`). Kein Medium öffnet sich von selbst.
+- Ein Lauf mit Medien, Fragen oder Sensor ist immer ein **Lauf mit der Uhr** und öffnet sich
+  „bereit“ (`Block.gestaltet`).
+
+### 12.3 Fragen (U3)
+
+- **Im Kapitel:** Der Block `frage` hat neben der Verständnisfrage (Antworten mit `*` und
+  Hinweis, speichert nichts) die Arten des Ablaufs — Skala · Ja/Nein · Auswahl mit einer oder
+  mehreren Antworten (`Block.frage`, `components/kursfrage.frage_karte`). Die Antwort wird
+  gespeichert (`KursRepo.antwort_setzen`, Variable unter der Block-ID), die Ansicht zeichnet
+  neu.
+- **Am Lauf:** `Block.fragen`, je Frage vorher (Seite „bereit“, nach den Medien) oder nachher
+  (im Ergebnis, vor „Wert für den Plan“). Gespeichert werden sie **mit dem Eintrag**
+  (`<test>.f:<frage>`); „Verwerfen“ verwirft sie mit.
+- Antworten stehen in „Deine Werte“, nirgends sonst — nicht im Tagebuch, nicht in Paket,
+  Export oder Sync.
+
+### 12.4 Folgen (U4)
+
+- **`wenn`** an jedem Block und Baustein (`core.kursbloecke.Wenn`, `wenn_stand`): Frage,
+  Antworten (eine genügt; bei mehreren Angekreuzten: eine ist dabei) oder Bereich einer Skala
+  (`ab`/`bis`). Mehrere Bedingungen gelten zusammen. Auch ein Feld eines Laufs geht
+  (`t.scale` ab 7) — der Editor bietet nur Fragen an.
+  - Text, Medium, Frage, Übung machen, Auswahl: stehen im Kapitel nur, wenn die Bedingung
+    gilt; fehlt die Antwort, bleiben sie verborgen.
+  - Bausteine: bei der passenden Antwort eine Zeile der Sammelkarte mit ihrem Grund („… ·
+    weil du ‚leicht‘ geantwortet hast“), bei einer anderen keine, ohne Antwort **offen** mit
+    dem Weg dorthin („Dazu fehlt deine Antwort — probier zuerst … aus.“).
+  - Was schon übernommen ist, bleibt im Plan, auch wenn die Antwort später anders lautet.
+- **Festes Ziel je Antwort:** `Block.ziele` (im Editor „Antwort = 30“). Im Ergebnis wählt die
+  Antwort „Wert für den Plan → Von Hand“ mit dieser Zahl vor, mit dem Satz „Vorgewählt, weil
+  du … geantwortet hast“; die Person kann ändern. Nur an einem Lauf, dessen Wert gebraucht
+  wird, und nur bei Ja/Nein und Auswahl mit einer Antwort.
+- **`ziel_aus` mit Feld:** `ziel_aus = "<test>.<feld>"` nimmt die Zahl aus diesem Feld des
+  Laufs und setzt das Ziel in diesem Feld. Mehrere Felder = mehrere Bausteine (keine
+  Zuordnung an einem Baustein). Der Editor bietet es nicht an — nur das Paket.
+- **Im Editor:** „Nur wenn“ an jedem Block und Baustein (`components/wenn_form.py`); „+
+  Folge“ an einer Frage legt einen Text, ein Medium oder (im Kurs mit Kursplan) einen Baustein
+  an, der die Bedingung auf die Frage schon trägt — bei welcher Antwort, wählt man in seinem
+  Formular. **Abweichung von §10.3:** „+ Folge“ steht an der Frage, nicht an jeder Antwort.
+
+### 12.5 Neue Bausteine (U5)
+
+`plan_entfernen` (eine Planübung geht aus dem Plan; ihr Baustein bringt sie danach nicht
+wieder) und `plan_tauschen` (die Planübung wird eine andere Übung, Ziel und Parameter beginnen
+neu). **Variante setzen** ist kein eigener Baustein: Sie geht über „Einstellen → Ziel“, wenn
+die Übung ein Feld Variante hat — nicht nachgestellt.
+
+### 12.6 Paket, Recht, Prüfung
+
+- **Formatversion 8** (`core.pakete.nutzt_uebung_machen`) nur für Pakete, die das Neue
+  nutzen; eine ältere App lehnt sie ab. `trainingsapp-paket pruefen` meldet `wenn` ins Leere
+  und unvollständige neue Bausteine als Fehler (`docs/uebungspakete.md`).
+- **Recht:** `docs/recht/00_zweckbestimmung.md`, „Frage mit Folge im Kurs“ — Selbstauskunft,
+  nichts ohne Tipp, die App deutet nichts; *nicht anwaltlich geprüft*.
+- **Tests:** `tests/test_ui_kurs_fragen.py`, `tests/test_ui_kurs_test.py` (Lauf mit Fragen,
+  Sensor, Ziel aus Antwort), `tests/test_kurse.py`, `tests/test_paket_kursplan.py`, Doctests
+  in `core/kursbloecke.py`, `core/kursplan.py`, `core/kursbau.py`, `core/kurswerte.py`.
+  **Nicht geprüft:** Web-Fotos der neuen Ansichten, Gerät (T156).

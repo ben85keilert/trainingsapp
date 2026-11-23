@@ -694,7 +694,7 @@ def seitenroute(ordner: str) -> str:
     return SEITENROUTE + ordner
 
 
-def ordner_aus_route(route: str) -> str | None:
+def ordner_aus_route(route: object) -> str | None:
     """Der Ordner eines privaten Pakets aus einer Route der Web-Fassung — ``None``, wenn die
     Route keine solche ist oder der Ordner nicht wie einer aussieht (nichts davon wird sonst
     Teil einer Adresse).
@@ -705,9 +705,11 @@ def ordner_aus_route(route: str) -> str | None:
     ('7Hq3vX9aBcDeFgHiJkLmNo', None)
     >>> ordner_aus_route("/paket/p/../../geheim"), ordner_aus_route("/paket/p/kurz")
     (None, None)
+    >>> ordner_aus_route(None) is None
+    True
     """
-    if not route.startswith(SEITENROUTE):
-        return None
+    if not isinstance(route, str) or not route.startswith(SEITENROUTE):
+        return None  # auch: eine nachgebaute Seite ohne echte Route (Prüfskripte)
     ordner = route[len(SEITENROUTE) :].split("?")[0].strip("/")
     return ordner if _ORDNER.fullmatch(ordner) else None
 

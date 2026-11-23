@@ -17,10 +17,11 @@ und die Übung“ —
    eingegebenen Variablen Wdh/Zeit/Haltezeit/Skala/Ja-Nein usw. zu speichern und für später
    verfügbar zu machen.“
 
-**Stand: Plan, nichts gebaut.** Bens Antworten vom 23.11.2026 stehen in **§10 — er geht den
+**Stand: Plan, nichts gebaut.** Bens Antworten vom 23.11.2026 stehen in **§10 und §11 — sie gehen den
 Abschnitten §2–§9 vor**, wo sie sich widersprechen. Skizzen als Handy-Bilder: Design-Artifact
 „Übungen im Kurs — Skizzen“ (Reihen A–C, zwölf Bilder; privat bei Ben:
-https://claude.ai/artifact/36d4wbyy6sWDu31itDw21E); gebaut wird nach Bens Wort zu den Skizzen und den Resten in §10.4.
+https://claude.ai/artifact/36d4wbyy6sWDu31itDw21E); gebaut wird auf Bens Wort. Die Reste aus §10.4 sind beantwortet (§11); die Skizzen B2 und B3
+zeigen noch die alte Laufansicht statt des Fokus (§11.1).
 
 ## 0. Wonach gesucht, was gelesen wurde
 
@@ -270,7 +271,7 @@ ausließ, hat keine Antwort. Vorschlag: Die Zeile steht in der Sammelkarte als *
 zuerst den Seitstütz aus“, Stand `OFFEN`, den es für fehlende Wahl und fehlenden Test schon
 gibt) — nicht verborgen, nicht Pflicht. Texte und Medien mit `wenn` bleiben verborgen.
 
-### 10.4 Was noch offen ist (in den Skizzen als Varianten)
+### 10.4 Was offen war — beantwortet in §11.3
 
 1. **Test = „wird gebraucht“** (10.1 Antwort 3): Ein Test eines bestehenden Kurses, dessen Wert
    kein Baustein nennt, würde vom Pflicht-Test zum freiwilligen Eindruck. Ob es das in den
@@ -282,7 +283,7 @@ gibt) — nicht verborgen, nicht Pflicht. Texte und Medien mit `wenn` bleiben ve
 4. **Seite „bereit“:** erst Medien „vorher“, dann Fragen „vorher“, dann „Starten“ (Skizze B1).
 5. **Fehlende Antwort** als „offen“ in der Sammelkarte (10.3).
 
-### 10.5 Reihenfolge
+### 10.5 Reihenfolge (überholt durch §11.4)
 
 **U1 → U3 → U4 → U2** (statt U1 → U2 → U3 → U4):
 
@@ -295,3 +296,74 @@ gibt) — nicht verborgen, nicht Pflicht. Texte und Medien mit `wenn` bleiben ve
   Medium „bei der Antwort“ im Lauf wandert von U3 nach U2; im Kapitel geht es schon mit U4
   (Block `medium` mit `wenn`). Drängen die Videos im Lauf, kann U2 ohne Umbau vorgezogen werden.
 - **U5** nur bei Ja zu 10.4 Punkt 3.
+
+## 11. Zweite Runde (Ben, 23.11.2026, nach den Skizzen)
+
+### 11.1 Der Lauf ist der Fokus
+
+Ben: „Übungen (als nur Üben oder Test) sollen im Fokusmodus laufen. Man kann also einstellen,
+ob nebenbei die Sensoren laufen. Ein Sensor soll auch als notwendige Startbedingung gesetzt
+werden können.“ · „Parameter, Uhr, Medien werden voreingestellt und am besten wird die gleiche
+Übungsumgebung gewählt wie der Fokusmodus, einfach um Vertrautheit zu schaffen.“
+
+- **Heute:** Der Testlauf ist eine eigene Ansicht (`ui/views/kurs_testlauf.py`), die vom Fokus
+  nur die Abschnittsleiste und die Ausprägungszeilen nimmt (Zeilen 128–129). Die Komponente
+  Fokus (`ui/components/fokus.py`: große Zeit, Takt, Bild der Bewegung, HF-Kachel, Kurven,
+  Zählstand des Sensors, Medien) benutzen nur der Timer der Übung und das Workout.
+- **Künftig:** Der Lauf aus dem Kurs — ausprobieren wie Test — läuft **in derselben
+  Fokus-Komponente** wie die Übung sonst: dieselben Ebenen (Takt · Bewegung · HF · Kurve),
+  dieselben Knöpfe, dieselbe Eingabe am Ende. Damit ersetzt das den Weg aus §3 („Fälliges aus
+  dem Fokus herauslösen“): Die Medien an den vier Stellen zeigt der Fokus selbst, der Kurs
+  reicht ihm nur das Material des Blocks. Aus dem Kurs kommen dazu nur die Seite *bereit*
+  (Hinweis, Medien und Fragen vorher) und das *Ergebnis* (Fragen nachher, „Wert für den Plan“).
+- **Voreingestellt** aus dem Baustein, wie heute: Parameter, Uhr, Takt, Medien — Vorgabe „wie
+  die Übung eingestellt ist“ (`wie_uebung`), eine eigene Angabe im Baustein geht vor.
+- **Sensoren nebenbei:** Am Baustein eine Zeile „Sensoren“ mit der Vorgabe „wie sonst“ — läuft
+  eine Messung, läuft sie weiter und der Fokus zeigt sie (HF, Kurven, Zählstand), wie beim Üben
+  außerhalb des Kurses. Kein neuer Schalter für die Person.
+- **Sensor als Startbedingung:** `Block.braucht` — eine Liste aus Herzfrequenz · RR-Intervalle ·
+  Bewegungssensor (zählen). Fehlt einer, zeigt die Seite *bereit* „Dafür brauchst du … —
+  verbinden“ und „Starten“ bleibt aus. Vorgabe: leer.
+- **Grenze bleibt** (§7): Der Sensor läuft mit und zeichnet auf; **Variablen des Kurses kommen
+  weiter nur aus dem Eintrag** (auch gezählte Wiederholungen, die der Sensor statt der Person
+  zählt — das ist der Wert des Eintrags), nie aus Herzfrequenz oder HRV, und keine Folge hängt
+  an einem Messwert. Eine Startbedingung „Sensor verbunden“ ist keine Rechnung aus Messwerten.
+- **Nicht gelesen:** `ui/views/uebung_timer.py` und wie der Fokus dort gebaut und beendet wird,
+  `ui/views/kurs_testlauf.py` im Ganzen. Ob der Kurslauf die Fokus-Komponente selbst einbaut
+  oder die Ansicht „Timer der Übung“ mit einem Kurs-Kontext öffnet, entscheidet sich beim Lesen
+  — vor dem Bau der Stufe F, mit Bericht an Ben.
+
+### 11.2 Medien je Antwort
+
+- Ein Medium darf an **mehreren Antworten** hängen: `wenn` nennt eine Liste von Antworten,
+  eine davon genügt („leicht“ oder „mittel“ → Video 1; „schwer“ → Video 2). Im Editor: an der
+  Folge „Medium zeigen“ die Antworten als Chips zum An- und Abwählen.
+- **Eine Antwort ohne Folge ist der Normalfall** — der Tipp ist dann nur „ich mache mir die
+  Anstrengung bewusst“; gespeichert wird sie trotzdem (§5).
+- Ein Medium für alle braucht keine Bedingung: Es steht als Block `medium` im Kapitel darunter.
+
+### 11.3 Antworten auf §10.4
+
+1. **Test ohne Abnehmer:** kein Schalter. Der Editor **markiert** ihn nur („Kein Baustein
+   verwendet diesen Wert“). Gelesen als: Der Lauf ist dann freiwillig wie jeder, dessen Wert
+   nicht gebraucht wird — ob bestehende Kurse so einen Test haben, ist weiter nicht nachgesehen;
+   vor Stufe U1 in `trainingsapp-inhalte` nachsehen und Ben das Ergebnis nennen.
+2. **Festes Ziel je Antwort:** ja — vorgewählt unter „Von Hand“, änderbar.
+3. **Übung herausnehmen, tauschen, Variante setzen:** gelesen als ja („alles, was irgendwie
+   einen Plan modifizieren kann“, erste Runde) — neue Bausteine, Stufe U5.
+4. **Seite „bereit“:** erst Medien, dann Fragen, dann „Starten“ — ja.
+5. **Fehlende Antwort** steht als „offen“ mit dem Weg zum Ausprobieren in der Sammelkarte — ja.
+
+### 11.4 Reihenfolge
+
+| Stufe | Inhalt | hängt an |
+|---|---|---|
+| U1 | Ausprobieren ohne Testpflicht (abgeleitet), alle Werte als Variablen, Migration `text`, Karte „Deine Werte“, Markierung „kein Baustein verwendet diesen Wert“ | — |
+| F | **Lauf im Fokus** (11.1): dieselbe Umgebung, Sensoren nebenbei, `braucht` als Startbedingung, Medien an vier Stellen am Baustein (ersetzt U2) | U1; vorher `uebung_timer.py` und `kurs_testlauf.py` lesen |
+| U3 | Fragen vorher/nachher und im Kapitel, Antworten als Variablen | U1 |
+| U4 | Folgen: `wenn` (auch mehrere Antworten), „+ Folge“ an der Antwort, festes Ziel je Antwort, `ziel_aus` mit Feld, „offen“ bei fehlender Antwort | U3 |
+| U5 | Neue Bausteine: Übung herausnehmen, tauschen, Variante setzen | U4 |
+
+F kommt vor den Fragen, weil Bens Vorgabe „dieselbe Umgebung“ die Ansicht festlegt, in die U3
+seine Fragen und U4 seine Medien „bei der Antwort“ einbauen — sonst würden beide zweimal gebaut.
+U1 bleibt davor: Es ändert nur die Ergebnis-Seite und die Daten, nicht den Lauf.

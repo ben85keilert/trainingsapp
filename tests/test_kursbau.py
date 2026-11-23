@@ -390,7 +390,8 @@ def test_test_misst_die_gewaehlte() -> None:
         ("b2", "wird mit gelöscht"),
         ("b3", "wird mit gelöscht"),
     ]
-    assert sicht.folge_text(folgen[0]) == "Test — die gewählte · Wiederholungen: wird mit gelöscht"
+    erwartet = "Übung machen — die gewählte · Wiederholungen: wird mit gelöscht"
+    assert sicht.folge_text(folgen[0]) == erwartet
     assert [b.id for b in folgen_anwenden(zwei.bloecke, folgen) if b.id != "w"] == ["b4"]
     # Nur der Test fällt weg: Der Baustein verliert sein Ziel
     assert [(f.block.id, f.was) for f in sicht.folgen("t")] == [

@@ -1,0 +1,14 @@
+-- Alles, was in einem Lauf des Kurses eingegeben wurde, bleibt benennbar (Ben, 23.11.2026:
+-- „Hierbei sind die eingegebenen Variablen Wdh/Zeit/Haltezeit/Skala/Ja-Nein usw. zu speichern
+-- und für später verfügbar zu machen“; docs/plan_kurs_uebungen.md §5).
+--
+-- Bisher hielt `course_variable` je Test **einen** Wert: den im Feld des Tests, unter dem
+-- Namen des Tests. Dazu kommen je Lauf die Werte aller Felder des Eintrags unter
+-- `<test>.<feld>` und — mit den Fragen — die Antworten unter `<test>.f:<frage>` bzw. der
+-- Block-ID einer Frage im Kapitel.
+--
+-- `text`: ein Wert, der keine Zahl ist — Variante, Seite, eine gewählte Antwort (mehrere als
+-- JSON-Liste). `value` ist dann 0. Ja/Nein steht als 1/0 in `value`.
+--
+-- Gerätelokal wie bisher: je Profil, nicht in Paket, Export oder Sync. Nie aus Messwerten.
+ALTER TABLE course_variable ADD COLUMN text TEXT;

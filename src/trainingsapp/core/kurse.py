@@ -589,6 +589,9 @@ class Kursvariable:
     #: jüngste Eintrag der Übung (ein Test ohne Lauf, dessen Kapitel nicht abgeschlossen
     #: ist). ``wert`` ist dann, was beim Wählen galt
     schwebt: bool = False
+    #: ein Wert, der keine Zahl ist (Migration 074): Variante, Seite, die Antwort auf eine
+    #: Frage — ``wert`` ist dann 0. Mehrere Antworten stehen als JSON-Liste
+    text: str | None = None
 
     def planwert(self, test_wert: float | None = None) -> Planwert | None:
         """Die Wahl als `Planwert` — gegen ``test_wert`` gerechnet (Vorgabe: der Wert der

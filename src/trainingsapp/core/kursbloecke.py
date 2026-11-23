@@ -40,7 +40,7 @@ Dieses Modul kennt kein flet und keine Datenbank.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
@@ -58,7 +58,7 @@ ARTEN: Final[dict[str, str]] = {
     TEXT: "Text",
     MEDIUM: "Medium",
     FRAGE: "Frage",
-    TEST: "Test",
+    TEST: "Übung machen",
     AUSWAHL: "Auswahl",
 }
 PLAN_UEBUNG: Final = "plan_uebung"
@@ -698,6 +698,41 @@ def wert_schluessel(block: Block, uebung: str) -> str:
     return f"{block.id}:{uebung}" if block.aus else block.id
 
 
+def feld_schluessel(name: str, feld: str) -> str:
+    """Der Name der Variable für **ein Feld** eines Laufs: ``<test>.<feld>`` — ``name`` ist der
+    Schlüssel des Tests (`wert_schluessel`). Der Wert des Tests selbst bleibt unter ``name``.
+
+    >>> feld_schluessel("t", "reps"), feld_schluessel("t:x", "scale")
+    ('t.reps', 't:x.scale')
+    """
+    return f"{name}.{feld}"
+
+
+def feldwerte(result: Mapping[str, Any]) -> dict[str, float | str]:
+    """Was ein Eintrag je Feld hinterlässt (Ben, 23.11.2026: „die eingegebenen Variablen
+    Wdh/Zeit/Haltezeit/Skala/Ja-Nein usw. zu speichern und für später verfügbar zu machen“):
+    Zahlen als Zahl — bei Sätzen der beste Satz, wie `wert_im_test` —, Ja/Nein als 1/0, Text
+    (Variante, Seite) als Text. Leeres fällt weg.
+
+    >>> feldwerte({"hold": [40, 48], "scale": 6, "side": "links", "done": True, "x": ""})
+    {'hold': 48.0, 'scale': 6.0, 'side': 'links', 'done': 1.0}
+    >>> feldwerte({"reps": [], "note": None, "tags": ["a", "b"]})
+    {}
+    """
+    ergebnis: dict[str, float | str] = {}
+    for key, wert in result.items():
+        if isinstance(wert, bool):
+            ergebnis[str(key)] = 1.0 if wert else 0.0
+        elif isinstance(wert, str):
+            if wert.strip():
+                ergebnis[str(key)] = wert.strip()
+        else:
+            zahl = wert_im_test(result, str(key))
+            if zahl is not None:
+                ergebnis[str(key)] = zahl
+    return ergebnis
+
+
 def ziel_aus_test(block: Block, wert: float) -> int:
     """Das Ziel im Plan: Testwert × Faktor, auf ganze Einheiten — mindestens 1.
 
@@ -760,6 +795,20 @@ def wert_wird_ziel(test: Block, bloecke: Iterable[Block], vorlagen: bool) -> boo
     True
     """
     return vorlagen or any(b.art in BAUSTEINE and b.ziel_aus == test.id for b in bloecke)
+
+
+def abnehmer(test: Block, bloecke: Iterable[Block]) -> list[Block]:
+    """Die Bausteine, die ihr Ziel aus diesem Test nehmen — in der Reihenfolge des Kurses.
+    Ohne Abnehmer (und ohne Kapitelplan, `wert_wird_ziel`) ist der Lauf „nur ausprobieren“;
+    der Editor markiert das (Ben, 23.11.2026: „Ein Test ohne Baustein soll nur markiert
+    sein“).
+
+    >>> t = Block(TEST, id="t", uebung="k")
+    >>> b = Block(PLAN_UEBUNG, id="b", uebung="k", ziel_aus="t")
+    >>> [x.id for x in abnehmer(t, [t, b, Block(PLAN_UEBUNG, id="c", uebung="k")])]
+    ['b']
+    """
+    return [b for b in bloecke if b.art in BAUSTEINE and b.ziel_aus == test.id]
 
 
 def planwert(
@@ -831,9 +880,22 @@ def ziel_im_plan(block: Block, wert: float, gewaehlt: Planwert | None = None) ->
 
 
 def fertig(
-    bloecke: Iterable[Block], werte: Mapping[str, float], wahl: Mapping[str, Sequence[str]]
+    bloecke: Iterable[Block],
+    werte: Mapping[str, float],
+    wahl: Mapping[str, Sequence[str]],
+    ziel_tests: Collection[str] | None = None,
 ) -> bool:
     """Alles da für „Plan anlegen“: jeder Test hat einen Wert, jede Auswahl ihre Anzahl.
+
+    ``ziel_tests``: die IDs der Tests, aus deren Wert ein Ziel im Plan wird
+    (`wert_wird_ziel`) — **nur sie sind Pflicht** (Ben, 23.11.2026: „Freiwillig als Vorgabe.
+    Pflicht, wenn gebraucht wird“, `docs/plan_kurs_uebungen.md` §10.1). Ein Lauf, dessen Wert
+    kein Baustein nennt, ist „nur ausprobieren“ und hält nichts auf. ``None``: jeder Test
+    zählt, wie bisher.
+
+    >>> t = [Block(TEST, id="t", uebung="u")]
+    >>> fertig(t, {}, {}), fertig(t, {}, {}, ziel_tests=()), fertig(t, {}, {}, ziel_tests={"t"})
+    (False, True, False)
 
     >>> b = [Block(TEST, id="t", uebung="u"), Block(AUSWAHL, id="a", uebungen=["x", "y"])]
     >>> fertig(b, {"t": 48}, {}), fertig(b, {"t": 48}, {"a": ["x"]})
@@ -847,8 +909,11 @@ def fertig(
     (False, False, True)
     """
     for b in bloecke:
-        if b.art == TEST and any(
-            wert_schluessel(b, u) not in werte for u in gemessene_uebungen(b, wahl)
+        pflicht = ziel_tests is None or b.id in ziel_tests
+        if (
+            b.art == TEST
+            and pflicht
+            and any(wert_schluessel(b, u) not in werte for u in gemessene_uebungen(b, wahl))
         ):
             return False
         if b.art == AUSWAHL and len(wahl.get(b.id, ())) != b.anzahl:
@@ -1006,12 +1071,15 @@ __all__ = [
     "Block",
     "Planwert",
     "Vorgabe",
+    "abnehmer",
     "anteil_runden",
     "anteil_schritt",
     "anteil_vorgabe",
     "bloecke_lesen",
     "bloecke_von",
     "braucht_eingabe",
+    "feld_schluessel",
+    "feldwerte",
     "fertig",
     "gemessene_uebungen",
     "ist_vorgabe",

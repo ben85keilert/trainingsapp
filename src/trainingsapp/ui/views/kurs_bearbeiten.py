@@ -108,6 +108,7 @@ from trainingsapp.core.kursbloecke import (
     ZU_ENDE,
     Antwort,
     Block,
+    abnehmer,
 )
 from trainingsapp.core.kurse import (
     FREISCHALTUNGEN,
@@ -1532,6 +1533,47 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             ],
         )
         test_hinweis = hinweis(TEST_HINWEIS[(False, nur_liefern)])
+        # Was sich aus dem Kurs ergibt (Ben, 23.11.2026, `docs/plan_kurs_uebungen.md` §10.1 und
+        # §11.3): kein Schalter „Test oder ausprobieren“ — der Lauf ist Pflicht, wenn ein
+        # Baustein (oder der Kapitelplan) seinen Wert braucht, sonst freiwillig. Der Editor
+        # markiert nur, was gilt
+        nehmer = abnehmer(block, sicht().alle()) if block.art == TEST else []
+        if nehmer or not nur_liefern:
+            wirkung_text = (
+                "Wirkt auf den Plan: "
+                + (
+                    f"{len(nehmer)} Baustein{'e' if len(nehmer) != 1 else ''} "
+                    f"nehm{'en' if len(nehmer) != 1 else 't'} das Ziel aus diesem Lauf"
+                    if nehmer
+                    else "Der Wert wird das Ziel im Kapitelplan"
+                )
+                + ". Darum ist er ein Test und muss gemacht sein, bevor der Plan entsteht."
+            )
+        else:
+            wirkung_text = (
+                "Kein Baustein verwendet diesen Wert — der Lauf ist freiwillig "
+                "(„nur ausprobieren“)."
+            )
+        wirkung = ft.Container(
+            padding=12,
+            border_radius=12,
+            border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+            data="test_wirkung",
+            content=ft.Column(
+                spacing=4,
+                tight=True,
+                controls=[
+                    ft.Text(
+                        "ERGIBT SICH AUS DEM KURS", size=11, weight=ft.FontWeight.BOLD, opacity=0.6
+                    ),
+                    ft.Text(
+                        "Geht mit: alles, was im Lauf eingetragen wird — je Feld ein Wert.",
+                        size=13,
+                    ),
+                    ft.Text(wirkung_text, size=13),
+                ],
+            ),
+        )
         vorschau_spalte = ft.Column(spacing=6, tight=True)
         vorschau_kasten = ft.Container(
             padding=14,
@@ -2136,6 +2178,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 feld_hinweis,
                 *([] if nur_liefern else [faktor]),
                 test_hinweis,
+                wirkung,
                 vorschau_kasten,
             ],
             AUSWAHL: [

@@ -45,6 +45,8 @@ from ..core.kursbloecke import (
     Block,
     Planwert,
     bloecke_lesen,
+    feld_schluessel,
+    feldwerte,
     vorlage_anwenden,
     wert_im_test,
     wert_schluessel,
@@ -439,7 +441,8 @@ class KursRepo:
     def variablen(self, kurs_id: str, subject_id: str) -> dict[str, Kursvariable]:
         """Was die Tests dieses Kurses für das Profil hinterlassen haben — nach Namen."""
         zeilen = self.con.execute(
-            "SELECT name, value, entry_id, set_at, wie, plan_value, anteil, plan_set_at, floating "
+            "SELECT name, value, entry_id, set_at, wie, plan_value, anteil, plan_set_at, floating, "
+            "text "
             "FROM course_variable WHERE subject_id = ? AND course_id = ?",
             (subject_id, kurs_id),
         ).fetchall()
@@ -454,6 +457,7 @@ class KursRepo:
                 anteil=float(r["anteil"]) if r["anteil"] is not None else None,
                 wahl_stempel=r["plan_set_at"] or "",
                 schwebt=bool(r["floating"]),
+                text=r["text"],
             )
             for r in zeilen
         }
@@ -489,6 +493,44 @@ class KursRepo:
                 (subject_id, kurs_id, name, float(wert), eintrag_id, jetzt().isoformat()),
             )
 
+    def feldwerte_setzen(
+        self,
+        kurs_id: str,
+        subject_id: str,
+        name: str,
+        result: Mapping[str, Any],
+        eintrag_id: str | None = None,
+    ) -> None:
+        """Ein Lauf hinterlässt **alles, was eingegeben wurde** (Ben, 23.11.2026; Migration
+        074): je Feld des Eintrags eine Variable ``<name>.<feld>``
+        (`core.kursbloecke.feld_schluessel`, `feldwerte`) — Zahlen in ``value``, Text
+        (Variante, Seite) in ``text``. ``name``: der Schlüssel des Tests. Was vom vorigen Lauf
+        unter diesem Test stand, weicht („Nochmal“ überschreibt) — die Antworten auf Fragen
+        (``<name>.f:…``) bleiben, sie setzt `antwort_setzen`."""
+        stempel = jetzt().isoformat()
+        with transaktion(self.con):
+            self.con.execute(
+                "DELETE FROM course_variable WHERE subject_id = ? AND course_id = ? "
+                "AND substr(name, 1, ?) = ? AND substr(name, ?, 2) != 'f:'",
+                (subject_id, kurs_id, len(name) + 1, name + ".", len(name) + 2),
+            )
+            for feld, wert in feldwerte(result).items():
+                ist_text = isinstance(wert, str)
+                self.con.execute(
+                    "INSERT INTO course_variable "
+                    "(subject_id, course_id, name, value, entry_id, set_at, text) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        subject_id,
+                        kurs_id,
+                        feld_schluessel(name, feld),
+                        0.0 if ist_text else float(wert),
+                        eintrag_id,
+                        stempel,
+                        wert if ist_text else None,
+                    ),
+                )
+
     # -- Wert für den Plan (Migration 066, W3; `docs/plan_kurs_ablauf.md` §17) ------------
 
     def planwerte(
@@ -503,7 +545,7 @@ class KursRepo:
         ergebnis: dict[str, Planwert] = {}
         for name, variable in self.variablen(kurs_id, subject_id).items():
             gewaehlt = variable.planwert(werte.get(name))
-            if gewaehlt is not None:
+            if gewaehlt is not None and variable.text is None:
                 ergebnis[name] = gewaehlt
         return ergebnis
 
@@ -584,6 +626,10 @@ class KursRepo:
                     eintrag.id if eintrag else None,
                     wahl_bleibt=True,
                 )
+                if eintrag is not None:
+                    self.feldwerte_setzen(
+                        kapitel.kurs_id, subject_id, name, eintrag.result, eintrag.id
+                    )
 
     def testeintraege(
         self, kapitel: Kapitel, subject_id: str, seit: datetime

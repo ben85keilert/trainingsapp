@@ -384,3 +384,18 @@ def test_ueberschrift_der_testkarte_nennt_die_vorgabe_die_im_lauf_gilt() -> None
     assert kurstest.karten_ueberschrift(zeit, "Käfer", _kaefer(timer=[HALTEN.als_dict()])) == (
         "Käfer: was schaffst du?"
     )
+
+
+def test_nur_tests_die_gebraucht_werden_sind_pflicht() -> None:
+    """„Plan anlegen“ wartet nur auf Tests, aus deren Wert ein Ziel wird — ein Lauf zum
+    Ausprobieren hält nichts auf (Ben, 23.11.2026, `docs/plan_kurs_uebungen.md` §10.1)."""
+    from trainingsapp.core.kursbloecke import PLAN_UEBUNG, TEST, Block, abnehmer, fertig
+
+    test = Block(TEST, id="t", uebung="planke")
+    probe = Block(TEST, id="e", uebung="seitstuetz")
+    baustein = Block(PLAN_UEBUNG, id="b", uebung="planke", ziel_aus="t")
+    alle = [test, probe, baustein]
+    assert [b.id for b in abnehmer(test, alle)] == ["b"] and abnehmer(probe, alle) == []
+    assert not fertig(alle, {}, {}, ziel_tests={"t"})
+    assert fertig(alle, {"t": 60.0}, {}, ziel_tests={"t"})
+    assert not fertig(alle, {"t": 60.0}, {})  # ohne Angabe: jeder Test, wie bisher

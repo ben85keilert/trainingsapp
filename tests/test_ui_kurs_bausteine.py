@@ -971,7 +971,7 @@ def test_test_misst_die_gewaehlte(page, state) -> None:
     frage = page.dialoge[-1]
     texte = _texte(frage)
     assert "Darauf beziehen sich andere Blöcke:" in texte
-    assert "• Test — die gewählte · Wiederholungen: wird mit gelöscht" in texte
+    assert "• Übung machen — die gewählte · Wiederholungen: wird mit gelöscht" in texte
     assert any(t.startswith("• Übung dazu — die gewählte, hinter Seitstütz") for t in texte)
     _daten(frage, "block_loeschen_ja").on_click()
     assert not _hat(ansicht, ("block", "t")) and not _hat(ansicht, ("baustein", "b2"))
@@ -1024,7 +1024,7 @@ def _test_oeffnen(page, ansicht, block_id: str = "t"):
     """Der Dialog des Tests ``block_id`` im Kapitel-Formular."""
     _daten(ansicht, ("block", block_id)).on_click()
     dialog = page.dialoge[-1]
-    assert isinstance(dialog, ft.AlertDialog) and dialog.title.value == "Test"
+    assert isinstance(dialog, ft.AlertDialog) and dialog.title.value == "Übung machen"
     return dialog
 
 

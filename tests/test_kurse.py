@@ -1273,8 +1273,30 @@ def test_kapitelabschluss_haelt_den_wert_eines_tests_ohne_lauf_fest(con, profil)
     assert (variable.wert, variable.eintrag_id) == (30.0, damals.id)
     sitzungen.eintrag_anlegen(session, kaefer, {"reps": [12]})
     assert repo.testwerte(zwei, profil.id, erreicht) == {"test": 30.0}
-    # ein Kapitel ohne Wert hinterlässt nichts
-    assert set(repo.variablen(kurs.id, profil.id)) == {"test"}
+    # ein Kapitel ohne Wert hinterlässt nichts; der Test dazu je Feld seinen Wert (Migration 074)
+    variablen = repo.variablen(kurs.id, profil.id)
+    assert set(variablen) == {"test", "test.reps"}
+    assert (variablen["test.reps"].wert, variablen["test.reps"].eintrag_id) == (30.0, damals.id)
+
+
+def test_feldwerte_eines_laufs_bleiben_benennbar(con, profil) -> None:
+    """Alles, was in einem Lauf eingegeben wurde, steht je Feld als Variable — Zahlen als Zahl,
+    Text als Text; „Nochmal“ ersetzt die Felder des Tests, andere Tests bleiben (Ben,
+    23.11.2026, `docs/plan_kurs_uebungen.md` §5)."""
+    repo = KursRepo(con)
+    kurs, _ids = rumpf_kurs(con)
+    repo.feldwerte_setzen(
+        kurs.id, profil.id, "t", {"hold": [40, 48], "scale": 6, "side": "links", "ok": True}
+    )
+    repo.feldwerte_setzen(kurs.id, profil.id, "t2", {"reps": 9})
+    v = repo.variablen(kurs.id, profil.id)
+    assert (v["t.hold"].wert, v["t.scale"].wert, v["t.ok"].wert) == (48.0, 6.0, 1.0)
+    assert (v["t.side"].text, v["t.side"].wert, v["t.hold"].text) == ("links", 0.0, None)
+    repo.feldwerte_setzen(kurs.id, profil.id, "t", {"hold": 50})
+    v = repo.variablen(kurs.id, profil.id)
+    assert set(v) == {"t.hold", "t2.reps"} and v["t.hold"].wert == 50.0
+    # ein Text ist nie ein „Wert für den Plan“
+    assert repo.planwerte(kurs.id, profil.id, {}) == {}
 
 
 def test_gestalteter_test_uebersteht_speichern_und_laden(con, profil) -> None:

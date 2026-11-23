@@ -129,7 +129,7 @@ def kapitel_bloecke(
     eintraege: Mapping[str, SessionEntry] | None = None,
     laufender_test: tuple[str, str] | None = None,
     planwerte: Mapping[str, Planwert] | None = None,
-    ziel_tests: Collection[str] = (),
+    ziel_tests: Collection[str] | None = None,
     anteil_von: Callable[[Block], float] | None = None,
     wert_waehlen: Callable[[Block, str, Planwert | None], Any] | None = None,
 ) -> KapitelBloecke:
@@ -175,8 +175,17 @@ def kapitel_bloecke(
     Vorgabe der Karte, `core.kursbloecke.anteil_vorgabe`; ohne: der Faktor des Tests);
     ``wert_waehlen(block, übung, wahl)`` — „Übernehmen“: die Ansicht merkt die Wahl
     (``None``: zurück zur Vorgabe des Kurses) und zeichnet neu. Ohne ``wert_waehlen`` gibt es
-    „Wert ändern“ nicht."""
+    „Wert ändern“ nicht.
+
+    **Nur ausprobieren** (Ben, 23.11.2026, `docs/plan_kurs_uebungen.md` §10.1): Ein Test, der
+    nicht in ``ziel_tests`` steht, ist freiwillig — die Karte heißt „Übung machen“, der Knopf
+    „Übung starten“, und „Plan anlegen“ wartet nicht auf ihn. ``ziel_tests=None`` (die
+    Ansicht sagt nichts dazu): jeder Test ist Pflicht, wie bisher."""
     ergebnis = KapitelBloecke(controls=[])
+
+    def freiwillig(block: Block) -> bool:
+        return ziel_tests is not None and block.id not in ziel_tests
+
     wahl = ergebnis.wahl
     #: je Auswahl-Block, was schon im Kursplan steht (nur Übungen dieser Auswahl)
     im_kursplan: dict[str, list[str]] = {
@@ -233,7 +242,7 @@ def kapitel_bloecke(
         return {**frueher, **hier}
 
     def stand_zeigen() -> None:
-        bereit = fertig(bloecke, werte, wirksam())
+        bereit = fertig(bloecke, werte, wirksam(), ziel_tests)
         knopf.disabled = not bereit
         fehlt.value = "" if bereit else "Erst den Test machen und die Auswahl treffen."
         fehlt.visible = not bereit
@@ -329,9 +338,10 @@ def kapitel_bloecke(
         eintrag = (eintraege or {}).get(wert_schluessel(block, uid))
         tag = lokaler_tag(eintrag.started_at) if eintrag and eintrag.started_at else None
         heute = state.heute() if callable(getattr(state, "heute", None)) else None
+        was = "Dein Lauf" if freiwillig(block) else "Dein Test"
         if tag is None:
-            return "Dein Test."
-        return "Dein Test von heute." if tag == heute else f"Dein Test vom {tag:%d.%m.}."
+            return f"{was}."
+        return f"{was} von heute." if tag == heute else f"{was} vom {tag:%d.%m.}."
 
     def zur_uebung_knopf(block: Block, uid: str, getestet: bool) -> ft.Control | None:
         """„Zur Übung“ bzw. „Nochmal“ zu **dieser** Übung — ``None``, wo nur gelesen wird. Ein
@@ -343,7 +353,13 @@ def kapitel_bloecke(
         if block.laeuft and test_starten is not None:
             laeuft = laufender_test == (block.id, uid)
             return ft.FilledTonalButton(
-                "Zum Test" if laeuft else "Nochmal" if getestet else "Test starten",
+                ("Zur Übung" if freiwillig(block) else "Zum Test")
+                if laeuft
+                else "Nochmal"
+                if getestet
+                else "Übung starten"
+                if freiwillig(block)
+                else "Test starten",
                 icon=ft.Icons.TIMER_OUTLINED if laeuft else ft.Icons.PLAY_ARROW,
                 on_click=test_starten(block, uid),
                 data=("test_starten", block.id, uid) if block.aus else ("test_starten", block.id),
@@ -365,7 +381,7 @@ def kapitel_bloecke(
         return (
             wert_waehlen is not None
             and offen
-            and block.id in ziel_tests
+            and block.id in (ziel_tests or ())
             and uid in katalog
             and not (angelegt and not kursplan)
         )
@@ -444,7 +460,9 @@ def kapitel_bloecke(
         sagen `gemessene_uebungen` und `wert_schluessel`: die feste — oder, mit ``aus``, die
         Gewählten einer Auswahl (Ben, 16.11.2026)."""
         gemessen = gemessene_uebungen(block, wirksam())
-        teile: list[ft.Control] = [titel("Test")]
+        teile: list[ft.Control] = [
+            titel("Übung machen · freiwillig" if freiwillig(block) else "Test")
+        ]
         #: mit Vorgabe oder gestaltet ist der Test ein Lauf mit der Uhr (`Block.laeuft`) — die
         #: Karte nennt Übung und Vorgabe und sagt, wie er läuft
         als_lauf = block.laeuft
@@ -547,7 +565,9 @@ def kapitel_bloecke(
                     hinweis(
                         # im Kursplan-Kurs rechnet der Baustein (eigener Faktor, vielleicht
                         # eine andere Übung) — was daraus wird, sagt die Sammelkarte
-                        f"{woher} Was daraus an deinem Plan wird, steht unten."
+                        f"{woher} Der Kurs merkt sich, was du eingetragen hast."
+                        if freiwillig(block)
+                        else f"{woher} Was daraus an deinem Plan wird, steht unten."
                         if kursplan
                         else f"{woher} Im Plan wird daraus das Ziel: "
                         f"{satzende(menge_text(feld, ziel_im_plan(block, wert, gewaehlt)))}"
@@ -785,7 +805,7 @@ def kapitel_bloecke(
     if anlegen is not None and hat_eingabe and offen and not angelegt:
 
         def druecken(_e: Any = None) -> Any:
-            if fertig(bloecke, werte, wirksam()):
+            if fertig(bloecke, werte, wirksam(), ziel_tests):
                 return anlegen(wirksam())
             return None
 

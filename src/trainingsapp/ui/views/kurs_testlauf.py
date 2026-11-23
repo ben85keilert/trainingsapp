@@ -436,10 +436,12 @@ def eintragen(page: Any, state: Any) -> SessionEntry | None:
     # wird als Variable gespeichert“) — ein späterer gewöhnlicher Eintrag ändert ihn nicht
     # mehr, „Nochmal“ überschreibt ihn (P214 a)
     wert = wert_im_test(eintrag.result, stand.block.feld)
+    profil_id = e.subject_id or state.profil.id
+    name = wert_schluessel(stand.block, uebung.id)
     if wert is not None and wert > 0:
-        profil_id = e.subject_id or state.profil.id
-        name = wert_schluessel(stand.block, uebung.id)
         state.kurse.variable_setzen(stand.kurs_id, profil_id, name, wert, eintrag.id)
+        # … und alles andere, was eingegeben wurde, je Feld (Ben, 23.11.2026, Migration 074)
+        state.kurse.feldwerte_setzen(stand.kurs_id, profil_id, name, eintrag.result, eintrag.id)
         # Der Wert für den Plan, wie die Person ihn in der Karte gewählt hat (W3) — gegen den
         # Wert gerechnet, der jetzt eingetragen ist. Ohne Wahl gilt die Vorgabe des Kurses:
         # `variable_setzen` hat sie eben wiederhergestellt
@@ -844,6 +846,11 @@ def kurs_test_view(
     v = stand.vorgabe if stand is not None else kurstest.vorgabe_fuer(block, profil)
     takt = stand.takt if stand is not None else kurstest.takt_fuer(block, uebung)
     aus = kurstest.ausfuehrung_fuer(block, uebung)
+    #: Wird aus dem Wert ein Ziel im Plan? Dann ist es ein Test — sonst „nur ausprobieren“
+    #: (Ben, 23.11.2026, `docs/plan_kurs_uebungen.md` §10.1): derselbe Lauf, andere Worte
+    gebraucht = wert_wird_ziel(
+        block, [b for k in kurs.kapitel for b in k.bloecke], bool(kapitel.plaene)
+    )
 
     def neu_zeichnen() -> None:
         with contextlib.suppress(Exception):
@@ -868,7 +875,9 @@ def kurs_test_view(
 
     kreuz = ft.IconButton(
         ft.Icons.CLOSE,
-        tooltip="Test abbrechen" if stand is None or stand.phase == LAEUFT else "Test verwerfen",
+        tooltip=("Test abbrechen" if gebraucht else "Abbrechen")
+        if stand is None or stand.phase == LAEUFT
+        else ("Test verwerfen" if gebraucht else "Verwerfen"),
         on_click=abbrechen,
         data="test_abbrechen",
     )
@@ -1420,7 +1429,11 @@ def kurs_test_view(
                     spacing=2,
                     tight=True,
                     controls=[
-                        ft.Text("Dein Test", size=22, weight=ft.FontWeight.W_700),
+                        ft.Text(
+                            "Dein Test" if gebraucht else "Dein Lauf",
+                            size=22,
+                            weight=ft.FontWeight.W_700,
+                        ),
                         # wie er endete: „Bei 7 angekommen“, „Der Timer ist durch“ …
                         ft.Text(
                             kurstest.ende_text(v, vorher=s.vorher, durch=s.durch),
@@ -1446,8 +1459,12 @@ def kurs_test_view(
                 *([plan_karte.control] if plan_karte is not None else []),
                 ft.Text(
                     f"Eingetragen wird ein gewöhnlicher Eintrag bei „{uebung.name}“ — er steht "
-                    "auch unter Heute. Was der Kurs daraus für deinen Plan vorschlägt, zeigt das "
-                    "Kapitel.",
+                    "auch unter Heute. "
+                    + (
+                        "Was der Kurs daraus für deinen Plan vorschlägt, zeigt das Kapitel."
+                        if gebraucht
+                        else "Der Kurs merkt sich, was du eingetragen hast."
+                    ),
                     size=12,
                     opacity=0.65,
                 ),
@@ -1494,7 +1511,7 @@ def kurs_test_view(
         # Im Lauf und im Ergebnis ein Fokus: keine Laufleiste (`components.fokus`)
         data=FOKUS_ANSICHT if stand is not None else None,
         appbar=ft.AppBar(
-            title=ft.Text(f"Test · {uebung.name}"),
+            title=ft.Text(f"{'Test' if gebraucht else 'Ausprobieren'} · {uebung.name}"),
             # bereit: der Pfeil zurück ins Kapitel; sonst ✕ — der Lauf endet ohne Eintrag
             leading=kreuz if stand is not None else None,
             automatically_imply_leading=stand is None,

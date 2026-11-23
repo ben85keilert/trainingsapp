@@ -67,7 +67,8 @@ from trainingsapp.core.kurse import (
     status,
 )
 from trainingsapp.core.kursplan import Aenderung, kursplan_name, wahl_im_plan
-from trainingsapp.core.models import Exercise, Media, Plan
+from trainingsapp.core.kurswerte import deine_werte
+from trainingsapp.core.models import Exercise, Media, Plan, lokaler_tag
 from trainingsapp.core.plaene import erledigte, tage_text
 from trainingsapp.core.plan_durchlauf import startet_als_workout
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -208,6 +209,55 @@ def _frueherer_plan(page: ft.Page, plan: Plan) -> ft.Control:
         content_padding=ft.Padding.only(left=0, right=0),
         data=("frueherer_plan", plan.id),
     )
+
+
+def ziel_tests_von(kurs: Kurs) -> set[str]:
+    """Die Tests des Kurses, aus deren Wert ein Ziel im Plan wird — alle anderen Läufe sind
+    „nur ausprobieren“ (`core.kursbloecke.wert_wird_ziel`)."""
+    kurs_bloecke = [b for k in kurs.kapitel for b in k.bloecke]
+    return {
+        b.id
+        for k in kurs.kapitel
+        for b in k.bloecke
+        if b.art == TEST and wert_wird_ziel(b, kurs_bloecke, bool(k.plaene))
+    }
+
+
+def _deine_werte(
+    page: ft.Page, state: AppState, kurs: Kurs, katalog: Mapping[str, Exercise]
+) -> ft.Control | None:
+    """Die Karte „Deine Werte“ (Ben, 23.11.2026, `core/kurswerte.py`): je Kapitel, was die
+    Person im Kurs gemacht und geantwortet hat — nur Zahlen und eigene Worte. Der Tipp auf
+    einen Lauf führt zu seinem Tag. ``None``, solange nichts da ist."""
+    gruppen = deine_werte(
+        kurs, state.kurse.variablen(kurs.id, state.profil.id), katalog, ziel_tests_von(kurs)
+    )
+    if not gruppen:
+        return None
+    teile: list[ft.Control] = [titel("Deine Werte")]
+    for gruppe in gruppen:
+        teile.append(ft.Text(gruppe.kapitel, size=12, weight=ft.FontWeight.W_600, opacity=0.8))
+        for z in gruppe.zeilen:
+            eintrag = state.sitzungen.eintrag_laden(z.eintrag_id) if z.eintrag_id else None
+            tag = lokaler_tag(eintrag.started_at) if eintrag and eintrag.started_at else None
+            wann = f" · {z.gesetzt.astimezone():%d.%m.}" if z.gesetzt and not z.antwort else ""
+            teile.append(
+                ft.ListTile(
+                    dense=True,
+                    title=ft.Text(f"{z.titel}{wann}"),
+                    subtitle=ft.Text(z.text, size=12),
+                    trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4) if tag else None,
+                    on_click=_oeffner(page, f"/tag/{tag.isoformat()}") if tag else None,
+                    content_padding=ft.Padding.only(left=0, right=0),
+                    data=("kurswert", z.block_id, z.antwort),
+                )
+            )
+    teile.append(
+        hinweis(
+            "Nur auf diesem Gerät. „Von vorn beginnen“ leert die Karte — deine Einträge bleiben."
+        )
+    )
+    return karte(*teile, abstand=4)
 
 
 def _dein_kursplan(
@@ -551,6 +601,8 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
         state.kurse.kommt_noch(kurs, state.profil.id, _offene_wahl(state, kurs, staende)),
     )
 
+    wertekarte = _deine_werte(page, state, kurs, katalog)
+
     return ft.View(
         route=route,
         appbar=ft.AppBar(title=ft.Text(kurs.name), actions=aktionen),
@@ -571,7 +623,7 @@ def kurs_view(page: ft.Page, state: AppState, kurs: Kurs) -> ft.View:
                                 padding=ft.Padding.only(left=16, right=16, top=10),
                                 content=eine,
                             )
-                            for eine in (plankarte, vorschau)
+                            for eine in (plankarte, vorschau, wertekarte)
                             if eine is not None
                         ],
                     ],

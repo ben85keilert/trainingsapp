@@ -234,12 +234,12 @@ async def test_karte_mit_vorgabe_startet_den_testlauf(umgebung) -> None:
     )
     assert "Noch kein Test, seit du dieses Kapitel öffnest." in texte
     knopf = _daten(ansicht, ("test_starten", "test"))
-    assert knopf.content == "Test starten" and not _hat(ansicht, ("test_oeffnen", "test"))
+    assert knopf.content == "Übung starten" and not _hat(ansicht, ("test_oeffnen", "test"))
     # Auch die Ansicht des Testlaufs startet nichts: Sie ist bereit
     bereit = _ansicht(u, kurs, kapitel, block, kaefer)
     assert u.state.einheit is None and u.state.kurs_test is None
     assert bereit.data is None and _daten(bereit, "test_start").content == "Start"
-    assert bereit.appbar.title.value == "Test · Käfer" and bereit.appbar.leading is None
+    assert bereit.appbar.title.value == "Ausprobieren · Käfer" and bereit.appbar.leading is None
     await klick(knopf)
     assert u.state.einheit is not None and u.state.einheit.laeuft
     assert u.seite.route == f"/kurse/{kurs.id}/{kapitel.id}/test/test/{kaefer.id}"
@@ -247,7 +247,7 @@ async def test_karte_mit_vorgabe_startet_den_testlauf(umgebung) -> None:
     # Solange er läuft, führt die Karte zum Test — ein zweiter Tipp startet keinen zweiten
     einheit = u.state.einheit
     laufend = _daten(_kapitel(u, kurs, kapitel), ("test_starten", "test"))
-    assert laufend.content == "Zum Test"
+    assert laufend.content == "Zur Übung"
     await klick(laufend)
     assert u.state.einheit is einheit
     assert not _eintraege(u.state, kaefer)
@@ -344,7 +344,7 @@ def test_route_legt_den_testlauf_ueber_kurs_und_kapitel(tmp_path, monkeypatch) -
     state = gestartet[-1]
     try:
         assert seite.routen() == ["/", f"/kurse/{kurs.id}", zum_kapitel, route]
-        assert seite.views[-1].appbar.title.value == "Test · Käfer"
+        assert seite.views[-1].appbar.title.value == "Ausprobieren · Käfer"
         assert state.einheit is None and state.kurs_test is None  # nur „bereit“
         asyncio.run(seite.on_view_pop())
         assert seite.routen()[-1] == zum_kapitel
@@ -385,7 +385,7 @@ def test_block_namens_timer_oeffnet_den_test_nicht_den_timer(tmp_path, monkeypat
     state = gestartet[-1]
     try:
         assert seite.routen()[-1] == route
-        assert seite.views[-1].appbar.title.value == "Test · Käfer"
+        assert seite.views[-1].appbar.title.value == "Ausprobieren · Käfer"
         asyncio.run(seite.push_route(f"{route}/timer"))  # der Timer legt sich darüber
         assert seite.routen()[-2:] == [route, f"{route}/timer"]
     finally:
@@ -406,8 +406,8 @@ async def test_menge_von_hand_ein_eintrag_mit_zeit_und_skala(umgebung) -> None:
     await _sekunden(u, 65)
     ansicht = _ansicht(u, kurs, kapitel, block, kaefer)
     texte = _texte(ansicht)
-    assert ansicht.data == FOKUS_ANSICHT and ansicht.appbar.title.value == "Test · Käfer"
-    assert ansicht.appbar.leading.tooltip == "Test abbrechen"
+    assert ansicht.data == FOKUS_ANSICHT and ansicht.appbar.title.value == "Ausprobieren · Käfer"
+    assert ansicht.appbar.leading.tooltip == "Abbrechen"
     assert "VORGABE" in texte and _daten(ansicht, "test_vorgabe").value == "30 Wiederholungen"
     assert _daten(ansicht, "test_zeit").value == "1:05" and "Zeit läuft · wird gemessen" in texte
     assert "Du zählst selbst" in texte
@@ -421,8 +421,8 @@ async def test_menge_von_hand_ein_eintrag_mit_zeit_und_skala(umgebung) -> None:
     await _sekunden(u, 20)  # das Ergebnis bleibt stehen — die Zeit steht fest
     ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
     texte = _texte(ergebnis)
-    assert ergebnis.data == FOKUS_ANSICHT and ergebnis.appbar.leading.tooltip == "Test verwerfen"
-    assert "Dein Test" in texte
+    assert ergebnis.data == FOKUS_ANSICHT and ergebnis.appbar.leading.tooltip == "Verwerfen"
+    assert "Dein Lauf" in texte
     assert _daten(ergebnis, "wdh").value == "30" and "die Vorgabe" in texte
     assert _daten(ergebnis, "zeit").value == "1:05" and "von der Uhr" in texte
     assert "Wie anstrengend war es?" in texte and "0 = gar nicht · 10 = mehr geht nicht" in texte
@@ -454,7 +454,7 @@ async def test_menge_von_hand_ein_eintrag_mit_zeit_und_skala(umgebung) -> None:
     danach = _kapitel(u, kurs, kapitel)
     assert _daten(danach, "testwert").value == "30 Wdh."
     assert _daten(danach, "testneben").value == "in 1:05 · Anstrengung 6"
-    assert any(t.startswith("Dein Test von heute.") for t in _texte(danach))
+    assert any(t.startswith("Dein Lauf von heute.") for t in _texte(danach))
     assert _daten(danach, ("test_starten", "test")).content == "Nochmal"
 
 
@@ -772,7 +772,7 @@ async def test_der_gewaehlten_je_uebung_ein_knopf(umgebung) -> None:
     ]
     for x in (kaefer, bruecke):
         _daten(ansicht, ("wahl", "wahl", x.id)).on_select()
-    assert _daten(ansicht, ("test_starten", "test", kaefer.id)).content == "Test starten"
+    assert _daten(ansicht, ("test_starten", "test", kaefer.id)).content == "Übung starten"
     await klick(_daten(ansicht, ("test_starten", "test", bruecke.id)))
     assert u.seite.route == f"/kurse/{kurs.id}/{kapitel.id}/test/test/{bruecke.id}"
     assert state.kurs_test.uebung_id == bruecke.id
@@ -793,7 +793,7 @@ async def test_der_gewaehlten_je_uebung_ein_knopf(umgebung) -> None:
     )
     assert _daten(danach, ("testwert", "test", kaefer.id)).value == "noch kein Test"
     assert _daten(danach, ("test_starten", "test", bruecke.id)).content == "Nochmal"
-    assert _daten(danach, ("test_starten", "test", kaefer.id)).content == "Test starten"
+    assert _daten(danach, ("test_starten", "test", kaefer.id)).content == "Übung starten"
 
 
 # -- Der gestaltete Test (Ben, 16.11.2026: „Der Test muss flexibel gestaltet werden können“) --
@@ -869,7 +869,7 @@ async def test_gestalteter_test_oeffnet_sich_bereit_und_zeigt_wie_er_laeuft(umge
     )
     assert "Noch kein Test, seit du dieses Kapitel öffnest." in texte
     knopf = _daten(karte, ("test_starten", "test"))
-    assert knopf.content == "Test starten" and not _hat(karte, ("test_oeffnen", "test"))
+    assert knopf.content == "Übung starten" and not _hat(karte, ("test_oeffnen", "test"))
     await klick(knopf)
     assert u.seite.route == f"/kurse/{kurs.id}/{kapitel.id}/test/test/{kaefer.id}"
     assert state.einheit is None and state.kurs_test is None  # nur geöffnet
@@ -907,7 +907,7 @@ async def test_gestalteter_test_oeffnet_sich_bereit_und_zeigt_wie_er_laeuft(umge
     assert stand.ausfuehrung_text == "links · 6 kg"
     # Solange er läuft, führt die Karte zum Test
     laufend = _daten(_kapitel(u, kurs, kapitel), ("test_starten", "test"))
-    assert laufend.content == "Zum Test"
+    assert laufend.content == "Zur Übung"
     await klick(laufend)
     assert state.einheit is e and state.kurs_test is stand
 

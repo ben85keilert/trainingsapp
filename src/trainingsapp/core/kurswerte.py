@@ -3,7 +3,8 @@
 
 Ein Lauf im Kurs hinterlässt alles, was eingegeben wurde, als Variablen (`course_variable`,
 Migration 065/074): den Wert des Tests unter seinem Namen (`core.kursbloecke.wert_schluessel`),
-jedes Feld des Eintrags unter ``<test>.<feld>``, jede Antwort unter ``<test>.f:<frage>`` — und
+jedes Feld des Eintrags unter ``<test>.<feld>``, jede Antwort unter ``<test>.f:<frage>``
+(`core.kursbloecke.antwort_name`) — und
 die Antwort auf eine Frage im Kapitel unter der Block-ID der Frage. Hier wird daraus die Karte
 der Kursseite: je Kapitel die Läufe und Antworten, **nur Zahlen und eigene Worte, keine
 Wertung**. Der Tipp auf einen Lauf führt zu seinem Tag.
@@ -19,14 +20,12 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .kursbloecke import FRAGE, TEST, Block, feld_schluessel
+from . import ablauf as ab
+from .kursbloecke import FRAGE, FRAGE_VORSATZ, TEST, Block, antwort_name, feld_schluessel
 from .kurse import Kurs, Kursvariable
 from .models import Exercise
 from .result_spec import FieldSpec, basis_key, vorrat_feld, wert_text
 from .tagesbilanz import menge_text
-
-#: Vorsatz der Variable einer Antwort am Lauf: ``<test>.f:<frage>``
-FRAGE_VORSATZ = "f:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,15 +47,6 @@ class Wertgruppe:
 
     kapitel: str
     zeilen: list[Wertzeile] = field(default_factory=list)
-
-
-def antwort_schluessel(name: str, frage_id: str) -> str:
-    """Der Name der Variable für die Antwort auf eine Frage **am Lauf** ``name``.
-
-    >>> antwort_schluessel("t", "q1"), antwort_schluessel("t:x", "q1")
-    ('t.f:q1', 't:x.f:q1')
-    """
-    return feld_schluessel(name, f"{FRAGE_VORSATZ}{frage_id}")
 
 
 def antwort_text(variable: Kursvariable, skala: bool = False) -> str:
@@ -163,7 +153,7 @@ def deine_werte(
                 gruppe.zeilen.append(
                     Wertzeile(
                         block.titel,
-                        antwort_text(v, getattr(block, "frage_art", "") == "skala"),
+                        antwort_text(v, block.frage is not None and block.frage.art == ab.F_SKALA),
                         gesetzt=v.gesetzt,
                         block_id=block.id,
                         antwort=True,
@@ -215,13 +205,13 @@ def _lauf_zeilen(
             )
         )
         # die Antworten auf die Fragen am Lauf, in der Reihenfolge des Blocks
-        for frage in getattr(block, "fragen", ()):
-            a = variablen.get(antwort_schluessel(name, frage.id))
+        for frage in block.fragen:
+            a = variablen.get(antwort_name(name, frage.id))
             if a is not None:
                 zeilen.append(
                     Wertzeile(
                         frage.text,
-                        antwort_text(a, frage.art == "skala"),
+                        antwort_text(a, frage.art == ab.F_SKALA),
                         gesetzt=a.gesetzt,
                         block_id=block.id,
                         antwort=True,
@@ -231,10 +221,8 @@ def _lauf_zeilen(
 
 
 __all__ = [
-    "FRAGE_VORSATZ",
     "Wertgruppe",
     "Wertzeile",
-    "antwort_schluessel",
     "antwort_text",
     "deine_werte",
 ]

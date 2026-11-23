@@ -56,10 +56,12 @@ from trainingsapp.core.kursbloecke import (
     TEST,
     TEXT,
     Block,
+    Gegeben,
     Planwert,
     fertig,
     gemessene_uebungen,
     ist_vorgabe,
+    wenn_stand,
     wert_schluessel,
     ziel_im_plan,
 )
@@ -67,6 +69,7 @@ from trainingsapp.core.models import Exercise, SessionEntry, lokaler_tag
 from trainingsapp.core.result_spec import FieldSpec, basis_key, vorrat_feld
 from trainingsapp.core.tagesbilanz import menge_text
 from trainingsapp.ui.components.karte import hinweis, karte, titel
+from trainingsapp.ui.components.kursfrage import frage_karte
 from trainingsapp.ui.components.medienliste import medium_zeile
 from trainingsapp.ui.components.planwert import planwert_karte
 
@@ -132,6 +135,8 @@ def kapitel_bloecke(
     ziel_tests: Collection[str] | None = None,
     anteil_von: Callable[[Block], float] | None = None,
     wert_waehlen: Callable[[Block, str, Planwert | None], Any] | None = None,
+    antworten: Mapping[str, Gegeben] | None = None,
+    antwort_geben: Callable[[str, Gegeben], Any] | None = None,
 ) -> KapitelBloecke:
     """Die Controls zu ``bloecke``. ``werte``: je Test-Block der Wert aus dem Eintrag
     (`KursRepo.testwerte` — bei einem Test „der gewählten“ je Übung der Auswahl einer);
@@ -180,8 +185,19 @@ def kapitel_bloecke(
     **Nur ausprobieren** (Ben, 23.11.2026, `docs/plan_kurs_uebungen.md` §10.1): Ein Test, der
     nicht in ``ziel_tests`` steht, ist freiwillig — die Karte heißt „Übung machen“, der Knopf
     „Übung starten“, und „Plan anlegen“ wartet nicht auf ihn. ``ziel_tests=None`` (die
-    Ansicht sagt nichts dazu): jeder Test ist Pflicht, wie bisher."""
+    Ansicht sagt nichts dazu): jeder Test ist Pflicht, wie bisher.
+
+    **Fragen und Folgen** (Ben, 23.11.2026, `docs/plan_kurs_uebungen.md` §4, §10.3):
+    ``antworten`` — die gespeicherten Antworten des Kurses (`KursRepo.antworten`). Ein Block
+    mit ``wenn`` steht nur da, wenn seine Bedingungen gelten (`wenn_stand`); fehlt eine
+    Antwort, bleibt er verborgen. Eine Frage in den Arten des Ablaufs (`Block.frage`) meldet
+    ihre Antwort an ``antwort_geben(name, antwort)`` — die Ansicht speichert und zeichnet neu
+    (dann erscheint, was an der Antwort hängt). Ohne ``antwort_geben`` ist sie nur zu lesen."""
     ergebnis = KapitelBloecke(controls=[])
+    gegeben = antworten or {}
+    # was hier gilt: Blöcke ohne Bedingung und die, deren Bedingungen erfüllt sind. Bausteine
+    # zeichnet diese Komponente nicht — die Sammelkarte rechnet ihr ``wenn`` selbst
+    bloecke = [b for b in bloecke if not b.wenn or wenn_stand(b.wenn, gegeben) is True]
 
     def freiwillig(block: Block) -> bool:
         return ziel_tests is not None and block.id not in ziel_tests
@@ -783,6 +799,14 @@ def kapitel_bloecke(
             ),
         )
 
+    def melder(name: str) -> Callable[[Gegeben], Any]:
+        """Wohin die Antwort auf die Frage ``name`` geht — ohne ``antwort_geben`` nirgends."""
+
+        def handler(antwort: Gegeben) -> Any:
+            return antwort_geben(name, antwort) if antwort_geben is not None else None
+
+        return handler
+
     for block in bloecke:
         if block.art == TEXT:
             if block.titel:
@@ -793,6 +817,17 @@ def kapitel_bloecke(
                 )
         elif block.art == MEDIUM and block.medium is not None:
             ergebnis.controls.append(medium_zeile(page, state, block.medium, browser=browser))
+        elif block.art == FRAGE and block.frage is not None:
+            ergebnis.controls.append(
+                frage_karte(
+                    block.frage,
+                    gegeben.get(block.id),
+                    melder(block.id),
+                    kennung=block.id,
+                    unter=block.text,
+                    gesperrt=antwort_geben is None or not offen,
+                )
+            )
         elif block.art == FRAGE:
             ergebnis.controls.append(frage(block))
         elif block.art == TEST:

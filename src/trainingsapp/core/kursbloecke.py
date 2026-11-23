@@ -96,7 +96,7 @@ BAUSTEINE: Final[dict[str, str]] = {
 #: notwendige Startbedingung gesetzt werden können“) — der Lauf startet erst, wenn er da ist.
 #: Nur, dass er verbunden ist: Aus seinen Werten rechnet der Kurs nie
 BRAUCHT_MESSUNG: Final = "messung"
-BRAUCHT: Final[dict[str, str]] = {BRAUCHT_MESSUNG: "Herzfrequenz (eine Messung läuft)"}
+BRAUCHT: Final[dict[str, str]] = {BRAUCHT_MESSUNG: "Herzfrequenz — ein Sensor ist verbunden"}
 #: ``test``: wann eine Frage am Lauf kommt — vor dem Start oder im Ergebnis (Vorgabe)
 VORHER: Final = "vorher"
 NACHHER: Final = "nachher"
@@ -877,6 +877,10 @@ class Block:
             or self.ziel
             or self.felder
             or self.wie_uebung
+            # Medien, Fragen oder ein Sensor am Lauf brauchen den Lauf ebenso (23.11.2026)
+            or self.medien
+            or self.fragen
+            or self.braucht
         )
 
     @property

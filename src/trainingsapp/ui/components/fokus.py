@@ -200,10 +200,17 @@ class Fokus:
         item: Any,
         key: str,
         neu_zeichnen: Callable[[], None],
+        material_item: Any = None,
     ) -> None:
         """``neu_zeichnen``: der Aufrufer frischt seine Spalte auf (ein Chip hat eine Ebene
-        umgeschaltet); ``key``: Schlüssel der Uhr für den Tempo-Regler (`uhr.schluessel`)."""
+        umgeschaltet); ``key``: Schlüssel der Uhr für den Tempo-Regler (`uhr.schluessel`).
+
+        ``material_item``: woher das **Material** kommt, wenn nicht von ``item`` — der Lauf
+        einer Übung im Kurs bringt eigene Medien mit (`core.kursbloecke.Block.medien`), ohne
+        eine Planübung zu sein: Zählen, Bewegung und Tempo gelten weiter der Übung (``item``),
+        Begleitung, „bei …“ und der Material-Knopf nehmen diese Stücke dazu."""
         self.page, self.state, self.uebung, self.item, self.key = page, state, uebung, item, key
+        self.mat_item = material_item if material_item is not None else item
         self.neu_zeichnen = neu_zeichnen
         # Zeit und Takt in einer Zeile (Ben, 8.11.2026 spät) — die Zeit etwas kleiner als auf
         # der Timer-Seite, der Takt etwas kleiner als die Zeit, dieselbe Form wie dort und in der
@@ -446,7 +453,7 @@ class Fokus:
         async def danach(_name: str) -> None:
             from trainingsapp.ui.components.material import begleitvideos
 
-            pfade, _ = begleitvideos(self.state, self.uebung, self.item)
+            pfade, _ = begleitvideos(self.state, self.uebung, self.mat_item)
             if not pfade:
                 return
             self._video_einsetzen(pfade, bool(self._uhr_lief))
@@ -486,7 +493,7 @@ class Fokus:
         from trainingsapp.ui.components.material import gesehen
 
         if self._material is None:
-            self._material = material_von(self.uebung, self.item)
+            self._material = material_von(self.uebung, self.mat_item)
         m = self._material
         if not m.bei or not lauf.begonnen:
             return
@@ -519,7 +526,9 @@ class Fokus:
             weg()
             # das Stück selbst, nicht die Liste (Ben, 19.11.2026)
             self.page.show_dialog(
-                faellig_blatt(self.page, self.state, self.uebung, self.item, (x,), titel="Jetzt")
+                faellig_blatt(
+                    self.page, self.state, self.uebung, self.mat_item, (x,), titel="Jetzt"
+                )
             )
 
         zeile = ft.Container(
@@ -600,7 +609,7 @@ class Fokus:
         self.bild_platz.content, self.bildfolge = bewegung if bewegung is not None else (None, None)
         if self.spieler is None and self.video_platz.content is None:
             # Das Begleitvideo startet mit der Uhr (Ben, 18.11.2026) — nicht, wenn sie steht
-            pfade, offen = begleitvideos(self.state, self.uebung, self.item)
+            pfade, offen = begleitvideos(self.state, self.uebung, self.mat_item)
             self._uhr_lief = _uhr_laeuft(lauf)
             if pfade:
                 self._video_einsetzen(pfade, self._uhr_lief and FOKUS_VIDEO in self.ebenen)
@@ -623,12 +632,16 @@ class Fokus:
             self.page,
             self.state,
             self.uebung,
-            self.item,
+            self.mat_item,
             text=False,
             dran=lambda: set(self._bei_schon),
         )
         self.ebenen_anwenden()
         self.saetze_karte = karte(self.saetze_spalte, abstand=0, padding=10)
+        #: Material-Knopf und Ebenen-Menü — für Aufrufer, die die Zeile der Uhr selbst zeichnen
+        #: (der Lauf im Kurs, `views/kurs_testlauf.py`)
+        self.material_control: ft.Control | None = material
+        self.ebenen_control: ft.Control = knopf
         return [
             # Takt · Zeit (mit Stand) · Material · Ebenen — eine Zeile (8.11.2026 spät)
             self.uhr.zeile(

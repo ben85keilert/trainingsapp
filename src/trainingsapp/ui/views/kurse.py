@@ -39,6 +39,7 @@ from trainingsapp.core.kursbloecke import (
     BAUSTEINE,
     TEST,
     Block,
+    Gegeben,
     Planwert,
     anteil_vorgabe,
     wert_schluessel,
@@ -807,6 +808,16 @@ def kapitel_view(
         def anteil_von(block: Block) -> float:
             return anteil_vorgabe(block, kurs_bloecke)
 
+        # Fragen und Folgen (Ben, 23.11.2026, `docs/plan_kurs_uebungen.md` §4, §10.3): Die
+        # Antwort wird gespeichert — Selbstauskunft, nur auf dem Gerät —, dann steht die
+        # Ansicht neu: Was an der Antwort hängt (ein Text, ein Medium, eine Zeile der
+        # Sammelkarte), erscheint. Am Plan ändert sich dabei nichts
+        antworten = state.kurse.antworten(kurs.id, profil)
+
+        def antwort_geben(name: str, antwort: Gegeben) -> None:
+            state.kurse.antwort_setzen(kurs.id, profil, name, wert=antwort.wert, text=antwort.text)
+            state.neu_zeichnen()
+
         # Die offene Wahl einer Auswahl bleibt für die Sitzung (Ben, 16.11.2026, P212): Wer
         # zum Test in die Übung geht und zurückkommt, muss nicht neu wählen. Der Stempel
         # sagt, wofür sie gilt — dieser Stand des Kurses, dieser Durchlauf: Nach „Von vorn“
@@ -859,6 +870,8 @@ def kapitel_view(
                 ziel_tests=ziel_tests,
                 anteil_von=anteil_von,
                 wert_waehlen=wert_waehlen,
+                antworten=antworten,
+                antwort_geben=antwort_geben if stand_hier is not None else None,
             )
             bloecke.extend(gezeichnet.controls)
         else:
@@ -918,6 +931,8 @@ def kapitel_view(
                 ziel_tests=ziel_tests,
                 anteil_von=anteil_von,
                 wert_waehlen=wert_waehlen,
+                antworten=antworten,
+                antwort_geben=antwort_geben if stand_hier is not None else None,
             )
             bloecke.extend(gezeichnet.controls)
             if stand_hier is not None and any(b.art in BAUSTEINE for b in kapitel.bloecke):

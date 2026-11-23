@@ -89,14 +89,18 @@ from trainingsapp.core import kurstest
 from trainingsapp.core.einheit import AUSFUEHRUNG_SCHLUESSEL, Ereignis
 from trainingsapp.core.kursbloecke import (
     AUSWAHL,
+    BRAUCHT,
+    BRAUCHT_MESSUNG,
     HAND,
     MENGE,
     TEST,
     ZEIT,
     Block,
+    Gegeben,
     Planwert,
     Vorgabe,
     anteil_vorgabe,
+    antwort_name,
     ist_vorgabe,
     planwert,
     wert_im_test,
@@ -104,7 +108,16 @@ from trainingsapp.core.kursbloecke import (
     wert_wird_ziel,
 )
 from trainingsapp.core.kurse import Kapitel, Kurs
-from trainingsapp.core.models import Exercise, SessionEntry, lokaler_tag
+from trainingsapp.core.models import (
+    BEGLEITUNG,
+    BEI,
+    NACHHER,
+    Exercise,
+    Media,
+    PlanItem,
+    SessionEntry,
+    lokaler_tag,
+)
 from trainingsapp.core.result_spec import FieldSpec, wert_text
 from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import (
@@ -125,11 +138,13 @@ from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.components import zaehl_stand, zaehlen
 from trainingsapp.ui.components.dialoge import meldung
-from trainingsapp.ui.components.fokus import FOKUS_ANSICHT, balken
+from trainingsapp.ui.components.fokus import FOKUS_ANSICHT, Fokus, balken
 from trainingsapp.ui.components.fokus_eintragen import auspraegung_zeilen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.kursblock import feld_von
+from trainingsapp.ui.components.kursfrage import frage_karte
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.medienliste import medium_zeile
 from trainingsapp.ui.components.planwert import planwert_karte
 from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
 from trainingsapp.ui.state import AppState
@@ -148,6 +163,8 @@ STUFEN = 10
 JE_ZEILE = 6
 #: Unter diesem Namen hält die Sitzung, was vor dem Start gewählt ist (`_wahl`)
 _WAHL = "kurs_test_wahl"
+#: … und was auf die Fragen **vor** dem Start geantwortet ist (`_antworten`)
+_ANTWORTEN = "kurs_test_antworten"
 
 
 @dataclass
@@ -193,6 +210,11 @@ class Kurstestlauf:
     #: 17.11.2026) — ``None``: die Vorgabe des Kurses, nichts zu merken. „Eintragen“ rechnet
     #: ihn gegen den Wert, der dann gilt (`eintragen`)
     planwahl: Planwert | None = None
+    #: die Antworten auf die Fragen am Lauf (Frage-ID → Antwort; Ben, 23.11.2026) — vor dem
+    #: Start gegeben oder im Ergebnis. Gespeichert werden sie mit „Eintragen“ (`eintragen`)
+    antworten: dict[str, Gegeben] = field(default_factory=dict)
+    #: steht in ``planwahl`` ein Ziel, das eine Antwort vorgewählt hat: der Satz dazu
+    ziel_grund: str = ""
 
     @property
     def timer(self) -> TimerProfil | None:
@@ -290,6 +312,49 @@ def _wahl(state: Any, block: Block, uebung: Exercise, aus: kurstest.Ausfuehrung)
     return wahl
 
 
+def _antworten(state: Any, block: Block, uebung: Exercise) -> dict[str, Gegeben]:
+    """Was die Person auf die Fragen **vor** dem Start geantwortet hat — je Test und Übung,
+    für die Sitzung (wie `_wahl`). Mit dem Start gehen sie an den Lauf, gespeichert werden
+    sie erst mit seinem Eintrag."""
+    alle = getattr(state, _ANTWORTEN, None)
+    if not isinstance(alle, dict):
+        alle = {}
+        with contextlib.suppress(Exception):
+            setattr(state, _ANTWORTEN, alle)
+    antworten: dict[str, Gegeben] = alle.setdefault((block.id, uebung.id), {})
+    return antworten
+
+
+def sensor_fehlt(state: Any, block: Block) -> list[str]:
+    """Die Sensoren, die der Lauf **braucht** und die nicht da sind (`Block.braucht`; Ben,
+    23.11.2026: „Ein Sensor soll auch als notwendige Startbedingung gesetzt werden können“)
+    — leer: Er kann starten. Geprüft wird nur, **dass** der Sensor verbunden ist; aus seinen
+    Werten rechnet der Kurs nie (`docs/recht/00_zweckbestimmung.md`)."""
+    fehlt: list[str] = []
+    messlauf = getattr(state, "messlauf", None)
+    if BRAUCHT_MESSUNG in block.braucht and not getattr(messlauf, "verbunden", False):
+        fehlt.append(BRAUCHT[BRAUCHT_MESSUNG])
+    return fehlt
+
+
+def material_item(block: Block, uebung: Exercise) -> PlanItem | None:
+    """Die Medien am Lauf als die einer gedachten Planübung — so kommen sie zu denen der
+    Übung dazu wie die einer Planübung (`core.material.material_von`). ``None`` ohne."""
+    if not block.medien:
+        return None
+    return PlanItem(exercise_id=uebung.id, media=list(block.medien))
+
+
+def medien_an(block: Block, stelle: str) -> list[Media]:
+    """Die Medien des Blocks an einer Stelle des Laufs: ``""`` = vorher (Erklärung),
+    `NACHHER` = im Ergebnis. Begleitung („dabei“) und „bei …“ zeigt der Fokus im Lauf."""
+    return [
+        m
+        for m in block.medien
+        if m.wann == stelle and m.rolle != BEGLEITUNG and (stelle or m.wann != BEI)
+    ]
+
+
 def starten(
     page: Any, state: Any, kurs: Kurs, kapitel: Kapitel, block: Block, uebung: Exercise
 ) -> Kurstestlauf | None:
@@ -307,6 +372,9 @@ def starten(
     ):
         return gefunden[0]
     if not block.laeuft:
+        return None
+    if fehlt := sensor_fehlt(state, block):
+        _melden(page, f"Dafür brauchst du: {', '.join(fehlt)}.")
         return None
     profil = kurstest.uhr_fuer(block, uebung)
     v = kurstest.vorgabe_fuer(block, profil)
@@ -333,6 +401,8 @@ def starten(
         takt=kurstest.takt_fuer(block, uebung),
         ausfuehrung=wie,
         ausfuehrung_text=aus.text(wahl),
+        # die Antworten von vor dem Start gehen mit in den Lauf
+        antworten=dict(_antworten(state, block, uebung)),
     )
     if e.timer is not None:
         # Der Takt des Tests auf der Stufe „Übung“ (ein Abschnitt des Timers mit eigenem
@@ -459,6 +529,20 @@ def eintragen(page: Any, state: Any) -> SessionEntry | None:
                 test_wert=wert,
                 eintrag_id=eintrag.id,
             )
+    # Die Antworten auf die Fragen am Lauf: Selbstauskunft, nur auf dem Gerät — was an ihnen
+    # hängt (``wenn`` an einem Block), zeigt das Kapitel
+    for frage in stand.block.fragen:
+        gegeben = stand.antworten.get(frage.id)
+        if gegeben is not None:
+            state.kurse.antwort_setzen(
+                stand.kurs_id,
+                profil_id,
+                antwort_name(name, frage.id),
+                wert=gegeben.wert,
+                text=gegeben.text,
+                eintrag_id=eintrag.id,
+            )
+    _antworten(state, stand.block, uebung).clear()
     # In die Zeitleiste, was eingetragen wurde — nichts kommt zweimal hinein (``teil``)
     jetzt_s = max(e.dauer_s(), 0.0)
     f = stand.felder
@@ -913,8 +997,58 @@ def kurs_test_view(
         spalte.controls = zeilen()
         return karte(titel("So machst du den Test"), spalte, abstand=8)
 
+    def medien_karte(stelle: str, ueberschrift: str) -> list[ft.Control]:
+        """Die Medien des Laufs an einer Stelle (vorher · nachher) als Zeilen zum Öffnen —
+        nie von selbst beim Aufbau der Ansicht (Geister-Dialog)."""
+        stuecke = medien_an(block, stelle)
+        if not stuecke:
+            return []
+        return [
+            karte(
+                titel(ueberschrift),
+                *(medium_zeile(page, state, m) for m in stuecke),
+                abstand=4,
+            )
+        ]
+
+    def fragen_karten(wann_vorher: bool, antworten: dict[str, Gegeben]) -> list[ft.Control]:
+        """Die Fragen am Lauf — vor dem Start oder im Ergebnis (`Block.fragen_vorher`). Die
+        Antwort steht sofort in ``antworten``; gespeichert wird sie mit dem Eintrag."""
+        karten: list[ft.Control] = []
+        for frage in block.fragen:
+            if (frage.id in block.fragen_vorher) != wann_vorher:
+                continue
+
+            def geantwortet(antwort: Gegeben, frage_id: str = frage.id) -> None:
+                antworten[frage_id] = antwort
+                bei_antwort(frage_id, antwort)
+
+            karten.append(
+                frage_karte(frage, antworten.get(frage.id), geantwortet, kennung=f"lauf:{frage.id}")
+            )
+        return karten
+
+    def bei_antwort(frage_id: str, antwort: Gegeben) -> None:
+        """Eine Antwort **schlägt ein festes Ziel vor** (`Block.ziele`; Ben, 23.11.2026: „eine
+        Antwort soll ein festes Ziel setzen können, aber manuell“): Sie wählt in „Wert für
+        den Plan“ nur vor — „Von Hand“ mit dieser Zahl; die Person sieht sie und kann sie
+        ändern. Am Plan ändert sich damit nichts."""
+        if stand is None or stand.phase != ERGEBNIS or not gebraucht:
+            return
+        feste = block.ziele.get(frage_id, {})
+        ziel = next((feste[a] for a in antwort.gewaehlt if a in feste), None)
+        if ziel is None:
+            return
+        stand.planwahl = planwert(HAND, ziel, hand=ziel)
+        stand.ziel_grund = (
+            f"Vorgewählt, weil du „{antwort.gewaehlt[0]}“ geantwortet hast — so steht es im "
+            "Kurs. Du kannst die Zahl ändern."
+        )
+        neu_zeichnen()
+
     def bereit() -> ft.Control:
         skala = _skala_karte(v, f)
+        fehlt = sensor_fehlt(state, block)
         return _seite(
             [
                 _kopf(v, f, timer),
@@ -929,10 +1063,29 @@ def kurs_test_view(
                     if block.text
                     else []
                 ),
+                # Vorher (Ben, 23.11.2026): erst die Medien, dann die Fragen, dann „Start“
+                *medien_karte("", "Vorher ansehen"),
+                *fragen_karten(True, _antworten(state, block, uebung)),
                 *([] if aus.leer else [ausfuehrung_karte()]),
                 *([_timer_karte(timer, im_kopf=v is None)] if timer is not None else []),
                 *([_takt_karte(takt)] if takt is not None else []),
                 *([skala] if skala is not None else []),
+                *(
+                    [
+                        _mit_symbol(
+                            ft.Icons.SENSORS,
+                            ft.Text(
+                                "Dafür brauchst du: "
+                                + ", ".join(BRAUCHT[s] for s in block.braucht)
+                                + ".",
+                                size=14,
+                                data="test_braucht",
+                            ),
+                        )
+                    ]
+                    if block.braucht
+                    else []
+                ),
             ],
             [
                 ft.FilledButton(
@@ -941,10 +1094,13 @@ def kurs_test_view(
                     height=64,
                     style=_GROSS,
                     on_click=start,
+                    disabled=bool(fehlt),
                     data="test_start",
                 ),
                 ft.Text(
-                    "Die Uhr läuft mit dem Tipp los.",
+                    f"Es fehlt noch: {', '.join(fehlt)}. Verbinde den Sensor unter „Messung“."
+                    if fehlt
+                    else "Die Uhr läuft mit dem Tipp los.",
                     size=12,
                     opacity=0.65,
                     text_align=ft.TextAlign.CENTER,
@@ -1023,9 +1179,60 @@ def kurs_test_view(
             takt_zeile.value = text
             return anders
 
+        # Dieselbe Umgebung wie beim Üben (Ben, 23.11.2026: „Übungen sollen im Fokusmodus
+        # laufen … ob nebenbei die Sensoren laufen“; `docs/plan_kurs_uebungen.md` §11.1): die
+        # Ebenen des Fokus — Bild der Bewegung, Begleitvideo, Herzfrequenz, Kurven, Medien
+        # „bei …“ — aus derselben Komponente, unter der Uhr des Laufs. Uhr, Vorgabe und Knöpfe
+        # bleiben die des Laufs. Die Sensoren laufen mit und zeichnen auf; der Kurs rechnet
+        # aus ihren Werten nie
+        ebenen_spalte = ft.Column(
+            spacing=12,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            data="test_ebenen",
+        )
+
+        def ebenen_frisch() -> None:
+            with contextlib.suppress(Exception):
+                ebenen_spalte.update()
+
+        fokus = Fokus(
+            page,
+            state,
+            uebung=uebung,
+            item=None,
+            key=uebung.id,
+            neu_zeichnen=ebenen_frisch,
+            material_item=material_item(block, uebung),
+        )
+        fokus.bauen(e, lauf)
+        ebenen_spalte.controls = [
+            ft.Row(
+                alignment=ft.MainAxisAlignment.END,
+                spacing=4,
+                controls=[
+                    *([fokus.material_control] if fokus.material_control is not None else []),
+                    fokus.ebenen_control,
+                ],
+            ),
+            fokus.ereignis_platz,
+            ft.Row(
+                alignment=ft.MainAxisAlignment.CENTER,
+                wrap=True,
+                spacing=12,
+                run_spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[fokus.video_platz, fokus.bild_platz, fokus.hf_karte],
+            ),
+            fokus.kurven_karte,
+        ]
+
         def auffrischen() -> None:
             """Jeder Tick der Uhr: der Takt — und, wenn sie sich ändern, die Zeit (mit dem
             Stand des Timers) und die Zahl des Sensors."""
+            with contextlib.suppress(Exception):
+                fokus.nachziehen(e, lauf)
+            ebenen_frisch()
             if mit_takt:
                 anders = takt_zeigen()
                 with contextlib.suppress(Exception):
@@ -1135,6 +1342,7 @@ def kurs_test_view(
                 *([takt_karte] if mit_takt else []),
                 *([skala] if skala is not None else []),
                 *([wdh_karte] if zeigt_wdh else []),
+                ebenen_spalte,
             ],
             [
                 *(
@@ -1200,6 +1408,7 @@ def kurs_test_view(
             wert = wert_des_tests()
             vorgabe = wert is not None and ist_vorgabe(wahl, wert, anteil_kurs)
             s.planwahl = None if vorgabe else wahl
+            s.ziel_grund = ""  # die Person hat selbst gewählt — der Satz zur Antwort entfällt
 
         plan_karte = (
             planwert_karte(
@@ -1456,7 +1665,16 @@ def kurs_test_view(
                     raster,
                     abstand=10,
                 ),
+                # Nachher (Ben, 23.11.2026): die Fragen am Lauf, dann der Wert für den Plan —
+                # eine Antwort kann dort ein Ziel vorwählen —, dann die Medien „nachher“
+                *fragen_karten(False, s.antworten),
                 *([plan_karte.control] if plan_karte is not None else []),
+                *(
+                    [ft.Text(s.ziel_grund, size=12, opacity=0.8, data="test_ziel_grund")]
+                    if s.ziel_grund and plan_karte is not None and s.planwahl is not None
+                    else []
+                ),
+                *medien_karte(NACHHER, "Danach ansehen"),
                 ft.Text(
                     f"Eingetragen wird ein gewöhnlicher Eintrag bei „{uebung.name}“ — er steht "
                     "auch unter Heute. "

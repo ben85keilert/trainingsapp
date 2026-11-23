@@ -1542,3 +1542,94 @@ async def test_wert_fuer_den_plan_im_kapitelplan_mit_zeit(umgebung) -> None:
     assert plan.items[0].target == {"hold": [60]}  # nicht 40 (80 % von 50)
     fertig = _kapitel(u, kurs, kapitel)
     assert not _hat(fertig, ("wert_aendern", "t"))  # das Ziel steht im Plan
+
+
+# -- Übung machen: Fragen, Sensor, Ziel aus einer Antwort (Ben, 23.11.2026) ----------------
+
+
+def _kurs_mit_fragen(state):
+    """Ein Kursplan-Kurs: die Planke als Lauf mit einer Frage vorher, einer nachher (die bei
+    „schwer“ 30 s vorschlägt) und dem Sensor als Startbedingung — ein Baustein nimmt ihr Ziel
+    aus dem Lauf, er ist also ein Test."""
+    from trainingsapp.core import ablauf as ab
+
+    planke = Exercise(name="Planke", result_spec=ResultSpec(fields=[vorrat_feld("hold")]))
+    state.uebungen.speichern(planke)
+    vor = ab.Frage("v", "Schon einmal gemacht?", art=ab.F_JA_NEIN)
+    nach = ab.Frage("n", "Wie war das?", art=ab.F_AUSWAHL, antworten=("leicht", "schwer"))
+    test = Block(
+        TEST,
+        id="test",
+        uebung=planke.id,
+        feld="hold",
+        fragen=[vor, nach],
+        fragen_vorher=["v"],
+        ziele={"n": {"schwer": 30.0}},
+        braucht=["messung"],
+    )
+    stein = Block(PLAN_UEBUNG, id="uebung-1", uebung=planke.id, ziel_aus="test")
+    kapitel = Kapitel(titel="Planke", bloecke=[test, stein])
+    kurs = Kurs(name="Fragen-Kurs", kursplan=Kursplan("Rumpf"), kapitel=[kapitel])
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    kapitel = kurs.kapitel[0]
+    _erreichen(state, kurs, kapitel)
+    return kurs, kapitel, kapitel.bloecke[0], state.uebungen.laden(planke.id)
+
+
+async def test_lauf_mit_fragen_sensor_und_ziel_aus_der_antwort(umgebung) -> None:
+    """Fragen vor dem Start und im Ergebnis; die Antwort „schwer“ wählt das Ziel nur vor
+    („Von Hand“ 30 s); gespeichert werden die Antworten mit dem Eintrag. Im Lauf stehen die
+    Ebenen des Fokus (`docs/plan_kurs_uebungen.md` §4, §6, §11.1)."""
+    from trainingsapp.core.kursbloecke import Gegeben
+
+    u = umgebung
+    kurs, kapitel, block, planke = _kurs_mit_fragen(u.state)
+    profil = u.state.profil.id
+    assert block.laeuft  # Fragen und Sensor machen ihn zum Lauf
+
+    bereit = _ansicht(u, kurs, kapitel, block, planke)
+    assert "Schon einmal gemacht?" in _texte(bereit) and "Wie war das?" not in _texte(bereit)
+    assert _hat(bereit, "test_braucht") and not _daten(bereit, "test_start").disabled
+    _daten(bereit, ("antwort", "lauf:v", "Ja")).on_select()
+    await klick(_daten(bereit, "test_start"))
+    assert u.state.kurs_test.antworten == {"v": Gegeben(text="Ja")}
+
+    laeuft = _ansicht(u, kurs, kapitel, block, planke)
+    assert _hat(laeuft, "test_ebenen")  # Bewegung · Herzfrequenz · Kurven wie beim Üben
+    await _sekunden(u, 20)
+    await klick(_daten(laeuft, "test_fertig"))
+    stand = u.state.kurs_test
+    assert stand.phase == ERGEBNIS and stand.planwahl is None
+
+    ergebnis = _ansicht(u, kurs, kapitel, block, planke)
+    assert "Wie war das?" in _texte(ergebnis)
+    _daten(ergebnis, ("antwort", "lauf:n", "schwer")).on_select()
+    assert (stand.planwahl.wie, stand.planwahl.wert) == (HAND, 30)
+    ergebnis = _ansicht(u, kurs, kapitel, block, planke)
+    assert _daten(ergebnis, "test_ziel_grund").value.startswith("Vorgewählt, weil du „schwer“")
+    assert u.state.kurse.antworten(kurs.id, profil) == {}  # bis hier ist nichts gespeichert
+
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    antworten = u.state.kurse.antworten(kurs.id, profil)
+    assert antworten["test.f:v"].text == "Ja" and antworten["test.f:n"].text == "schwer"
+    assert antworten["test.hold"].wert == 20.0
+    (zeile,) = [z for z in u.state.kurse.plan_aenderungen(kurs, kapitel, profil) if "#ziel" in z.id]
+    assert zeile.titel == "Ziel für Planke: 30 s" and zeile.unter.startswith("dein Wert von Hand")
+
+
+async def test_ohne_sensor_startet_der_lauf_nicht(umgebung) -> None:
+    """`Block.braucht`: Ist der Sensor nicht verbunden, bleibt „Start“ aus und der Lauf startet
+    nicht — geprüft wird nur, dass er da ist, nie ein Messwert."""
+    u = umgebung
+    kurs, kapitel, block, planke = _kurs_mit_fragen(u.state)
+    messlauf, u.state.messlauf = u.state.messlauf, None
+    try:
+        assert kurs_test.sensor_fehlt(u.state, block) == ["Herzfrequenz — ein Sensor ist verbunden"]
+        bereit = _ansicht(u, kurs, kapitel, block, planke)
+        assert _daten(bereit, "test_start").disabled
+        assert kurs_test.starten(u.seite, u.state, kurs, kapitel, block, planke) is None
+        assert u.state.kurs_test is None
+    finally:
+        u.state.messlauf = messlauf

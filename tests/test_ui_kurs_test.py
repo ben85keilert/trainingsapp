@@ -407,7 +407,9 @@ async def test_menge_von_hand_ein_eintrag_mit_zeit_und_skala(umgebung) -> None:
     ansicht = _ansicht(u, kurs, kapitel, block, kaefer)
     texte = _texte(ansicht)
     assert ansicht.data == FOKUS_ANSICHT and ansicht.appbar.title.value == "Ausprobieren · Käfer"
-    assert ansicht.appbar.leading.tooltip == "Abbrechen"
+    # der Fokus-Bildschirm: ✕ steht in der Steuerzeile, oben führt der Pfeil ins Kapitel
+    assert ansicht.appbar.leading is None and _hat(ansicht, "steuerzeile")
+    assert _daten(ansicht, "test_abbrechen").tooltip.startswith("Abbrechen")
     assert "VORGABE" in texte and _daten(ansicht, "test_vorgabe").value == "30 Wiederholungen"
     assert _daten(ansicht, "test_zeit").value == "1:05" and "Zeit läuft · wird gemessen" in texte
     assert "Du zählst selbst" in texte
@@ -685,9 +687,8 @@ async def test_zeit_auf_uebung_mit_wiederholungen_fragt_sie(umgebung) -> None:
     kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(ZEIT, 30))
     await _starten(u, kurs, kapitel)
     await _sekunden(u, 20)
-    assert "Wie viele es waren, sagst du danach." in _texte(
-        _ansicht(u, kurs, kapitel, block, kaefer)
-    )
+    # niemand zählt: Die Sätze tippt man in „Eintragen“, wie im Fokus der Übung
+    assert "Wiederholungen — niemand zählt" in _texte(_ansicht(u, kurs, kapitel, block, kaefer))
     await _sekunden(u, 11)
     kurs_test.pruefen(u.seite, state)  # der Wächter tut dasselbe
     assert state.kurs_test.phase == ERGEBNIS and state.kurs_test.sekunden == 30.0
@@ -934,7 +935,7 @@ async def test_timer_mit_abschnitten_endet_von_selbst_und_traegt_einmal_ein(umge
     assert "danach Pause 0:10" in texte and "Timer läuft · endet von selbst" in texte
     assert len(_daten(ansicht, "test_leiste").content.controls) == 4  # vier Abschnitte
     assert not _hat(ansicht, "test_fertig") and _hat(ansicht, "test_vorher")
-    assert "Du zählst selbst" in texte and "Wie viele es waren, sagst du danach." in texte
+    assert "EINTRAGEN" in texte and "Wiederholungen — niemand zählt" in texte
     assert "Ist der Timer durch, hält die Uhr von selbst an." in texte
     # der Ticker frischt Zeit und Abschnitt auf
     u.uhr.t += 10
@@ -1618,6 +1619,91 @@ async def test_lauf_mit_fragen_sensor_und_ziel_aus_der_antwort(umgebung) -> None
     assert antworten["test.hold"].wert == 20.0
     (zeile,) = [z for z in u.state.kurse.plan_aenderungen(kurs, kapitel, profil) if "#ziel" in z.id]
     assert zeile.titel == "Ziel für Planke: 30 s" and zeile.unter.startswith("dein Wert von Hand")
+
+
+async def test_eintragen_im_lauf_steht_im_ergebnis(umgebung) -> None:
+    """Der Lauf ist der Fokus (Ben, 25.11.2026): Was die Person im Lauf in „Eintragen“ tippt —
+    Sätze und Skala —, steht im Ergebnis schon da; eingetragen wird **ein** Eintrag."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(ZEIT, 30))
+    await _starten(u, kurs, kapitel)
+    await _sekunden(u, 10)
+    ansicht = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert _hat(ansicht, "test_fest_oben") and _hat(ansicht, "steuerzeile")
+    feld = next(c for c in _alle(ansicht) if isinstance(c, ft.TextField) and c.hint_text == "Wert")
+    for wert in ("8", "6"):
+        feld.value = wert
+        feld.on_submit(SimpleNamespace(control=feld))
+    chip = next(
+        c for c in _alle(ansicht) if isinstance(c, ft.Chip) and getattr(c.label, "value", "") == "7"
+    )
+    chip.on_select()
+    await _sekunden(u, 21)
+    kurs_test.pruefen(u.seite, state)  # der Wächter tut dasselbe
+    stand = state.kurs_test
+    assert stand.phase == ERGEBNIS and (stand.wdh, stand.skala) == (14, 7)
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert _daten(ergebnis, "test_wdh").value == "14"
+    assert not _daten(ergebnis, "test_eintragen").disabled
+    await klick(_daten(ergebnis, "test_eintragen"))
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, kaefer)
+    assert eintrag.result["reps"] == [14] and eintrag.result["duration"] == 30
+
+
+async def test_pause_im_lauf_haelt_die_uhr(umgebung) -> None:
+    """⏸ in der Steuerzeile hält die Uhr des Laufs an und lässt sie weiterlaufen."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(MENGE, 30))
+    await _starten(u, kurs, kapitel)
+    await _sekunden(u, 5)
+    ansicht = _ansicht(u, kurs, kapitel, block, kaefer)
+    halt = next(c for c in _alle(ansicht) if getattr(c, "tooltip", None) == "Pause")
+    await klick(halt)
+    assert not state.einheit.timer.lauf.laeuft
+    await _sekunden(u, 5)
+    ansicht = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert _daten(ansicht, "test_zeit").value == "0:05"
+    assert _daten(ansicht, "test_abschnitt").value.endswith("angehalten")
+    await klick(next(c for c in _alle(ansicht) if getattr(c, "tooltip", None) == "Weiter"))
+    assert state.einheit.timer.lauf.laeuft
+
+
+async def test_bewegungssensor_als_startbedingung(umgebung) -> None:
+    """`Block.braucht = ["bewegung"]` (Ben, 25.11.2026): Mit einem Gerät, das zählen kann,
+    startet der Lauf; ohne Gerät fehlt der Sensor; bietet das verbundene Gerät keinen, sagt
+    eine Meldung genau das."""
+    from trainingsapp.devices.base import Verbindung
+    from trainingsapp.devices.profiles import UHR_BROADCAST
+
+    u = umgebung
+    kurs, kapitel, block, planke = _kurs_mit_fragen(u.state)
+    block.braucht = ["bewegung"]
+    name = "Bewegungssensor — ein Gerät, das Wiederholungen zählen kann"
+    assert kurs_test.sensor_fehlt(u.state, block) == []  # der Gurt der Attrappe ist ein H10
+    assert kurs_test.sensor_hinweis(u.state, block) == ""
+    messlauf = u.state.messlauf
+    try:
+        u.state.messlauf = None
+        assert kurs_test.sensor_fehlt(u.state, block) == [name]
+        assert kurs_test.sensor_hinweis(u.state, block) == ""  # nichts verbunden: kein Gerät
+        u.state.messlauf = SimpleNamespace(
+            status=SimpleNamespace(verbindung=Verbindung.VERBUNDEN),
+            profil=UHR_BROADCAST,
+            verbunden=True,
+        )
+        assert kurs_test.sensor_fehlt(u.state, block) == [name]
+        satz = kurs_test.sensor_hinweis(u.state, block)
+        assert satz.startswith(f"Dein verbundenes Gerät ({UHR_BROADCAST.name}) hat keinen")
+        bereit = _ansicht(u, kurs, kapitel, block, planke)
+        assert _daten(bereit, "test_start").disabled
+        assert _daten(bereit, "test_sensor_hinweis").value == satz
+        assert kurs_test.starten(u.seite, u.state, kurs, kapitel, block, planke) is None
+        assert u.state.kurs_test is None
+    finally:
+        u.state.messlauf = messlauf
 
 
 async def test_ohne_sensor_startet_der_lauf_nicht(umgebung) -> None:

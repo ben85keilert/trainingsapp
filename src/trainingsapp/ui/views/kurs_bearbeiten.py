@@ -103,6 +103,7 @@ from trainingsapp.core.kursbloecke import (
     AUSWAHL,
     BAUSTEINE,
     BRAUCHT,
+    BRAUCHT_BEWEGUNG,
     BRAUCHT_MESSUNG,
     FRAGE,
     MEDIUM,
@@ -1770,6 +1771,12 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             value=BRAUCHT_MESSUNG in block.braucht,
             data="test_braucht",
         )
+        bewegung = ft.Checkbox(
+            label="Sensor nötig: Bewegungssensor",
+            tooltip=f"Der Lauf startet erst mit: {BRAUCHT[BRAUCHT_BEWEGUNG]}",
+            value=BRAUCHT_BEWEGUNG in block.braucht,
+            data="test_braucht_bewegung",
+        )
         fragen_liste = FragenListe(
             block.fragen,
             block.fragen_vorher,
@@ -1870,7 +1877,11 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                     neuer.frage, neuer.antworten = replace(gelesen[0], id=neuer.id), []
             if block.art == TEST:
                 neuer.medien = list(lauf_medien)
-                neuer.braucht = [BRAUCHT_MESSUNG] if sensor.value else []
+                neuer.braucht = [
+                    art
+                    for art, haken in ((BRAUCHT_MESSUNG, sensor), (BRAUCHT_BEWEGUNG, bewegung))
+                    if haken.value
+                ]
                 am_lauf = fragen_liste.lesen()
                 if isinstance(am_lauf, str):
                     lesefehler["fragen"] = am_lauf
@@ -2439,6 +2450,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 vorschau_kasten,
                 lauf_medien_teil,
                 sensor,
+                bewegung,
                 fragen_liste.control,
                 wenn_feld,
             ],

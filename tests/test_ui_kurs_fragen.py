@@ -238,6 +238,7 @@ def test_editor_frage_mit_folge_und_uebung_machen(page, state) -> None:
     felder["Übung"].value = planke.id
     felder["Übung"].on_select()
     _d(dialog, "test_braucht").value = True
+    _d(dialog, "test_braucht_bewegung").value = True
     _d(dialog, "lauf_medium_link").value = "https://example.org/danach"
     _d(dialog, "lauf_medium_link_dazu").on_click()
     stelle = _d(dialog, ("lauf_medium_stelle", 0))
@@ -258,7 +259,7 @@ def test_editor_frage_mit_folge_und_uebung_machen(page, state) -> None:
     frage, text, test = state.kurse.laden(kurs.id).kapitel[0].bloecke
     assert frage.frage.wahl == ("leicht", "schwer") and frage.frage.id == frage.id
     assert text.wenn == [Wenn(frage.id, ("leicht",))] and text.text == "Dann geht es weiter."
-    assert test.braucht == ["messung"] and test.laeuft
+    assert test.braucht == ["messung", "bewegung"] and test.laeuft
     assert [(m.uri, m.wann) for m in test.medien] == [("https://example.org/danach", "nachher")]
     (lauffrage,) = test.fragen
     assert lauffrage.text == "Und jetzt?" and test.fragen_vorher == []

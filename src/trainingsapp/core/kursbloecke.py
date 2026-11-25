@@ -96,7 +96,14 @@ BAUSTEINE: Final[dict[str, str]] = {
 #: notwendige Startbedingung gesetzt werden können“) — der Lauf startet erst, wenn er da ist.
 #: Nur, dass er verbunden ist: Aus seinen Werten rechnet der Kurs nie
 BRAUCHT_MESSUNG: Final = "messung"
-BRAUCHT: Final[dict[str, str]] = {BRAUCHT_MESSUNG: "Herzfrequenz — ein Sensor ist verbunden"}
+#: … und der **Bewegungssensor** (Ben, 25.11.2026): ein verbundenes Gerät mit
+#: Beschleunigungssensor, das Wiederholungen zählen kann. Bietet das verbundene Gerät keinen,
+#: sagt die Seite „bereit“ das eigens (`ui.views.kurs_testlauf.sensor_hinweis`)
+BRAUCHT_BEWEGUNG: Final = "bewegung"
+BRAUCHT: Final[dict[str, str]] = {
+    BRAUCHT_MESSUNG: "Herzfrequenz — ein Sensor ist verbunden",
+    BRAUCHT_BEWEGUNG: "Bewegungssensor — ein Gerät, das Wiederholungen zählen kann",
+}
 #: ``test``: wann eine Frage am Lauf kommt — vor dem Start oder im Ergebnis (Vorgabe)
 VORHER: Final = "vorher"
 NACHHER: Final = "nachher"
@@ -1399,6 +1406,7 @@ __all__ = [
     "AUSWAHL",
     "BAUSTEINE",
     "BRAUCHT",
+    "BRAUCHT_BEWEGUNG",
     "BRAUCHT_MESSUNG",
     "FRAGE",
     "FRAGE_VORSATZ",

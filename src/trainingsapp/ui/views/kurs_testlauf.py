@@ -8,9 +8,11 @@ Eine Ansicht, drei Zustände:
 
 - **bereit** (F2) — es läuft kein Testlauf: Vorgabe, Anleitung, der Hinweis des Kurses, die
   Ausführung (vorgegeben nur zum Lesen, frei zum Wählen), Timer und Takt, „Start“;
-- **läuft** (T1, T2, F3) — die Vorgabe groß, die Zeit sehr groß (mit einem Timer sein
-  Abschnitt, der Rest und die Leiste), der Takt, unten der Knopf, der den Lauf beendet
-  (`core.kurstest.knopf_text`), und „Vorher aufgehört …“; ✕ bricht ab;
+- **läuft** — **der Fokus-Bildschirm** wie beim Üben (Ben, 25.11.2026,
+  `docs/plan_kurs_uebungen.md` §13; `components/fokus.Fokus`): fest oben Takt · Zeit ·
+  Ebenen, der Balken der Abschnitte und die Steuerzeile (⏸ · der Knopf, der den Lauf beendet,
+  `core.kurstest.knopf_text` · ✕); darunter die Vorgabe, „Vorher aufgehört …“, die Ebenen,
+  die Karte „Eintragen“ (Sätze und Skala — sie stehen dann im Ergebnis) und die Sätze;
 - **Ergebnis** (T3, F4) — was vorgegeben war, was die Uhr gemessen hat, was die Person
   dazusagt (die Runden des Takts stehen als Vorschlag in den Wiederholungen), die Ausführung;
   „Eintragen und zurück zum Kapitel“, „Nochmal“, „Verwerfen“.
@@ -79,7 +81,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from typing import Any
 
@@ -90,9 +92,11 @@ from trainingsapp.core.einheit import AUSFUEHRUNG_SCHLUESSEL, Ereignis
 from trainingsapp.core.kursbloecke import (
     AUSWAHL,
     BRAUCHT,
+    BRAUCHT_BEWEGUNG,
     BRAUCHT_MESSUNG,
     HAND,
     MENGE,
+    SKALA,
     TEST,
     ZEIT,
     Block,
@@ -118,35 +122,35 @@ from trainingsapp.core.models import (
     SessionEntry,
     lokaler_tag,
 )
-from trainingsapp.core.result_spec import FieldSpec, wert_text
+from trainingsapp.core.result_spec import FieldSpec, vorrat_feld, wert_text
 from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import (
     COUNTDOWN,
     ENDE,
-    Abschnitt,
-    TimerLauf,
     TimerProfil,
     TimerStand,
     dauer_text,
     signal,
     stoppuhr,
 )
+from trainingsapp.core.timer_eintrag import eingaben, gelaufene_zeiten
 from trainingsapp.core.uebung_timer import zeit_werte
 from trainingsapp.core.zaehlen import QUELLE_TAKT, quelle_name
+from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.einheit import Einheitslauf
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.components import zaehl_stand, zaehlen
 from trainingsapp.ui.components.dialoge import meldung
-from trainingsapp.ui.components.fokus import FOKUS_ANSICHT, Fokus, balken
-from trainingsapp.ui.components.fokus_eintragen import auspraegung_zeilen
+from trainingsapp.ui.components.fokus import FOKUS_ANSICHT, Fokus, steuerzeile
+from trainingsapp.ui.components.fokus import OBEN as FOKUS_OBEN
+from trainingsapp.ui.components.fokus_eintragen import EintragenKarte, auspraegung_zeilen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.kursblock import feld_von
 from trainingsapp.ui.components.kursfrage import frage_karte
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.medienliste import medium_zeile
 from trainingsapp.ui.components.planwert import planwert_karte
-from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.timer_takt import TICK_S, ton_spielen
 
@@ -334,7 +338,28 @@ def sensor_fehlt(state: Any, block: Block) -> list[str]:
     messlauf = getattr(state, "messlauf", None)
     if BRAUCHT_MESSUNG in block.braucht and not getattr(messlauf, "verbunden", False):
         fehlt.append(BRAUCHT[BRAUCHT_MESSUNG])
+    if BRAUCHT_BEWEGUNG in block.braucht and not zaehl_stand.geraet_kann_zaehlen(messlauf):
+        fehlt.append(BRAUCHT[BRAUCHT_BEWEGUNG])
     return fehlt
+
+
+def sensor_hinweis(state: Any, block: Block) -> str:
+    """Der Lauf braucht den Bewegungssensor, und **das verbundene Gerät bietet keinen** (Ben,
+    25.11.2026: „Wenn das verbundene Gerät keinen Bewegungssensor bietet, soll eine
+    Hinweismeldung das angeben“) — der Satz dazu, sonst ``""``. Ohne verbundenes Gerät sagt
+    schon „Es fehlt noch …“, was zu tun ist."""
+    messlauf = getattr(state, "messlauf", None)
+    if BRAUCHT_BEWEGUNG not in block.braucht or zaehl_stand.geraet_kann_zaehlen(messlauf):
+        return ""
+    status = getattr(messlauf, "status", None)
+    if status is None or status.verbindung != Verbindung.VERBUNDEN:
+        return ""
+    name = str(getattr(getattr(messlauf, "profil", None), "name", "") or "")
+    geraet = f"Dein verbundenes Gerät ({name})" if name else "Dein verbundenes Gerät"
+    return (
+        f"{geraet} hat keinen Bewegungssensor — damit lässt sich dieser Lauf nicht starten. "
+        "Verbinde unter „Messung“ ein Gerät, das Wiederholungen zählen kann."
+    )
 
 
 def material_item(block: Block, uebung: Exercise) -> PlanItem | None:
@@ -374,7 +399,8 @@ def starten(
     if not block.laeuft:
         return None
     if fehlt := sensor_fehlt(state, block):
-        _melden(page, f"Dafür brauchst du: {', '.join(fehlt)}.")
+        hinweis_text = sensor_hinweis(state, block)
+        _melden(page, hinweis_text or f"Dafür brauchst du: {', '.join(fehlt)}.")
         return None
     profil = kurstest.uhr_fuer(block, uebung)
     v = kurstest.vorgabe_fuer(block, profil)
@@ -462,6 +488,18 @@ def anhalten(page: Any, state: Any, *, vorher: bool = False) -> bool:
         v, stand.felder, vorher=stand.vorher, gezaehlt=stand.gezaehlt, takt=runden > 0
     )
     stand.takt_runden = runden if woher == kurstest.VOM_TAKT else None
+    # Was die Person im Lauf in der Karte „Eintragen“ getippt hat (wie im Fokus der Übung:
+    # ``person/wdh``, ``person/skala``) — es steht im Ergebnis schon da, wo sonst gefragt
+    # würde. Was der Sensor zählte oder die Vorgabe festlegt, geht vor
+    zeiten = gelaufene_zeiten(e.ereignisse, min_s=0.0, jetzt_s=max(e.dauer_s(), 0.0))
+    getippt = eingaben(e.ereignisse, zeiten)
+    von_hand = sum(getippt.saetze(stand.felder.wdh)) if stand.felder.wdh else 0
+    if von_hand > 0 and woher in (kurstest.GEFRAGT, kurstest.VOM_TAKT):
+        stand.wdh, stand.takt_runden = von_hand, None
+    skalen = getippt.skala.get(stand.felder.skala, {})
+    if stand.skala is None and skalen:
+        with contextlib.suppress(TypeError, ValueError):
+            stand.skala = int(skalen[max(skalen)])
     stand.ende_t_s = max(e.dauer_s() - ueber_s, 0.0)
     stand.phase = ERGEBNIS
     e.takt()  # die Pause steht gleich in der Zeitleiste und in der Aufnahme
@@ -855,16 +893,6 @@ def _fest_zeile(feld: FieldSpec, wert: Any) -> ft.Control:
     )
 
 
-def _leiste(lauf: TimerLauf) -> ft.Control:
-    """Die Leiste der Abschnitte eines Timers wie im Fokus (`components.fokus.balken`) — was
-    gelaufen ist, sagt `TimerLauf.fortschritt`."""
-    folge: list[tuple[Abschnitt, float]] = [
-        (a, s.gefuellt if s.gefuellt > 0 or s.aktuell else -1.0)
-        for (*_, a), s in zip(lauf.profil.folge(), lauf.fortschritt(), strict=True)
-    ]
-    return balken(folge, hoehe=12)
-
-
 def _balken(m: kurstest.Marke) -> ft.Control:
     """Der Balken 1–10 der Anstrengung mit der Marke des Kurses (T2)."""
 
@@ -1056,6 +1084,7 @@ def kurs_test_view(
     def bereit() -> ft.Control:
         skala = _skala_karte(v, f)
         fehlt = sensor_fehlt(state, block)
+        geraet_ohne = sensor_hinweis(state, block)
         return _seite(
             [
                 _kopf(v, f, timer, gebraucht=gebraucht),
@@ -1095,6 +1124,19 @@ def kurs_test_view(
                 ),
             ],
             [
+                *(
+                    [
+                        ft.Text(
+                            geraet_ohne,
+                            size=13,
+                            color=ft.Colors.ERROR,
+                            text_align=ft.TextAlign.CENTER,
+                            data="test_sensor_hinweis",
+                        )
+                    ]
+                    if geraet_ohne
+                    else []
+                ),
                 ft.FilledButton(
                     "Start",
                     icon=ft.Icons.PLAY_ARROW,
@@ -1118,41 +1160,64 @@ def kurs_test_view(
     # -- läuft (T1, T2, F3) ---------------------------------------------------------------------
 
     def laeuft(e: Einheitslauf, s: Kurstestlauf) -> ft.Control:
+        """Der Lauf **ist der Fokus** (Ben, 25.11.2026, `docs/plan_kurs_uebungen.md` §13):
+        derselbe Bildschirm wie beim Üben — Takt · Zeit · Ebenen in einer Zeile, der Balken
+        der Abschnitte und die Steuerzeile stehen fest oben; darunter rollt, was der Kurs
+        dazugibt (Vorgabe, Marke der Anstrengung), die Ebenen, „Eintragen“ und die Sätze."""
         assert e.timer is not None  # `laufender`
         lauf = e.timer.lauf
-
-        def zeit_jetzt() -> str:
-            """Mit der Stoppuhr, was gelaufen ist (Vorgabe Zeit: der Rest) — mit einem Timer
-            der Rest seines Abschnitts, wie im Fokus der Übung."""
-            if timer is not None:
-                return lauf.anzeige()
-            return kurstest.zeit_anzeige(v, lauf.vergangen_s())
-
-        zeit = ft.Text(
-            zeit_jetzt(),
-            size=96,
-            weight=ft.FontWeight.W_700,
-            text_align=ft.TextAlign.CENTER,
-            data="test_zeit",
+        fest = ft.Container(
+            padding=ft.Padding.only(left=16, right=16, top=8, bottom=8), data="test_fest_oben"
         )
+        rest = ft.Column(
+            spacing=12, horizontal_alignment=ft.CrossAxisAlignment.STRETCH, data="test_ebenen"
+        )
+
+        def frisch() -> None:
+            for teil in (fest, rest):
+                with contextlib.suppress(Exception):
+                    teil.update()
+
+        fokus = Fokus(
+            page,
+            state,
+            uebung=uebung,
+            item=None,
+            key=uebung.id,
+            neu_zeichnen=frisch,
+            material_item=material_item(block, uebung),
+        )
+        fokus.zeit_text.data = "test_zeit"
+        fokus.stand_text.data = "test_abschnitt"
+        fokus.balken_platz.data = "test_leiste"
+
+        # „Eintragen“ wie im Fokus der Übung — nur, was der Lauf nicht schon festlegt: Die
+        # Ausführung steht mit dem Start, eine Menge als Vorgabe sind die Wiederholungen,
+        # eine Anstrengung als Vorgabe ist das Ende des Laufs
+        eintragen_karte = EintragenKarte(page, state, uebung=uebung, item=None)
+        eintragen_karte.felder = []
+        eintragen_karte.wdh_feld = None if v is not None and v.art == MENGE else f.wdh
+        vorrat = vorrat_feld("scale")
+        # die Skala fragt der Lauf immer (auch bei einer Übung ohne eigene): dieselbe hier
+        eintragen_karte.skala = (
+            None
+            if v is not None and v.art == SKALA
+            else next(
+                (x for x in eintragen_karte.u.result_spec.fields if x.key == f.skala),
+                replace(vorrat, key=f.skala, label=f.skala_name) if vorrat else None,
+            )
+        )
+        eintragen_karte.control.visible = not eintragen_karte.leer
+
         zahl = ft.Text(size=28, weight=ft.FontWeight.W_700, data="test_zahl")
         wer_zaehlt = ft.Text(size=15, weight=ft.FontWeight.W_600)
         dazu = ft.Text(size=12, opacity=0.65)
         symbol = ft.Icon(ft.Icons.PERSON_OUTLINE, size=26)
-        # Mit einem Timer: sein Abschnitt, die Leiste, was danach kommt und wie weit er ist
-        abschnitt = ft.Text(
-            size=15,
-            weight=ft.FontWeight.W_600,
-            text_align=ft.TextAlign.CENTER,
-            data="test_abschnitt",
-        )
-        leiste = ft.Container(data="test_leiste")
+        # Mit einem Timer: was danach kommt und wie weit er ist — Abschnitt und Leiste zeigt
+        # der Kopf des Fokus
         danach = ft.Text(size=12, opacity=0.65, expand=True)
         gesamt = ft.Text(size=12, opacity=0.65, data="test_gesamt")
-        # Der Takt: dieselbe Anzeige wie im Fokus (einmal gebaut, je Tick nachgezogen) —
-        # auch für den Takt eines Abschnitts des Timers
         mit_takt = kurstest.fuehrt_ein_takt(s.profil, s.takt)
-        anzeige = TaktAnzeige(groesse=96)
         takt_zeile = ft.Text(size=13, data="test_takt")
 
         def zaehlen_zeigen() -> None:
@@ -1165,101 +1230,37 @@ def kurs_test_view(
             zahl.visible = gezaehlt is not None
             symbol.icon = ft.Icons.SENSORS if gezaehlt is not None else ft.Icons.PERSON_OUTLINE
 
-        def timer_zeigen() -> None:
+        def uhr_zeigen() -> None:
+            """Zeit und Zeile darunter in den Worten des Laufs: mit der Stoppuhr, was
+            gelaufen ist (Vorgabe Zeit: der Rest), mit einem Timer sein Abschnitt."""
+            steht = lauf.begonnen and not lauf.laeuft and not lauf.fertig
             if timer is None:
-                return
-            stand_jetzt = lauf.stand()
-            abschnitt.value = kurstest.abschnitt_text(stand_jetzt)
-            leiste.content = _leiste(lauf)
-            danach.value = kurstest.danach_text(timer, stand_jetzt.nummer)
-            gesamt.value = lauf.fortschritt_text()[1]
-
-        def takt_zeigen() -> bool:
-            """Die Lage im Takt, der gerade gilt — ``True``, wenn es ein anderer ist als eben
-            (der nächste Abschnitt hat seinen eigenen)."""
-            lage = lauf.takt_lage()
-            gilt = lauf.takt_effektiv() if lage else None
-            anzeige.nachziehen(gilt, lage)
-            genannt = gilt or s.takt  # zwischen zwei Abschnitten mit Takt: der des Tests
-            text = kurstest.takt_text(genannt) if genannt is not None else ""
-            anders = text != takt_zeile.value
-            takt_zeile.value = text
-            return anders
-
-        # Dieselbe Umgebung wie beim Üben (Ben, 23.11.2026: „Übungen sollen im Fokusmodus
-        # laufen … ob nebenbei die Sensoren laufen“; `docs/plan_kurs_uebungen.md` §11.1): die
-        # Ebenen des Fokus — Bild der Bewegung, Begleitvideo, Herzfrequenz, Kurven, Medien
-        # „bei …“ — aus derselben Komponente, unter der Uhr des Laufs. Uhr, Vorgabe und Knöpfe
-        # bleiben die des Laufs. Die Sensoren laufen mit und zeichnen auf; der Kurs rechnet
-        # aus ihren Werten nie
-        ebenen_spalte = ft.Column(
-            spacing=12,
-            tight=True,
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            data="test_ebenen",
-        )
-
-        def ebenen_frisch() -> None:
-            with contextlib.suppress(Exception):
-                ebenen_spalte.update()
-
-        fokus = Fokus(
-            page,
-            state,
-            uebung=uebung,
-            item=None,
-            key=uebung.id,
-            neu_zeichnen=ebenen_frisch,
-            material_item=material_item(block, uebung),
-        )
-        fokus.bauen(e, lauf)
-        ebenen_spalte.controls = [
-            ft.Row(
-                alignment=ft.MainAxisAlignment.END,
-                spacing=4,
-                controls=[
-                    *([fokus.material_control] if fokus.material_control is not None else []),
-                    fokus.ebenen_control,
-                ],
-            ),
-            fokus.ereignis_platz,
-            ft.Row(
-                alignment=ft.MainAxisAlignment.CENTER,
-                wrap=True,
-                spacing=12,
-                run_spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[fokus.video_platz, fokus.bild_platz, fokus.hf_karte],
-            ),
-            fokus.kurven_karte,
-        ]
+                fokus.zeit_text.value = kurstest.zeit_anzeige(v, lauf.vergangen_s())
+                zeile = kurstest.zeit_zeile(v, timer=None)
+            else:
+                stand_jetzt = lauf.stand()
+                zeile = kurstest.abschnitt_text(stand_jetzt)
+                danach.value = kurstest.danach_text(timer, stand_jetzt.nummer)
+                gesamt.value = lauf.fortschritt_text()[1]
+            fokus.stand_text.value = f"{zeile} · angehalten" if steht else zeile
+            if mit_takt:
+                lage = lauf.takt_lage()
+                genannt = (lauf.takt_effektiv() if lage else None) or s.takt
+                takt_zeile.value = kurstest.takt_text(genannt) if genannt is not None else ""
 
         def auffrischen() -> None:
-            """Jeder Tick der Uhr: der Takt — und, wenn sie sich ändern, die Zeit (mit dem
-            Stand des Timers) und die Zahl des Sensors."""
+            """Jeder Tick der Uhr: Der Fokus zieht nach, der Lauf setzt seine Worte."""
             with contextlib.suppress(Exception):
                 fokus.nachziehen(e, lauf)
-            ebenen_frisch()
-            if mit_takt:
-                anders = takt_zeigen()
-                with contextlib.suppress(Exception):
-                    anzeige.control.update()
-                if anders:
-                    with contextlib.suppress(Exception):
-                        takt_zeile.update()
-            neu = zeit_jetzt()
-            # der Rest eines Abschnitts kann derselbe sein wie eben der des vorigen („0:08“):
-            # ob sich etwas tat, sagt dazu die Laufzeit des Timers
-            lief = lauf.fortschritt_text()[1] if timer is not None else ""
-            vorher_zahl = zahl.value
+            uhr_zeigen()
             zaehlen_zeigen()
-            if neu == zeit.value and lief == (gesamt.value or "") and zahl.value == vorher_zahl:
-                return
-            zeit.value = neu
-            timer_zeigen()
-            for teil in (zeit, *gezeigt):
-                with contextlib.suppress(Exception):
-                    teil.update()
+            with contextlib.suppress(Exception):
+                eintragen_karte.nachziehen(e)
+            frisch()
+
+        def pause(_e: Any = None) -> None:
+            einheit_ui.anhalten_oder_weiter(page, state)
+            auffrischen()
 
         def fertig(_e: Any = None) -> None:
             if anhalten(page, state):
@@ -1269,7 +1270,45 @@ def kurs_test_view(
             if anhalten(page, state, vorher=True):
                 neu_zeichnen()
 
+        fokus.halt_knopf.on_click = pause
+        teile = fokus.bauen(e, lauf)
+        # Was `Fokus.bauen` hinter dem Kopf liefert: Hinweise „bei …“, Tempo-Regler, die Reihe
+        # Video · Bewegung · Herzfrequenz, Kurven, die Zählzeile des Sensors (mit ±1). Der
+        # Tempo-Regler bleibt weg: Den Takt gibt der Kurs vor, seine Runden sind der Vorschlag
+        ebenen = [t for t in teile[FOKUS_OBEN:] if t is not fokus.tempo_platz]
+        uhr_zeigen()
         zaehlen_zeigen()
+        knopf = kurstest.knopf_text(v, timer=timer)
+        mit_vorher = kurstest.vorher_knopf(v, timer=timer)  # ohne Ende kein „vorher“
+        vorher_knopf = (
+            ft.OutlinedButton(
+                "Vorher aufgehört …",
+                on_click=vorher_aufgehoert,
+                expand=not knopf,
+                data="test_vorher",
+            )
+            if mit_vorher
+            else None
+        )
+        steuer = steuerzeile(
+            fokus.halt_knopf,
+            ft.FilledButton(
+                knopf, icon=ft.Icons.CHECK, on_click=fertig, expand=True, data="test_fertig"
+            )
+            if knopf  # eine Zeit und ein Timer enden von selbst
+            else None,
+            # neben „Fertig“ ist kein Platz: Dann steht „Vorher aufgehört …“ als Erstes darunter
+            None if knopf else vorher_knopf,
+            None if knopf or vorher_knopf is not None else ft.Container(expand=True),
+            ft.IconButton(
+                ft.Icons.CLOSE,
+                icon_color=ft.Colors.ERROR,
+                tooltip="Abbrechen — beenden ohne Eintrag",
+                on_click=abbrechen,
+                data="test_abbrechen",
+            ),
+        )
+        fest.content = ft.Column(spacing=8, controls=[*teile[:FOKUS_OBEN], steuer])
         # Wiederholungen: wer zählt — nur bei einer Übung, die welche hat
         wdh_karte = karte(
             titel(kurstest.GROESSEN[kurstest.WDH]),
@@ -1284,107 +1323,61 @@ def kurs_test_view(
             ),
             abstand=10,
         )
-        # Der Stand des Timers unter der Zeit — die Stoppuhr hat keinen
-        timer_stand = ft.Column(
-            spacing=6,
-            tight=True,
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            controls=[abschnitt, leiste, ft.Row(spacing=8, controls=[danach, gesamt])],
-        )
-        # Der Takt führt — er zählt nicht (F3): seine Anzeige, daneben, was er vorgibt
+        # Der Takt führt — er zählt nicht (F3); seine Anzeige steht links neben der Zeit
         takt_karte = karte(
             titel("Takt"),
-            ft.Row(
-                spacing=12,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    anzeige.control,
-                    ft.Column(
-                        spacing=4,
-                        tight=True,
-                        expand=True,
-                        controls=[
-                            takt_zeile,
-                            ft.Text(
-                                "Der Takt führt — gezählt hat damit noch niemand.",
-                                size=12,
-                                opacity=0.65,
-                            ),
-                        ],
-                    ),
-                ],
-            ),
-            abstand=8,
+            takt_zeile,
+            ft.Text("Der Takt führt — gezählt hat damit noch niemand.", size=12, opacity=0.65),
+            abstand=6,
         )
-        timer_zeigen()
-        takt_zeigen()
         skala = _skala_karte(v, f)
         zaehlt_jemand = _gezaehlt(state, s) is not None
-        # „Du zählst selbst“ steht nicht neben der Marke der Anstrengung und nicht neben dem
-        # Takt (seine Karte sagt es) — zählt der Sensor, steht seine Zahl immer da
-        zeigt_wdh = f.wdh is not None and (zaehlt_jemand or (skala is None and not mit_takt))
-        #: was der Ticker neben der Zeit auffrischt — nur, was auf der Seite steht
-        gezeigt: list[ft.Control] = [
-            *([timer_stand] if timer is not None else []),
+        # „Du zählst selbst“ steht nicht neben der Marke der Anstrengung, nicht neben dem Takt
+        # (seine Karte sagt es) und nicht neben „Eintragen“ (dort tippt man die Sätze) —
+        # zählt der Sensor, steht seine Zahl immer da
+        zeigt_wdh = f.wdh is not None and (
+            zaehlt_jemand or (skala is None and not mit_takt and eintragen_karte.wdh_feld is None)
+        )
+        rest.controls = [
+            *([vorher_knopf] if knopf and vorher_knopf is not None else []),
+            _kopf(v, f, timer, ausfuehrung=s.ausfuehrung_text, gebraucht=gebraucht),
+            *(
+                [
+                    ft.Row(spacing=8, controls=[danach, gesamt]),
+                    ft.Text(kurstest.zeit_zeile(v, timer=timer), size=12, opacity=0.65),
+                ]
+                if timer is not None
+                else []
+            ),
+            *([takt_karte] if mit_takt else []),
+            *([skala] if skala is not None else []),
             *([wdh_karte] if zeigt_wdh else []),
+            *ebenen,
+            *([] if eintragen_karte.leer else [eintragen_karte.bauen(e)]),
+            # der Überblick über die Sätze steht unter „Eintragen“ — nur ein Timer hat welche
+            *([fokus.saetze_karte] if timer is not None else []),
+            ft.Text(
+                kurstest.unten_text(v, timer=timer, takt=mit_takt),
+                size=12,
+                opacity=0.65,
+                text_align=ft.TextAlign.CENTER,
+            ),
         ]
         state.timer_beobachter[BEOBACHTER] = auffrischen
-        knopf = kurstest.knopf_text(v, timer=timer)
-        return _seite(
-            [
-                _kopf(v, f, timer, ausfuehrung=s.ausfuehrung_text, gebraucht=gebraucht),
-                ft.Container(
-                    padding=ft.Padding.symmetric(vertical=12),
-                    content=ft.Column(
-                        spacing=4,
-                        tight=True,
-                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                        controls=[
-                            zeit,
-                            ft.Text(kurstest.zeit_zeile(v, timer=timer), size=13, opacity=0.65),
-                        ],
+        return sicher(
+            ft.Column(
+                expand=True,
+                spacing=0,
+                controls=[
+                    fest,
+                    ft.Column(
+                        expand=True,
+                        scroll=ft.ScrollMode.AUTO,
+                        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                        controls=[ft.Container(padding=16, content=rest)],
                     ),
-                ),
-                *([timer_stand] if timer is not None else []),
-                *([takt_karte] if mit_takt else []),
-                *([skala] if skala is not None else []),
-                *([wdh_karte] if zeigt_wdh else []),
-                ebenen_spalte,
-            ],
-            [
-                *(
-                    [
-                        ft.FilledButton(
-                            knopf,
-                            icon=ft.Icons.CHECK,
-                            height=64,
-                            style=_GROSS,
-                            on_click=fertig,
-                            data="test_fertig",
-                        )
-                    ]
-                    if knopf  # eine Zeit und ein Timer enden von selbst
-                    else []
-                ),
-                *(
-                    [
-                        ft.TextButton(
-                            "Vorher aufgehört …",
-                            height=48,
-                            on_click=vorher_aufgehoert,
-                            data="test_vorher",
-                        )
-                    ]
-                    if kurstest.vorher_knopf(v, timer=timer)  # ohne Ende kein „vorher“
-                    else []
-                ),
-                ft.Text(
-                    kurstest.unten_text(v, timer=timer, takt=mit_takt),
-                    size=12,
-                    opacity=0.65,
-                    text_align=ft.TextAlign.CENTER,
-                ),
-            ],
+                ],
+            )
         )
 
     # -- Ergebnis (T3, F4) ----------------------------------------------------------------------
@@ -1737,9 +1730,10 @@ def kurs_test_view(
         data=FOKUS_ANSICHT if stand is not None else None,
         appbar=ft.AppBar(
             title=ft.Text(f"{'Test' if gebraucht else 'Ausprobieren'} · {uebung.name}"),
-            # bereit: der Pfeil zurück ins Kapitel; sonst ✕ — der Lauf endet ohne Eintrag
-            leading=kreuz if stand is not None else None,
-            automatically_imply_leading=stand is None,
+            # bereit und im Lauf: der Pfeil zurück ins Kapitel (der Lauf läuft weiter; sein ✕
+            # steht in der Steuerzeile, wie im Fokus der Übung). Im Ergebnis: ✕ verwirft
+            leading=kreuz if stand is not None and stand.phase == ERGEBNIS else None,
+            automatically_imply_leading=stand is None or stand.phase == LAEUFT,
         ),
         padding=0,
         controls=[inhalt],

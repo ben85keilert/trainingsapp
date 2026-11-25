@@ -17,7 +17,8 @@ und die Übung“ —
    eingegebenen Variablen Wdh/Zeit/Haltezeit/Skala/Ja-Nein usw. zu speichern und für später
    verfügbar zu machen.“
 
-**Stand: gebaut am 23.11.2026 (§12 — was gebaut ist, wo es vom Plan abweicht, was fehlt).**
+**Stand: gebaut am 23.11.2026 (§12), ergänzt am 25.11.2026 (§13: der Lauf ist der
+Fokus-Bildschirm, Bewegungssensor als Startbedingung — §13 geht §12.2 vor).**
 Davor: Bens Antworten vom 23.11.2026 stehen in **§10 und §11 — sie gehen den
 Abschnitten §2–§9 vor**, wo sie sich widersprechen. Skizzen als Handy-Bilder: Design-Artifact
 „Übungen im Kurs — Skizzen“ (Reihen A–C, zwölf Bilder; privat bei Ben:
@@ -403,13 +404,12 @@ Abschnitt.
   zeigt darunter aus **derselben Komponente** (`components/fokus.Fokus`) das Ebenen-Menü, das
   Bild der Bewegung, das Begleitvideo, die Herzfrequenz-Kachel, die Kurven und die Hinweise
   „bei …“. Sensoren laufen mit, wie sonst (der Lauf startet über `ui.uebung_lauf.starten`).
-  **Offen für Ben:** ob der Lauf ganz auf den Fokus-Bildschirm umziehen soll (Zeit mit Takt
-  in einer Zeile, Sätze, „Eintragen“-Karte) — das hieße, die Vorgaben des Tests dort neu zu
-  bauen.
+  **Überholt (25.11.2026): Der Lauf ist jetzt der Fokus-Bildschirm — §13.1.**
 - **Sensor als Startbedingung:** `Block.braucht = ["messung"]` — „Herzfrequenz — ein Sensor
   ist verbunden“ (`Messlauf.verbunden`). Fehlt er, ist „Start“ aus und die Seite sagt, was
-  fehlt (`kurs_testlauf.sensor_fehlt`). **Nur diese eine Art**: Ob ein Gerät den
-  Bewegungssensor liefert, lässt sich vor dem Start nicht sicher sagen (nicht nachgebaut).
+  fehlt (`kurs_testlauf.sensor_fehlt`). **Überholt (25.11.2026):** Der Satz „ob ein Gerät den
+  Bewegungssensor liefert, lässt sich vor dem Start nicht sicher sagen“ stimmte nicht — das
+  Geräteprofil sagt es (`components.zaehl_stand.geraet_kann_zaehlen`); §13.2.
 - **Medien am Lauf:** `Block.medien` — vier Stellen wie an der Planübung (`core.kursbau`:
   `MEDIEN_STELLEN`, `medium_stelle`, `medium_an_stelle`): vorher (Zeilen auf der Seite
   „bereit“) · dabei (Begleitung im Lauf) · bei … Sekunden / Wiederholungen (Hinweis unter der
@@ -481,3 +481,76 @@ die Übung ein Feld Variante hat — nicht nachgestellt.
   **Nicht am Foto geprüft:** Lauf mit verbundenem Sensor und Kurven, Begleitvideo, „bei …“,
   Ziel aus einer Antwort, die Blätter der neuen Bausteine, „Was soll folgen?“ — und nichts
   davon am Gerät (T156).
+
+## 13. Dritte Runde (Ben, 25.11.2026) — das gilt
+
+Bens Antworten auf die vier offenen Punkte aus §12: (1) Lauf ganz auf den Fokus-Bildschirm —
+„ja“; (2) Bewegungssensor als Startbedingung — „ja. Wenn das verbundene Gerät keinen
+Bewegungssensor bietet, soll eine Hinweismeldung das angeben“; (3) „+ Folge“ an der Frage statt
+an jeder Antwort — „ok“; (4) Gerätetest T156 — „kommt später“.
+
+**Durchsicht des Plans vor dem Bau** (gegen den Code, nicht gegen die Abschnitte): §2–§11 sind
+Entwurf und Verlauf, §12 beschreibt den Stand vom 23.11. richtig bis auf die zwei in §12.2
+markierten Stellen. Seit dem 23.11. gab es auf `main` keine Commits, die Kurs, Lauf oder Fokus
+berühren (`git log 09ce162..` leer).
+
+### 13.1 Der Lauf ist der Fokus-Bildschirm
+
+`views/kurs_testlauf.py`, Zustand „läuft“ — gebaut wie der Fokus der Übung
+(`views/uebung_timer.py`), aus derselben Komponente (`components/fokus.Fokus`):
+
+- **Fest oben:** Takt · Zeit · Material · Ebenen in einer Zeile (`ZeitMitTakt`), der Balken
+  der Abschnitte eines Timers, darunter die **Steuerzeile**: ⏸ (neu im Lauf des Kurses) · der
+  Knopf, der den Lauf beendet („Fertig — 30 gemacht“, „Bei 7 angekommen“ …) · ✕. Endet der
+  Lauf von selbst (Zeit, Timer), steht an der Stelle des Knopfs „Vorher aufgehört …“; sonst
+  steht es als Erstes darunter. In der Titelleiste steht im Lauf der Pfeil zurück ins Kapitel
+  (der Lauf läuft weiter), das ✕ nur noch im Ergebnis.
+- **Worte des Laufs in der Uhr:** Mit der Stoppuhr zeigt die Zeit, was gelaufen ist (Vorgabe
+  Zeit: den Rest), darunter „Zeit läuft · …“; mit einem Timer den Rest des Abschnitts und
+  „Los · Runde 1 von 2“. Angehalten steht „· angehalten“ dabei.
+- **Darunter, rollend:** die Vorgabe des Kurses (und wie die Übung gemacht wird), mit Timer
+  „danach …“ und die Laufzeit, die Karte „Takt“ (nur der Text — die Anzeige steht neben der
+  Zeit), die Marke der Anstrengung, „Sensor zählt“ mit der Zahl, dann die Ebenen des Fokus
+  (Hinweise „bei …“, Video · Bewegung · Herzfrequenz, Kurven, Zählzeile mit ±1), die Karte
+  **„Eintragen“** und — mit einem Timer — die Sätze.
+- **„Eintragen“ im Lauf** (`components/fokus_eintragen.EintragenKarte`): Sätze („+10“, eigener
+  Wert, „−“) und die Skala, wie im Fokus der Übung. Was dort getippt ist, **steht im Ergebnis
+  schon da** (`anhalten`: Summe der Sätze, letzte Skala) und lässt sich dort ändern;
+  eingetragen wird weiter **ein** Eintrag mit „Eintragen“ im Ergebnis. Nicht angeboten, was
+  der Lauf festlegt: die Ausführung (steht mit dem Start), die Wiederholungen bei einer Menge
+  als Vorgabe, die Skala bei einer Anstrengung als Vorgabe. Was der Sensor zählte, geht vor.
+  Die Skala steht auch bei einer Übung ohne eigenes Skalenfeld da — das Ergebnis fragt sie
+  ebenso.
+- **Nicht übernommen:** der Tempo-Regler des Takts (den Takt gibt der Kurs vor; seine Runden
+  sind der Vorschlag für die Wiederholungen) und „Nächster“ (ein Abschnitt lässt sich im Lauf
+  des Kurses nicht überspringen).
+- Das Ergebnis und die Seite „bereit“ sind unverändert.
+
+### 13.2 Bewegungssensor als Startbedingung
+
+- `Block.braucht` kennt neben `messung` jetzt **`bewegung`** (`core.kursbloecke.BRAUCHT`):
+  ein verbundenes Gerät mit Beschleunigungssensor (heute Polar H10 und Verity Sense;
+  `geraet_kann_zaehlen` — verbunden genügt). Fehlt es, ist „Start“ aus und die Seite nennt,
+  was fehlt.
+- **Hinweis** (`kurs_testlauf.sensor_hinweis`): Ist ein Gerät verbunden, das keinen
+  Bewegungssensor hat, steht über „Start“: „Dein verbundenes Gerät (‹Name›) hat keinen
+  Bewegungssensor — damit lässt sich dieser Lauf nicht starten. Verbinde unter „Messung“ ein
+  Gerät, das Wiederholungen zählen kann.“ Derselbe Satz kommt als Meldung, wenn der Start
+  anderswo versucht wird.
+- **Nur Startbedingung:** Der Lauf startet das Zählen nicht von selbst; zählt bei der Übung
+  schon der Sensor, tritt die Uhr dem bei, wie bisher.
+- **Editor:** zweiter Haken „Sensor nötig: Bewegungssensor“ im Dialog „Übung machen“.
+- **Paket: Formatversion 9** (`core.pakete.nutzt_bewegungssensor`) nur für Pakete mit
+  `braucht = ["bewegung"]` — eine App mit Version 8 ließe die Bedingung still fallen, darum
+  lehnt sie die Datei ab.
+
+### 13.3 Prüfung
+
+- Tests: `tests/test_ui_kurs_test.py` (Fokus-Bildschirm mit Steuerzeile, „Eintragen“ im Lauf
+  steht im Ergebnis und ergibt einen Eintrag, ⏸, Bewegungssensor mit Hinweis),
+  `tests/test_ui_kurs_fragen.py` (Editor), Doctests in `core/pakete.py`.
+- Web-Fotos (412 × 860, 25.11.2026): Seite „bereit“ mit fehlendem Bewegungssensor · Lauf mit
+  Vorgabe Zeit als Fokus-Bildschirm (Kopf, Steuerzeile, Vorgabe, HF-Kachel, Kurven,
+  „Eintragen“). **Nicht am Foto geprüft:** Lauf mit Timer (Balken, Sätze), mit Takt, mit
+  Begleitvideo, der Hinweis bei verbundenem Gerät ohne Bewegungssensor (im Browser gibt es
+  kein Bluetooth) — und nichts davon am Gerät (T156).

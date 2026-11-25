@@ -90,7 +90,7 @@ FORMAT = "trainingsapp-uebungspaket"
 #: (``ablauf.fragen[].art``: Ja/Nein, Auswahl — Ben, 17.11.2026). Geschrieben wird immer die
 #: kleinste, die der Inhalt braucht (`noetige_version`): eine Datei ohne Kurse weiter als
 #: Version 1
-FORMAT_VERSION = 8
+FORMAT_VERSION = 9
 
 #: Namensraum der UUIDv5-IDs — derselbe wie für den Seed vor den Paketen.
 #: Einmal gewählt, nie ändern, sonst bekäme jede Übung eine neue ID.
@@ -1703,6 +1703,20 @@ def nutzt_uebung_machen(kurs: Kurs) -> bool:
     )
 
 
+def nutzt_bewegungssensor(kurs: Kurs) -> bool:
+    """Verlangt ein Lauf des Kurses den **Bewegungssensor** als Startbedingung (Ben,
+    25.11.2026, Formatversion 9)? Eine App mit Formatversion 8 kennt nur „Herzfrequenz“ und
+    ließe die Bedingung still fallen — sie lehnt die Datei darum ab.
+
+    >>> def kurs(*braucht):
+    ...     block = Block("test", id="t", uebung="u", braucht=list(braucht))
+    ...     return Kurs(name="K", kapitel=[Kapitel(titel="A", bloecke=[block])])
+    >>> nutzt_bewegungssensor(kurs("messung")), nutzt_bewegungssensor(kurs("bewegung"))
+    (False, True)
+    """
+    return any("bewegung" in b.braucht for kap in kurs.kapitel for b in kap.bloecke)
+
+
 def nutzt_antworten(kurse: Iterable[Kurs], plaene: Iterable[PaketPlan]) -> bool:
     """Steht in einem Plan des Pakets — oder in einer Plan-Vorlage eines Kurses (Kapitelplan,
     Vorlage des Kursplans) — ein Ablauf mit einer Frage, die Antworten zum Antippen hat
@@ -1727,7 +1741,8 @@ def noetige_version(
     2 Kurse · 3 Pläne · 4 Dateien aus dem Paket (ZIP, U3) · 5 Ergänzungen (U5) · 6 ein Kurs
     mit Kursplan oder Bausteinen (`nutzt_kursplan`) · 7 ein Ablauf mit einer Frage, die
     Antworten zum Antippen hat (`nutzt_antworten`) · 8 „Übung machen“ im Kurs: Medien,
-    Fragen, Sensor am Lauf, Bedingungen, neue Bausteine (`nutzt_uebung_machen`). Das Höchste
+    Fragen, Sensor am Lauf, Bedingungen, neue Bausteine (`nutzt_uebung_machen`) · 9 der
+    Bewegungssensor als Startbedingung eines Laufs (`nutzt_bewegungssensor`). Das Höchste
     zählt.
 
     Version 6 ist mit Absicht eine Schranke: Eine App, die den Kursplan nicht kennt, zeigte
@@ -1746,10 +1761,15 @@ def noetige_version(
     >>> noetige_version(plaene=[plan])
     7
     >>> k.kapitel[0].bloecke = [Block("test", id="t", uebung="u", braucht=["messung"])]
-    >>> noetige_version(kurse=[k]) == 8 == FORMAT_VERSION
+    >>> noetige_version(kurse=[k])
+    8
+    >>> k.kapitel[0].bloecke[0].braucht = ["messung", "bewegung"]
+    >>> noetige_version(kurse=[k]) == 9 == FORMAT_VERSION
     True
     """
     kurse, plaene = list(kurse), list(plaene)
+    if any(nutzt_bewegungssensor(k) for k in kurse):
+        return 9
     if any(nutzt_uebung_machen(k) for k in kurse):
         return 8
     if nutzt_antworten(kurse, plaene):
@@ -1894,6 +1914,7 @@ __all__ = [
     "name_pruefen",
     "noetige_version",
     "nutzt_antworten",
+    "nutzt_bewegungssensor",
     "nutzt_kursplan",
     "paket_bauen",
     "paket_id",

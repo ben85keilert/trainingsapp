@@ -352,7 +352,9 @@ JSON, UTF-8. Version 1 (Übungen); **Version 2** fügt `kurse[]` hinzu, **Versio
 **Version 5** `ergaenzungen[]`, **Version 6** den Kursplan (`kurse[].kursplan`, die
 Bausteine `plan_*` und Tests mit `aus`, Ben 16.11.2026 — Abschnitt
 [Kursplan und Bausteine](#kursplan-und-bausteine-formatversion-6-ben-16112026)), **Version 7**
-Fragen mit Antworten zum Antippen im Ablauf eines Plans (`fragen[].art`, Ben 17.11.2026).
+Fragen mit Antworten zum Antippen im Ablauf eines Plans (`fragen[].art`, Ben 17.11.2026),
+**Version 8** „Übung machen“ im Kurs (Ben, 23.11.2026), **Version 9** den Bewegungssensor als
+Startbedingung eines Laufs (`braucht = ["bewegung"]`, Ben 25.11.2026).
 Geschrieben wird
 immer die **kleinste Version, die der Inhalt braucht** (`core.pakete.noetige_version`, das
 Höchste zählt): eine Datei ohne Kurse und Pläne weiter als Version 1, ohne Pläne als
@@ -718,6 +720,7 @@ davon nutzt, bleibt bei seiner Formatversion.
 |---|---|---|
 | `test` | `medien[]` | Medien am Lauf, wie `media[]` einer Planübung: ohne `wann` vorher, `rolle = "begleitung"` dabei, `wann = "bei"` mit `bei = {art = "zeit", sekunden = 20}` oder `{art = "wdh", n = 10}` (auch `abschnitt`, `satz`), `wann = "nachher"` im Ergebnis. Sie kommen zu denen der Übung dazu |
 | `test` | `braucht = ["messung"]` | der Lauf startet erst, wenn ein Herzfrequenz-Sensor verbunden ist — nur das; aus Messwerten rechnet der Kurs nie |
+| `test` | `braucht = ["bewegung"]` | **Formatversion 9** (Ben, 25.11.2026): der Lauf startet erst, wenn ein Gerät mit Bewegungssensor verbunden ist (eines, das Wiederholungen zählen kann); beides zusammen geht. Eine App mit Formatversion 8 lehnt die Datei ab |
 | `test` | `fragen[]` | Fragen am Lauf wie `fragen[]` im Ablauf eines Plans (`id`, `text`, `art` = `skala` (mit `min`, `max`) · `ja_nein` · `auswahl` (mit `antworten`, `mehrfach`)), dazu `wann = "vorher"` (sonst im Ergebnis) und `ziele = { schwer = 30 }` — die Antwort schlägt dieses Ziel im Feld des Tests vor (nur `ja_nein` und `auswahl` ohne `mehrfach`; die Person bestätigt oder ändert) |
 | `frage` | `frage = { art = "ja_nein" }` | die Frage in einer Art des Ablaufs (`skala` mit `min`/`max`, `ja_nein`, `auswahl` mit `antworten`, `mehrfach`); ihr Wortlaut ist `titel`, ihre Antwort wird gespeichert. Ohne `frage`: die Verständnisfrage mit `antworten[] = {text, richtig, hinweis}` wie bisher |
 | jeder Block | `wenn[]` | der Block gilt nur, wenn **alle** Bedingungen erfüllt sind: `{ frage = "<name>", antworten = ["leicht", "mittel"] }` (eine davon genügt) oder `{ frage = "<name>", ab = 7, bis = 10 }` (Skala). `<name>`: die `id` einer `frage` im Kapitel, `<test>.f:<frage>` für eine Frage am Lauf, `<test>.<feld>` für ein Feld des Laufs (nur mit `ab`/`bis`) |

@@ -1050,8 +1050,12 @@ class _Lauf:
         feld = self._feld(uebung, test.feld)
         je_satz = feld.type == FieldType.SET_LIST
         bisher = dict(item.target) if item is not None and item.target else {}
-        ziel = {**bisher, test.feld: [zahl] if je_satz else zahl}
-        text = self._ziel_text(uebung, ziel, (test.feld,))
+        # Was der Baustein daneben **fest** setzt (Ben, 25.11.2026: die Variante „muss mit
+        # gesetzt werden können“) — jedes Feld von ``ziel`` außer dem des Tests
+        dazu = {k: copy.deepcopy(w) for k, w in b.ziel.items() if k != test.feld}
+        ziel = {**bisher, **dazu, test.feld: [zahl] if je_satz else zahl}
+        gesetzt: tuple[str, ...] = (test.feld, *dazu)
+        text = self._ziel_text(uebung, ziel, gesetzt)
         # Die Regel des Kurses, ohne Wertung: woher die Zahl kommt (Faktor, gemessener Wert,
         # Vorgabe des Tests) — `core.kurstest.herkunft`. Genannt wird die Vorgabe, die im Lauf
         # **galt**: Lief der Test mit seinem eigenen Timer, gilt eine Vorgabe „Zeit“ nicht
@@ -1080,7 +1084,7 @@ class _Lauf:
             unter=woher,
             wer=name,
             uebung=uebung,
-            nur=(test.feld,),
+            nur=gesetzt,
             braucht=braucht,
         )
 

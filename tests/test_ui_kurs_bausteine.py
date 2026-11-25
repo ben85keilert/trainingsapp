@@ -2517,3 +2517,44 @@ def _einstellen_aus_dem_bild(ansicht):
         assert karte.menue() is None  # die Aktion schließt das Menü
 
     return einstellen
+
+
+def test_baustein_setzt_die_variante_neben_dem_ziel_aus_dem_test(page, state) -> None:
+    """Ben, 25.11.2026: „Variante als Parameter muss mit gesetzt werden können“ — bei genau
+    einer Übung mit Varianten steht unter „Ziel aus dem Test“ die Ziel-Variante; gespeichert
+    wird sie neben ``ziel_aus``, und das feste Ziel bietet sie ebenfalls an."""
+    kurs, u = _kurs(state)
+    kurs = _gestaltbar(state, kurs, u)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[1])
+    _daten(ansicht, "baustein_dazu").on_click()
+    _daten(ansicht, ("baustein_neu", PLAN_UEBUNG)).on_click()
+    blatt = page.dialoge[-1]
+    _waehlen(blatt, "baustein_uebung", f"u:{u['Käfer'].id}")
+    _waehlen(blatt, "baustein_ziel", "test:t")
+    kasten = _daten(blatt, "baustein_zielvariante")
+    (segmente,) = [x for x in _alle(kasten) if isinstance(x, ft.SegmentedButton)]
+    assert [g.value for g in segmente.segments] == ["auf Knien", "gestreckt"]
+    segmente.selected = ["auf Knien"]
+    segmente.on_change(SimpleNamespace(control=segmente))
+    _daten(blatt, "baustein_uebernehmen").on_click()
+    _speichern(ansicht)
+    neu = state.kurse.laden(kurs.id).kapitel[1].bloecke[-1]
+    assert (neu.ziel_aus, neu.ziel) == ("t", {"variant": "auf Knien"})
+
+    # das feste Ziel bietet die Variante ebenfalls an — bei einer Auswahl aus mehreren nicht
+    ansicht = kapitel_bearbeiten(page, state, state.kurse.laden(kurs.id), kurs.kapitel[1])
+    _daten(ansicht, "baustein_dazu").on_click()
+    _daten(ansicht, ("baustein_neu", PLAN_UEBUNG)).on_click()
+    blatt = page.dialoge[-1]
+    _waehlen(blatt, "baustein_uebung", f"u:{u['Käfer'].id}")
+    _waehlen(blatt, "baustein_ziel", baustein_form.FEST)
+
+    def varianten_im_ziel() -> bool:
+        return any(
+            isinstance(x, ft.SegmentedButton) and "auf Knien" in [g.value for g in x.segments]
+            for x in _alle(_daten(blatt, "baustein_zielwerte"))
+        )
+
+    assert varianten_im_ziel()
+    _waehlen(blatt, "baustein_uebung", "aus:w")
+    assert not varianten_im_ziel()

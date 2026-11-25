@@ -1408,8 +1408,9 @@ class Kurssicht:
 
     def ziel_spec(self, uebungen: Sequence[str]) -> ResultSpec:
         """Die Felder, in denen ein **festes** Ziel stehen kann: die Zielfelder der Übung
-        (`core.standards.ziel_spec`, ohne Variante) — bei mehreren (eine Auswahl) nur die, die
-        alle haben."""
+        (`core.standards.ziel_spec`) — bei mehreren (eine Auswahl) nur die, die alle haben.
+        Die **Variante** gehört bei genau einer Übung dazu (Ben, 25.11.2026: „Variante als
+        Parameter muss mit gesetzt werden können“); bei mehreren nie — jede hat ihre eigenen."""
         specs = [
             ziel_spec(self.katalog[u].result_spec)
             for u in dict.fromkeys(uebungen)
@@ -1420,9 +1421,20 @@ class Kurssicht:
         gemeinsam = [
             f
             for f in specs[0].fields
-            if not ist_variante(f) and all(s.field_by_key(f.key) is not None for s in specs[1:])
+            if (len(specs) == 1 or not ist_variante(f))
+            and all(s.field_by_key(f.key) is not None for s in specs[1:])
         ]
         return replace(specs[0], fields=gemeinsam)
+
+    def variante_spec(self, uebungen: Sequence[str]) -> ResultSpec | None:
+        """Nur die **Ziel-Variante** — für einen Baustein, dessen Ziel aus einem Test kommt:
+        Die Variante lässt sich daneben fest setzen. ``None``: mehrere Übungen oder keine
+        Variante."""
+        spec = self.ziel_spec(uebungen)
+        feld = next((f for f in spec.fields if ist_variante(f)), None)
+        if feld is None:
+            return None
+        return replace(spec, fields=[replace(feld, default=None, label="Ziel-Variante")])
 
     def testfelder(self, uebungen: Sequence[str]) -> tuple[list[FieldSpec], bool]:
         """Was ein Test an diesen Übungen messen kann — Felder der Art `TESTFELDER`. Bei einer

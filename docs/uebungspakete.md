@@ -354,7 +354,8 @@ Bausteine `plan_*` und Tests mit `aus`, Ben 16.11.2026 — Abschnitt
 [Kursplan und Bausteine](#kursplan-und-bausteine-formatversion-6-ben-16112026)), **Version 7**
 Fragen mit Antworten zum Antippen im Ablauf eines Plans (`fragen[].art`, Ben 17.11.2026),
 **Version 8** „Übung machen“ im Kurs (Ben, 23.11.2026), **Version 9** den Bewegungssensor als
-Startbedingung eines Laufs (`braucht = ["bewegung"]`, Ben 25.11.2026).
+Startbedingung eines Laufs (`braucht = ["bewegung"]`) und ein festes Ziel neben dem Ziel aus
+einem Test (`ziel` neben `ziel_aus`, beides Ben 25.11.2026).
 Geschrieben wird
 immer die **kleinste Version, die der Inhalt braucht** (`core.pakete.noetige_version`, das
 Höchste zählt): eine Datei ohne Kurse und Pläne weiter als Version 1, ohne Pläne als
@@ -724,6 +725,7 @@ davon nutzt, bleibt bei seiner Formatversion.
 | `test` | `fragen[]` | Fragen am Lauf wie `fragen[]` im Ablauf eines Plans (`id`, `text`, `art` = `skala` (mit `min`, `max`) · `ja_nein` · `auswahl` (mit `antworten`, `mehrfach`)), dazu `wann = "vorher"` (sonst im Ergebnis) und `ziele = { schwer = 30 }` — die Antwort schlägt dieses Ziel im Feld des Tests vor (nur `ja_nein` und `auswahl` ohne `mehrfach`; die Person bestätigt oder ändert) |
 | `frage` | `frage = { art = "ja_nein" }` | die Frage in einer Art des Ablaufs (`skala` mit `min`/`max`, `ja_nein`, `auswahl` mit `antworten`, `mehrfach`); ihr Wortlaut ist `titel`, ihre Antwort wird gespeichert. Ohne `frage`: die Verständnisfrage mit `antworten[] = {text, richtig, hinweis}` wie bisher |
 | jeder Block | `wenn[]` | der Block gilt nur, wenn **alle** Bedingungen erfüllt sind: `{ frage = "<name>", antworten = ["leicht", "mittel"] }` (eine davon genügt) oder `{ frage = "<name>", ab = 7, bis = 10 }` (Skala). `<name>`: die `id` einer `frage` im Kapitel, `<test>.f:<frage>` für eine Frage am Lauf, `<test>.<feld>` für ein Feld des Laufs (nur mit `ab`/`bis`) |
+| `plan_uebung`, `plan_einstellen` | `ziel` neben `ziel_aus` | **Formatversion 9** (Ben, 25.11.2026): Das Ziel kommt aus dem Test, und was in `ziel` steht — etwa `ziel = { variant = "auf Knien" }` — wird fest dazugesetzt (eine Zeile der Sammelkarte). Bis Formatversion 8 fiel `ziel` neben `ziel_aus` weg |
 | `plan_uebung`, `plan_einstellen` | `ziel_aus = "<test>.<feld>"` | das Ziel kommt aus diesem Feld des Laufs und steht in diesem Feld |
 | Baustein | `art = "plan_entfernen"`, `an` | die Planübung dieser Marke geht aus dem Plan |
 | Baustein | `art = "plan_tauschen"`, `an`, `uebung` | die Planübung dieser Marke wird die Übung `uebung`; Ziel und Parameter beginnen neu |

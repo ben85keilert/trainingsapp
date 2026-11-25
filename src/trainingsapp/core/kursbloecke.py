@@ -628,7 +628,7 @@ class Block:
                 d["ziel_aus"] = self.ziel_aus
                 if self.faktor != 1.0:
                     d["faktor"] = self.faktor
-            elif self.ziel:
+            if self.ziel:
                 d["ziel"] = dict(self.ziel)
             if self.felder is not None:
                 d["felder"] = list(self.felder)
@@ -824,7 +824,9 @@ class Block:
         if art in (PLAN_UEBUNG, PLAN_EINSTELLEN):
             block.ziel_aus = _marke(roh.get("ziel_aus"))
             ziel = roh.get("ziel")
-            if isinstance(ziel, Mapping) and not block.ziel_aus:
+            # neben ``ziel_aus`` steht, was der Baustein fest dazusetzt — etwa die Variante
+            # (Ben, 25.11.2026; Formatversion 9)
+            if isinstance(ziel, Mapping):
                 block.ziel = {str(k): v for k, v in ziel.items()}
             block.faktor = _zahl(roh.get("faktor"), 1.0, 0.1, 3.0)
             felder = roh.get("felder")

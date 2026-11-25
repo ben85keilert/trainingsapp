@@ -66,6 +66,7 @@ from trainingsapp.core.result_spec import FieldSpec, ResultSpec
 from trainingsapp.core.standards import ziel_bereinigen
 from trainingsapp.core.takt import AUS, Takt
 from trainingsapp.core.timer import TimerProfil, dauer_text
+from trainingsapp.core.varianten import VARIANTE
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis
@@ -257,6 +258,8 @@ def baustein_blatt(
         "parameter": KEIN if block.felder is None else WAEHLEN if block.felder else ABHAKEN,
         "kante": kante_von(block),
         "form": None,
+        #: die Ziel-Variante neben einem Ziel aus dem Test (`Kurssicht.variante_spec`)
+        "form_variante": None,
         #: Der Timer: `KEIN`, ``t:<id>`` (aus der Bibliothek) oder `EIGEN`; ob der Editor des
         #: eigenen aufgeklappt ist; der Editor selbst, solange er steht
         "timer": KEIN if not block.timer else f"t:{bekannt.id}" if bekannt is not None else EIGEN,
@@ -285,6 +288,12 @@ def baustein_blatt(
         form = zustand["form"]
         if form is not None and zustand["ziel"] == FEST:
             entwurf.ziel = ziel_bereinigen(form.werte(), form.spec)
+        neben = zustand["form_variante"]
+        if neben is not None and zustand["ziel"] == TEST:
+            gewaehlt = ziel_bereinigen(neben.werte(), neben.spec).get(VARIANTE)
+            entwurf.ziel.pop(VARIANTE, None)
+            if gewaehlt:
+                entwurf.ziel[VARIANTE] = gewaehlt
 
     def fertig() -> Block:
         """Der Baustein, wie er übernommen würde — nur, was zu seinen Angaben gehört."""
@@ -299,7 +308,10 @@ def baustein_blatt(
         ohne_uebung = b.art == PLAN_EINSTELLEN and not b.an
         if zustand["ziel"] != TEST or ohne_uebung:
             b.ziel_aus, b.faktor = "", 1.0
-        if zustand["ziel"] != FEST or ohne_uebung:
+        if zustand["ziel"] == TEST and not ohne_uebung:
+            # neben dem Ziel aus dem Test bleibt nur die Variante fest
+            b.ziel = {k: w for k, w in b.ziel.items() if k == VARIANTE}
+        elif zustand["ziel"] != FEST or ohne_uebung:
             b.ziel = {}
         if ohne_uebung or zustand["parameter"] == KEIN:
             b.felder = None
@@ -491,6 +503,24 @@ def baustein_blatt(
                     "nimmt, und kann es ändern — ganz, Anteil oder von Hand."
                 )
             )
+            # Die Variante lässt sich daneben fest setzen (Ben, 25.11.2026)
+            neben_spec = jetzt().variante_spec(ziel_uebungen())
+            if neben_spec is not None:
+                neben = SpecForm(
+                    neben_spec,
+                    {VARIANTE: entwurf.ziel.get(VARIANTE)},
+                    page=page,
+                    vorgaben=False,
+                )
+                _melden(neben.control, vorschau_neu)
+                zustand["form_variante"] = neben
+                teile.append(
+                    ft.Container(
+                        padding=ft.Padding.only(left=12),
+                        content=neben.control,
+                        data="baustein_zielvariante",
+                    )
+                )
         if zustand["ziel"] == FEST:
             spec = jetzt().ziel_spec(ziel_uebungen())
             if spec.fields:
@@ -1042,7 +1072,7 @@ def baustein_blatt(
 
     def bauen() -> list[ft.Control]:
         # Zielmaske und Timer-Editor gibt es nur, wenn ihr Teil sie neu anlegt
-        zustand["form"] = zustand["editor"] = None
+        zustand["form"] = zustand["form_variante"] = zustand["editor"] = None
         if entwurf.art == PLAN_UEBUNG:
             teile = uebung_form()
         elif entwurf.art == PLAN_EINSTELLEN:

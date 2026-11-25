@@ -462,7 +462,8 @@ Abschnitt.
 `plan_entfernen` (eine Planübung geht aus dem Plan; ihr Baustein bringt sie danach nicht
 wieder) und `plan_tauschen` (die Planübung wird eine andere Übung, Ziel und Parameter beginnen
 neu). **Variante setzen** ist kein eigener Baustein: Sie geht über „Einstellen → Ziel“, wenn
-die Übung ein Feld Variante hat — nicht nachgestellt.
+die Übung ein Feld Variante hat — nicht nachgestellt. **Überholt (25.11.2026): Es ging nicht;
+jetzt geht es — §13.3.**
 
 ### 12.6 Paket, Recht, Prüfung
 
@@ -521,9 +522,12 @@ berühren (`git log 09ce162..` leer).
   als Vorgabe, die Skala bei einer Anstrengung als Vorgabe. Was der Sensor zählte, geht vor.
   Die Skala steht auch bei einer Übung ohne eigenes Skalenfeld da — das Ergebnis fragt sie
   ebenso.
-- **Nicht übernommen:** der Tempo-Regler des Takts (den Takt gibt der Kurs vor; seine Runden
-  sind der Vorschlag für die Wiederholungen) und „Nächster“ (ein Abschnitt lässt sich im Lauf
-  des Kurses nicht überspringen).
+- **Tempo-Regler** (Ben, 25.11.2026: „sollte immer dabei sein“): wie im Fokus der Übung,
+  solange ein Takt läuft. Die Runden des Takts — der Vorschlag für die Wiederholungen —
+  rechnen mit seinem Faktor am Ende des Laufs (`core.kurstest.takt_runden(…, tempo)`); wurde
+  er mittendrin verstellt, ist die Zahl genähert, sie bleibt ein Vorschlag.
+- **Nicht übernommen:** „Nächster“ (ein Abschnitt lässt sich im Lauf des Kurses nicht
+  überspringen).
 - Das Ergebnis und die Seite „bereit“ sind unverändert.
 
 ### 13.2 Bewegungssensor als Startbedingung
@@ -539,18 +543,39 @@ berühren (`git log 09ce162..` leer).
   anderswo versucht wird.
 - **Nur Startbedingung:** Der Lauf startet das Zählen nicht von selbst; zählt bei der Übung
   schon der Sensor, tritt die Uhr dem bei, wie bisher.
+- **Vermerk (Ben, 25.11.2026): „Bewegungssensor muss ich erst testen, wie es funktioniert.“**
+  Die Startbedingung ist gebaut, aber von Ben am Gerät noch nicht erprobt; ob sie so bleibt
+  und ob der Lauf das Zählen selbst starten soll, entscheidet sich nach seinem Test (T156 i).
 - **Editor:** zweiter Haken „Sensor nötig: Bewegungssensor“ im Dialog „Übung machen“.
 - **Paket: Formatversion 9** (`core.pakete.nutzt_bewegungssensor`) nur für Pakete mit
   `braucht = ["bewegung"]` — eine App mit Version 8 ließe die Bedingung still fallen, darum
   lehnt sie die Datei ab.
 
-### 13.3 Prüfung
+### 13.3 Variante am Baustein
+
+Ben, 25.11.2026: „Variante als Parameter muss mit gesetzt werden können.“ (§12.5 sagte „geht
+über Einstellen → Ziel, nicht nachgestellt“ — nachgestellt: Es ging nicht, `Kurssicht.ziel_spec`
+ließ die Variante immer weg.)
+
+- **Festes Ziel:** Bei genau einer Übung gehört die Variante zu den Zielfeldern der Bausteine
+  „Übung in den Plan“ und „Einstellen“. Bei einer Auswahl aus mehreren Übungen nicht — jede hat
+  ihre eigenen Varianten.
+- **Neben dem Ziel aus einem Test:** Unter „Ziel aus dem Test“ steht die „Ziel-Variante“
+  (`Kurssicht.variante_spec`). Der Baustein trägt dann `ziel_aus` **und** `ziel = {variant = …}`;
+  die Sammelkarte zeigt eine Zeile („Ziel für Käfer: auf Knien · 24 Wiederholungen“), ein Tipp
+  setzt beides (`core.kursplan._ziel_aus_test`).
+- **Paket:** `ziel` neben `ziel_aus` wird jetzt gelesen und geschrieben (bis 0.3.101 fiel
+  `ziel` dann weg) — **Formatversion 9** (`core.pakete.nutzt_ziel_neben_test`). Im Paket darf
+  dort jedes Zielfeld stehen, der Editor bietet nur die Variante an.
+
+### 13.4 Prüfung
 
 - Tests: `tests/test_ui_kurs_test.py` (Fokus-Bildschirm mit Steuerzeile, „Eintragen“ im Lauf
   steht im Ergebnis und ergibt einen Eintrag, ⏸, Bewegungssensor mit Hinweis),
   `tests/test_ui_kurs_fragen.py` (Editor), Doctests in `core/pakete.py`.
 - Web-Fotos (412 × 860, 25.11.2026): Seite „bereit“ mit fehlendem Bewegungssensor · Lauf mit
   Vorgabe Zeit als Fokus-Bildschirm (Kopf, Steuerzeile, Vorgabe, HF-Kachel, Kurven,
-  „Eintragen“). **Nicht am Foto geprüft:** Lauf mit Timer (Balken, Sätze), mit Takt, mit
+  „Eintragen“); der Abstand unter der Steuerzeile danach behoben, nicht neu fotografiert.
+  **Nicht am Foto geprüft:** die Ziel-Variante im Baustein-Blatt, der Tempo-Regler im Lauf, Lauf mit Timer (Balken, Sätze), mit Takt, mit
   Begleitvideo, der Hinweis bei verbundenem Gerät ohne Bewegungssensor (im Browser gibt es
   kein Bluetooth) — und nichts davon am Gerät (T156).

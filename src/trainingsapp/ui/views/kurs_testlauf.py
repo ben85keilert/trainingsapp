@@ -474,7 +474,9 @@ def anhalten(page: Any, state: Any, *, vorher: bool = False) -> bool:
     zahl = gezaehlt[0] if gezaehlt is not None else None
     stand.durch = durch
     stand.vorher = kurstest.verfehlt(v, vorher=vorher, durch=durch, wdh=zahl, gelaufen_s=gelaufen_s)
-    runden = kurstest.takt_runden(stand.profil, stand.takt, gelaufen_s)
+    # der Tempo-Regler des Fokus gilt auch hier — die Runden folgen seinem Faktor
+    tempo = float(getattr(lauf, "tempo_faktor", 1.0) or 1.0)
+    runden = kurstest.takt_runden(stand.profil, stand.takt, gelaufen_s, tempo)
     stand.wdh, stand.sekunden, stand.skala = kurstest.am_ende(
         v,
         stand.felder,
@@ -1272,10 +1274,10 @@ def kurs_test_view(
 
         fokus.halt_knopf.on_click = pause
         teile = fokus.bauen(e, lauf)
-        # Was `Fokus.bauen` hinter dem Kopf liefert: Hinweise „bei …“, Tempo-Regler, die Reihe
-        # Video · Bewegung · Herzfrequenz, Kurven, die Zählzeile des Sensors (mit ±1). Der
-        # Tempo-Regler bleibt weg: Den Takt gibt der Kurs vor, seine Runden sind der Vorschlag
-        ebenen = [t for t in teile[FOKUS_OBEN:] if t is not fokus.tempo_platz]
+        # Was `Fokus.bauen` hinter dem Kopf liefert: Hinweise „bei …“, der Tempo-Regler (Ben,
+        # 25.11.2026: „sollte immer dabei sein“ — die Runden des Takts folgen ihm, `anhalten`),
+        # die Reihe Video · Bewegung · Herzfrequenz, Kurven, die Zählzeile des Sensors (mit ±1)
+        ebenen = teile[FOKUS_OBEN:]
         uhr_zeigen()
         zaehlen_zeigen()
         knopf = kurstest.knopf_text(v, timer=timer)

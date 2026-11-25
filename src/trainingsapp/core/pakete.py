@@ -1717,6 +1717,22 @@ def nutzt_bewegungssensor(kurs: Kurs) -> bool:
     return any("bewegung" in b.braucht for kap in kurs.kapitel for b in kap.bloecke)
 
 
+def nutzt_ziel_neben_test(kurs: Kurs) -> bool:
+    """Setzt ein Baustein neben dem Ziel aus einem Test (``ziel_aus``) auch ein **festes**
+    Ziel (``ziel`` — etwa die Variante; Ben, 25.11.2026, Formatversion 9)? Eine App mit
+    Formatversion 8 nähme nur das Ziel aus dem Test — sie lehnt die Datei darum ab.
+
+    >>> def kurs(**mehr):
+    ...     block = Block("plan_uebung", id="b", uebung="u", **mehr)
+    ...     return Kurs(name="K", kapitel=[Kapitel(titel="A", bloecke=[block])])
+    >>> nutzt_ziel_neben_test(kurs(ziel_aus="t")), nutzt_ziel_neben_test(kurs(ziel={"reps": 9}))
+    (False, False)
+    >>> nutzt_ziel_neben_test(kurs(ziel_aus="t", ziel={"variant": "auf Knien"}))
+    True
+    """
+    return any(bool(b.ziel_aus and b.ziel) for kap in kurs.kapitel for b in kap.bloecke)
+
+
 def nutzt_antworten(kurse: Iterable[Kurs], plaene: Iterable[PaketPlan]) -> bool:
     """Steht in einem Plan des Pakets — oder in einer Plan-Vorlage eines Kurses (Kapitelplan,
     Vorlage des Kursplans) — ein Ablauf mit einer Frage, die Antworten zum Antippen hat
@@ -1742,7 +1758,8 @@ def noetige_version(
     mit Kursplan oder Bausteinen (`nutzt_kursplan`) · 7 ein Ablauf mit einer Frage, die
     Antworten zum Antippen hat (`nutzt_antworten`) · 8 „Übung machen“ im Kurs: Medien,
     Fragen, Sensor am Lauf, Bedingungen, neue Bausteine (`nutzt_uebung_machen`) · 9 der
-    Bewegungssensor als Startbedingung eines Laufs (`nutzt_bewegungssensor`). Das Höchste
+    Bewegungssensor als Startbedingung eines Laufs (`nutzt_bewegungssensor`) oder ein festes
+    Ziel neben dem Ziel aus einem Test (`nutzt_ziel_neben_test`). Das Höchste
     zählt.
 
     Version 6 ist mit Absicht eine Schranke: Eine App, die den Kursplan nicht kennt, zeigte
@@ -1768,7 +1785,7 @@ def noetige_version(
     True
     """
     kurse, plaene = list(kurse), list(plaene)
-    if any(nutzt_bewegungssensor(k) for k in kurse):
+    if any(nutzt_bewegungssensor(k) or nutzt_ziel_neben_test(k) for k in kurse):
         return 9
     if any(nutzt_uebung_machen(k) for k in kurse):
         return 8
@@ -1916,6 +1933,7 @@ __all__ = [
     "nutzt_antworten",
     "nutzt_bewegungssensor",
     "nutzt_kursplan",
+    "nutzt_ziel_neben_test",
     "paket_bauen",
     "paket_id",
     "paket_json",

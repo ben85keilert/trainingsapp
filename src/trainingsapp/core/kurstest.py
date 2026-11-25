@@ -475,13 +475,19 @@ def gezaehlte_zeit(profil: TimerProfil, gelaufen_s: float) -> float:
     return summe
 
 
-def takt_runden(profil: TimerProfil, takt: Takt | None, gelaufen_s: float) -> int:
+def takt_runden(
+    profil: TimerProfil, takt: Takt | None, gelaufen_s: float, tempo: float = 1.0
+) -> int:
     """Wie viele **volle Runden** der Takt in ``gelaufen_s`` Sekunden Laufzeit lief — aus der
     Uhr gerechnet, nie mitgezählt (`core.takt.lage`): je zählendem Abschnitt des Timers von
     vorn (dort beginnt der Takt neu; ein Abschnitt mit eigenem Takt nimmt seinen), bei der
     Stoppuhr über die ganze Laufzeit. Eine Pause übt niemand — dort läuft der Takt, aber seine
     Runden zählen nicht in den Vorschlag. Das Ergebnis ist ein **Vorschlag** für die
     Wiederholungen, keine Messung (`takt_frage`).
+
+    ``tempo``: der Faktor des Tempo-Reglers am Ende des Laufs (`TimerLauf.tempo_faktor`; 2,0 =
+    doppelte Dauern). Wurde er mitten im Lauf verstellt, ist die Zahl nur genähert — sie
+    bleibt ein Vorschlag.
 
     >>> from trainingsapp.core.takt import VORLAGEN
     >>> from trainingsapp.core.timer import Abschnitt
@@ -495,6 +501,8 @@ def takt_runden(profil: TimerProfil, takt: Takt | None, gelaufen_s: float) -> in
     >>> from dataclasses import replace
     >>> takt_runden(stoppuhr(), replace(k, runden=10), 92.0)  # der Takt hört nach 10 auf
     10
+    >>> takt_runden(stoppuhr(), k, 92.0, tempo=2.0)  # halb so schnell: 10 s je Runde
+    9
     >>> schnell = TimerProfil(abschnitte=[Abschnitt("Los", 20, takt=VORLAGEN["metronom_1"])])
     >>> takt_runden(schnell, k, 20.0)  # der Abschnitt hat seinen eigenen Takt
     20
@@ -506,7 +514,7 @@ def takt_runden(profil: TimerProfil, takt: Takt | None, gelaufen_s: float) -> in
         gilt = takt_waehlen(None, a.takt, takt)
         if gilt is None or not a.zaehlt or im_abschnitt <= 0:
             continue
-        dauer = gilt.rundendauer_s
+        dauer = gilt.rundendauer_s * (tempo if tempo > 0 else 1.0)
         if dauer <= 0:
             continue
         voll = int((im_abschnitt + 1e-6) // dauer)

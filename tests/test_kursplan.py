@@ -1110,9 +1110,11 @@ def test_bausteine_lesen_paketschluessel_und_unbrauchbares() -> None:
         )
         == []
     )
-    # ``ziel`` und ``ziel_aus`` zugleich: der Test gilt
+    # ``ziel`` und ``ziel_aus`` zugleich (seit 25.11.2026, Formatversion 9): Das Ziel kommt aus
+    # dem Test, was sonst in ``ziel`` steht — etwa die Variante — wird fest dazugesetzt
     (b,) = bloecke_lesen([{"art": "plan_einstellen", "an": "a", "ziel": {"x": 1}, "ziel_aus": "t"}])
-    assert (b.ziel, b.ziel_aus) == ({}, "t")
+    assert (b.ziel, b.ziel_aus) == ({"x": 1}, "t")
+    assert b.to_dict()["ziel"] == {"x": 1} and b.to_dict()["ziel_aus"] == "t"
 
 
 def test_bausteine_aendern_kurse_ohne_kursplan_nicht() -> None:
@@ -1128,3 +1130,25 @@ def test_bausteine_aendern_kurse_ohne_kursplan_nicht() -> None:
     }
     assert not braucht_eingabe([Block(PLAN_UEBUNG, id="a", uebung="planke")])
     assert braucht_eingabe(KAPITEL_2)
+
+
+def test_variante_neben_dem_ziel_aus_dem_test() -> None:
+    """Ben, 25.11.2026: „Variante als Parameter muss mit gesetzt werden können“ — ein Baustein
+    mit ``ziel_aus`` setzt daneben, was in ``ziel`` fest steht; eine Zeile, ein Tipp."""
+    plan, stand = nach_kapitel_1()
+    bloecke = [
+        Block(TEST, id="test", uebung="kaefer", feld="reps"),
+        Block(
+            PLAN_UEBUNG,
+            id="dazu",
+            uebung="kaefer",
+            hinter="a",
+            ziel_aus="test",
+            ziel={"variant": "auf Knien"},
+        ),
+    ]
+    zeilen = aenderungen(plan, bloecke, WERTE, {}, stand, NAMEN)
+    ziel = next(z for z in zeilen if z.id.endswith("#ziel"))
+    assert "auf Knien" in ziel.titel and ziel.titel.endswith("30 Wiederholungen")
+    neu, _ = anwenden(plan, bloecke, WERTE, {}, alle_ids(zeilen), (), stand, NAMEN)
+    assert neu.items[1].target == {"variant": "auf Knien", "reps": [30]}

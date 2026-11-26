@@ -60,11 +60,18 @@ class KursplanKarte:
 
 
 def kursplan_karte(
-    zeilen: Sequence[Aenderung], *, planname: str, uebernehmen: Uebernehmen
+    zeilen: Sequence[Aenderung],
+    *,
+    planname: str,
+    uebernehmen: Uebernehmen,
+    ausprobieren: Callable[[str], Callable[..., Any] | None] | None = None,
 ) -> KursplanKarte:
     """Die Sammelkarte zu ``zeilen``. ``planname``: wie der Kursplan heißt (Unterzeile);
     ``uebernehmen`` bekommt beim Tipp auf „Übernehmen“ die IDs der gewählten Zeilen, die der
-    Abweichungen mit „übernehmen“ und die der Abweichungen mit „lassen“."""
+    Abweichungen mit „übernehmen“ und die der Abweichungen mit „lassen“.
+    ``ausprobieren(lauf)``: der Handler, der zum Lauf mit dieser Block-ID führt — eine offene
+    Zeile, der die Antwort aus einem Lauf fehlt, bekommt damit den Knopf „Ausprobieren“
+    (Skizze C3, Ben 26.11.2026); ``None``: Dorthin führt hier kein Weg."""
     spalte = ft.Column(spacing=10, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
     huelle = ft.Container(data="kursplan_karte", content=karte(spalte))
     #: der Stand der Karte — mit jedem `zeigen` neu
@@ -157,6 +164,7 @@ def kursplan_karte(
         )
 
     def zeile_hinweis(z: Aenderung, symbol: ft.IconData, oben: float = 1.0) -> ft.Control:
+        weg = ausprobieren(z.lauf) if ausprobieren is not None and z.lauf else None
         return ft.Row(
             spacing=0,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -169,6 +177,18 @@ def kursplan_karte(
                     content=ft.Icon(symbol, size=22, opacity=0.8 * oben),
                 ),
                 ft.Container(expand=True, content=texte(z, oben)),
+                *(
+                    [
+                        ft.TextButton(
+                            "Ausprobieren",
+                            icon=ft.Icons.PLAY_ARROW,
+                            on_click=weg,
+                            data=("kursplan_ausprobieren", z.id),
+                        )
+                    ]
+                    if weg is not None
+                    else []
+                ),
             ],
         )
 

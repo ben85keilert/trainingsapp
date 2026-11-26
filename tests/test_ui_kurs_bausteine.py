@@ -479,7 +479,8 @@ def test_bausteine_ohne_kursplan_nur_mit_hinweis(page, state) -> None:
 
 def test_kurs_ohne_kursplan_wie_vorher(page, state) -> None:
     """Ohne Kursplan bleibt das Kapitel, wie es war: die fünf Blockarten, die Pläne des
-    Kapitels, die Bedingung — und Test oder Auswahl brauchen weiter einen Kapitelplan."""
+    Kapitels, die Bedingung. Test oder Auswahl brauchen seit dem 26.11.2026 keinen
+    Kapitelplan mehr."""
     u = _uebungen(state)
     kurs = editor.kurs_anlegen(state)
     ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
@@ -504,7 +505,9 @@ def test_kurs_ohne_kursplan_wie_vorher(page, state) -> None:
     felder["Übung"].on_select()
     _daten(dialog, "block_uebernehmen").on_click()
     _speichern(ansicht)
-    assert "Test und Auswahl brauchen einen Plan im Kapitel." in _texte(ansicht)
+    # ohne Kapitelplan geht es auch (Ben, 26.11.2026): Der Lauf ist dann freiwillig
+    assert "Test und Auswahl brauchen einen Plan im Kapitel." not in _texte(ansicht)
+    assert [b.art for b in state.kurse.laden(kurs.id).kapitel[0].bloecke] == [TEST]
 
 
 def test_im_kursplan_kurs_brauchen_test_und_tage_keinen_kapitelplan(page, state) -> None:

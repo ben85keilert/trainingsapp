@@ -514,8 +514,12 @@ class AppState:
     medium_dazu: dict[str, Any] = field(default_factory=dict)
     #: Der Block „Medium“ eines Kapitels, dessen Dialog für Kamera, Rekorder oder Fotoauswahl
     #: zuging (Ben, 23.11.2026): Kapitel-ID → (Block, wie er im Dialog stand; neu?) — das
-    #: Formular des Kapitels öffnet ihn beim Zurückkommen wieder (`views/kurs_bearbeiten.py`)
+    #: Formular des Kapitels öffnet ihn beim Zurückkommen wieder (`views/kurs_bearbeiten.py`).
+    #: Er bleibt liegen, bis der Dialog mit „Übernehmen“ oder „Abbrechen“ endet
     block_entwurf: dict[str, Any] = field(default_factory=dict)
+    #: … und der Dialog, in dem er gerade wieder offen steht: Kapitel-ID → (Dialog, Merker
+    #: „bleibt liegen“) — entsteht die Seite neu, geht er zu, ohne den Entwurf zu verwerfen
+    block_dialog: dict[str, Any] = field(default_factory=dict)
     #: Die Uhr, die für das Material angehalten ist, während eine Paketdatei offen ist — sie
     #: läuft weiter, wenn man aus der Ansicht zurückgeht (`components/material.py`)
     material_lauf: Any = None

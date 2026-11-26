@@ -95,6 +95,7 @@ from trainingsapp.core.kursbloecke import (
     BRAUCHT_BEWEGUNG,
     BRAUCHT_MESSUNG,
     HAND,
+    MEDIUM,
     MENGE,
     SKALA,
     TEST,
@@ -105,6 +106,7 @@ from trainingsapp.core.kursbloecke import (
     Vorgabe,
     anteil_vorgabe,
     antwort_name,
+    folgen_im_ergebnis,
     ist_vorgabe,
     planwert,
     wert_im_test,
@@ -813,7 +815,9 @@ def _kopf(
     Anleitung, wie der Test gemacht wird („auf Knien · beide · 10 kg“, Skizze F3)."""
     klein, gross = kurstest.kopf(v, timer, f.skala_name)
     if not gebraucht and klein.casefold() == "test":
-        klein = "Übung"  # „nur ausprobieren“: derselbe Lauf, kein Test (23.11.2026)
+        # „nur ausprobieren“: derselbe Lauf, kein Test (23.11.2026) — auch die Aufforderung
+        # fragt dann nicht, was man schafft (26.11.2026)
+        klein, gross = "Übung", "Probier es aus"
     darunter = (
         ft.Text(ausfuehrung, size=15, weight=ft.FontWeight.W_600, data="test_ausfuehrung")
         if ausfuehrung
@@ -1032,7 +1036,8 @@ def kurs_test_view(
             ]
 
         spalte.controls = zeilen()
-        return karte(titel("So machst du den Test"), spalte, abstand=8)
+        wie = "So machst du den Test" if gebraucht else "So machst du die Übung"
+        return karte(titel(wie), spalte, abstand=8)
 
     def medien_karte(stelle: str, ueberschrift: str) -> list[ft.Control]:
         """Die Medien des Laufs an einer Stelle (vorher · nachher) als Zeilen zum Öffnen —
@@ -1057,31 +1062,66 @@ def kurs_test_view(
                 continue
 
             def geantwortet(antwort: Gegeben, frage_id: str = frage.id) -> None:
+                vorher = [b.id for b, _ in folgen(antworten)]
                 antworten[frage_id] = antwort
-                bei_antwort(frage_id, antwort)
+                if bei_antwort(frage_id, antwort):
+                    return  # hat schon neu gezeichnet
+                if not wann_vorher and [b.id for b, _ in folgen(antworten)] != vorher:
+                    neu_zeichnen()  # ein Text oder Medium „bei der Antwort“ kommt oder geht
 
             karten.append(
                 frage_karte(frage, antworten.get(frage.id), geantwortet, kennung=f"lauf:{frage.id}")
             )
         return karten
 
-    def bei_antwort(frage_id: str, antwort: Gegeben) -> None:
+    def folgen(antworten: dict[str, Gegeben]) -> list[tuple[Block, str]]:
+        """Texte und Medien des Kapitels, die bei den gerade gewählten Antworten dieses Laufs
+        gelten (`core.kursbloecke.folgen_im_ergebnis`) — nur im Ergebnis."""
+        if stand is None or stand.phase != ERGEBNIS:
+            return []
+        gespeichert = state.kurse.antworten(kurs.id, state.profil.id)
+        return folgen_im_ergebnis(block, kapitel.bloecke, antworten, gespeichert)
+
+    def folgen_karten(antworten: dict[str, Gegeben]) -> list[ft.Control]:
+        """„Bei der Antwort …“ (Skizze B4, Ben 26.11.2026): Was der Kurs an eine Antwort
+        dieses Laufs hängt, steht gleich im Ergebnis — mit dem Grund als Überschrift, ohne
+        Wertung. Im Kapitel steht es danach weiter. Nichts öffnet sich von selbst."""
+        karten: list[ft.Control] = []
+        for b, grund in folgen(antworten):
+            if b.art == MEDIUM and b.medium is not None:
+                inhalt: list[ft.Control] = [medium_zeile(page, state, b.medium)]
+            else:
+                inhalt = [
+                    *([ft.Text(b.titel, size=15, weight=ft.FontWeight.W_600)] if b.titel else []),
+                    *([ft.Markdown(b.text)] if b.text else []),
+                ]
+            if inhalt:
+                karten.append(
+                    ft.Container(
+                        data=("test_folge", b.id),
+                        content=karte(titel(grund[:1].upper() + grund[1:]), *inhalt, abstand=4),
+                    )
+                )
+        return karten
+
+    def bei_antwort(frage_id: str, antwort: Gegeben) -> bool:
         """Eine Antwort **schlägt ein festes Ziel vor** (`Block.ziele`; Ben, 23.11.2026: „eine
         Antwort soll ein festes Ziel setzen können, aber manuell“): Sie wählt in „Wert für
         den Plan“ nur vor — „Von Hand“ mit dieser Zahl; die Person sieht sie und kann sie
         ändern. Am Plan ändert sich damit nichts."""
         if stand is None or stand.phase != ERGEBNIS or not gebraucht:
-            return
+            return False
         feste = block.ziele.get(frage_id, {})
         ziel = next((feste[a] for a in antwort.gewaehlt if a in feste), None)
         if ziel is None:
-            return
+            return False
         stand.planwahl = planwert(HAND, ziel, hand=ziel)
         stand.ziel_grund = (
             f"Vorgewählt, weil du „{antwort.gewaehlt[0]}“ geantwortet hast — so steht es im "
             "Kurs. Du kannst die Zahl ändern."
         )
         neu_zeichnen()
+        return True
 
     def bereit() -> ft.Control:
         skala = _skala_karte(v, f)
@@ -1670,6 +1710,7 @@ def kurs_test_view(
                 # Nachher (Ben, 23.11.2026): die Fragen am Lauf, dann der Wert für den Plan —
                 # eine Antwort kann dort ein Ziel vorwählen —, dann die Medien „nachher“
                 *fragen_karten(False, s.antworten),
+                *folgen_karten(s.antworten),
                 *([plan_karte.control] if plan_karte is not None else []),
                 *(
                     [ft.Text(s.ziel_grund, size=12, opacity=0.8, data="test_ziel_grund")]

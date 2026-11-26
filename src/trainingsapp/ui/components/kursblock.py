@@ -792,6 +792,8 @@ def kapitel_bloecke(
                     else "Was du wählst, kommt in deinen Kursplan — unten steht, was sich ändert."
                 )
                 if kursplan
+                else "Deine Wahl gilt für die Übung, die du hier ausprobierst."
+                if anlegen is None  # ein Kapitel ohne Plan (26.11.2026)
                 else "Der Plan ist angelegt — ändern kannst du ihn in der Planverwaltung."
                 if angelegt
                 else "Mit zwei oder mehr stehen sie im Workout als Wege: Dort wählst du jedes "

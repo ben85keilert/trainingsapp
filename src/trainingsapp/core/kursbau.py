@@ -1163,6 +1163,25 @@ def _gemeinsame(je_uebung: Sequence[Sequence[FieldSpec]]) -> tuple[list[FieldSpe
     return gemeinsam or list(alle.values()), bool(gemeinsam)
 
 
+def wenn_was(w: Wenn) -> str:
+    """Bei welcher Antwort eine Bedingung gilt — „leicht oder mittel“, „ab 7“, „3–5“.
+
+    >>> wenn_was(Wenn("q", ("leicht", "mittel"))), wenn_was(Wenn("q", ab=7))
+    ('leicht oder mittel', 'ab 7')
+    >>> wenn_was(Wenn("q", ab=3, bis=5)), wenn_was(Wenn("q", bis=4)), wenn_was(Wenn("q"))
+    ('3–5', 'bis 4', 'jede Antwort')
+    """
+    if w.antworten:
+        return " oder ".join(w.antworten)
+    if w.ab is not None and w.bis is not None:
+        return f"{w.ab:g}–{w.bis:g}"
+    if w.ab is not None:
+        return f"ab {w.ab:g}"
+    if w.bis is not None:
+        return f"bis {w.bis:g}"
+    return "jede Antwort"
+
+
 @dataclass(slots=True)
 class Kurssicht:
     """Der Kurs, wie er im Formular eines Kapitels gerade steht: die gespeicherten Kapitel,
@@ -1906,16 +1925,45 @@ class Kurssicht:
         teile: list[str] = []
         for w in wenn:
             frage = namen.get(w.frage, "eine Frage, die es hier nicht gibt")
-            if w.antworten:
-                was = " oder ".join(w.antworten)
-            elif w.ab is not None and w.bis is not None:
-                was = f"{w.ab:g}–{w.bis:g}"
-            elif w.ab is not None:
-                was = f"ab {w.ab:g}"
-            else:
-                was = f"bis {w.bis:g}"
-            teile.append(f"„{frage}“ = {was}")
+            teile.append(f"„{frage}“ = {wenn_was(w)}")
         return "nur wenn " + " und ".join(teile) if teile else ""
+
+    def folgen_der_frage(self, name: str) -> list[tuple[str, Block]]:
+        """Was an den Antworten auf die Frage ``name`` hängt — im ganzen Kurs, in der Folge
+        der Kapitel: bei welcher Antwort (`wenn_was`) und welcher Block oder Baustein. Das
+        steht im Editor unter der Frage (Skizze A3, Ben 26.11.2026).
+
+        >>> from trainingsapp.core.kursbloecke import TEXT
+        >>> from trainingsapp.core.kurse import Kapitel
+        >>> q = Block(FRAGE, id="q", titel="Wie war das?")
+        >>> a = Block(TEXT, id="a", wenn=[Wenn("q", ("leicht", "mittel"))])
+        >>> b = Block(PLAN_UEBUNG, id="b", uebung="u", wenn=[Wenn("x"), Wenn("q", ab=7)])
+        >>> kurs = Kurs(kapitel=[Kapitel(id="k")])
+        >>> s = Kurssicht(kurs, "k", [q, a, b, Block(TEXT, id="c")], {})
+        >>> [(was, x.id) for was, x in s.folgen_der_frage("q")]
+        [('leicht oder mittel', 'a'), ('ab 7', 'b')]
+        """
+        return [(wenn_was(w), b) for b in self.alle() for w in b.wenn if w.frage == name]
+
+    def folgen_zahl(self, block: Block) -> int:
+        """Wie viele Blöcke und Bausteine an den Antworten dieses Blocks hängen — an der
+        Frage im Kapitel oder an den Fragen eines Laufs.
+
+        >>> from trainingsapp.core.kursbloecke import TEXT
+        >>> from trainingsapp.core.kurse import Kapitel
+        >>> lauf = Block(TEST, id="t", uebung="u", fragen=[ab.Frage("q", "Wie?")])
+        >>> folge = Block(TEXT, id="a", wenn=[Wenn("t.f:q", ("leicht",))])
+        >>> s = Kurssicht(Kurs(kapitel=[Kapitel(id="k")]), "k", [lauf, folge], {})
+        >>> s.folgen_zahl(lauf), s.folgen_zahl(folge)
+        (1, 0)
+        """
+        if block.art == FRAGE and block.frage is not None:
+            namen = [block.id]
+        elif block.art == TEST:
+            namen = [antwort_name(block.id, f.id) for f in block.fragen]
+        else:
+            return 0
+        return sum(len(self.folgen_der_frage(name)) for name in namen)
 
     def folgen_der_antwort(self, name: str, antwort: str) -> list[Block]:
         """Die Blöcke, die bei dieser Antwort gelten — was im Editor unter ihr steht."""
@@ -2415,6 +2463,7 @@ __all__ = [
     "vergebene_ids",
     "verweise",
     "vorgabe_wahl",
+    "wenn_was",
     "zielfeld",
     "zusatz_des_tests",
 ]

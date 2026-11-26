@@ -265,3 +265,193 @@ def test_editor_frage_mit_folge_und_uebung_machen(page, state) -> None:
     assert lauffrage.text == "Und jetzt?" and test.fragen_vorher == []
     # kein Baustein nimmt den Wert — ein festes Ziel hängt nur an einem Lauf, der gebraucht wird
     assert test.ziele == {}
+
+
+# -- Nachträge nach dem Vergleich mit den Skizzen (Ben, 26.11.2026) ---------------------------
+
+
+def _lauf_kurs(state: AppState, *, kursplan: bool = True) -> tuple[Kurs, dict[str, Exercise]]:
+    """Kapitel mit einem Lauf (Frage nachher), einem Text und einem Medium an seinen Antworten
+    und — mit Kursplan — einem Baustein an „leicht“."""
+    from trainingsapp.core.kursbloecke import MEDIUM, TEST
+    from trainingsapp.core.models import Media
+
+    uebungen = {
+        name: Exercise(name=name, result_spec=ResultSpec(fields=[vorrat_feld("hold")]))
+        for name in ("Seitstütz", "Kniestütz")
+    }
+    for u in uebungen.values():
+        state.uebungen.speichern(u)
+    frage = ab.Frage("w", "Wie war das?", art=ab.F_AUSWAHL, antworten=("leicht", "schwer"))
+    bloecke = [
+        Block(TEST, id="lauf", uebung=uebungen["Seitstütz"].id, wie_uebung=["uhr"], fragen=[frage]),
+        Block(TEXT, id="lob", titel="Gut", text="Weiter so.", wenn=[Wenn("lauf.f:w", ("leicht",))]),
+        Block(
+            MEDIUM,
+            id="hilfe",
+            medium=Media(uri="https://example.org/h", title="Leichter"),
+            wenn=[Wenn("lauf.f:w", ("schwer",))],
+        ),
+    ]
+    if kursplan:
+        bloecke.append(
+            Block(
+                PLAN_UEBUNG,
+                id="uebung-1",
+                uebung=uebungen["Seitstütz"].id,
+                wenn=[Wenn("lauf.f:w", ("leicht",))],
+            )
+        )
+    kurs = Kurs(
+        name="Lauf-Kurs",
+        kursplan=Kursplan("Seite") if kursplan else None,
+        kapitel=[Kapitel(titel="Seitlich", bloecke=bloecke), Kapitel(titel="Ende")],
+    )
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    state.kurse.starten(kurs, state.profil.id)
+    return kurs, uebungen
+
+
+def test_sammelkarte_fuehrt_zum_lauf(page, state) -> None:
+    """Skizze C3: Fehlt die Antwort aus einem Lauf, hat die offene Zeile „Ausprobieren“ — der
+    Tipp führt zu ihm. Fehlt die Antwort auf eine Frage im Kapitel, gibt es den Knopf nicht."""
+    import asyncio
+
+    kurs, uebungen = _lauf_kurs(state)
+    kapitel = kurs.kapitel[0]
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    assert "Dazu fehlt deine Antwort — probier zuerst Seitstütz aus." in _texte(ansicht)
+    asyncio.run(_daten(ansicht, ("kursplan_ausprobieren", "uebung-1")).on_click())
+    assert page.route == f"/kurse/{kurs.id}/{kapitel.id}/test/lauf/{uebungen['Seitstütz'].id}"
+
+    anderer, anderes, _ = _kurs(state)  # dort hängen die Bausteine an einer Frage im Kapitel
+    karte = kapitel_view(page, state, anderer, anderes, ft.UrlLauncher())
+    assert not any(
+        isinstance(getattr(x, "data", None), tuple) and x.data[0] == "kursplan_ausprobieren"
+        for x in _alle(karte)
+    )
+
+
+def test_kurs_ohne_plan_laeuft(page, state) -> None:
+    """Ben, 26.11.2026: „ein Kurs soll auch ohne Plan klappen“ — ein Kapitel ohne Kursplan und
+    ohne Kapitelplan zeigt seinen Lauf als freiwillig, kennt kein „Plan anlegen“ und lässt
+    weitergehen."""
+    kurs, _ = _lauf_kurs(state, kursplan=False)
+    ansicht = kapitel_view(page, state, kurs, kurs.kapitel[0], ft.UrlLauncher())
+    texte = _texte(ansicht)
+    assert "ÜBUNG MACHEN · FREIWILLIG" in texte
+    assert not _hat(ansicht, "plan_anlegen") and not _hat(ansicht, "kursplan_karte")
+    weiter = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.FilledButton) and x.content == "Weiter"
+    )
+    assert not weiter.disabled
+
+
+def test_editor_zeigt_folgen_an_der_frage(page, state) -> None:
+    """Skizze A3: Die Kapitelliste nennt an jedem Block seine Bedingung und am Lauf die Zahl
+    der Folgen; im Dialog stehen sie unter der Frage, der Tipp öffnet die Folge."""
+    import asyncio
+
+    from trainingsapp.ui.views.kurs_bearbeiten import kapitel_bearbeiten
+
+    kurs, _ = _lauf_kurs(state)
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    assert _d(ansicht, ("block_folgen_zahl", "lauf")).value == "3 Folgen an den Antworten"
+    assert _d(ansicht, ("block_wenn_zeile", "lob")).value == (
+        "nur wenn „Seitstütz: Wie war das?“ = leicht"
+    )
+    assert _d(ansicht, ("block_wenn_zeile", "uebung-1")).value.endswith("= leicht")
+
+    _d(ansicht, ("block", "lauf")).on_click()
+    dialog = page.dialoge[-1]
+    zeilen = [
+        x
+        for x in _alle_dialog(dialog)
+        if isinstance(getattr(x, "data", None), tuple) and x.data[0] == "lauf_frage_folgen_w"
+    ]
+    saetze = [next(t.value for t in _alle_dialog(z) if isinstance(t, ft.Text)) for z in zeilen]
+    assert saetze == [
+        "leicht — Text: Gut",
+        "schwer — Medium: Leichter",
+        "leicht — Übung dazu: Seitstütz, ans Ende",
+    ]
+    assert "3 Folgen" in " ".join(
+        str(t.value) for t in _alle_dialog(_d(dialog, "test_wirkung")) if isinstance(t, ft.Text)
+    )
+    zeilen[0].on_click()  # übernimmt den Lauf und öffnet danach die Folge
+    asyncio.run(dialog.on_dismiss())
+    assert _felder(page.dialoge[-1])["Text (Markdown)"].value == "Weiter so."
+
+
+def test_editor_speichert_lauf_ohne_plan(page, state) -> None:
+    """Ohne Kursplan und ohne Kapitelplan lässt sich ein Kapitel mit „Übung machen“
+    speichern — daran hing auch die Aufnahme am Block „Medium“ (sie speichert zuerst)."""
+    from trainingsapp.core.kursbloecke import TEST
+    from trainingsapp.ui.views.kurs_bearbeiten import kapitel_bearbeiten
+
+    kurs, _ = _lauf_kurs(state, kursplan=False)
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    _felder(ansicht)["Titel"].value = "Neu benannt"
+    _speichern(ansicht)
+    gespeichert = state.kurse.laden(kurs.id).kapitel[0]
+    assert gespeichert.titel == "Neu benannt" and gespeichert.bloecke[0].art == TEST
+    _d(ansicht, ("block", "lauf")).on_click()
+    wirkung = " ".join(
+        str(t.value)
+        for t in _alle_dialog(_d(page.dialoge[-1], "test_wirkung"))
+        if isinstance(t, ft.Text)
+    )
+    assert "Dieses Kapitel hat keinen Plan — der Lauf ist freiwillig" in wirkung
+
+
+def test_foto_am_lauf_kommt_zu_den_medien(page, state) -> None:
+    """Medien am Lauf haben dieselben Wege wie der Block „Medium“ (Ben, 26.11.2026): „Foto
+    aufnehmen“ speichert das Kapitel, geht zur Kamera, und zurück steht der Lauf wieder offen
+    — das Foto bei den Medien „vorher“. Der Entwurf bleibt bis „Übernehmen“ liegen."""
+    import asyncio
+
+    from trainingsapp.core.anhaenge import BILD, Ziel
+    from trainingsapp.ui import paketdatei
+    from trainingsapp.ui.views import anhang_aufnahme
+    from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
+    from trainingsapp.ui.views.kurs_bearbeiten import block_schluessel, kapitel_bearbeiten
+
+    page.run_task = lambda f, *a: asyncio.run(f(*a))
+    kurs, _ = _lauf_kurs(state, kursplan=False)
+    kurs = state.kurse.laden(kurs.id)
+    kapitel = kurs.kapitel[0]
+    route = f"/kurse/{kurs.id}/{kapitel.id}/bearbeiten"
+    page.route = route
+    alt_kamera = anhang_aufnahme.kamera_moeglich
+    anhang_aufnahme.kamera_moeglich = lambda _page: True
+    try:
+        ansicht = kapitel_bearbeiten(page, state, kurs, kapitel)
+        # die Liste nennt im Kapitel ohne Plan kein Ziel
+        assert "wird Ziel im Plan" not in " ".join(_texte(ansicht))
+        _d(ansicht, ("block", "lauf")).on_click()
+        dialog = page.dialoge[-1]
+        dialog.open = True
+        wege = {i.data[1]: i for i in _d(dialog, "lauf_medium_dazu").items}
+    finally:
+        anhang_aufnahme.kamera_moeglich = alt_kamera
+    assert {"foto", "video", "datei", "ton", "vorhandenes"} <= set(wege)
+    wege["foto"].on_click(None)
+    ziel = Ziel.fuer_ablage(block_schluessel(kapitel.id))
+    assert page.route == aufnahme_route(route, ziel, BILD) and dialog.open is False
+
+    datei = "medien/" + "b" * 64 + ".jpg"
+    assert paketdatei.anhaengen(state, ziel, paketdatei.medium_mit(datei, "Von der Seite"))
+    page.route = route
+    page.dialoge.clear()
+    neu = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, neu, neu.kapitel[0])
+    (dialog,) = page.dialoge
+    assert kapitel.id in state.block_entwurf
+    _d(dialog, "block_uebernehmen").on_click()
+    assert state.block_entwurf == {}
+    _speichern(ansicht)
+    lauf = state.kurse.laden(kurs.id).kapitel[0].bloecke[0]
+    assert [(m.uri, m.title, m.wann) for m in lauf.medien] == [(datei, "Von der Seite", "")]

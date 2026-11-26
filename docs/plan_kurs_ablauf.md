@@ -624,7 +624,9 @@ Maßgeblich ist der Code (`core/kursplan.py`, `data/kurse.py`, `tests/test_kursp
   Plan im Kapitel“ und „Tage zählt die Pläne des Kapitels“. Dort liefern Test und Auswahl an
   die Bausteine (§11.2), und „Tage“ zählt die Übungen des Kursplans
   (`tests/test_kurse.py::test_stand_tage_zaehlt_die_uebungen_des_kursplans`). Ohne Kursplan
-  gelten beide weiter (getestet in `tests/test_ui_kurs_bausteine.py`).
+  gilt „Tage“ weiter; **„Test und Auswahl brauchen einen Plan im Kapitel“ entfällt seit dem
+  26.11.2026 ganz** (Ben: „ein Kurs soll auch ohne Plan klappen“, `plan_kurs_uebungen.md`
+  §14.5; getestet in `tests/test_ui_kurs_bausteine.py`).
 - **Wege:** ein eigenes schmales Formular für genau eine Kante statt `wege_karte`; **Timer** nur
   aus der Bibliothek (eingebettet, `ohne_verweise`); **Takt und Parameter** eines Bausteins sind
   im Editor nicht einstellbar, vorhandene Werte bleiben.

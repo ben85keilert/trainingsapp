@@ -266,6 +266,10 @@ class _Saetze:
                 self.wartet[block.id] = ""
                 yield Zeile(DAZU, self._wahl_satz(nummer, block), offen=True)
                 yield from _angaben(block)
+            elif z.stand == kp.OFFEN and z.antwort_fehlt:
+                # sie wartet auf eine Antwort (``wenn``), nicht auf eine Wahl — der Satz sagt,
+                # auf welche (Befund 26.11.2026: dort stand „hinter deine Auswahl“)
+                yield Zeile(DAZU, f"{z.titel} — je nach deiner Antwort", offen=True)
             elif z.stand == kp.OFFEN:  # sie gehört hinter eine Übung, die erst gewählt wird
                 name = self._name(z, block)
                 hinter = self._wartende(block.hinter)

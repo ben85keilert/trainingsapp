@@ -884,7 +884,7 @@ async def test_gestalteter_test_oeffnet_sich_bereit_und_zeigt_wie_er_laeuft(umge
         "es war." in texte
     )
     assert _daten(bereit, "test_hinweis").value == "Mach dich vorher 5 Minuten warm."
-    assert "SO MACHST DU DEN TEST" in texte
+    assert "SO MACHST DU DIE ÜBUNG" in texte
     assert _daten(bereit, ("test_fest", "side")).value == "links" and "vorgegeben" in texte
     assert not [x for x in _alle(bereit) if isinstance(x, ft.Chip)]  # die Seite steht fest
     # der Timer steht schon groß im Kopf — die Karte nennt seine Abschnitte
@@ -1185,7 +1185,7 @@ async def test_vorgegebene_ausfuehrung_ohne_vorgabe_endet_mit_fertig(umgebung) -
     await _starten(u, kurs, kapitel)
     bereit = _ansicht(u, kurs, kapitel, block, planke)
     texte = _texte(bereit)
-    assert "ÜBUNG" in texte and _daten(bereit, "test_vorgabe").value == "Was schaffst du?"
+    assert "ÜBUNG" in texte and _daten(bereit, "test_vorgabe").value == "Probier es aus"
     assert (
         "Die App misst die Zeit, bis du „Fertig“ tippst. Danach sagst du, wie anstrengend es "
         "war." in texte
@@ -1619,6 +1619,60 @@ async def test_lauf_mit_fragen_sensor_und_ziel_aus_der_antwort(umgebung) -> None
     assert antworten["test.hold"].wert == 20.0
     (zeile,) = [z for z in u.state.kurse.plan_aenderungen(kurs, kapitel, profil) if "#ziel" in z.id]
     assert zeile.titel == "Ziel für Planke: 30 s" and zeile.unter.startswith("dein Wert von Hand")
+
+
+async def test_folge_der_antwort_steht_im_ergebnis(umgebung) -> None:
+    """Skizze B4 (Ben, 26.11.2026): Ein Text oder Medium des Kapitels, das an einer Antwort
+    dieses Laufs hängt, steht schon im Ergebnis — mit dem Grund als Überschrift, und es
+    wechselt mit der Antwort. Ohne Kursplan und ohne Kapitelplan ist der Lauf freiwillig."""
+    from trainingsapp.core import ablauf as ab
+    from trainingsapp.core.kursbloecke import MEDIUM, TEXT, Wenn
+    from trainingsapp.core.models import Media
+
+    u = umgebung
+    state = u.state
+    seit = Exercise(name="Seitstütz", result_spec=ResultSpec(fields=[vorrat_feld("hold")]))
+    state.uebungen.speichern(seit)
+    frage = ab.Frage("w", "Wie war das?", art=ab.F_AUSWAHL, antworten=("leicht", "schwer"))
+    kapitel = Kapitel(
+        titel="Seitlich",
+        bloecke=[
+            Block(TEST, id="lauf", uebung=seit.id, feld="hold", fragen=[frage]),
+            Block(
+                TEXT, id="lob", titel="Gut", text="Weiter so.", wenn=[Wenn("lauf.f:w", ("leicht",))]
+            ),
+            Block(
+                MEDIUM,
+                id="hilfe",
+                medium=Media(uri="https://example.org/h", title="Leichter machen"),
+                wenn=[Wenn("lauf.f:w", ("schwer",))],
+            ),
+        ],
+    )
+    kurs = Kurs(name="Ohne Plan", kapitel=[kapitel])
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    kapitel = kurs.kapitel[0]
+    _erreichen(state, kurs, kapitel)
+    block, seit = kapitel.bloecke[0], state.uebungen.laden(seit.id)
+
+    bereit = _ansicht(u, kurs, kapitel, block, seit)
+    assert _daten(bereit, "test_vorgabe").value == "Probier es aus"  # kein Test: andere Worte
+    await klick(_daten(bereit, "test_start"))
+    await _sekunden(u, 12)
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, seit), "test_fertig"))
+
+    ergebnis = _ansicht(u, kurs, kapitel, block, seit)
+    assert not _hat(ergebnis, ("test_folge", "lob")) and not _hat(ergebnis, ("test_folge", "hilfe"))
+    _daten(ergebnis, ("antwort", "lauf:w", "leicht")).on_select()
+    ergebnis = _ansicht(u, kurs, kapitel, block, seit)
+    texte = _texte(_daten(ergebnis, ("test_folge", "lob")))
+    assert texte[0] == "WEIL DU „LEICHT“ GEANTWORTET HAST" and "Weiter so." in texte
+    assert not _hat(ergebnis, ("test_folge", "hilfe"))
+    _daten(ergebnis, ("antwort", "lauf:w", "schwer")).on_select()
+    ergebnis = _ansicht(u, kurs, kapitel, block, seit)
+    assert "Leichter machen" in _texte(_daten(ergebnis, ("test_folge", "hilfe")))
+    assert not _hat(ergebnis, ("test_folge", "lob"))
 
 
 async def test_eintragen_im_lauf_steht_im_ergebnis(umgebung) -> None:

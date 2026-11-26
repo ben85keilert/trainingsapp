@@ -579,3 +579,94 @@ ließ die Variante immer weg.)
   **Nicht am Foto geprüft:** die Ziel-Variante im Baustein-Blatt, der Tempo-Regler im Lauf, Lauf mit Timer (Balken, Sätze), mit Takt, mit
   Begleitvideo, der Hinweis bei verbundenem Gerät ohne Bewegungssensor (im Browser gibt es
   kein Bluetooth) — und nichts davon am Gerät (T156).
+
+## 14. Vierte Runde (Ben, 26.11.2026) — Vergleich mit den Skizzen, das gilt
+
+Ben: „vor 3 Tagen wurden Artefakte erstellt mit Titel ‚Übungen im Kurs – Skizzen‘. Vermutlich
+wurden diese nicht vollständig umgesetzt.“ Verglichen wurden die zwölf Skizzen (A1–A4, B1–B4,
+C1–C4) mit Web-Fotos eines nachgebauten Kurses. Bens Auftrag danach: „baue alles, auch B4 und
+C3“, dazu „ein Kurs soll auch ohne Plan klappen“ und „beim Pixel 10 kann ich keine Bilder und
+Videos mehr am Kurs einfügen, prüfe das einmal“.
+
+### 14.1 Folgen an der Frage (Skizze A3)
+
+- **Unter jeder Frage steht, was an ihren Antworten hängt** („WAS FOLGT“): je Folge eine
+  Zeile „leicht oder mittel — Medium: Nächster Schritt“ (`Kurssicht.folgen_der_frage`,
+  `components/kursfrage_form.folgen_teil`) — an den Fragen eines Laufs und an der Frage im
+  Kapitel. Der Tipp übernimmt den offenen Block und öffnet die Folge; eine Folge in einem
+  anderen Kapitel nennt nur das Kapitel. „+ Folge“ bleibt an der Frage (§12.4).
+- **Die Kapitelliste nennt die Bedingung** an jedem Block und Baustein („nur wenn ‚Seitstütz:
+  Wie war das?‘ = leicht“, `Kurssicht.wenn_text`) und an Lauf und Frage die Zahl der Folgen.
+  „Ergibt sich aus dem Kurs“ nennt sie ebenfalls.
+- Eine Frage, die ihre Antwort speichert, steht in der Liste mit ihrer Art („Auswahl — eine
+  Antwort“) statt mit „0 Antworten“.
+
+### 14.2 Folgen im Ergebnis (Skizze B4)
+
+Ein **Text oder Medium des Kapitels**, das an einer Antwort **dieses Laufs** hängt, steht schon
+im Ergebnis, unter den Fragen — mit dem Grund als Überschrift („Weil du ‚leicht‘ geantwortet
+hast“), und es wechselt mit der Antwort (`core.kursbloecke.folgen_im_ergebnis`). Gerechnet wird
+aus den Antworten, die gerade gewählt sind, und den gespeicherten des Kurses; frühere
+Antworten desselben Laufs zählen nicht. Im Kapitel steht der Block danach wie bisher. Nichts
+öffnet sich von selbst; Bausteine stehen weiter nur in der Sammelkarte.
+
+### 14.3 „Ausprobieren“ in der Sammelkarte (Skizze C3)
+
+Fehlt einer Zeile die Antwort aus einem **Lauf**, hat sie den Knopf „Ausprobieren“ — er führt
+zu diesem Lauf, auch in einem früheren Kapitel (`Aenderung.lauf`, `views/kurse.zum_lauf`).
+Fehlt die Antwort auf eine Frage im Kapitel, gibt es ihn nicht: Die Frage steht darüber.
+„Das kommt noch“ schrieb zu einem solchen Baustein „hinter deine Auswahl“; jetzt „… kommt dazu
+— je nach deiner Antwort“ (`Aenderung.antwort_fehlt`).
+
+### 14.4 Worte beim Ausprobieren
+
+Ein Lauf, dessen Wert nichts braucht, fragt nicht „Was schaffst du?“, sondern sagt „Probier es
+aus“; die Karte der Ausführung heißt dort „So machst du die Übung“.
+
+### 14.5 Ein Kurs ohne Plan
+
+Ein Kurs ohne Kursplan, ein Kapitel ohne Plan-Vorlage: „Übung machen“ und „Auswahl“ gehen
+trotzdem. **Die Speicherprüfung „Test und Auswahl brauchen einen Plan im Kapitel“ entfällt**
+(sie galt seit dem 12.11.2026; `docs/plan_kurs_ablauf.md` §11.2 nahm nur Kursplan-Kurse aus).
+Der Lauf ist dann freiwillig (`wert_wird_ziel` ohne Vorlagen und ohne Baustein), die Wahl gilt
+für den Lauf, der „die gewählte“ macht; das Kapitel zeigt kein „Plan anlegen“, und „Weiter“
+wartet auf nichts. Der Editor sagt es („Dieses Kapitel hat keinen Plan — der Lauf ist
+freiwillig“). Die Prüfung „‚Tage‘ zählt die Pläne des Kapitels“ bleibt.
+
+### 14.6 Medien am Kurs (Meldung vom Pixel 10)
+
+Nachgestellt im Browser, nicht am Gerät. Zwei Befunde:
+
+1. **Kamera, Rekorder und Fotoauswahl speichern zuerst das Kapitel** (§ „Kurs-Block Medium“,
+   23.11.2026). In einem Kurs ohne Plan mit einer „Übung machen“ scheiterte dieses Speichern
+   an der Prüfung aus 14.5 — der Dialog blieb mit der Meldung stehen, kein Bild kam an. Mit
+   14.5 behoben.
+2. **Der Entwurf des Blocks war nach dem ersten Aufbau der Seite verbraucht.** Er bleibt jetzt
+   liegen, bis sein Dialog mit „Übernehmen“ oder „Abbrechen“ endet (`AppState.block_entwurf`,
+   `block_dialog`); entsteht die Seite ein zweites Mal, geht der alte Dialog zu und ein neuer
+   auf. Anlass: Im Browser blieb der Dialog nach der Kamera einmal aus, wiederholen ließ es
+   sich nicht — ob das am Pixel 10 die Ursache war, ist offen (T156 n).
+
+Dazu: **Medien am Lauf** haben dieselben Wege wie der Block „Medium“ (Foto, Video, Ton,
+Fotoauswahl, Datei, vorhandenes Medium); ein neues Stück steht „vorher“, die Stelle stellt man
+danach.
+
+### 14.7 Bewusst nicht gebaut
+
+- „+ Folge“ an jeder Antwort (Ben am 25.11.: an der Frage ist „ok“).
+- Das Video „vorher“ als große Kachel (B2) — es bleibt eine Zeile zum Öffnen, wie überall.
+- Die Fußzeile „Es fehlt noch: Test …“ mit „Plan anlegen“ (B1) — im Kursplan-Kurs übernimmt
+  man in der Sammelkarte.
+
+### 14.8 Prüfung
+
+- Tests: `tests/test_ui_kurs_fragen.py` (Sammelkarte führt zum Lauf, Kurs ohne Plan, Folgen an
+  der Frage im Editor, Speichern ohne Plan, Foto am Lauf), `tests/test_ui_kurs_test.py` (Folge
+  im Ergebnis), `tests/test_kursvorschau.py`, `tests/test_ui_kursbloecke.py` (Entwurf bleibt
+  liegen), Doctests in `core/kursbloecke.py`, `core/kursbau.py`.
+- Web-Fotos (412 × 860, 26.11.2026): alle zwölf Skizzen gegen den Stand davor; danach Kapitel
+  und Ergebnis im Kurs ohne Plan, Folge im Ergebnis bei „leicht“ und „schwer“, Sammelkarte mit
+  „Ausprobieren“, Kapitelliste und „WAS FOLGT“ im Editor, Tipp auf eine Folge, Foto am Block
+  „Medium“ und am Lauf. **Nicht am Foto:** Fotoauswahl und Dateiwahl (gibt es im Browser
+  nicht), Video am Kurs, „Ausprobieren“ in ein früheres Kapitel — und nichts am Gerät (T156).
+- Probekurs zum Durchklicken: `trainingsapp-inhalte/pakete/privat/probe_kurs/`.

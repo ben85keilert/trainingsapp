@@ -550,10 +550,12 @@ def test_kapitel_bearbeiten_bloecke_plan_und_bedingung(page, state) -> None:
     felder["Ziel in % des Tests"].value = "80"
     _daten(dialog, "block_uebernehmen").on_click()
 
-    # Test ohne Plan: Speichern sagt, was fehlt
+    # Test ohne Plan: geht (Ben, 26.11.2026: „ein Kurs soll auch ohne Plan klappen“) — der
+    # Lauf ist dann freiwillig
     _felder(ansicht)["Titel"].value = "Rumpf"
     _speichern(ansicht)
-    assert "Test und Auswahl brauchen einen Plan im Kapitel." in _texte(ansicht)
+    assert "Test und Auswahl brauchen einen Plan im Kapitel." not in _texte(ansicht)
+    assert [b.art for b in state.kurse.laden(kurs.id).kapitel[0].bloecke] == [TEXT, FRAGE, TEST]
     _daten(ansicht, "plan_uebernehmen").on_click()
     _daten(page.dialoge[-1], ("plan_nehmen", plan.id)).on_click()
     # Bedingung: drei Tage
@@ -796,8 +798,17 @@ def test_medium_block_nimmt_auf_wie_der_plan_und_steht_danach_wieder_offen(page,
     assert _felder(dialog)["Titel"].value == "Atmung"
     assert _daten(dialog, "block_beschriftung").value == "ruhig"
     assert _daten(dialog, "block_adresse").visible is False
-    assert state.block_entwurf == {}
+    # Der Entwurf bleibt liegen, bis der Dialog endet (26.11.2026): Entsteht die Seite ein
+    # zweites Mal, geht der alte Dialog zu und ein neuer auf — mit demselben Stück
+    assert kapitel.id in state.block_entwurf
+    dialog.open = True
+    ansicht = kapitel_bearbeiten(page, state, gespeichert, gespeichert.kapitel[0])
+    assert dialog.open is False and len(page.dialoge) == 2
+    dialog = page.dialoge[-1]
+    assert _felder(dialog)["Titel"].value == "Atmung"
+    assert _daten(dialog, "block_adresse").visible is False
     _daten(dialog, "block_uebernehmen").on_click()
+    assert state.block_entwurf == {} and state.block_dialog == {}
     _speichern(ansicht)
     (block,) = state.kurse.laden(kurs.id).kapitel[0].bloecke
     m = block.medium

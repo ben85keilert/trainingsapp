@@ -438,6 +438,49 @@ def wenn_grund(wenn: Sequence[Wenn], antworten: Mapping[str, Gegeben]) -> str:
     return " und ".join(teile)
 
 
+def folgen_im_ergebnis(
+    lauf: Block,
+    bloecke: Sequence[Block],
+    im_lauf: Mapping[str, Gegeben],
+    gespeichert: Mapping[str, Gegeben],
+) -> list[tuple[Block, str]]:
+    """Texte und Medien des Kapitels, die an einer **Antwort dieses Laufs** hängen und bei
+    den Antworten gelten, die im Ergebnis gerade gewählt sind — je mit ihrem Grund (Skizze
+    B4, Ben 26.11.2026: das Medium „bei der Antwort“ steht schon im Ergebnis, nicht erst im
+    Kapitel). ``im_lauf``: Frage-ID → Antwort, noch nicht gespeichert; ``gespeichert``: die
+    Antworten des Kurses — die früheren dieses Laufs zählen nicht, die neuen ersetzen sie.
+
+    >>> from trainingsapp.core import ablauf as ab
+    >>> lauf = Block(TEST, id="t", uebung="u", fragen=[ab.Frage("q", "Wie war das?")])
+    >>> video = Block(MEDIUM, id="m", wenn=[Wenn("t.f:q", ("leicht", "mittel"))])
+    >>> text = Block(TEXT, id="x", text="Gut.", wenn=[Wenn("t.f:q", ("leicht",)), Wenn("k")])
+    >>> stein = Block(PLAN_UEBUNG, id="b", uebung="u", wenn=[Wenn("t.f:q", ("leicht",))])
+    >>> alle = [lauf, video, text, stein]
+    >>> [(b.id, g) for b, g in folgen_im_ergebnis(lauf, alle, {"q": Gegeben(text="mittel")}, {})]
+    [('m', 'weil du „mittel“ geantwortet hast')]
+    >>> alt = {"t.f:q": Gegeben(text="leicht")}  # vom Lauf davor — zählt nicht
+    >>> folgen_im_ergebnis(lauf, alle, {}, alt)
+    []
+    >>> [b.id for b, _ in folgen_im_ergebnis(lauf, alle, {"q": Gegeben(text="leicht")}, alt)]
+    ['m']
+    """
+    eigene = {antwort_name(lauf.id, f.id) for f in lauf.fragen}
+
+    def frueher(name: str) -> bool:
+        kopf, _, rest = name.partition(".")
+        return kopf.partition(":")[0] == lauf.id and rest.startswith(FRAGE_VORSATZ)
+
+    antworten = {n: g for n, g in gespeichert.items() if not frueher(n)}
+    antworten.update({antwort_name(lauf.id, fid): g for fid, g in im_lauf.items()})
+    return [
+        (b, wenn_grund(b.wenn, antworten))
+        for b in bloecke
+        if b.art in (TEXT, MEDIUM)
+        and any(w.frage in eigene for w in b.wenn)
+        and wenn_stand(b.wenn, antworten) is True
+    ]
+
+
 @dataclass(slots=True)
 class Block:
     """Ein Block eines Kapitels. Welche Felder zählen, sagt ``art``."""
@@ -1455,6 +1498,7 @@ __all__ = [
     "feld_schluessel",
     "feldwerte",
     "fertig",
+    "folgen_im_ergebnis",
     "gegeben_zu",
     "gemessene_uebungen",
     "ist_vorgabe",

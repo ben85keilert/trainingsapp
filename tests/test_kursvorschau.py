@@ -505,3 +505,31 @@ def test_repo_die_skizze_mit_echtem_plan_wahl_und_test(con, profil) -> None:
     # Kapitel 2 abgeschlossen (nichts übernommen): Kapitel 3 läuft und fällt aus der Vorschau
     repo.kapitel_abschliessen(kurs, zwei, profil.id)
     assert [k.nummer for k in repo.kommt_noch(kurs, profil.id)] == [5]
+
+
+def test_baustein_wartet_auf_antwort_nicht_auf_auswahl() -> None:
+    """Befund 26.11.2026: Ein Baustein, der auf eine **Antwort** wartet (``wenn``), stand in
+    „Das kommt noch“ als „… kommt dazu, hinter deine Auswahl“ — er hat mit einer Auswahl
+    nichts zu tun."""
+    from trainingsapp.core import ablauf as ab
+    from trainingsapp.core.kursbloecke import FRAGE, Wenn
+
+    frage = ab.Frage("q", "Auch die Brücke?", art=ab.F_AUSWAHL, antworten=("ja", "nein"))
+    kurs = Kurs(
+        name="Frage-Kurs",
+        kursplan=Kursplan("Rumpf"),
+        kapitel=[
+            Kapitel(id="k1", titel="Eins", bloecke=[Block(PLAN_UEBUNG, id="b1", uebung="p")]),
+            Kapitel(
+                id="k2",
+                titel="Zwei",
+                bloecke=[
+                    Block(FRAGE, id="q", titel="Auch die Brücke?", frage=frage),
+                    Block(PLAN_UEBUNG, id="b2", uebung="b", wenn=[Wenn("q", ("ja",))]),
+                ],
+            ),
+        ],
+    )
+    (zwei,) = kommt_noch(kurs, Plan(), {}, {}, {}, 0, NAMEN)
+    assert [z.text for z in zwei.zeilen] == ["Brücke kommt dazu — je nach deiner Antwort"]
+    assert zwei.zeilen[0].offen

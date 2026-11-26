@@ -188,6 +188,55 @@ class FrageForm:
         return frage, ziele, str(self.wann.value or NACHHER) == VORHER
 
 
+#: Eine Folge an einer Frage, wie sie darunter steht: der Satz („leicht — Übung dazu: …“)
+#: und der Handler, der sie öffnet — ``None``: Sie steht in einem anderen Kapitel
+FolgeZeile = tuple[str, Callable[..., Any] | None]
+
+
+def folgen_teil(zeilen: Sequence[FolgeZeile], kennung: str) -> list[ft.Control]:
+    """„Was folgt“ unter einer Frage (Skizze A3, Ben 26.11.2026): je Folge eine Zeile — bei
+    welcher Antwort, was. Der Tipp öffnet sie. Leer ohne Folgen."""
+    if not zeilen:
+        return []
+    return [
+        ft.Text("WAS FOLGT", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+        *(
+            ft.Container(
+                padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+                border_radius=10,
+                bgcolor=ft.Colors.SECONDARY_CONTAINER,
+                ink=handler is not None,
+                on_click=handler,
+                data=(kennung, n),
+                content=ft.Row(
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Text(
+                            text,
+                            size=13,
+                            expand=True,
+                            color=ft.Colors.ON_SECONDARY_CONTAINER,
+                        ),
+                        *(
+                            [
+                                ft.Icon(
+                                    ft.Icons.CHEVRON_RIGHT,
+                                    size=18,
+                                    color=ft.Colors.ON_SECONDARY_CONTAINER,
+                                )
+                            ]
+                            if handler is not None
+                            else []
+                        ),
+                    ],
+                ),
+            )
+            for n, (text, handler) in enumerate(zeilen)
+        ),
+    ]
+
+
 class FragenListe:
     """Die Fragen am Lauf einer Übung — je Frage eine Karte mit ihrer `FrageForm`."""
 
@@ -199,11 +248,14 @@ class FragenListe:
         *,
         mit_zielen: bool,
         folge: Callable[[str], Any] | None = None,
+        folgen: Callable[[str], Sequence[FolgeZeile]] | None = None,
     ) -> None:
         """``folge(frage_id)``: „+ Folge“ an einer Frage — der Dialog übernimmt den Block und
-        öffnet die Wahl, was folgen soll. Ohne: kein Knopf."""
+        öffnet die Wahl, was folgen soll. Ohne: kein Knopf. ``folgen(frage_id)``: was an den
+        Antworten der Frage schon hängt — steht unter ihr (`folgen_teil`)."""
         self.mit_zielen = mit_zielen
         self.folge = folge
+        self.folgen = folgen
         self.formen: list[FrageForm] = [
             self._form(f, f.id in vorher, ziele.get(f.id)) for f in fragen
         ]
@@ -304,6 +356,10 @@ class FragenListe:
                                 ],
                             ),
                             form.control,
+                            *folgen_teil(
+                                self.folgen(form.id) if self.folgen is not None else (),
+                                f"lauf_frage_folgen_{form.id}",
+                            ),
                         ],
                     ),
                 )

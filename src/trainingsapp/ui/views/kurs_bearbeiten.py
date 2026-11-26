@@ -69,6 +69,7 @@ from trainingsapp.core.kursbau import (
     AUSFUEHRUNG_WAHL,
     EIGEN,
     F_ALT,
+    FRAGE_ARTEN,
     M_VORHER,
     M_WDH,
     M_ZEIT,
@@ -88,6 +89,7 @@ from trainingsapp.core.kursbau import (
     faktor_lesen,
     faktor_text,
     folgen_anwenden,
+    frage_art,
     kurs_kopie,
     medium_an_stelle,
     medium_stelle,
@@ -151,7 +153,12 @@ from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte, titel
-from trainingsapp.ui.components.kursfrage_form import FrageForm, FragenListe
+from trainingsapp.ui.components.kursfrage_form import (
+    FolgeZeile,
+    FrageForm,
+    FragenListe,
+    folgen_teil,
+)
 from trainingsapp.ui.components.kursplan_bild import kursplan_bild_karte
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.spec_form import SpecForm
@@ -322,11 +329,19 @@ def antworten_lesen(text: str) -> list[Antwort]:
     return ergebnis
 
 
-def block_kurz(block: Block, katalog: dict[str, Exercise], sicht: Kurssicht | None = None) -> str:
+def block_kurz(
+    block: Block,
+    katalog: dict[str, Exercise],
+    sicht: Kurssicht | None = None,
+    *,
+    kapitelplan: bool | None = None,
+) -> str:
     """Eine Zeile zum Block in der Liste des Editors. ``sicht``: der Kurs drumherum — ein
     Baustein nennt damit die Planübungen, auf die er sich bezieht (`Kurssicht.kurz`); in einem
     Kurs mit Kursplan wird ein Test nicht von selbst zum Ziel. Ein Test mit Vorgabe nennt sie
-    hinter der Übung (`Kurssicht.test_kurz`).
+    hinter der Übung (`Kurssicht.test_kurz`). ``kapitelplan``: Wird der Wert des Tests von
+    selbst Ziel im Kapitelplan? ``None`` = ja, wenn der Kurs keinen Kursplan baut; der Editor
+    sagt ``False`` für ein Kapitel ohne Plan (26.11.2026 — dort stand „wird Ziel im Plan“).
 
     >>> block_kurz(Block(AUSWAHL, uebungen=["a", "b"], anzahl=1), {})
     '1 von 2 Übungen'
@@ -345,14 +360,16 @@ def block_kurz(block: Block, katalog: dict[str, Exercise], sicht: Kurssicht | No
     if block.art == MEDIUM:
         return (block.medium.title or block.medium.uri) if block.medium else "ohne Adresse"
     if block.art == FRAGE:
+        if block.frage is not None:  # speichert ihre Antwort: die Art statt der Zahl
+            return f"{block.titel or 'ohne Frage'} · {FRAGE_ARTEN[frage_art(block.frage)]}"
         return f"{block.titel or 'ohne Frage'} · {len(block.antworten)} Antworten"
     if block.art == TEST:
         # „die gewählte“ einer Auswahl (``aus``) oder die feste Übung, dahinter die Vorgabe; im
         # Kurs mit Kursplan das Feld, sonst „wird Ziel im Plan“ — gerechnet in `core/kursbau.py`
         umfeld = sicht or Kurssicht(Kurs(), "", [block], katalog)
-        return umfeld.test_kurz(
-            block, kapitelplan=umfeld.kurs.kursplan is None, fehlt="Übung wählen"
-        )
+        if kapitelplan is None:
+            kapitelplan = umfeld.kurs.kursplan is None
+        return umfeld.test_kurz(block, kapitelplan=kapitelplan, fehlt="Übung wählen")
     namen = [katalog[u].name for u in block.uebungen if u in katalog]
     menge = f"{block.anzahl} von {len(block.uebungen)}"
     return f"{menge} · {', '.join(namen)}" if namen else f"{menge} Übungen"
@@ -379,9 +396,20 @@ def block_mit_stueck(block: Block, neues: Media | None) -> Block:
     ('medien/x.mp4', 'Atmung', 'ruhig')
     >>> block_mit_stueck(alt, None) is alt
     True
+
+    An einer „Übung machen“ kommt das Stück zu den **Medien am Lauf** (Ben, 26.11.2026) —
+    „vorher“, die Stelle stellt man danach:
+
+    >>> lauf = block_mit_stueck(Block("test", uebung="u"), Media(uri="medien/x.mp4"))
+    >>> [(m.uri, m.wann) for m in lauf.medien]
+    [('medien/x.mp4', '')]
     """
     if neues is None:
         return block
+    if block.art == TEST:
+        if any(m.uri == neues.uri for m in block.medien):
+            return block
+        return replace(block, medien=[*block.medien, medium_an_stelle(neues, M_VORHER)])
     alt = block.medium
     return replace(
         block,
@@ -1336,10 +1364,24 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
 
     # -- Blöcke ---------------------------------------------------------------------------
 
-    def block_dialog(block: Block, neu: bool, *, stelle: Block | None = None) -> None:
+    def block_dialog(
+        block: Block, neu: bool, *, stelle: Block | None = None, wartend: bool = False
+    ) -> None:
         """Die Felder zur Art des Blocks; „Übernehmen“ schreibt in die Liste des Formulars.
         ``stelle``: der Block der Liste, den „Übernehmen“ ersetzt, wenn ``block`` ein Entwurf
-        von ihm ist (zurück von Kamera, Rekorder oder Fotoauswahl)."""
+        von ihm ist (zurück von Kamera, Rekorder oder Fotoauswahl). ``wartend``: Der Block
+        liegt als Entwurf bereit (`block_fortsetzen`) — er bleibt liegen, bis dieser Dialog
+        mit „Übernehmen“ oder „Abbrechen“ endet."""
+        #: ``an``: Der Dialog geht zu, ohne dass der Block fertig ist — für eine Aufnahme oder
+        #: weil die Seite neu entsteht. Der Entwurf bleibt dann liegen
+        gehalten = {"an": False}
+
+        def entwurf_fertig() -> None:
+            """Der wartende Entwurf ist verbraucht: übernommen oder verworfen."""
+            if wartend and not gehalten["an"]:
+                state.block_entwurf.pop(kapitel.id, None)
+                state.block_dialog.pop(kapitel.id, None)
+
         kopf = ft.TextField(
             label={TEXT: "Überschrift", FRAGE: "Frage", MEDIUM: "Titel"}.get(
                 block.art, "Aufforderung (leer = Vorgabe)"
@@ -1376,7 +1418,12 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             data="block_adresse",
         )
         datei_text = ft.Text(
-            "Datei aus dem Paket", size=12, opacity=0.7, visible=ist_datei(), data="block_datei"
+            "Datei aus dem Paket",
+            size=12,
+            opacity=0.7,
+            visible=ist_datei(),
+            expand=True,  # in einer Zeile: allein brach der Text mitten im Wort um (26.11.2026)
+            data="block_datei",
         )
         beschriftung = ft.TextField(
             label="Beschriftung (optional)",
@@ -1444,6 +1491,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 return
             state.block_entwurf[kapitel.id] = (entwurf(), neu)
             ziel = Ziel.fuer_ablage(block_schluessel(kapitel.id))
+            gehalten["an"] = True  # der Entwurf wartet weiter — auch über dieses Schließen
             schliessen(dialog)
             await page.push_route(
                 hochladen_route(route, ziel) if art is None else aufnahme_route(route, ziel, art)
@@ -1480,8 +1528,8 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         def frage_art_gewaehlt(art: str) -> None:
             antworten.visible = art == F_ALT
             frage_hinweis.value = FRAGE_HINWEIS[art == F_ALT]
-            frage_folge.visible = art != F_ALT
-            for c in (antworten, frage_hinweis, frage_folge):
+            frage_folge.visible = frage_folgen.visible = art != F_ALT
+            for c in (antworten, frage_hinweis, frage_folge, frage_folgen):
                 with contextlib.suppress(Exception):
                     c.update()
 
@@ -1507,6 +1555,18 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         # sagen die Bausteine „Am Plan“ (`docs/plan_kurs_ablauf.md` §11.2). Der Faktor des Tests
         # und „Hinter Planübung Nr.“ gehören zum Kapitelplan und stehen nur da, wo es einen gibt.
         nur_liefern = baut_plan and not plaene
+        #: Ein Kurs ohne Kursplan, ein Kapitel ohne Plan (Ben, 26.11.2026: „ein Kurs soll auch
+        #: ohne Plan klappen“): Der Lauf ist dann nur ein Eintrag — nichts wird ein Ziel
+        ohne_plan = not baut_plan and not plaene
+
+        def test_hinweis_text(mit: bool) -> str:
+            if ohne_plan:
+                return (
+                    "Der Lauf ist ein gewöhnlicher Eintrag der Übung. Dieses Kapitel hat "
+                    "keinen Plan — aus dem Wert wird kein Ziel."
+                )
+            return TEST_HINWEIS[(mit, nur_liefern)]
+
         # Das Feld des Tests (`Block.feld`): „Was wird gemessen“ — läuft der Test mit der Uhr
         # (mit Vorgabe oder gestaltet), „Ins Ziel kommt“; dasselbe Auswahlfeld, das Angebot
         # rechnet `Kurssicht.zielfelder`
@@ -1581,13 +1641,40 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 gemessen_reihe,
             ],
         )
-        test_hinweis = hinweis(TEST_HINWEIS[(False, nur_liefern)])
+        test_hinweis = hinweis(test_hinweis_text(False))
+
+        def folgen_zeilen_der(name: str) -> list[FolgeZeile]:
+            """Was an den Antworten der Frage ``name`` hängt, als Zeilen unter ihr (Skizze A3,
+            Ben 26.11.2026): „leicht — Übung dazu: Seitstütz, ans Ende“. Der Tipp übernimmt
+            diesen Block und öffnet die Folge; eine in einem anderen Kapitel nennt nur das
+            Kapitel."""
+            hier = {b.id for b in bloecke}
+            wo = {
+                b.id: nummer
+                for nummer, (_k, liste) in enumerate(sicht().kapitel(), start=1)
+                for b in liste
+            }
+
+            def zur_folge(ziel: Block) -> Callable[..., None]:
+                return lambda _e=None: uebernehmen(danach=lambda _fertig: oeffnen(ziel)())
+
+            zeilen: list[FolgeZeile] = []
+            for was, b in sicht().folgen_der_frage(name):
+                # ohne Pfeil: „→“ kennt die Schrift der App nicht (Web-Foto 26.11.2026)
+                satz = f"{was} — {art_name(b)}: {block_kurz(b, katalog_alle, sicht())}"
+                if b.id in hier:
+                    zeilen.append((satz, zur_folge(b)))
+                else:
+                    zeilen.append((f"{satz} (Kapitel {wo.get(b.id, '?')})", None))
+            return zeilen
+
         # Was sich aus dem Kurs ergibt (Ben, 23.11.2026, `docs/plan_kurs_uebungen.md` §10.1 und
         # §11.3): kein Schalter „Test oder ausprobieren“ — der Lauf ist Pflicht, wenn ein
         # Baustein (oder der Kapitelplan) seinen Wert braucht, sonst freiwillig. Der Editor
         # markiert nur, was gilt
         nehmer = abnehmer(block, sicht().alle()) if block.art == TEST else []
-        if nehmer or not nur_liefern:
+        folgen_am_lauf = sicht().folgen_zahl(block) if block.art == TEST else 0
+        if nehmer or not (nur_liefern or ohne_plan):
             wirkung_text = (
                 "Wirkt auf den Plan: "
                 + (
@@ -1600,8 +1687,15 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             )
         else:
             wirkung_text = (
-                "Kein Baustein verwendet diesen Wert — der Lauf ist freiwillig "
-                "(„nur ausprobieren“)."
+                "Dieses Kapitel hat keinen Plan"
+                if ohne_plan
+                else "Kein Baustein verwendet diesen Wert"
+            ) + " — der Lauf ist freiwillig („nur ausprobieren“)."
+        if folgen_am_lauf:  # Skizze A2: „Wirkt auf den Plan: nur über die Antworten“
+            wirkung_text += (
+                f" An den Antworten häng{'en' if folgen_am_lauf != 1 else 't'} "
+                f"{folgen_am_lauf} Folge{'n' if folgen_am_lauf != 1 else ''} — sie stehen "
+                "unten bei den Fragen."
             )
         wirkung = ft.Container(
             padding=12,
@@ -1752,8 +1846,15 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                         medium_dazu.menue(
                             page,
                             state,
-                            medium_dazu.Wege(datei=lauf_medium_datei, vorhandenes=lauf_medium_dazu),
-                            text="Datei oder vorhandenes Medium",
+                            # dieselben Wege wie am Block „Medium“ (Ben, 26.11.2026): Kamera
+                            # und Fotoauswahl speichern das Kapitel und öffnen den Lauf wieder
+                            medium_dazu.Wege(
+                                datei=lauf_medium_datei,
+                                aufnehmen=block_aufnehmen,
+                                fotoauswahl=block_fotoauswahl,
+                                vorhandenes=lauf_medium_dazu,
+                            ),
+                            text="Foto, Video, Datei oder vorhandenes Medium",
                             vorhandene=lambda: medium_dazu.vorrat_von(state),
                             kennung="lauf_medium_dazu",
                         )
@@ -1784,6 +1885,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             # ein festes Ziel schlägt eine Antwort nur vor, wo aus dem Lauf ein Ziel wird
             mit_zielen=bool(nehmer or not nur_liefern),
             folge=lambda frage_id: folge_von(frage_id),
+            folgen=lambda frage_id: folgen_zeilen_der(antwort_name(block.id, frage_id)),
         )
 
         vorschau_spalte = ft.Column(spacing=6, tight=True)
@@ -2049,7 +2151,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 for marke, wert in marken
             ]
             felder_setzen()
-            test_hinweis.value = TEST_HINWEIS[(mit, nur_liefern)]
+            test_hinweis.value = test_hinweis_text(mit)
             vorschau_zeichnen()
 
         # -- „So läuft der Test“: Uhr, Takt, Ausführung (Skizze F1) ---------------------------
@@ -2363,6 +2465,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 bloecke[bloecke.index(stelle if stelle is not None else block)] = neuer
             if danach is not None:
                 nach_dem_block.danach(lambda: danach(neuer))
+            entwurf_fertig()
             schliessen(dialog)
             listen_frisch()
 
@@ -2391,9 +2494,23 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 )
             ],
         )
+        frage_folgen = ft.Column(
+            spacing=6,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            visible=block.frage is not None,
+            controls=folgen_teil(folgen_zeilen_der(block.id), "block_frage_folgen"),
+        )
         felder: dict[str, list[ft.Control]] = {
             TEXT: [kopf, text, wenn_feld],
-            MEDIUM: [kopf, adresse, datei_text, medium_wege, beschriftung, wenn_feld],
+            MEDIUM: [
+                kopf,
+                adresse,
+                ft.Row(controls=[datei_text]),
+                medium_wege,
+                beschriftung,
+                wenn_feld,
+            ],
             FRAGE: [
                 kopf,
                 text,
@@ -2401,6 +2518,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 antworten,
                 frage_hinweis,
                 frage_folge,
+                frage_folgen,
                 wenn_feld,
             ],
             # Der Test (Skizzen T5 und F1): unter der Übung die Vorgabe, dann „So läuft der
@@ -2462,7 +2580,9 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 anzahl,
                 *([] if nur_liefern else [nach]),
                 hinweis(
-                    "Was mit der Wahl geschieht, sagt ein Baustein unter „Am Plan“ (Übung → "
+                    "Die Wahl gilt für eine „Übung machen“, die „die gewählte“ macht."
+                    if ohne_plan
+                    else "Was mit der Wahl geschieht, sagt ein Baustein unter „Am Plan“ (Übung → "
                     "„die gewählte aus …“)."
                     if nur_liefern
                     else "Ab zwei Gewählten stehen sie im Workout als Wege hinter der "
@@ -2471,6 +2591,15 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 wenn_feld,
             ],
         }
+
+        def abbrechen(_e: Any = None) -> None:
+            entwurf_fertig()
+            schliessen(dialog)
+
+        async def dialog_zu(e: Any = None) -> None:
+            entwurf_fertig()  # daneben getippt: wie „Abbrechen“
+            await nach_dem_block.bei_schliessen(e)
+
         inhalt = ft.Column(
             tight=True,
             spacing=10,
@@ -2490,12 +2619,14 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             inset_padding=ft.Padding.symmetric(horizontal=24, vertical=24)
             if block.art == TEST
             else None,
-            on_dismiss=nach_dem_block.bei_schliessen,
+            on_dismiss=dialog_zu,
             actions=[
-                ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
+                ft.TextButton("Abbrechen", on_click=abbrechen, data="block_abbrechen"),
                 ft.FilledButton("Übernehmen", on_click=uebernehmen, data="block_uebernehmen"),
             ],
         )
+        if wartend:
+            state.block_dialog[kapitel.id] = (dialog, gehalten)
         page.show_dialog(dialog)
 
     def block_schieben(block: Block, um: int) -> Callable[..., None]:
@@ -2576,7 +2707,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         haengt = sicht().haengt(b)
         unter: list[ft.Control] = [
             ft.Text(
-                block_kurz(b, katalog_alle, sicht()),
+                block_kurz(b, katalog_alle, sicht(), kapitelplan=not baut_plan and bool(plaene)),
                 size=12,
                 color=farbe,
                 opacity=0.75,
@@ -2584,6 +2715,29 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 overflow=ft.TextOverflow.ELLIPSIS,
             )
         ]
+        if b.wenn:  # die Bedingung steht an der Zeile (Skizze A3, Ben 26.11.2026)
+            unter.append(
+                ft.Text(
+                    sicht().wenn_text(b.wenn),
+                    size=12,
+                    color=farbe,
+                    italic=True,
+                    max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                    data=("block_wenn_zeile", b.id),
+                )
+            )
+        folgen_zahl = sicht().folgen_zahl(b)
+        if folgen_zahl:
+            unter.append(
+                ft.Text(
+                    f"{folgen_zahl} Folge{'n' if folgen_zahl != 1 else ''} an den Antworten",
+                    size=12,
+                    color=farbe,
+                    opacity=0.75,
+                    data=("block_folgen_zahl", b.id),
+                )
+            )
         if haengt:
             unter.append(
                 ft.Text("Verweis fehlt: " + ", ".join(haengt), size=12, color=ft.Colors.ERROR)
@@ -3196,8 +3350,9 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             and not any(x.art == AUSWAHL for x in bloecke)
         ):
             grund = "„Tage“ zählt die Pläne des Kapitels — es hat keinen."
-        elif not baut_plan and any(x.art in (TEST, AUSWAHL) for x in bloecke) and not plaene:
-            grund = "Test und Auswahl brauchen einen Plan im Kapitel."
+        # Ein Kapitel ohne Plan darf eine „Übung machen“ und eine Auswahl haben (Ben,
+        # 26.11.2026: „ein Kurs soll auch ohne Plan klappen“) — der Lauf ist dann freiwillig,
+        # die Wahl gilt für die Läufe, die „die gewählte“ machen
         fehler.value = grund or ""
         fehler.visible = grund is not None
         with contextlib.suppress(Exception):
@@ -3228,18 +3383,34 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         """Zurück von Kamera, Rekorder oder Fotoauswahl: Der Block, dessen Dialog dafür zuging,
         steht wieder offen — mit dem neuen Stück, wenn eines entstand (`block_aufnehmen`).
         Nur wenn diese Seite oben liegt: Unter der Kamera entsteht sie auch, dort bliebe der
-        Dialog ungesehen und der Entwurf wäre verbraucht."""
+        Dialog ungesehen.
+
+        **Der Entwurf bleibt liegen, bis sein Dialog mit „Übernehmen“ oder „Abbrechen“ endet**
+        (26.11.2026) — entsteht die Seite ein zweites Mal, während er offen ist, geht der alte
+        Dialog zu und ein neuer auf, der in die Liste **dieser** Seite schreibt. Vorher war
+        der Entwurf mit dem ersten Aufbau verbraucht; ein zweiter Aufbau ließ den Dialog an
+        einer Seite hängen, die es nicht mehr gab. Anlass: Ben meldete, am Pixel 10 kämen
+        Bilder und Videos nicht am Kurs an — ob das die Ursache war, ist am Gerät nicht
+        nachgestellt (im Browser blieb der Dialog einmal aus, wiederholen ließ es sich nicht)."""
         if str(getattr(page, "route", route) or route).rstrip("/") != route:
             return
-        wartet = state.block_entwurf.pop(kapitel.id, None)
+        wartet = state.block_entwurf.get(kapitel.id)
         neues = paketdatei.abholen(state, block_schluessel(kapitel.id))
         if wartet is None:
             return
         entwurf_block, war_neu = wartet
+        if neues is not None:
+            entwurf_block = block_mit_stueck(entwurf_block, neues)
+            state.block_entwurf[kapitel.id] = (entwurf_block, war_neu)
+        alt = state.block_dialog.pop(kapitel.id, None)
+        if alt is not None:  # der Dialog eines früheren Aufbaus dieser Seite
+            alt[1]["an"] = True
+            schliessen(alt[0])
         stelle = None if war_neu else next((b for b in bloecke if b.id == entwurf_block.id), None)
         if not war_neu and stelle is None:
+            state.block_entwurf.pop(kapitel.id, None)
             return  # den Block gibt es nicht mehr
-        block_dialog(block_mit_stueck(entwurf_block, neues), war_neu, stelle=stelle)
+        block_dialog(entwurf_block, war_neu, stelle=stelle, wartend=True)
 
     bloecke_zeichnen()
     bausteine_zeichnen()

@@ -165,6 +165,12 @@ class Aenderung:
     #: einer Übung, die erst mit dieser Karte dazukommt. Kommen bei einem Weg beide Enden erst
     #: dazu, steht hier das, zu dem er führt
     braucht: str = ""
+    #: nur bei `OFFEN`: Die Zeile wartet auf eine **Antwort** (``wenn``) — nicht auf eine Wahl
+    #: oder einen Test
+    antwort_fehlt: bool = False
+    #: … und die Antwort kommt aus diesem **Lauf** (Block-ID eines ``test``): Die Karte führt
+    #: dorthin („Ausprobieren“, Skizze C3). Leer: Die Frage steht im Kapitel
+    lauf: str = ""
 
     @property
     def anwendbar(self) -> bool:
@@ -649,6 +655,8 @@ class _Lauf:
                         self._wenn_titel(block),
                         self._wenn_fehlt(block),
                         OFFEN,
+                        antwort_fehlt=True,
+                        lauf=self._wenn_lauf(block),
                     )
                 )
                 continue
@@ -698,6 +706,16 @@ class _Lauf:
                 return f"Dazu fehlt deine Antwort auf „{quelle.titel}“."
             break
         return "Dazu fehlt noch eine Antwort."
+
+    def _wenn_lauf(self, b: Block) -> str:
+        """Der Lauf (Block-ID), aus dem die erste fehlende Antwort kommt — ``""``, wenn sie
+        aus einer Frage im Kapitel kommt."""
+        for w in b.wenn:
+            if gegeben_zu(w.frage, self.antworten):
+                continue
+            quelle = self.quellen.get(w.frage.partition(".")[0])
+            return quelle.id if quelle is not None and quelle.art == TEST else ""
+        return ""
 
     # -- plan_entfernen, plan_tauschen ---------------------------------------------------------
 

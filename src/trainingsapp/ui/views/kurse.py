@@ -775,6 +775,16 @@ def kapitel_view(
         def test_starten(block: Block, uid: str) -> Callable[..., Awaitable[None]]:
             return kurs_testlauf.starter(page, state, kurs, kapitel, block, katalog[uid])
 
+        def zum_lauf(block_id: str) -> Callable[..., Awaitable[None]] | None:
+            """„Ausprobieren“ an einer offenen Zeile der Sammelkarte (Skizze C3): zum Lauf,
+            dessen Antwort fehlt — in diesem oder einem früheren Kapitel. ``None``, wenn es
+            ihn nicht gibt oder seine Übung erst gewählt wird."""
+            for k in kurs.kapitel:
+                lauf = next((b for b in k.bloecke if b.id == block_id and b.art == TEST), None)
+                if lauf is not None and lauf.laeuft and lauf.uebung in katalog:
+                    return kurs_testlauf.starter(page, state, kurs, k, lauf, katalog[lauf.uebung])
+            return None
+
         # Wert für den Plan (W3, Ben 17.11.2026, `components/planwert.py`): Die Person sagt
         # nach dem Test, wie sein Wert in den Plan geht — ganz, ein Anteil, von Hand. Die
         # Testkarte zeigt die Wahl und lässt sie ändern; was daraus am Plan wird, steht wie
@@ -858,7 +868,9 @@ def kapitel_view(
                 browser=browser,
                 text_bauen=markdown,
                 zur_uebung=lambda uid: _oeffner(page, f"/uebung/{uid}"),
-                anlegen=plan_anlegen,
+                # ohne Plan-Vorlagen gibt es nichts anzulegen (Ben, 26.11.2026: „ein Kurs soll
+                # auch ohne Plan klappen“) — Lauf und Wahl stehen dann für sich
+                anlegen=plan_anlegen if kapitel.plaene else None,
                 # Kurs von vorn: was beim letzten Mal gewählt war, als Vorbelegung
                 letzte_wahl={} if angelegt else state.kurse.letzte_wahl(kapitel, profil),
                 bei_wahl=wahl_geaendert,
@@ -940,6 +952,7 @@ def kapitel_view(
                     aenderungen(),
                     planname=kursplan.name if kursplan is not None else kursplan_name(kurs),
                     uebernehmen=uebernehmen,
+                    ausprobieren=zum_lauf,
                 )
                 bloecke.append(sammelkarte.control)
         # Bereinigt halten: Was inzwischen fest ist oder sich hier nicht mehr wählen lässt,

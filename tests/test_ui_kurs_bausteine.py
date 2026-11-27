@@ -1562,9 +1562,7 @@ def test_test_gestalten_timer_takt_ausfuehrung_speichern_wieder_oeffnen(page, st
         "Anstrengung",
     ]
     # … ohne Vorgabe fragt die Karte wie beim Test von bisher, dahinter der Timer
-    assert _texte(_daten(dialog, "test_vorschau"))[1] == (
-        "Käfer: was schaffst du? · Timer „3 × 30 s“"
-    )
+    assert _texte(_daten(dialog, "test_vorschau"))[1] == ("Käfer · Timer „3 × 30 s“")
     # mit einem Timer steht „Zeit“ nicht zur Wahl
     assert _daten_ids(dialog, "test_vorgabe") == [OHNE, MENGE, SKALA]
     assert not _zu_sehen(dialog, _daten(dialog, "test_zeit_weg"))  # es war keine gesetzt
@@ -1575,9 +1573,7 @@ def test_test_gestalten_timer_takt_ausfuehrung_speichern_wieder_oeffnen(page, st
     _takt_uebernehmen(page)
     assert _lauf(dialog)[1] == EIGENE_ANGABE
     assert _zeile(dialog, "test_takt") == "Kniebeuge 2-1-2 · 2-1-2 · 12,0/min"
-    assert _texte(_daten(dialog, "test_vorschau"))[1] == (
-        "Käfer: was schaffst du? · mit Takt · Timer „3 × 30 s“"
-    )
+    assert _texte(_daten(dialog, "test_vorschau"))[1] == ("Käfer · mit Takt · Timer „3 × 30 s“")
 
     # -- Ausführung: je Parameter vorgegeben oder frei --------------------------------------
     _waehlen(dialog, "test_ausfuehrung", EIGENE_ANGABE)
@@ -1659,7 +1655,7 @@ def test_test_gestalten_timer_takt_ausfuehrung_speichern_wieder_oeffnen(page, st
     assert _zeile(dialog, "test_ausfuehrung") == "vorgegeben: links — wählt die Person: Variante"
     assert _daten(dialog, "block_text").value == "Mach dich vorher 5 Minuten warm."
     texte = _texte(_daten(dialog, "test_vorschau"))
-    assert texte[1] == "Käfer: was schaffst du? · mit Takt · Timer „3 × 30 s“"
+    assert texte[1] == "Käfer · mit Takt · Timer „3 × 30 s“"
     assert texte[2] == kurstest.lauf_satz(test, kaefer) and "Timer „3 × 30 s“" in texte[2]
     _daten(dialog, "test_uhr_stift").on_click()
     blatt = page.dialoge[-1]
@@ -1739,9 +1735,7 @@ def test_wie_die_uebung_und_timer_loest_die_vorgabe_zeit_ab(page, state) -> None
     assert not _zu_sehen(dialog, _daten(dialog, "test_zeit"))
     # der Test läuft weiter mit der Uhr — jetzt mit dem Timer der Übung, ohne Vorgabe
     assert _daten(dialog, "test_feld").label == "Ins Ziel kommt"
-    assert _texte(_daten(dialog, "test_vorschau"))[1] == (
-        "Käfer: was schaffst du? · Timer der Übung"
-    )
+    assert _texte(_daten(dialog, "test_vorschau"))[1] == ("Käfer · Timer der Übung")
     # Menge und Anstrengung gehen mit Timer; die Zeile hat dann gesagt, was sie zu sagen hatte
     _vorgabe(dialog, MENGE)
     assert _gewaehlt(dialog, "test_vorgabe") == [MENGE] and not _zu_sehen(dialog, zeile)
@@ -1774,9 +1768,7 @@ def test_wie_die_uebung_und_timer_loest_die_vorgabe_zeit_ab(page, state) -> None
         "Anstrengung",
         "Ausführung",
     ]
-    assert _texte(_daten(dialog, "test_vorschau"))[1] == (
-        "Käfer: was schaffst du? · mit Takt · Timer der Übung"
-    )
+    assert _texte(_daten(dialog, "test_vorschau"))[1] == ("Käfer · mit Takt · Timer der Übung")
     _daten(dialog, "block_uebernehmen").on_click()
     assert "Käfer · Wiederholungen · mit Takt · Timer der Übung" in _texte(ansicht)
     _speichern(ansicht)

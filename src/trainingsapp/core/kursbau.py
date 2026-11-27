@@ -2238,10 +2238,10 @@ class Kurssicht:
         Timer (`core.kurstest.vorgabe_fuer`) —, fragt die Karte wie beim Test von bisher:
 
         >>> sicht.test_vorschau(replace(mit_takt, vorgabe=None)).kopf
-        ('Käfer: was schaffst du? · mit Takt',)
+        ('Käfer · mit Takt',)
         >>> timer = {"id": "t", "name": "Runden", "abschnitte": [{"name": "Üben", "dauer_s": 30}]}
         >>> sicht.test_vorschau(replace(test, vorgabe=Vorgabe(ZEIT, 60), timer=timer)).kopf
-        ('Käfer: was schaffst du? · Timer „Runden“',)
+        ('Käfer · Timer „Runden“',)
         """
         sicht = self.mit(block)
 
@@ -2251,7 +2251,8 @@ class Kurssicht:
             gilt = replace(block, vorgabe=vorgabe_fuer(block, uhr_fuer(block, uebung)))
             kopf = name_des_tests(gilt, self.katalog, name, skala)
             fragt = block.laeuft and gilt.vorgabe is None and not block.titel
-            return f"{kopf}: {OHNE_VORGABE}" if fragt else kopf
+            del fragt  # bis 27.11.2026 stand hier die Frage der App hinter dem Namen
+            return kopf
 
         gemessen = [u for u in gemessene_uebungen(block, sicht.beispielwahl()) if u in self.katalog]
         if block.aus and gemessen and not block.titel:

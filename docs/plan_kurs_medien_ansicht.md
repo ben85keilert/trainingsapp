@@ -353,9 +353,7 @@ der Karte, „Die Uhr läuft mit dem Tipp los.“, „Eingetragen wird ein gewö
 im Ergebnis, „Noch nicht gemacht / Noch kein Test, seit du dieses Kapitel öffnest.“ und
 „Nur auf diesem Gerät. ‚Von vorn beginnen‘ leert die Karte — deine Einträge bleiben.“
 
-**Geblieben** (bewusst, zur Entscheidung): die Überschrift „<Übung>: was schaffst du?“ an
-einem Lauf ohne Vorgabe **und ohne eigene Aufforderung** (`kurstest.OHNE_VORGABE` — sie steht
-auch im Editor und in den Vorschauen); Sätze, die sagen, was fehlt („Es fehlt noch: …“, „Dazu
+**Geblieben** (bewusst): Sätze, die sagen, was fehlt („Es fehlt noch: …“, „Dazu
 fehlt deine Antwort …“); „Nichts ändert sich ohne deinen Tipp“ in der Sammelkarte; ohne Lauf
 „Noch kein Eintrag bei …“.
 
@@ -371,3 +369,50 @@ Ort, kein Gerät, keine Zeit; aufrecht braucht keinen Tag; ein zweites Bereinige
 **Schon abgelegte Fotos bleiben quer** — ihre Ausrichtung ist verloren. Noch einmal
 hinzufügen. Ein Paket, das mit dieser Fassung gebaut wird, trägt für solche Fotos andere
 Dateinamen (die Prüfsumme) als ein älterer Bau.
+
+## 12. Zweite Runde Nachträge (Ben, 27.11.2026, Version 0.3.107)
+
+„1) ja, sowas wie ‚was schaffst du?‘ auch raus. 2) wenn ein Kurs abgeschlossen ist, soll es
+trotzdem möglich sein, die Übung mit all den Videos zu wiederholen. Wenn Videos nicht
+angeschaut wurden, weil es z. B. Bedingungen gibt, an denen man vorbei kam, soll gezeigt sein,
+dass das noch aussteht bei den ‚fertigen‘ Übungen. 3) Ein Test muss keinen Eintrag haben
+müssen. … Wenn nicht danach explizit gefragt wird, muss man auch nichts eingeben. Dabei muss
+es in den Einstellungen die Möglichkeit geben, dass einfach gar nichts gemessen wird, sondern
+nur gemacht.“
+
+### 12.1 Keine Frage der App in der Überschrift
+
+„<Übung>: was schaffst du?“ ist weg — an der Karte im Kapitel, in der Liste und den Vorschauen
+des Editors und über dem Lauf. Ohne Vorgabe und ohne eigene Aufforderung steht der Name der
+Übung da (bei mehreren Gewählten „Deine Auswahl“). `kurstest.OHNE_VORGABE` ist leer.
+
+### 12.2 Ein Lauf muss nichts eintragen
+
+- **Ein Wert ist nur Pflicht, wo der Kurs ihn braucht** — ein Baustein oder der Kapitelplan
+  nimmt sein Ziel daraus (`wert_wird_ziel`; `kurs_testlauf.wert_pflicht`). Jeder andere Lauf
+  trägt ein, was da ist: „Eintragen“ ist nie gesperrt, es gibt kein „Es fehlt noch …“. Die
+  Felder (Wiederholungen, Anstrengung) stehen weiter da — wer mag, füllt sie.
+- **„Nichts messen — nur machen“** (`Block.nur_machen`, Haken am Lauf im Kurs-Editor): Das
+  Ergebnis zeigt keine Felder und fragt nicht nach der Anstrengung — nur die Fragen des
+  Kurses, seine Folgen und Medien; der Knopf heißt „Fertig — zurück zum Kapitel“. Der Eintrag
+  hat keine Werte (abgehakt). Wo der Wert gebraucht wird, ist der Haken gesperrt und das Feld
+  gilt nicht.
+- **Gemacht ohne Wert:** Der Kurs merkt jeden eingetragenen Lauf für sich
+  (`gemacht_name`: ``<lauf>.gemacht`` bei den Antworten des Kurses, nur auf dem Gerät; „Von
+  vorn“ nimmt es mit). Daran hängen „Gemacht“ und „Nochmal“ an der Karte, die vollständige
+  Vorseite (§11.2) und der Fußknopf (er nennt den Lauf dann nicht mehr).
+- Nicht geändert: Ein Test **ohne Lauf** („Zur Übung“, Eintrag bei der Übung) und die
+  Bedingung „Menge“ eines Kapitels rechnen weiter aus Einträgen mit Wert.
+
+### 12.3 Wiederholen im abgeschlossenen Kapitel, was noch aussteht
+
+- Ein Lauf behält seinen Knopf, sobald das Kapitel erreicht ist — auch im abgeschlossenen
+  Kapitel, im abgeschlossenen Kurs und nach „Plan anlegen“ (`kapitel_bloecke(wiederholen=…)`).
+  Ein neuer Lauf überschreibt seinen Wert im Kurs wie bisher („Nochmal“, P214 a); am Plan
+  ändert sich dadurch nichts von selbst.
+- **An einem gemachten Lauf** steht in der Karte „Noch nicht angesehen: …“ mit den Titeln —
+  Medien vorher, nachher und zu einem Ereignis, die nie geöffnet wurden. In der Vorseite
+  steht es am Stück („noch nicht angesehen“ bzw. „✓ gesehen“). Was „dabei“ mitläuft, zählt
+  nicht — es wird nicht abgehakt.
+- **Nicht erfasst:** Blöcke „Medium“ im Kapitel, die an einer **anderen Antwort** hängen als
+  der gegebenen — sie bleiben verborgen, wie bisher (`wenn`); die Karte nennt sie nicht.

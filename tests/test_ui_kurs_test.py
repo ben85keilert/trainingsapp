@@ -256,7 +256,7 @@ async def test_ohne_vorgabe_bleibt_die_karte(umgebung) -> None:
     u = umgebung
     kurs, kapitel, _, _ = _kurs(u.state, None, uebung="Planke", feld="hold")
     ansicht = _kapitel(u, kurs, kapitel)
-    assert "Planke: was schaffst du?" in _texte(ansicht)
+    assert "Planke" in _texte(ansicht)
     assert _daten(ansicht, ("test_oeffnen", "test")).content == "Zur Übung"
     assert not _hat(ansicht, ("test_starten", "test"))
 
@@ -459,8 +459,8 @@ async def test_menge_von_hand_ein_eintrag_mit_zeit_und_skala(umgebung) -> None:
 
 
 async def test_vorher_aufgehoert_fragt_wie_viele(umgebung) -> None:
-    """„Vorher aufgehört …“: Die Vorgabe ist nicht erreicht — die App fragt die Wiederholungen,
-    und „Eintragen“ geht erst mit ihnen."""
+    """„Vorher aufgehört …“: Die Vorgabe ist nicht erreicht — die App fragt die Wiederholungen.
+    Eintragen geht auch ohne sie: Der Lauf ist freiwillig (27.11.2026)."""
     u = umgebung
     state = u.state
     kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(MENGE, 30))
@@ -471,9 +471,9 @@ async def test_vorher_aufgehoert_fragt_wie_viele(umgebung) -> None:
     feld = _daten(ergebnis, "test_wdh")
     assert isinstance(feld, ft.TextField) and not feld.value and "sagst du" in _texte(ergebnis)
     assert _daten(ergebnis, "zeit").value == "0:40"
-    assert _daten(ergebnis, "test_eintragen").disabled
-    assert _daten(ergebnis, "test_fehlt").value == "Es fehlt noch: Wiederholungen."
-    assert kurs_test.eintragen(u.seite, state) is None and not _eintraege(state, kaefer)
+    # der Lauf ist freiwillig: Er verlangt keinen Wert (Ben, 27.11.2026) — „Eintragen“ geht
+    assert not _daten(ergebnis, "test_eintragen").disabled
+    assert not _daten(ergebnis, "test_fehlt").visible
     feld.value = "18"
     feld.on_change(SimpleNamespace(control=feld))
     assert not _daten(ergebnis, "test_eintragen").disabled
@@ -518,7 +518,7 @@ async def test_anstrengung_bis_7_belegt_die_skala_vor_und_fragt_die_wiederholung
     ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
     assert _daten(ergebnis, ("test_skala", 7)).bgcolor == ft.Colors.PRIMARY  # vorbelegt
     assert _daten(ergebnis, "zeit").value == "1:12"
-    assert _daten(ergebnis, "test_eintragen").disabled  # das Feld des Tests fehlt noch
+    assert not _daten(ergebnis, "test_eintragen").disabled  # freiwillig: kein Wert nötig
     feld = _daten(ergebnis, "test_wdh")
     feld.value = "22"
     feld.on_change(SimpleNamespace(control=feld))
@@ -691,7 +691,7 @@ async def test_zeit_auf_uebung_mit_wiederholungen_fragt_sie(umgebung) -> None:
     kurs_test.pruefen(u.seite, state)  # der Wächter tut dasselbe
     assert state.kurs_test.phase == ERGEBNIS and state.kurs_test.sekunden == 30.0
     ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
-    assert _daten(ergebnis, "test_eintragen").disabled
+    assert not _daten(ergebnis, "test_eintragen").disabled
     feld = _daten(ergebnis, "test_wdh")
     feld.value = "14"
     feld.on_change(SimpleNamespace(control=feld))
@@ -862,7 +862,7 @@ async def test_gestalteter_test_oeffnet_sich_bereit_und_zeigt_wie_er_laeuft(umge
     assert block.vorgabe is None and block.laeuft
     karte = _kapitel(u, kurs, kapitel)
     texte = _texte(karte)
-    assert "Käfer: was schaffst du?" in texte and "Mach dich vorher 5 Minuten warm." in texte
+    assert "Käfer" in texte and "Mach dich vorher 5 Minuten warm." in texte
     # wie der Lauf läuft, steht im Lauf selbst — die Karte sagt nur, was der Kurs schreibt
     assert not _hat(karte, ("test_wie", "test"))
     assert not any("seit du dieses Kapitel öffnest" in t for t in texte)
@@ -951,7 +951,7 @@ async def test_timer_mit_abschnitten_endet_von_selbst_und_traegt_einmal_ein(umge
     texte = _texte(ergebnis)
     assert _daten(ergebnis, "test_ende").value == "Der Timer ist durch"
     assert _daten(ergebnis, "zeit").value == "0:40" and "vom Timer" in texte
-    assert _daten(ergebnis, "test_eintragen").disabled
+    assert not _daten(ergebnis, "test_eintragen").disabled
     feld = _daten(ergebnis, "test_wdh")
     feld.value = "14"
     feld.on_change(SimpleNamespace(control=feld))
@@ -1133,7 +1133,7 @@ async def test_wie_die_uebung_nimmt_ihren_timer_takt_und_ihre_parameter(umgebung
         wie_uebung=["uhr", "takt", "parameter"],
     )
     karte = _kapitel(u, kurs, kapitel)
-    assert "Planke: was schaffst du?" in _texte(karte)  # nicht „Planke: 1 Minute“
+    assert "Planke" in _texte(karte)  # nicht „Planke: 1 Minute“
     assert not _hat(karte, ("test_wie", "test"))
     await _starten(u, kurs, kapitel)
     bereit = _ansicht(u, kurs, kapitel, block, planke)
@@ -1761,3 +1761,56 @@ async def test_ohne_sensor_startet_der_lauf_nicht(umgebung) -> None:
         assert u.state.kurs_test is None
     finally:
         u.state.messlauf = messlauf
+
+
+# -- Ein Lauf muss nichts eintragen (Ben, 27.11.2026) ------------------------------------------
+
+
+async def test_freiwilliger_lauf_traegt_auch_ohne_wert_ein_und_gilt_als_gemacht(umgebung) -> None:
+    """„Ein Test muss keinen Eintrag haben müssen. Wenn die Grundübung ‚Wdh‘ eingestellt hat,
+    kommt man ohne Wdh-Eintrag nicht weiter.“ — ein Lauf, dessen Wert kein Baustein braucht,
+    trägt ein, was da ist. Der Kurs merkt, dass er gemacht ist: Die Karte sagt „Gemacht“ und
+    bietet „Nochmal“."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(MENGE, 30))
+    await _starten(u, kurs, kapitel)
+    await _sekunden(u, 40)
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_vorher"))
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    await klick(_daten(ergebnis, "test_eintragen"))  # ohne Wiederholungen
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, kaefer)
+    assert "reps" not in eintrag.result  # nichts erfunden
+    assert state.kurse.testwerte(kapitel, state.profil.id, SEIT) == {}
+    assert "test.gemacht" in state.kurse.antworten(kurs.id, state.profil.id)
+    karte = _kapitel(u, kurs, kapitel)
+    assert _daten(karte, ("test_gemacht", "test")).value == "Gemacht"
+    assert _daten(karte, ("test_starten", "test")).content == "Nochmal"
+
+
+async def test_nur_machen_fragt_nichts_und_hakt_ab(umgebung) -> None:
+    """„… die Möglichkeit geben, dass einfach gar nichts gemessen wird, sondern nur gemacht.“
+    Mit `Block.nur_machen` fragt das Ergebnis nichts — kein Feld für Wiederholungen, keine
+    Frage nach der Anstrengung —, der Eintrag ist ein Haken."""
+    u = umgebung
+    state = u.state
+    kurs, kapitel, block, kaefer = _kurs(state, Vorgabe(MENGE, 30))
+    block.nur_machen = True
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    kapitel = kurs.kapitel[0]
+    block = kapitel.bloecke[0]
+    assert block.nur_machen and block.to_dict()["nur_machen"] is True
+    await _starten(u, kurs, kapitel)
+    await _sekunden(u, 20)
+    await klick(_daten(_ansicht(u, kurs, kapitel, block, kaefer), "test_vorher"))
+    ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
+    assert not _hat(ergebnis, "test_wdh") and not _hat(ergebnis, "test_raster")
+    knopf = _daten(ergebnis, "test_eintragen")
+    assert knopf.content == "Fertig — zurück zum Kapitel" and not knopf.disabled
+    await klick(knopf)
+    await _bis_vorbei(u)
+    (eintrag,) = _eintraege(state, kaefer)
+    assert eintrag.result == {}
+    assert "test.gemacht" in state.kurse.antworten(kurs.id, state.profil.id)

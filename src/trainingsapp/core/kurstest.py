@@ -103,9 +103,9 @@ SKALA_NAME: Final = "Anstrengung"
 #: Feldschlüssel des Vorrats, wenn die Übung das Feld nicht anbietet
 _WDH_FELD: Final = "reps"
 _SKALA_FELD: Final = "scale"
-#: Die Frage in der Überschrift der Testkarte, wenn im Lauf keine Vorgabe gilt: „Käfer: was
-#: schaffst du?“ (`karten_ueberschrift`)
-OHNE_VORGABE: Final = "was schaffst du?"
+#: Bis 27.11.2026 stand an einem Lauf ohne Vorgabe eine Frage der App hinter dem Namen —
+#: jetzt nur der Name (Ben: „sowas … auch raus“). Die Konstante bleibt leer für ältere Aufrufer
+OHNE_VORGABE: Final = ""
 #: So heißt ein Timer, dem niemand einen Namen gab (`core.timer.TimerProfil.name`) — das ist
 #: kein Name, den man nennt (`timer_name`)
 _TIMER_OHNE_NAMEN: Final = TimerProfil().name
@@ -752,8 +752,8 @@ def karten_ueberschrift(
 ) -> str:
     """Die **Überschrift der Testkarte** eines Tests, der als Lauf gemacht wird und keine
     eigene Aufforderung hat (`Block.titel`): „Käfer: bis Anstrengung 7“ — mit der Vorgabe, die
-    im Lauf **gilt** (`vorgabe_fuer`: neben einem Timer keine „Zeit“). Gilt keine, die Frage
-    wie beim Test ohne Lauf: „Käfer: was schaffst du?“ (`OHNE_VORGABE`). Eine Stelle für die
+    im Lauf **gilt** (`vorgabe_fuer`: neben einem Timer keine „Zeit“). Gilt keine, steht nur
+    der Name da (seit 27.11.2026 ohne die Frage der App dahinter). Eine Stelle für die
     Karte im Kapitel (`ui/components/kursblock.py`) und die Vorschau im Kurs-Editor.
 
     ``name``: was vor dem Doppelpunkt steht — die Übung, „Deine Auswahl“, „Übung fehlt“.
@@ -766,18 +766,18 @@ def karten_ueberschrift(
     >>> karten_ueberschrift(Block(TEST, uebung="k", vorgabe=Vorgabe(SKALA, 7)), "Käfer")
     'Käfer: bis Anstrengung 7'
     >>> karten_ueberschrift(Block(TEST, aus="a", ziel={"side": "links"}), "Deine Auswahl")
-    'Deine Auswahl: was schaffst du?'
+    'Deine Auswahl'
     >>> timer = TimerProfil(abschnitte=[Abschnitt("Los", 90)])
     >>> zeit = Block(TEST, uebung="k", vorgabe=Vorgabe(ZEIT, 60))
     >>> karten_ueberschrift(zeit, "Käfer"), karten_ueberschrift(zeit, "Käfer", skala="Schwere")
     ('Käfer: 1 Minute', 'Käfer: 1 Minute')
     >>> karten_ueberschrift(Block(TEST, uebung="k", vorgabe=Vorgabe(ZEIT, 60),
     ...                           timer=timer.als_dict()), "Käfer")  # der Timer ist die Zeit
-    'Käfer: was schaffst du?'
+    'Käfer'
     >>> mit_timer = Exercise(timer=[timer.als_dict()])
     >>> wie_uebung = Block(TEST, uebung="k", vorgabe=Vorgabe(ZEIT, 60), wie_uebung=["uhr"])
     >>> karten_ueberschrift(wie_uebung, "Käfer", mit_timer), karten_ueberschrift(wie_uebung, "?")
-    ('Käfer: was schaffst du?', '?: 1 Minute')
+    ('Käfer', '?: 1 Minute')
     >>> schwer = Exercise(result_spec=ResultSpec(fields=[replace(vorrat_feld("scale"),
     ...                                                           label="Schwere")]))
     >>> karten_ueberschrift(Block(TEST, uebung="k", vorgabe=Vorgabe(SKALA, 7)), "Käfer", schwer)
@@ -785,7 +785,7 @@ def karten_ueberschrift(
     """
     vorgabe = vorgabe_fuer(block, uhr_fuer(block, uebung))
     if vorgabe is None:
-        return f"{name}: {OHNE_VORGABE}"
+        return name  # keine Frage der App dahinter — was dort stehen soll, schreibt der Kurs
     wie = skala or (skala_name(uebung.result_spec) if uebung is not None else SKALA_NAME)
     return f"{name}: {vorgabe_text(vorgabe, wie, satzanfang=False)}"
 
@@ -1336,7 +1336,7 @@ def kopf(
     sie der Timer, ohne beides die Aufforderung der Testkarte.
 
     >>> kopf(Vorgabe(SKALA, 7)), kopf(None)
-    (('Vorgabe', 'Bis Anstrengung 7'), ('Test', 'Was schaffst du?'))
+    (('Vorgabe', 'Bis Anstrengung 7'), ('Test', ''))
     >>> from trainingsapp.core.timer import Abschnitt
     >>> tabata = TimerProfil(name="Tabata", abschnitte=[Abschnitt("Los", 240)])
     >>> kopf(None, tabata), kopf(Vorgabe(ZEIT, 60), tabata), kopf(Vorgabe(MENGE, 30), tabata)
@@ -1350,7 +1350,7 @@ def kopf(
     lauf = _mit_timer(timer)
     if lauf is not None:
         return "Timer", timer_text(lauf)
-    return "Test", OHNE_VORGABE[0].upper() + OHNE_VORGABE[1:]
+    return "Test", ""  # der Aufrufer setzt den Namen der Übung bzw. den Titel des Blocks
 
 
 def zeit_anzeige(v: Vorgabe | None, gelaufen_s: float) -> str:

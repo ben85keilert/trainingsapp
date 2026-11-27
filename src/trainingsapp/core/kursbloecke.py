@@ -373,6 +373,30 @@ class Wenn:
         return f"weil du {gegeben.wert:g} angegeben hast"
 
 
+#: Was hinter dem Schlüssel eines Laufs steht, wenn er **gemacht** ist (`gemacht_name`)
+GEMACHT_ENDE: Final = ".gemacht"
+
+
+def gemacht_name(test_name: str) -> str:
+    """Unter diesem Namen merkt der Kurs, dass ein Lauf gemacht wurde — auch wenn er nichts
+    eingetragen hat (Ben, 27.11.2026: „Ein Test muss keinen Eintrag haben müssen“). Bei den
+    Antworten des Kurses, nur auf dem Gerät; „Von vorn“ nimmt es mit.
+
+    >>> gemacht_name("t"), gemacht_name("t:x")
+    ('t.gemacht', 't:x.gemacht')
+    """
+    return test_name + GEMACHT_ENDE
+
+
+def gemachte_laeufe(antworten: Mapping[str, Any]) -> list[str]:
+    """Die Schlüssel der Läufe, die als gemacht gemerkt sind.
+
+    >>> gemachte_laeufe({"t.gemacht": 1, "q": 2, "t.f:w": 3})
+    ['t']
+    """
+    return [k[: -len(GEMACHT_ENDE)] for k in antworten if k.endswith(GEMACHT_ENDE)]
+
+
 def antwort_name(test_name: str, frage_id: str) -> str:
     """Der Name der Antwort auf eine Frage **am Lauf**: ``<test>.f:<frage>`` — ``test_name``
     ist der Schlüssel des Tests (`wert_schluessel`) oder, in einer Bedingung, seine Block-ID.
@@ -558,6 +582,11 @@ class Block:
     medien: list[Media] = field(default_factory=list)
     #: ``test``: Sensoren als Startbedingung (`BRAUCHT`) — leer: keiner nötig
     braucht: list[str] = field(default_factory=list)
+    #: ``test``: **nichts messen, nur machen** (Ben, 27.11.2026: „Dabei muss es in den
+    #: Einstellungen die Möglichkeit geben, dass einfach gar nichts gemessen wird, sondern nur
+    #: gemacht“) — das Ergebnis fragt nichts außer den Fragen des Kurses, der Eintrag ist ein
+    #: Haken. Gilt nicht, wo ein Baustein den Wert braucht (`wert_wird_ziel`)
+    nur_machen: bool = False
     #: ``test``: Fragen am Lauf, in ihrer Reihenfolge — und welche davon **vor** dem Start
     #: kommen (IDs; alle anderen im Ergebnis)
     fragen: list[ab.Frage] = field(default_factory=list)
@@ -643,6 +672,8 @@ class Block:
                 d["medien"] = [m.als_dict() for m in self.medien]
             if self.braucht:
                 d["braucht"] = list(self.braucht)
+            if self.nur_machen:
+                d["nur_machen"] = True
             if self.fragen:
                 vorher = set(self.fragen_vorher)
                 d["fragen"] = [
@@ -826,6 +857,7 @@ class Block:
             braucht = roh.get("braucht")
             if isinstance(braucht, list):
                 block.braucht = [s for s in BRAUCHT if s in {str(x) for x in braucht}]
+            block.nur_machen = roh.get("nur_machen") is True
             for f in _liste(roh.get("fragen")):
                 frage = ab.Frage.aus_dict(f)
                 if frage is None or any(x.id == frage.id for x in block.fragen):
@@ -1456,6 +1488,7 @@ __all__ = [
     "FRAGE",
     "FRAGE_VORSATZ",
     "GANZ",
+    "GEMACHT_ENDE",
     "HAND",
     "HART",
     "MEDIUM",
@@ -1500,6 +1533,8 @@ __all__ = [
     "fertig",
     "folgen_im_ergebnis",
     "gegeben_zu",
+    "gemacht_name",
+    "gemachte_laeufe",
     "gemessene_uebungen",
     "ist_vorgabe",
     "planwert",

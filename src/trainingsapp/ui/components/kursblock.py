@@ -59,23 +59,25 @@ from trainingsapp.core.kursbloecke import (
     Gegeben,
     Planwert,
     fertig,
+    gemacht_name,
     gemessene_uebungen,
     ist_vorgabe,
     wenn_stand,
     wert_schluessel,
     ziel_im_plan,
 )
-from trainingsapp.core.models import Exercise, SessionEntry, lokaler_tag
+from trainingsapp.core.models import BEGLEITUNG, Exercise, SessionEntry, lokaler_tag
 from trainingsapp.core.result_spec import FieldSpec, basis_key, vorrat_feld
 from trainingsapp.core.tagesbilanz import menge_text
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.kursfrage import frage_karte
+from trainingsapp.ui.components.material import gesehen as material_gesehen
 from trainingsapp.ui.components.medienkarte import medienkarte
 from trainingsapp.ui.components.planwert import planwert_karte
 
 #: Die Aufforderung eines Tests „der gewählten“ ohne eigenen Titel, solange keine oder mehr
-#: als eine Übung gewählt ist — mit genau einer steht ihr Name da („Käfer: was schaffst du?“)
-OHNE_TITEL = f"Deine Auswahl: {kurstest.OHNE_VORGABE}"
+#: als eine Übung gewählt ist — mit genau einer steht ihr Name da („Käfer“)
+OHNE_TITEL = "Deine Auswahl"
 
 
 def feld_von(uebung: Exercise | None, key: str) -> FieldSpec:
@@ -144,6 +146,7 @@ def kapitel_bloecke(
     wert_waehlen: Callable[[Block, str, Planwert | None], Any] | None = None,
     antworten: Mapping[str, Gegeben] | None = None,
     antwort_geben: Callable[[str, Gegeben], Any] | None = None,
+    wiederholen: bool = False,
 ) -> KapitelBloecke:
     """Die Controls zu ``bloecke``. ``werte``: je Test-Block der Wert aus dem Eintrag
     (`KursRepo.testwerte` — bei einem Test „der gewählten“ je Übung der Auswahl einer);
@@ -199,9 +202,18 @@ def kapitel_bloecke(
     mit ``wenn`` steht nur da, wenn seine Bedingungen gelten (`wenn_stand`); fehlt eine
     Antwort, bleibt er verborgen. Eine Frage in den Arten des Ablaufs (`Block.frage`) meldet
     ihre Antwort an ``antwort_geben(name, antwort)`` — die Ansicht speichert und zeichnet neu
-    (dann erscheint, was an der Antwort hängt). Ohne ``antwort_geben`` ist sie nur zu lesen."""
+    (dann erscheint, was an der Antwort hängt). Ohne ``antwort_geben`` ist sie nur zu lesen.
+
+    **Wiederholen** (Ben, 27.11.2026: „wenn ein Kurs abgeschlossen ist, soll es trotzdem
+    möglich sein, die Übung mit all den Videos zu wiederholen“): ``wiederholen`` — ein Lauf
+    behält seinen Knopf auch im abgeschlossenen Kapitel und nach „Plan anlegen“. Ein Lauf
+    gilt als gemacht, wenn er einen Wert hat **oder** als gemacht gemerkt ist
+    (`core.kursbloecke.gemacht_name` — ein Lauf muss nichts eintragen). An einem gemachten
+    Lauf steht, welche seiner Medien noch nicht angesehen sind."""
     ergebnis = KapitelBloecke(controls=[])
     gegeben = antworten or {}
+    #: was das Profil schon angesehen hat (nur auf dem Gerät, `components/material.py`)
+    schon_gesehen = material_gesehen(state)
 
     def an_stelle(block: Block, control: ft.Control) -> ft.Control:
         """``control`` mit einer Marke, zu der die Ansicht rollen kann (der Fußknopf „nächster
@@ -369,12 +381,46 @@ def kapitel_bloecke(
             return f"{was}."
         return f"{was} von heute." if tag == heute else f"{was} vom {tag:%d.%m.}."
 
+    def ist_gemacht(block: Block, uid: str) -> bool:
+        """Als gemacht gemerkt — auch ohne Wert (`gemacht_name`)."""
+        return gemacht_name(wert_schluessel(block, uid)) in gegeben
+
+    def offene_medien(block: Block, ohne_wert: bool) -> list[ft.Control]:
+        """An einem gemachten Lauf: „Gemacht“ (wenn er nichts eingetragen hat) und was von
+        seinen Medien noch aussteht — vorher, nachher und die zu einem Ereignis, an dem man
+        vorbeikam. Was „dabei“ mitläuft, zählt nicht (es wird nicht abgehakt)."""
+        zeilen: list[ft.Control] = []
+        if ohne_wert:
+            zeilen.append(
+                ft.Row(
+                    spacing=6,
+                    controls=[
+                        ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, size=18, color=ft.Colors.PRIMARY),
+                        ft.Text("Gemacht", size=14, data=("test_gemacht", block.id)),
+                    ],
+                )
+            )
+        offen_ = [m for m in block.medien if m.rolle != BEGLEITUNG and m.uri not in schon_gesehen]
+        if offen_:
+            namen = ", ".join(m.title or "ohne Titel" for m in offen_[:3])
+            mehr = f" und {len(offen_) - 3} weitere" if len(offen_) > 3 else ""
+            zeilen.append(
+                ft.Text(
+                    f"Noch nicht angesehen: {namen}{mehr}",
+                    size=12,
+                    color=ft.Colors.TERTIARY,
+                    data=("test_ungesehen", block.id),
+                )
+            )
+        return zeilen
+
     def zur_uebung_knopf(block: Block, uid: str, getestet: bool) -> ft.Control | None:
         """„Zur Übung“ bzw. „Nochmal“ zu **dieser** Übung — ``None``, wo nur gelesen wird. Ein
         Test, der als Lauf gemacht wird (`Block.laeuft`), startet stattdessen seinen Lauf: „Test
         starten“ bzw. „Nochmal“, und „Zum Test“, solange er läuft oder auf sein Ergebnis
         wartet."""
-        if uid not in katalog or not offen or (angelegt and not kursplan):
+        nochmal = wiederholen and block.laeuft and test_starten is not None
+        if uid not in katalog or (not nochmal and (not offen or (angelegt and not kursplan))):
             return None
         if block.laeuft and test_starten is not None:
             laeuft = laufender_test == (block.id, uid)
@@ -542,8 +588,7 @@ def kapitel_bloecke(
             name = uebung.name if uebung is not None else "Übung fehlt"
             teile.append(
                 ft.Text(
-                    block.titel
-                    or (lauf_titel(block, uid) if als_lauf else f"{name}: {kurstest.OHNE_VORGABE}"),
+                    block.titel or (lauf_titel(block, uid) if als_lauf else name),
                     weight=ft.FontWeight.W_600,
                 )
             )
@@ -591,7 +636,7 @@ def kapitel_bloecke(
                     hinweis(
                         # im Kursplan-Kurs rechnet der Baustein (eigener Faktor, vielleicht
                         # eine andere Übung) — was daraus wird, sagt die Sammelkarte
-                        f"{woher} Der Kurs merkt sich, was du eingetragen hast."
+                        woher
                         if freiwillig(block)
                         else f"{woher} Was daraus an deinem Plan wird, steht unten."
                         if kursplan
@@ -604,8 +649,11 @@ def kapitel_bloecke(
                 teile.append(
                     hinweis(f"Noch kein Eintrag bei „{name}“, seit du dieses Kapitel öffnest.")
                 )
+            gemacht = wert is not None or ist_gemacht(block, uid)
+            if gemacht:
+                teile.extend(offene_medien(block, wert is None))
             knoepfe: list[ft.Control] = []
-            if (oeffnen := zur_uebung_knopf(block, uid, wert is not None)) is not None:
+            if (oeffnen := zur_uebung_knopf(block, uid, gemacht)) is not None:
                 knoepfe.append(oeffnen)
             if wert is not None and darf_wert(block, uid):
                 knoepfe.append(wert_knopf(block, uid))
@@ -627,7 +675,7 @@ def kapitel_bloecke(
             uebung = katalog.get(uid)
             feld = feld_von(uebung, block.feld)
             wert = werte.get(wert_schluessel(block, uid))
-            oeffnen = zur_uebung_knopf(block, uid, wert is not None)
+            oeffnen = zur_uebung_knopf(block, uid, wert is not None or ist_gemacht(block, uid))
             # als Lauf: hinter dem Wert, was er sonst gemessen hat
             daneben = neben(block, uid) if als_lauf and wert is not None else ""
             # Kapitelplan: das Ziel in einer eigenen blassen Zeile — neben dem Knopf bräche

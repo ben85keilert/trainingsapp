@@ -107,6 +107,7 @@ from trainingsapp.core.kursbloecke import (
     anteil_vorgabe,
     antwort_name,
     folgen_im_ergebnis,
+    gemacht_name,
     ist_vorgabe,
     planwert,
     wert_im_test,
@@ -517,6 +518,19 @@ def anhalten(page: Any, state: Any, *, vorher: bool = False) -> bool:
     return True
 
 
+def wert_pflicht(state: Any, stand: Kurstestlauf) -> bool:
+    """Braucht der Kurs den Wert dieses Laufs (ein Baustein oder der Kapitelplan nimmt sein
+    Ziel daraus, `core.kursbloecke.wert_wird_ziel`)? Nur dann muss etwas eingetragen sein.
+    Gibt es den Kurs nicht mehr: ja — wie bisher."""
+    kurs = state.kurse.laden(stand.kurs_id)
+    kapitel = kurs.kapitel_mit(stand.kapitel_id) if kurs is not None else None
+    if kurs is None or kapitel is None:
+        return True
+    return wert_wird_ziel(
+        stand.block, [b for k in kurs.kapitel for b in k.bloecke], bool(kapitel.plaene)
+    )
+
+
 def eintragen(page: Any, state: Any) -> SessionEntry | None:
     """„Eintragen“: ein eigener, abgeschlossener Eintrag bei der Übung — dann ``person/eintrag``
     in die Zeitleiste und die Uhr fertig (Moduldocstring). ``None``: Es wartet kein Ergebnis,
@@ -529,16 +543,25 @@ def eintragen(page: Any, state: Any) -> SessionEntry | None:
     if uebung is None or e.zeitbasis is None or e.timer is None:
         return None
     wdh, sekunden, skala = stand.wdh, stand.sekunden, stand.skala
-    if kurstest.fehlt(stand.block, uebung, wdh=wdh, sekunden=sekunden, skala=skala):
+    # Ein Wert ist nur Pflicht, wo der Kurs ihn braucht (Ben, 27.11.2026: „Ein Test muss
+    # keinen Eintrag haben müssen … Um Übungen einfach auszuprobieren und abzuhaken ist das
+    # hinderlich“) — sonst trägt der Lauf ein, was da ist, und sei es nur der Haken
+    pflicht = wert_pflicht(state, stand)
+    if pflicht and kurstest.fehlt(stand.block, uebung, wdh=wdh, sekunden=sekunden, skala=skala):
         return None
-    mit, werte = kurstest.eintrag(
-        stand.block,
-        uebung,
-        wdh=wdh,
-        sekunden=sekunden,
-        skala=skala,
-        ausfuehrung=stand.ausfuehrung,
-    )
+    if stand.block.nur_machen and not pflicht:
+        # „nichts messen, nur machen“: ein Eintrag ohne Werte — die Übung ist abgehakt
+        mit = uebung
+        werte: dict[str, Any] = {}
+    else:
+        mit, werte = kurstest.eintrag(
+            stand.block,
+            uebung,
+            wdh=wdh,
+            sekunden=sekunden,
+            skala=skala,
+            ausfuehrung=stand.ausfuehrung,
+        )
     anker = e.zeitbasis.anker_utc
     sitzung = state.sitzungen.session_fuer(
         e.subject_id or state.profil.id, None, lokaler_tag(anker)
@@ -577,6 +600,15 @@ def eintragen(page: Any, state: Any) -> SessionEntry | None:
                 test_wert=wert,
                 eintrag_id=eintrag.id,
             )
+    # Dass der Lauf gemacht ist, merkt der Kurs für sich — auch ohne Wert (nur auf dem Gerät)
+    state.kurse.antwort_setzen(
+        stand.kurs_id,
+        profil_id,
+        gemacht_name(name),
+        wert=1.0,
+        text="gemacht",
+        eintrag_id=eintrag.id,
+    )
     # Die Antworten auf die Fragen am Lauf: Selbstauskunft, nur auf dem Gerät — was an ihnen
     # hängt (``wenn`` an einem Block), zeigt das Kapitel
     for frage in stand.block.fragen:
@@ -989,6 +1021,12 @@ def kurs_test_view(
             letzter = state.kurse.testwerte(kapitel, state.profil.id, erreicht.erreicht).get(
                 wert_schluessel(block, uebung.id)
             )
+    #: … oder er ist gemacht, ohne etwas einzutragen (`gemacht_name`)
+    gemacht = letzter is not None
+    with contextlib.suppress(Exception):
+        gemacht = gemacht or gemacht_name(wert_schluessel(block, uebung.id)) in (
+            state.kurse.antworten(kurs.id, state.profil.id)
+        )
     #: was das Profil schon angesehen hat (nur auf dem Gerät)
     schon_gesehen: set[str] = material_ui.gesehen(state)
 
@@ -1073,7 +1111,18 @@ def kurs_test_view(
             data=("medium_gesehen", m.uri),
         )
         haken.visible = m.uri in schon_gesehen
-        wann = ft.Text(darunter, size=12, opacity=0.7, visible=bool(darunter) and not haken.visible)
+        # an einem gemachten Lauf sagt die Karte, was noch aussteht (Ben, 27.11.2026) — nicht
+        # bei dem, was „dabei“ mitläuft: Das wird nicht abgehakt
+        aus = "noch nicht angesehen" if gemacht and m.rolle != BEGLEITUNG else ""
+        offen_text = " · ".join(t for t in (darunter, aus) if t)
+        wann = ft.Text(
+            offen_text,
+            size=12,
+            opacity=0.7,
+            color=ft.Colors.TERTIARY if aus else None,
+            visible=bool(offen_text) and not haken.visible,
+            data=("medium_offen", m.uri),
+        )
 
         def geoeffnet() -> None:
             material_ui.gesehen_setzen(state, m.uri, True)
@@ -1129,7 +1178,7 @@ def kurs_test_view(
             ],
         )
         im_lauf: list[ft.Control] = []
-        if letzter is not None:
+        if gemacht:
             for m in block.medien:
                 if m.rolle == BEGLEITUNG:
                     im_lauf.append(medium_mit_haken(m, "läuft dabei mit"))
@@ -1251,7 +1300,7 @@ def kurs_test_view(
                 ),
                 # „Danach“ steht hier erst, wenn der Lauf schon einmal gemacht ist — beim
                 # ersten Mal kommt es im Ergebnis (Ben, 27.11.2026)
-                *(medien_karte(NACHHER, "Danach ansehen") if letzter is not None else []),
+                *(medien_karte(NACHHER, "Danach ansehen") if gemacht else []),
             ],
             [
                 *(
@@ -1268,8 +1317,8 @@ def kurs_test_view(
                     else []
                 ),
                 ft.FilledButton(
-                    "Nochmal" if letzter is not None else "Start",
-                    icon=ft.Icons.REPLAY if letzter is not None else ft.Icons.PLAY_ARROW,
+                    "Nochmal" if gemacht else "Start",
+                    icon=ft.Icons.REPLAY if gemacht else ft.Icons.PLAY_ARROW,
                     height=64,
                     style=_GROSS,
                     on_click=start,
@@ -1515,8 +1564,10 @@ def kurs_test_view(
 
     def ergebnis(s: Kurstestlauf) -> ft.Control:
         fehlt_text = ft.Text(size=12, color=ft.Colors.ERROR, data="test_fehlt")
+        #: „nichts messen, nur machen“ (`Block.nur_machen`) — nicht, wo der Wert gebraucht wird
+        nur_machen = block.nur_machen and not gebraucht
         eintragen_knopf = ft.FilledButton(
-            "Eintragen und zurück zum Kapitel",
+            "Fertig — zurück zum Kapitel" if nur_machen else "Eintragen und zurück zum Kapitel",
             icon=ft.Icons.CHECK,
             height=56,
             style=ft.ButtonStyle(
@@ -1556,7 +1607,12 @@ def kurs_test_view(
 
         def stand_zeigen(aktualisieren: bool = True) -> None:
             """„Eintragen“ geht erst, wenn das Feld des Tests einen Wert hat."""
-            fehlt = kurstest.fehlt(block, uebung, wdh=s.wdh, sekunden=s.sekunden, skala=s.skala)
+            # nur ein Lauf, dessen Wert der Kurs braucht, verlangt ihn
+            fehlt = (
+                kurstest.fehlt(block, uebung, wdh=s.wdh, sekunden=s.sekunden, skala=s.skala)
+                if gebraucht
+                else ""
+            )
             eintragen_knopf.disabled = bool(fehlt)
             fehlt_text.value = f"Es fehlt noch: {fehlt}." if fehlt else ""
             fehlt_text.visible = bool(fehlt)
@@ -1573,7 +1629,7 @@ def kurs_test_view(
                 stand_zeigen()
                 return
             await zurueck()
-            _melden(page, f"{uebung.name}: {eintrag.shorthand() or 'eingetragen'}")
+            _melden(page, f"{uebung.name}: {eintrag.shorthand() or 'gemacht'}")
 
         eintragen_knopf.on_click = eintragen_klick
 
@@ -1783,18 +1839,26 @@ def kurs_test_view(
                         ),
                     ],
                 ),
-                karte(*zeilen, padding=14, abstand=0),
-                karte(
-                    ft.Column(
-                        spacing=2,
-                        tight=True,
-                        controls=[
-                            ft.Text(frage, size=15, weight=ft.FontWeight.W_600),
-                            ft.Text(unterzeile, size=12, opacity=0.65),
-                        ],
-                    ),
-                    raster,
-                    abstand=10,
+                # Gemessenes und die Frage nach der Anstrengung — nicht bei „nur machen“: Dort
+                # fragt das Ergebnis nur, was der Kurs fragt
+                *(
+                    []
+                    if nur_machen
+                    else [
+                        karte(*zeilen, padding=14, abstand=0),
+                        karte(
+                            ft.Column(
+                                spacing=2,
+                                tight=True,
+                                controls=[
+                                    ft.Text(frage, size=15, weight=ft.FontWeight.W_600),
+                                    ft.Text(unterzeile, size=12, opacity=0.65),
+                                ],
+                            ),
+                            raster,
+                            abstand=10,
+                        ),
+                    ]
                 ),
                 # Nachher (Ben, 23.11.2026): die Fragen am Lauf, dann der Wert für den Plan —
                 # eine Antwort kann dort ein Ziel vorwählen —, dann die Medien „nachher“

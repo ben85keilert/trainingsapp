@@ -612,14 +612,14 @@ def test_test_misst_die_gewaehlte_und_die_karte_folgt_der_wahl(page, state) -> N
     # Ohne Wahl: die Aufforderung und der Hinweis — kein Knopf, es gibt noch keine Übung
     ansicht = _kapitel(page, state, kurs, zwei)
     texte = _texte(ansicht)
-    assert "Deine Auswahl: was schaffst du?" in texte
+    assert "Deine Auswahl" in texte
     assert "Triff zuerst deine Auswahl — der Test gilt der Übung, die du wählst." in texte
     assert _hat(ansicht, ("test_wahl_fehlt", "test")) and _test_knoepfe(ansicht) == []
 
     # Käfer gewählt: Die Karte nennt ihn, „Zur Übung“ führt zu ihm — nicht zu einer anderen
     _daten(ansicht, ("wahl", "wahl", kaefer.id)).on_select()
     texte = _texte(ansicht)
-    assert "Käfer: was schaffst du?" in texte
+    assert "Käfer" in texte
     assert "Noch kein Eintrag bei „Käfer“, seit du dieses Kapitel öffnest." in texte
     assert not _hat(ansicht, ("test_wahl_fehlt", "test"))
     assert _test_knoepfe(ansicht) == [("test_oeffnen", "test", kaefer.id)]
@@ -640,8 +640,8 @@ def test_test_misst_die_gewaehlte_und_die_karte_folgt_der_wahl(page, state) -> N
     # Käfers zählt für sie nicht
     _daten(ansicht, ("wahl", "wahl", bruecke.id)).on_select()
     texte = _texte(ansicht)
-    assert "Brücke: was schaffst du?" in texte and "Käfer: was schaffst du?" not in texte
     assert "Noch kein Eintrag bei „Brücke“, seit du dieses Kapitel öffnest." in texte
+    assert "Noch kein Eintrag bei „Käfer“, seit du dieses Kapitel öffnest." not in texte
     assert not _hat(ansicht, ("testwert", "test", kaefer.id))
     assert _test_knoepfe(ansicht) == [("test_oeffnen", "test", bruecke.id)]
     assert "Ziel für Brücke" in texte and "aus deinem Test — mach ihn zuerst" in texte
@@ -684,7 +684,7 @@ def test_test_der_gewaehlten_mit_auswahl_im_frueheren_kapitel(page, state) -> No
     _daten(ansicht, ("wahl", "wahl", bruecke.id)).on_select()
     _daten(ansicht, UEBERNEHMEN).on_click()
     ansicht = _kapitel(page, state, kurs, drei)
-    assert "Brücke: was schaffst du?" in _texte(ansicht)
+    assert "Brücke" in _texte(ansicht)
     assert not _hat(ansicht, ("test_wahl_fehlt", "test3"))
     knopf = _daten(ansicht, ("test_oeffnen", "test3", bruecke.id))
     asyncio.run(knopf.on_click())

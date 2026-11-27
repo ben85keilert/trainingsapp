@@ -701,3 +701,90 @@ def test_heute_fuehrt_in_den_kurs_lauf_zurueck(state) -> None:
     assert einheit_ui.teil_route(anders, im_kurs) == "/training/u2/timer/uebung/u2"
     ohne = SimpleNamespace(kurs_test=None, einheit=SimpleNamespace(id="e"))
     assert einheit_ui.teil_route(teil, ohne) == "/training/u1/timer/uebung/u1"
+
+
+# -- Wiederholen im abgeschlossenen Kapitel, was noch aussteht (Ben, 27.11.2026) ----------------
+
+
+def test_abgeschlossenes_kapitel_laesst_den_lauf_wiederholen_und_nennt_offene_medien(
+    page, state
+) -> None:
+    """„Wenn ein Kurs abgeschlossen ist, soll es trotzdem möglich sein, die Übung mit all den
+    Videos zu wiederholen. Wenn Videos nicht angeschaut wurden, … soll gezeigt sein, dass das
+    noch aussteht bei den ‚fertigen‘ Übungen.“"""
+    from trainingsapp.core.kursbloecke import gemacht_name
+    from trainingsapp.ui.components import material
+    from trainingsapp.ui.views import kurs_testlauf
+
+    kurs, kapitel, block, seit = _medien_kurs(state)
+    profil = state.profil.id
+    kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    # der Lauf ist gemacht (ohne Wert) und das Kapitel abgeschlossen
+    state.kurse.antwort_setzen(kurs.id, profil, gemacht_name("lauf"), wert=1.0, text="gemacht")
+    state.kurse.kapitel_abschliessen(kurs, kapitel, profil)
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    assert ansicht.bottom_appbar is None  # abgeschlossen: kein Fußknopf
+    assert _daten(ansicht, ("test_gemacht", "lauf")).value == "Gemacht"
+    assert _daten(ansicht, ("test_starten", "lauf")).content == "Nochmal"
+    # was aussteht: vorher, zum Ereignis, nachher — „dabei“ läuft mit und zählt nicht
+    assert _daten(ansicht, ("test_ungesehen", "lauf")).value == (
+        "Noch nicht angesehen: vorher, spaeter, danach"
+    )
+    material.gesehen_setzen(state, "https://example.org/vorher", True)
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    assert _daten(ansicht, ("test_ungesehen", "lauf")).value == (
+        "Noch nicht angesehen: spaeter, danach"
+    )
+
+    # in der Vorseite steht es am Stück: gesehen bzw. noch nicht angesehen
+    bereit = kurs_testlauf.kurs_test_view(page, state, kurs, kapitel, block, seit)
+    assert _d(bereit, "test_start").content == "Nochmal"
+    assert _d(bereit, ("medium_gesehen", "https://example.org/vorher")).visible is True
+    offen = _d(bereit, ("medium_offen", "https://example.org/danach"))
+    assert offen.visible is True and offen.value == "noch nicht angesehen"
+    dabei = _d(bereit, ("medium_offen", "https://example.org/dabei"))
+    assert dabei.value == "läuft dabei mit"
+    for uri in ("spaeter", "danach"):
+        material.gesehen_setzen(state, f"https://example.org/{uri}", True)
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    assert not _hat(ansicht, ("test_ungesehen", "lauf"))
+
+
+def test_editor_nur_machen_nur_wo_der_wert_nicht_gebraucht_wird(page, state) -> None:
+    """Die Einstellung „Nichts messen — nur machen“ am Lauf: wählbar, wo kein Baustein und
+    kein Kapitelplan den Wert braucht; sonst gesperrt."""
+    from trainingsapp.ui.views.kurs_bearbeiten import kapitel_bearbeiten
+
+    kurs, _ = _lauf_kurs(state, kursplan=False)
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    _d(ansicht, ("block", "lauf")).on_click()
+    haken = _d(_editor(ansicht), "test_nur_machen")
+    assert haken.disabled is False and haken.value is False
+    haken.value = True
+    _speichern(ansicht)
+    assert state.kurse.laden(kurs.id).kapitel[0].bloecke[0].nur_machen is True
+
+    # ein Baustein nimmt sein Ziel aus dem Lauf: dann muss er einen Wert liefern
+    from trainingsapp.core.kursbloecke import TEST
+
+    planke = Exercise(name="Planke", result_spec=ResultSpec(fields=[vorrat_feld("hold")]))
+    state.uebungen.speichern(planke)
+    mit_ziel = Kurs(
+        name="Mit Ziel",
+        kursplan=Kursplan("Rumpf"),
+        kapitel=[
+            Kapitel(
+                titel="Test",
+                bloecke=[
+                    Block(TEST, id="t", uebung=planke.id, feld="hold", wie_uebung=["uhr"]),
+                    Block(PLAN_UEBUNG, id="uebung-1", uebung=planke.id, ziel_aus="t"),
+                ],
+            )
+        ],
+    )
+    state.kurse.speichern(mit_ziel)
+    mit_ziel = state.kurse.laden(mit_ziel.id)
+    ansicht = kapitel_bearbeiten(page, state, mit_ziel, mit_ziel.kapitel[0])
+    _d(ansicht, ("block", "t")).on_click()
+    assert _d(_editor(ansicht), "test_nur_machen").disabled is True

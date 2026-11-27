@@ -312,7 +312,7 @@ def test_satz_der_testkarte_sagt_wie_der_test_laeuft() -> None:
 
 def test_texte_ohne_vorgabe() -> None:
     stoppuhr = kurstest.uhr_fuer(Block(TEST))
-    assert kurstest.kopf(None, stoppuhr) == ("Test", "Was schaffst du?")
+    assert kurstest.kopf(None, stoppuhr) == ("Test", "")
     assert kurstest.knopf_text(None, timer=stoppuhr) == "Fertig"
     assert not kurstest.vorher_knopf(None, timer=stoppuhr)
     assert kurstest.vorher_knopf(None, timer=INTERVALL)
@@ -375,14 +375,12 @@ def test_ueberschrift_der_testkarte_nennt_die_vorgabe_die_im_lauf_gilt() -> None
         "Käfer: zwischen Schwere 5 und 7"
     )
     ohne = Block(TEST, uebung="k", takt=KNIEBEUGE)
-    assert kurstest.karten_ueberschrift(ohne, "Deine Auswahl") == (
-        f"Deine Auswahl: {kurstest.OHNE_VORGABE}"
-    )
+    assert kurstest.karten_ueberschrift(ohne, "Deine Auswahl") == ("Deine Auswahl")
     # eine Zeit neben einem Timer gilt nicht — auch wenn der Timer erst von der Übung kommt
     zeit = Block(TEST, uebung="k", vorgabe=Vorgabe(ZEIT, 60), wie_uebung=[WIE_UHR])
     assert kurstest.karten_ueberschrift(zeit, "Käfer", _kaefer()) == "Käfer: 1 Minute"
     assert kurstest.karten_ueberschrift(zeit, "Käfer", _kaefer(timer=[HALTEN.als_dict()])) == (
-        "Käfer: was schaffst du?"
+        "Käfer"
     )
 
 

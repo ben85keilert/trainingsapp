@@ -232,12 +232,12 @@ def test_fester_test_sieht_aus_wie_bisher(page, state) -> None:
     kurs, kapitel, uebungen = _kurs(state)
     planke = uebungen["Planke"]
     ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
-    assert "Planke: was schaffst du?" in _texte(ansicht)
+    assert "Planke" in _texte(ansicht)
     assert "Noch kein Eintrag bei „Planke“, seit du dieses Kapitel öffnest." in _texte(ansicht)
     assert _test_knoepfe(ansicht) == [("test_oeffnen", "test")]
     assert _daten(ansicht, ("test_oeffnen", "test")).content == "Zur Übung"
     _daten(ansicht, ("wahl", "wahl", uebungen["Käfer"].id)).on_select()  # ändert die Karte nicht
-    assert "Planke: was schaffst du?" in _texte(ansicht)
+    assert "Planke" in _texte(ansicht)
     asyncio.run(_daten(ansicht, ("test_oeffnen", "test")).on_click())
     assert page.route == f"/uebung/{planke.id}"
     _eintragen(state, planke, {"hold": [48]})
@@ -282,7 +282,7 @@ def test_test_der_gewaehlten_im_kapitelplan(page, state) -> None:
 
     # Ohne Wahl: Aufforderung und Hinweis, kein Knopf
     ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
-    assert "Deine Auswahl: was schaffst du?" in _texte(ansicht)
+    assert "Deine Auswahl" in _texte(ansicht)
     assert _daten(ansicht, ("test_wahl_fehlt", "t")).value == (
         "Triff zuerst deine Auswahl — der Test gilt der Übung, die du wählst."
     )
@@ -291,11 +291,11 @@ def test_test_der_gewaehlten_im_kapitelplan(page, state) -> None:
 
     # Eine gewählt: die Karte wie beim festen Test, mit ihrem Namen
     _daten(ansicht, ("wahl", "w", kaefer.id)).on_select()
-    assert "Käfer: was schaffst du?" in _texte(ansicht)
+    assert "Käfer" in _texte(ansicht)
     assert _test_knoepfe(ansicht) == [("test_oeffnen", "t", kaefer.id)]
     # Zwei gewählt: je Übung eine Zeile mit ihrem Knopf
     _daten(ansicht, ("wahl", "w", bruecke.id)).on_select()
-    assert "Deine Auswahl: was schaffst du?" in _texte(ansicht)
+    assert "Deine Auswahl" in _texte(ansicht)
     assert _test_knoepfe(ansicht) == [
         ("test_oeffnen", "t", kaefer.id),
         ("test_oeffnen", "t", bruecke.id),

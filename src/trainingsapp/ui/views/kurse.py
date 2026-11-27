@@ -44,6 +44,7 @@ from trainingsapp.core.kursbloecke import (
     Gegeben,
     Planwert,
     anteil_vorgabe,
+    gemachte_laeufe,
     wert_schluessel,
     wert_wird_ziel,
 )
@@ -886,6 +887,9 @@ def kapitel_view(
                 wert_waehlen=wert_waehlen,
                 antworten=antworten,
                 antwort_geben=antwort_geben if stand_hier is not None else None,
+                # ein Lauf lässt sich wiederholen, sobald das Kapitel erreicht ist — auch
+                # danach und im abgeschlossenen Kurs (Ben, 27.11.2026)
+                wiederholen=stand_hier is not None,
             )
             bloecke.extend(gezeichnet.controls)
         else:
@@ -947,6 +951,9 @@ def kapitel_view(
                 wert_waehlen=wert_waehlen,
                 antworten=antworten,
                 antwort_geben=antwort_geben if stand_hier is not None else None,
+                # ein Lauf lässt sich wiederholen, sobald das Kapitel erreicht ist — auch
+                # danach und im abgeschlossenen Kurs (Ben, 27.11.2026)
+                wiederholen=stand_hier is not None,
             )
             bloecke.extend(gezeichnet.controls)
             if stand_hier is not None and any(b.art in BAUSTEINE for b in kapitel.bloecke):
@@ -963,7 +970,7 @@ def kapitel_view(
         # ist keine offene Wahl mehr
         wahl_halten(gezeichnet.wahl)
         fuss.update(
-            gemacht=list(werte),
+            gemacht=[*werte, *gemachte_laeufe(antworten)],
             antworten=antworten,
             pflicht=ziel_tests,
             plan_offen=(lambda: sum(1 for z in aenderungen() if z.stand in (NEU, WEICHT_AB)))

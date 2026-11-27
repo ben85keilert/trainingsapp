@@ -2062,6 +2062,17 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             value=BRAUCHT_BEWEGUNG in block.braucht,
             data="test_braucht_bewegung",
         )
+        #: Braucht der Kurs den Wert dieses Laufs? Dann lässt sich „nur machen“ nicht wählen
+        wert_gebraucht = bool(nehmer) or not (nur_liefern or ohne_plan)
+        nur_machen = ft.Checkbox(
+            label="Nichts messen — nur machen",
+            tooltip="Das Ergebnis fragt dann nichts außer deinen Fragen; der Lauf ist ein Haken."
+            if not wert_gebraucht
+            else "Geht nicht: Ein Baustein oder der Kapitelplan nimmt sein Ziel aus diesem Lauf.",
+            value=block.nur_machen and not wert_gebraucht,
+            disabled=wert_gebraucht,
+            data="test_nur_machen",
+        )
         fragen_liste = FragenListe(
             block.fragen,
             block.fragen_vorher,
@@ -2164,6 +2175,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                     neuer.frage, neuer.antworten = replace(gelesen[0], id=neuer.id), []
             if block.art == TEST:
                 neuer.medien = list(lauf_medien)
+                neuer.nur_machen = bool(nur_machen.value) and not wert_gebraucht
                 neuer.braucht = [
                     art
                     for art, haken in ((BRAUCHT_MESSUNG, sensor), (BRAUCHT_BEWEGUNG, bewegung))
@@ -2762,6 +2774,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 wirkung,
                 vorschau_kasten,
                 lauf_medien_teil,
+                nur_machen,
                 sensor,
                 bewegung,
                 fragen_liste.control,

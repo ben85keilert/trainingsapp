@@ -99,6 +99,13 @@ def satzende(text: str) -> str:
     return text if text.endswith(".") else f"{text}."
 
 
+def stelle_von(state: Any, block_id: str) -> ft.ScrollKey:
+    """Die Marke eines Blocks im Kapitel — je Aufbau der Ansicht eine eigene (zwei Ansichten
+    desselben Kapitels stehen beim Wechsel kurz nebeneinander)."""
+    nummer = getattr(state, "route_nummer", 0)
+    return ft.ScrollKey(f"kursblock-{block_id}-{nummer}")  # type: ignore[call-arg]
+
+
 @dataclass
 class KapitelBloecke:
     """Die gezeichneten Blöcke und die Wahl der Person."""
@@ -195,6 +202,12 @@ def kapitel_bloecke(
     (dann erscheint, was an der Antwort hängt). Ohne ``antwort_geben`` ist sie nur zu lesen."""
     ergebnis = KapitelBloecke(controls=[])
     gegeben = antworten or {}
+
+    def an_stelle(block: Block, control: ft.Control) -> ft.Control:
+        """``control`` mit einer Marke, zu der die Ansicht rollen kann (der Fußknopf „nächster
+        Schritt“, `stelle_von`) — die Hülle entsteht einmal und wird nie ersetzt."""
+        return ft.Container(content=control, key=stelle_von(state, block.id))
+
     # was hier gilt: Blöcke ohne Bedingung und die, deren Bedingungen erfüllt sind. Bausteine
     # zeichnet diese Komponente nicht — die Sammelkarte rechnet ihr ``wenn`` selbst
     bloecke = [b for b in bloecke if not b.wenn or wenn_stand(b.wenn, gegeben) is True]
@@ -824,19 +837,22 @@ def kapitel_bloecke(
             ergebnis.controls.append(medienkarte(page, state, block.medium, browser=browser))
         elif block.art == FRAGE and block.frage is not None:
             ergebnis.controls.append(
-                frage_karte(
-                    block.frage,
-                    gegeben.get(block.id),
-                    melder(block.id),
-                    kennung=block.id,
-                    unter=block.text,
-                    gesperrt=antwort_geben is None or not offen,
+                an_stelle(
+                    block,
+                    frage_karte(
+                        block.frage,
+                        gegeben.get(block.id),
+                        melder(block.id),
+                        kennung=block.id,
+                        unter=block.text,
+                        gesperrt=antwort_geben is None or not offen,
+                    ),
                 )
             )
         elif block.art == FRAGE:
             ergebnis.controls.append(frage(block))
         elif block.art == TEST:
-            ergebnis.controls.append(test(block))
+            ergebnis.controls.append(an_stelle(block, test(block)))
         elif block.art == AUSWAHL:
             ergebnis.controls.append(auswahl(block))
 

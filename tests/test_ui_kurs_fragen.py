@@ -548,3 +548,59 @@ def test_editor_kapitel_wechseln_speichert(page, state) -> None:
     _felder(ansicht)["Titel"].value = ""
     asyncio.run(_d(ansicht, ("kapitel_wechsel", 1)).on_click())
     assert page.route == "hier"
+
+
+# -- Der Fußknopf „nächster Schritt“ (`core/kursschritt.py`, Plan P231 §5 D2) ------------------
+
+
+def _schritt(ansicht):
+    leiste = ansicht.bottom_appbar
+    return None if leiste is None else leiste.data
+
+
+def test_fussknopf_nennt_den_naechsten_schritt_und_startet_den_lauf(page, state) -> None:
+    """Der Fußknopf nennt, was als Nächstes dran ist: erst der Lauf (ein Tipp startet ihn),
+    danach die Sammelkarte, sonst „Weiter“. Ein freiwilliger Lauf hält nicht auf — daneben
+    steht „Weiter“. Nichts wird von selbst übernommen."""
+    import asyncio
+
+    kurs, uebungen = _lauf_kurs(state, kursplan=False)
+    kapitel = kurs.kapitel[0]
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    assert _schritt(ansicht) == ("kurs_schritt", "lauf", "lauf")
+    knopf = _daten(ansicht.bottom_appbar, "kurs_schritt_knopf")
+    assert knopf.content == "Seitstütz machen"
+    # freiwillig: „Weiter“ steht daneben
+    assert _hat(ansicht.bottom_appbar, "kurs_schritt_weiter")
+    asyncio.run(knopf.on_click())
+    assert page.route == f"/kurse/{kurs.id}/{kapitel.id}/test/lauf/{uebungen['Seitstütz'].id}"
+
+    # ein Kapitel ohne offene Schritte: der Knopf ist „Weiter“ bzw. „Kurs abschließen“
+    ende = kurs.kapitel[1]
+    state.kurse.kapitel_erreichen(kurs, ende, state.profil.id)
+    ansicht = kapitel_view(page, state, kurs, ende, ft.UrlLauncher())
+    assert ansicht.bottom_appbar is None  # ohne Blöcke kein Fußknopf — unten steht „Weiter“
+
+
+def test_fussknopf_fuehrt_zur_sammelkarte(page, state) -> None:
+    """Sind Lauf und Fragen erledigt und die Sammelkarte hat Zeilen zum Übernehmen, nennt der
+    Fußknopf sie — er rollt hin, übernommen wird dort."""
+    kurs, kapitel, _ = _kurs(state)
+    profil = state.profil.id
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    art = _schritt(ansicht)[1]
+    assert art in ("antwort", "plan")  # erst die Frage im Kapitel, dann der Plan
+    # alle Fragen des Kapitels beantworten: dann ist die Sammelkarte dran oder „Weiter“
+    for b in kapitel.bloecke:
+        if b.frage is not None:
+            antwort = b.frage.wahl[0] if b.frage.wahl else "ja"
+            state.kurse.antwort_setzen(kurs.id, profil, b.id, wert=0.0, text=antwort)
+    ansicht = kapitel_view(page, state, kurs, kapitel, ft.UrlLauncher())
+    assert _schritt(ansicht)[1] in ("plan", "weiter")
+    plan_vorher = state.kurse.kursplan(kurs, profil)
+    if _schritt(ansicht)[1] == "plan":
+        import asyncio
+
+        asyncio.run(_daten(ansicht.bottom_appbar, "kurs_schritt_knopf").on_click())
+        nachher = state.kurse.kursplan(kurs, profil)
+        assert (nachher.items if nachher else []) == (plan_vorher.items if plan_vorher else [])

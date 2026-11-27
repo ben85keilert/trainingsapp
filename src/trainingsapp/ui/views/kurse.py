@@ -31,9 +31,11 @@ from __future__ import annotations
 import contextlib
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
+from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import kursschritt
 from trainingsapp.core.kapiteltext import bilder_zu_links
 from trainingsapp.core.kursbloecke import (
     BAUSTEINE,
@@ -67,7 +69,7 @@ from trainingsapp.core.kurse import (
     stand_text,
     status,
 )
-from trainingsapp.core.kursplan import Aenderung, kursplan_name, wahl_im_plan
+from trainingsapp.core.kursplan import NEU, WEICHT_AB, Aenderung, kursplan_name, wahl_im_plan
 from trainingsapp.core.kurswerte import deine_werte
 from trainingsapp.core.models import Exercise, Media, Plan, lokaler_tag
 from trainingsapp.core.plaene import erledigte, tage_text
@@ -75,7 +77,7 @@ from trainingsapp.core.plan_durchlauf import startet_als_workout
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.kommt_noch import kommt_noch_karte
-from trainingsapp.ui.components.kursblock import kapitel_bloecke
+from trainingsapp.ui.components.kursblock import kapitel_bloecke, stelle_von
 from trainingsapp.ui.components.kursplan_karte import KursplanKarte, kursplan_karte
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
@@ -87,6 +89,8 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views import kurs_testlauf
 from trainingsapp.ui.views.katalog import trainieren_knopf
 
+#: Die Marke der Sammelkarte, zu der der Fußknopf rollt (`components.kursblock.stelle_von`)
+PLAN_STELLE = "sammelkarte"
 #: Symbol und Beschriftung je Status eines Kapitels
 _STATUS: dict[str, tuple[ft.IconData, str]] = {
     FERTIG: (ft.Icons.CHECK_CIRCLE, "fertig"),
@@ -685,6 +689,9 @@ def kapitel_view(
     folgend = naechstes(kurs, kapitel)
     nummer = kurs.kapitel.index(kapitel) + 1
     nachher = Nachher()
+    #: Was der Fußknopf „nächster Schritt“ wissen muss (`core/kursschritt.py`) — gefüllt, wo
+    #: das Kapitel Blöcke hat
+    fuss: dict[str, Any] = {"gemacht": [], "antworten": {}, "pflicht": None, "plan_offen": None}
 
     def melden(text: str) -> None:
         page.show_dialog(ft.SnackBar(ft.Text(text)))
@@ -954,10 +961,20 @@ def kapitel_view(
                     uebernehmen=uebernehmen,
                     ausprobieren=zum_lauf,
                 )
-                bloecke.append(sammelkarte.control)
+                bloecke.append(
+                    ft.Container(content=sammelkarte.control, key=stelle_von(state, PLAN_STELLE))
+                )
         # Bereinigt halten: Was inzwischen fest ist oder sich hier nicht mehr wählen lässt,
         # ist keine offene Wahl mehr
         wahl_halten(gezeichnet.wahl)
+        fuss.update(
+            gemacht=list(werte),
+            antworten=antworten,
+            pflicht=ziel_tests,
+            plan_offen=(lambda: sum(1 for z in aenderungen() if z.stand in (NEU, WEICHT_AB)))
+            if sammelkarte is not None
+            else None,
+        )
     elif kapitel.text.strip():
         bloecke.append(markdown(kapitel.text))
 
@@ -1084,13 +1101,89 @@ def kapitel_view(
         )
     bloecke.append(ft.Row(wrap=True, spacing=10, run_spacing=8, controls=unten))
 
-    return ft.View(
+    ansicht = ft.View(
         route=route,
         appbar=ft.AppBar(title=ft.Text(kurs.name)),
         scroll=ft.ScrollMode.AUTO,
         padding=16,
         controls=[sicher(ft.Column(spacing=14, controls=bloecke))],
     )
+
+    # Der Fußknopf (Ben, 27.11.2026, `docs/plan_kurs_medien_ansicht.md` §5 D2): Er nennt immer
+    # den nächsten offenen Schritt — ausprobieren, antworten, den Plan ansehen, weiter — und
+    # führt hin. Er übernimmt nichts: Am Plan ändert sich weiter nur etwas mit dem Tipp in
+    # der Sammelkarte. Nur im Kapitel, das dran ist.
+    if kapitel.bloecke and stand_hier is not None and s in (AKTUELL, OFFEN):
+        kann_weiter = stand.erfuellt or kurs.freischaltung == FREI
+        weiter_text = (
+            ("Weiter" if folgend is not None else "Kurs abschließen") if kann_weiter else ""
+        )
+        schritt = kursschritt.naechster(
+            kapitel.bloecke,
+            gemacht=fuss["gemacht"],
+            antworten=fuss["antworten"],
+            pflicht_laeufe=fuss["pflicht"],
+            plan_offen=fuss["plan_offen"]() if fuss["plan_offen"] is not None else 0,
+            weiter=weiter_text,
+            namen={uid: u.name for uid, u in katalog.items()},
+        )
+        if schritt is not None:
+
+            async def zur_stelle(marke: str) -> None:
+                with contextlib.suppress(Exception):
+                    await ansicht.scroll_to(scroll_key=stelle_von(state, marke), duration=250)
+
+            async def schritt_tun(_e: Any = None) -> None:
+                if schritt.art == kursschritt.WEITER:
+                    await weiter()
+                elif schritt.art == kursschritt.PLAN:
+                    await zur_stelle(PLAN_STELLE)
+                elif schritt.art == kursschritt.LAUF:
+                    lauf = next((b for b in kapitel.bloecke if b.id == schritt.block_id), None)
+                    if lauf is not None and lauf.laeuft and lauf.uebung in katalog:
+                        # ein Lauf mit fester Übung startet gleich — sonst hin zur Karte
+                        await kurs_testlauf.starter(
+                            page, state, kurs, kapitel, lauf, katalog[lauf.uebung]
+                        )()
+                    else:
+                        await zur_stelle(schritt.block_id)
+                else:
+                    await zur_stelle(schritt.block_id)
+
+            symbol = {
+                kursschritt.LAUF: ft.Icons.PLAY_ARROW,
+                kursschritt.ANTWORT: ft.Icons.HELP_OUTLINE,
+                kursschritt.PLAN: ft.Icons.PLAYLIST_ADD_CHECK,
+                kursschritt.WEITER: ft.Icons.ARROW_FORWARD,
+            }[schritt.art]
+            ansicht.bottom_appbar = ft.BottomAppBar(
+                height=72,
+                padding=ft.Padding.symmetric(horizontal=16, vertical=10),
+                data=("kurs_schritt", schritt.art, schritt.block_id),
+                content=ft.Row(
+                    spacing=8,
+                    controls=[
+                        ft.FilledButton(
+                            schritt.text,
+                            icon=symbol,
+                            expand=True,
+                            on_click=schritt_tun,
+                            data="kurs_schritt_knopf",
+                        ),
+                        # ein freiwilliger Schritt hält nicht auf: daneben geht es weiter
+                        *(
+                            [
+                                ft.TextButton(
+                                    weiter_text, on_click=weiter, data="kurs_schritt_weiter"
+                                )
+                            ]
+                            if not schritt.pflicht and weiter_text
+                            else []
+                        ),
+                    ],
+                ),
+            )
+    return ansicht
 
 
 __all__ = ["kapitel_view", "kapitel_zahl", "kurs_view", "kurse_liste"]

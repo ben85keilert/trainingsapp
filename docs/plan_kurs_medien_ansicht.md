@@ -12,7 +12,8 @@ erkennen, was Audio-Video-Bild ist. … Mache weitere Vorschläge, wie man Kursg
 übersichtlicher machen kann. Der Ablauf genauso direkter, weniger Rumgeklicke, direkteres
 Starten.“
 
-**Stand: Plan mit Skizzen, nichts gebaut.** Fragen an Ben in §8 (Katalog P231).
+**Stand: Plan mit Skizzen, nichts gebaut.** Bens Antworten vom 27.11.2026 stehen in §9;
+offen sind noch f und g (welche der Vorschläge G1–G8 und D1–D7).
 
 Gesucht im Katalog: `frontbild`, `titelbild`, `vorschaubild`, `thumbnail`, `medienvorschau`,
 `eingebettet` — kein Treffer zur Sache (nur P44, P175 am Wort). Gelesen: P225, P227, P229,
@@ -219,3 +220,18 @@ f) **Welche von G1–G8?** Empfehlung: G1, G2, G5 zuerst; G3 und G6 danach; G4 v
 g) **Welche von D1–D7?** Empfehlung: D2, D4, D6 zuerst (der größte Gewinn im Kapitel), D1 und
    D3 danach; D5 nur, wenn dir ein Knopf für zwei Dinge recht ist.
 h) **Reihenfolge:** K0 → K1 → K2, dann Titelbild (K3) — oder das Titelbild vor dem Editor?
+
+## 9. Bens Antworten (27.11.2026) — das gilt
+
+„Youtube war nur als Vergleich gedacht. Deine Vorschläge zu den Vorschaubildern bei Videos
+ist gut.“
+
+| Frage | Antwort | Folge |
+|---|---|---|
+| a | **ja** | Videos spielen im Kapitel in der Karte. Die Regel „nur in der eigenen Ansicht“ gilt für Kurse nicht mehr (CLAUDE.md und `plan_medien_einstellungen.md` §2.4 beim Bau nachziehen) |
+| b | **„überall einheitlich“** | Feld **und** Blatt „Titelbild“ an jedem Medium: Übung, Planübung, Plan, Weg im Ablauf, Kurs — erreichbar an jeder Stelle, die ein Medium bearbeitet. §3.2 gilt damit nicht nur im Kurs-Editor |
+| c | **„am besten wählen können. Man fährt durch und klickt ein Bild, kann einen Text dazusetzen“** | Das Blatt beginnt mit dem Video und dem Regler; ein Tipp nimmt das Bild. **Dazu ein Text auf dem Bild** (neu): `Media.titelbild_text`, über dem Bild gesetzt (unten links, auf dunklem Verlauf) — nicht ins Bild gerechnet, damit er sich ändern lässt und in jeder Größe scharf ist. „Nur Titel“ ist dann der Fall „Text ohne Bild“. Bis man wählt, gilt das automatische Bild (§3.1) |
+| d | **nein** | kein Bild aus dem Netz; ein Link zeigt die Titelkarte oder ein eigenes Bild |
+| e | **„probieren wir“** | Zeilen nach §4.1 bauen, am Web-Foto und am Gerät ansehen |
+| f, g | offen — die Listen G1–G8 (§4.3) und D1–D7 (§5) standen nur im Plan, nicht in der Antwort | noch einmal vorgelegt |
+| h | **„wie es am sinnvollsten ist“** | Reihenfolge wie §7: K0 → K1 → K2 → K3; K3 mit Text auf dem Bild und an allen Stellen (b) |

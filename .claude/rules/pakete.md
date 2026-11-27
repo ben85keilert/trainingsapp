@@ -18,7 +18,9 @@ Ausgelagert aus `CLAUDE.md` (11.11.2026); dort steht je Absatz die Kurzfassung m
 
 - **Übungen kommen über Pakete** (Ben, 14.10.2026). Der mitgelieferte Katalog ist
   das Paket „Standard“ (`data/seed/standard.toml` — TOML, weil von Hand gepflegt; IDs per UUIDv5
-  aus dem Schlüssel); weitere kommen per Import, der Export schreibt nur Übungen.
+  aus dem Schlüssel; seit 27.11.2026 eine **unveränderte Kopie des veröffentlichten Stands** aus
+  dem Inhalte-Repo samt Dateien unter `seed/medien/` — hier nie von Hand ändern, prüfen mit
+  `scripts/seed_pruefen.py`, P232); weitere kommen per Import, der Export schreibt nur Übungen.
   `exercise.package_id` = Herkunft, `NULL` = eigene Übung (auch Kopien). Ein Import
   aktualisiert nur die Übungen desselben Pakets — **was die Person geändert hat, bleibt**
   (Ben, 16.10.2026: Drei-Wege-Abgleich je Feld gegen den Paketstand,

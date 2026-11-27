@@ -102,7 +102,8 @@ def test_verweis_und_braucht_ueber_unterordner(tmp_path) -> None:
     basis = "https://example.invalid/pakete"
     gebaut = json.loads(bauen(datei, tmp_path / "dist", basis_url=basis).read_text("utf-8"))
     braucht = {v["name"]: v for v in gebaut["paket"]["braucht"]}
-    assert braucht["Standard"]["quelle"] == f"{basis}/uebungspaket_Standard.json"
+    # „Standard“ hat Dateien (P232) — auf dem Server liegt es als ZIP
+    assert braucht["Standard"]["quelle"] == f"{basis}/uebungspaket_Standard.zip"
 
 
 def test_lader_liest_unterordner(tmp_path) -> None:

@@ -127,7 +127,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-trainingsapp = ["data/migrations/*.sql", "data/seed/*.toml"]
+trainingsapp = ["data/migrations/*.sql", "data/seed/*.toml", "data/seed/medien/**/*"]
 
 # ---------------------------------------------------------------------------
 # Flet-Build

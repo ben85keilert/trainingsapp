@@ -20,7 +20,7 @@ wird nur im Browser; der Code bleibt bei 8 Zeichen.
 
 | Weg | App | Web-Fassung | Woran es hängt |
 |---|---|---|---|
-| Standardpaket | ja | ja | liegt im App-Archiv (`data/seed/standard.toml`) — kein Netz, kein Code |
+| Standardpaket | ja | ja | liegt im App-Archiv (`data/seed/standard.toml`, Dateien unter `data/seed/medien/`) — kein Netz, kein Code |
 | Paket aus einer **Datei**, öffentlich | ja | ja (laut Code; nicht im Browser nachgeprüft) | `views/pakete.py`: `pick_files(with_data=True)` gibt im Browser die Bytes |
 | Paket aus einem **Link**, öffentlich | ja | **nein** | `link_importieren` → `asyncio.to_thread(link_lesen)` → `urllib` (`core/paketquelle._laden`); `urllib` hat im Browser-Python keinen Netzweg |
 | Quellen, Updates beim Start | ja | **nein** | `paket_quellen` steht in `WEB.ohne` (`config.py:145`) |

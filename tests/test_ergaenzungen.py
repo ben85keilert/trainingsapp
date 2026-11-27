@@ -132,7 +132,7 @@ def test_eigenes_paket_bringt_geaenderte_fremde_uebung_als_ergaenzung(tmp_path, 
     from trainingsapp.data.eigene_pakete import EigenesPaketRepo
 
     uebungen = ExerciseRepo(con)
-    knie_id, planke_id = seed_id("kniebeuge"), seed_id("unterarmstuetz")
+    knie_id, planke_id = seed_id("kniebeuge"), seed_id("planke")
     knie = uebungen.laden(knie_id)
     knie.description += "\n## Für Anna\nNur bis 90°."
     knie.default_target = {"reps": [12]}

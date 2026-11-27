@@ -50,7 +50,8 @@ icon_key = "self_improvement"
 
 def test_standardpaket_besteht_die_pruefung() -> None:
     fehler, hinweise = pruefen(SEED_DATEI, symbole=None)
-    assert fehler == [] and hinweise == []
+    # seit der Seed der veröffentlichte Stand ist (P232), nennt er Dateien — das ist kein Mangel
+    assert fehler == [] and [h for h in hinweise if "Datei(en)" not in h] == []
 
 
 def test_pruefen_findet_tippfehler(tmp_path) -> None:
@@ -1077,7 +1078,8 @@ def test_bauen_schreibt_was_das_paket_braucht(tmp_path) -> None:
     gebaut = json.loads(bauen(datei, tmp_path / "dist", basis_url=basis).read_text("utf-8"))
     braucht = {v["name"]: v for v in gebaut["paket"]["braucht"]}
     assert braucht["Standard"]["id"] == GRUNDAUSSTATTUNG
-    assert braucht["Standard"]["quelle"] == f"{basis}/uebungspaket_Standard.json"
+    # „Standard“ hat Dateien (P232) — auf dem Server liegt es als ZIP
+    assert braucht["Standard"]["quelle"] == f"{basis}/uebungspaket_Standard.zip"
     from trainingsapp.data.seed import seed_inhalt
 
     assert braucht["Standard"]["version"] == seed_inhalt(SEED_DATEI).paket.version

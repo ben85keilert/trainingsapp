@@ -36,6 +36,7 @@ from trainingsapp.core.pakete import (
     paket_json,
     paket_lesen,
 )
+from trainingsapp.core.paketversion import version_zahl
 from trainingsapp.core.result_spec import SPEC_WINKEL
 from trainingsapp.data.db import oeffnen
 from trainingsapp.data.kurse import KursRepo
@@ -220,7 +221,7 @@ def test_hoehere_version_aktualisiert_die_grundausstattung(con, tmp_path) -> Non
     seed_einspielen(con, datei)
     assert repo.laden(u.id).description == "Meine Fassung"
 
-    roh["paket"]["version"] += 1
+    roh["paket"]["version"] = version_zahl(roh["paket"]["version"]) + 1  # im TOML „X.Y.Z“
     wade = next(e for e in roh["exercises"] if e["key"] == "wadenheben")
     wade["description"] = "Neu im Paket"
     wade["name"] = "Wadenheben (neu)"
@@ -242,7 +243,7 @@ def test_seed_laesst_neuere_installation_stehen(con) -> None:
     """
     pakete = PaketRepo(con)
     roh = tomllib.loads(SEED_DATEI.read_text(encoding="utf-8"))
-    roh["paket"]["version"] += 1
+    roh["paket"]["version"] = version_zahl(roh["paket"]["version"]) + 1  # im TOML „X.Y.Z“
     roh["paket"]["beschreibung"] = "Aus der Quelle"
     roh["exercises"] = [e for e in roh["exercises"] if e["key"] != "wadenheben"]
     roh["exercises"].append({"key": "nur_in_der_quelle", "name": "Nur in der Quelle"})

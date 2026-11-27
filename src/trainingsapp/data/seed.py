@@ -17,8 +17,15 @@ Paketstand je Übung (für „Auf Paketstand setzen“) trägt der Start nach, w
 **Neuer als der Seed** (K6, 17.10.2026): Kam „Standard“ in höherer Version aus einer
 Paketquelle oder Datei, lässt der Start das Paket ganz in Ruhe. Sonst setzte er die
 Version zurück, die Quelle spielte das Update bei jedem Start neu ein, und was nur die
-Quelle kennt, stünde als „nicht mehr im Paket“ da. Die Datei entspricht einem
-veröffentlichten Stand: gleiche Version, gleicher Inhalt.
+Quelle kennt, stünde als „nicht mehr im Paket“ da.
+
+**Die Datei ist der veröffentlichte Stand** (Ben, 27.11.2026): gleiche Version, gleicher
+Inhalt wie das Paket auf dem Server — nach der Installation gibt es nichts zu aktualisieren,
+auch ohne Netz. Gepflegt wird „Standard“ im Inhalte-Repo; `seed/standard.toml` und die Dateien
+unter `seed/medien/` sind eine unveränderte Kopie, nie von Hand geändert.
+`scripts/seed_pruefen.py` baut daraus das Paket und vergleicht Version und Prüfsumme mit dem
+Index der Paketquelle (vor jedem Versions-Commit). Die Dateien (``datei = "…"``) legt der
+Start in die Paketablage, bereinigt wie bei jedem Import (`core.paketdatei.toml_oeffnen`).
 
 **Wie erkennt der Seed, was schon da ist?** Über die ID. Jede Seed-Übung
 bekommt eine *deterministische* ID aus ihrem Schlüssel (UUIDv5), keine
@@ -90,28 +97,42 @@ def seed_laden(datei: Path = SEED_DATEI) -> list[Exercise]:
     return seed_inhalt(datei).uebungen
 
 
-def seed_einspielen(con: sqlite3.Connection, datei: Path = SEED_DATEI) -> int:
+def seed_einspielen(
+    con: sqlite3.Connection, datei: Path = SEED_DATEI, *, ablage: Paketablage | None = None
+) -> int:
     """Installiert „Standard“ bzw. legt fehlende Übungen an.
 
     Vorhandene bleiben unangetastet, solange die Paketversion gleich bleibt;
     ist „Standard“ entfernt, deaktiviert oder schon neuer als die Datei (K6),
     passiert nichts.
 
+    Args:
+        ablage: Wohin die Dateien des Pakets kommen (``datei = "…"`` in der TOML). Die App gibt
+            sie immer mit (`ui.state.AppState.starten`). Ohne Ablage — Tests und Werkzeuge, die
+            nur die Übungen brauchen — kommt „Standard“ **ohne** seine Dateien an: Die Einträge
+            mit ``datei`` fehlen dann an den Übungen.
+
     Returns:
         Wie viele Übungen neu angelegt wurden.
     """
     inhalt = seed_inhalt(datei)
-    pakete = PaketRepo(con)
+    pakete = PaketRepo(con, ablage)
     vorher = pakete.laden(inhalt.paket.id)
     if vorher is not None and not vorher.aktiv:  # entfernt oder deaktiviert: nichts nachlegen
         return 0
     if vorher is not None and (vorher.version or 0) > (inhalt.paket.version or 0):
         return 0  # neuer aus Quelle oder Datei (K6): nichts zurücksetzen
     update = vorher is not None and (inhalt.paket.version or 0) > (vorher.version or 0)
-    with transaktion(con):
-        pakete.herkunft_nachtragen(inhalt)  # Datenbanken von vor den Paketen
-        # Seed-Tags („HRV", „Isometrie") alphabetisch, nicht oben wie selbst angelegte
-        ergebnis = pakete.importieren(inhalt, aktualisieren=update, neue_tags_oben=False)
+    with tempfile.TemporaryDirectory() as arbeit:
+        if ablage is not None and datei.suffix == ".toml":
+            # Mit Dateien — bei jedem Start, nicht nur beim Update: Ohne sie fehlten die
+            # Medien am Inhalt, und was der Start nachlegt (fehlende Übungen, Paketstand),
+            # wiche vom veröffentlichten Paket ab. Vorhandene Dateien legt der Import nicht neu ab.
+            inhalt = toml_oeffnen(datei, Path(arbeit))
+        with transaktion(con):
+            pakete.herkunft_nachtragen(inhalt)  # Datenbanken von vor den Paketen
+            # Seed-Tags („HRV", „Isometrie") alphabetisch, nicht oben wie selbst angelegte
+            ergebnis = pakete.importieren(inhalt, aktualisieren=update, neue_tags_oben=False)
     return ergebnis.anzahl(Status.NEU)
 
 

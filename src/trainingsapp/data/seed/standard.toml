@@ -1,5 +1,11 @@
 # Paket „Standard“ — die Übungen, die mit der App kommen.
 #
+# Gepflegt wird diese Datei im Repo trainingsapp-inhalte (pakete/standard/standard.toml) und
+# von dort über die Paketquelle verteilt. Die App bringt eine unveränderte Kopie des
+# veröffentlichten Stands mit (trainingsapp: src/trainingsapp/data/seed/standard.toml, die
+# Dateien daneben unter medien/) — dort nie von Hand ändern: `veroeffentlichen.sh` legt sie
+# hin, `scripts/seed_pruefen.py` der App vergleicht sie mit dem Server.
+#
 # Eine Übung = ein [[exercises]]-Block. Abschnitte und Reihenfolge dienen nur der
 # Übersicht. Die Felder sind dieselben wie im Austauschformat (JSON, siehe
 # docs/uebungspakete.md) — hier nur als TOML, damit man Kommentare schreiben und
@@ -14,10 +20,7 @@
 #   Änderungen   an vorhandenen Übungen kommen erst an, wenn paket.version steigt —
 #                dann je Feld: Was jemand in der App geändert hat, bleibt
 #                (docs/uebungspakete.md, „Update lässt Geändertes stehen“).
-#   version      gleiche Version = gleicher Inhalt wie das veröffentlichte Paket.
-#                Hat ein Gerät „Standard“ schon in höherer Version (Paketquelle),
-#                lässt der Start es in Ruhe.
-#   Prüfen       uv run pytest tests/test_pakete.py
+#   Prüfen       trainingsapp-paket pruefen (CLAUDE.md, „Befehle“)
 #
 # Felder je Übung
 #   key, name    Pflicht
@@ -49,18 +52,18 @@ version = 1
 id = "2c1194ea-67ba-536d-aa7d-bf74bc3c73d4"
 name = "Standard"
 beschreibung = "Die wichtigsten Übungen zum Einstieg: Atmung, Mobilisation, Dehnung, Kräftigung, Gleichgewicht und Messwerte zum Vergleichen."
-version = 5
-neuigkeiten = "Gehen, Laufen und Radfahren gehören jetzt zum Paket: Übungen mit GPS stehen unter „Messung“, Reiter „GPS“, zur Wahl, die Tempo-Stufen stellt man an der Übung ein."
+version = "0.1.0"
+neuigkeiten = "Die Kniebeuge zeigt beim Üben eine Animation, von der Seite und von vorn."
+# 0.0.6: Neu im Paket: Kobra, Hände fausten, Langsitz (beidbeinig und einbeinig), Beinabduktion, Sit-ups, Klimmzüge und Sitzmeditation, dazu sieben Dehnungen: Oberschenkelinnenseite, Rumpf seitlich, Kindhaltung, Drehdehnlage, Schulterrückseite, Unterarm und Trizeps. Bauchatmung heißt jetzt Atemvertiefung, Unterarmstütz heißt Planke, „Brustwirbelsäule mobilisieren“ heißt Katzenbuckel und Pferderücken.
 
 
 # ── Atmung ──────────────────────────────────────────────────────────────────
 
 [[exercises]]
 key = "bauchatmung"
-name = "Bauchatmung"
+name = "Atemvertiefung"
 typen = ["Atmung", "Entspannung"]
 regionen = ["Rumpf"]
-spec = "halten"
 icon_key = "spa"
 description = "Rückenlage, eine Hand auf dem Bauch. Beim Einatmen hebt sich die Hand, die Brust bleibt ruhig; langsam ausatmen."
 
@@ -68,7 +71,6 @@ description = "Rückenlage, eine Hand auf dem Bauch. Beim Einatmen hebt sich die
 key = "atem_4_7_8"
 name = "4-7-8-Atmung"
 typen = ["Atmung", "Entspannung", "HRV"]
-spec = "halten"
 icon_key = "air"
 limit_spec = { rules = [{ type = "timer", seconds = 300 }] }
 description = "Vier Sekunden einatmen, sieben halten, acht ausatmen. Gut geeignet als Einstieg in eine HRV-Messung."
@@ -77,10 +79,16 @@ description = "Vier Sekunden einatmen, sieben halten, acht ausatmen. Gut geeigne
 key = "kohaerenzatmung"
 name = "Kohärenzatmung (6/min)"
 typen = ["Atmung", "HRV"]
-spec = "halten"
 icon_key = "waves"
 limit_spec = { rules = [{ type = "timer", seconds = 300 }] }
 description = "Gleichmäßig fünf Sekunden ein, fünf Sekunden aus. Erzeugt einen deutlichen Ausschlag im LF-Band und eignet sich gut, um die HRV-Messung zu prüfen."
+
+[[exercises]]
+key = "sitzmeditation"
+name = "Sitzmeditation"
+typen = ["Entspannung"]
+icon_key = "self_improvement"
+description = "Aufrecht und bequem sitzen, auf einem Kissen oder Stuhl, die Hände ruhen. Die Aufmerksamkeit liegt beim Atem; schweift sie ab, freundlich zum Atem zurückkehren."
 
 
 # ── Mobilisation ────────────────────────────────────────────────────────────
@@ -103,7 +111,7 @@ description = "Die Schultern langsam und groß nach hinten kreisen: hoch, zurüc
 
 [[exercises]]
 key = "brustwirbel_mobilisation"
-name = "Brustwirbelsäule mobilisieren"
+name = "Katzenbuckel und Pferderücken"
 typen = ["Mobilisation"]
 regionen = ["Rücken"]
 icon_key = "sync_alt"
@@ -125,6 +133,22 @@ regionen = ["Rücken", "Hüfte"]
 icon_key = "self_improvement"
 description = "Rückenlage, Beine aufgestellt. Den unteren Rücken sanft in die Unterlage drücken, dann ein leichtes Hohlkreuz — langsam im Wechsel, ohne Schwung."
 
+[[exercises]]
+key = "kobra"
+name = "Kobra"
+typen = ["Mobilisation", "Dehnung"]
+regionen = ["Rücken", "Rumpf"]
+icon_key = "self_improvement"
+description = "Bauchlage, Hände unter den Schultern. Den Oberkörper langsam aufrichten, das Becken bleibt liegen, die Schultern weg von den Ohren; kurz halten und langsam ablegen."
+
+[[exercises]]
+key = "haende_fausten"
+name = "Hände fausten"
+typen = ["Mobilisation"]
+regionen = ["Hand", "Arm"]
+icon_key = "back_hand"
+description = "Die Hände fest zur Faust schließen, dann weit öffnen und die Finger spreizen. Gleichmäßig im Wechsel, die Schultern bleiben locker."
+
 
 # ── Dehnung ─────────────────────────────────────────────────────────────────
 
@@ -133,7 +157,6 @@ key = "nacken_dehnung"
 name = "Nackendehnung seitlich"
 typen = ["Dehnung"]
 regionen = ["Nacken"]
-spec = "halten"
 icon_key = "self_improvement"
 description = "Kopf zur Seite neigen, Gegenschulter bewusst nach unten ziehen. Ohne Zug am Kopf."
 
@@ -142,7 +165,6 @@ key = "brustmuskel_dehnung"
 name = "Brustmuskel dehnen"
 typen = ["Dehnung"]
 regionen = ["Schulter", "Rumpf"]
-spec = "halten"
 icon_key = "accessibility_new"
 description = "Unterarm im Türrahmen anlegen, Ellbogen auf Schulterhöhe. Den Körper langsam nach vorn drehen, bis vorn an Brust und Schulter ein Zug entsteht. Je Seite."
 
@@ -151,7 +173,6 @@ key = "hueftbeuger_dehnung"
 name = "Hüftbeuger dehnen"
 typen = ["Dehnung"]
 regionen = ["Hüfte"]
-spec = "halten"
 icon_key = "directions_walk"
 description = "Ausfallschritt, Becken aufrichten, Gesäß anspannen. Der Zug gehört vorn in die Hüfte, nicht in den Rücken."
 
@@ -160,7 +181,6 @@ key = "gesaess_dehnung"
 name = "Gesäßmuskel dehnen"
 typen = ["Dehnung"]
 regionen = ["Hüfte"]
-spec = "halten"
 icon_key = "self_improvement"
 description = "Rückenlage, einen Fuß über das andere Knie legen. Das untere Bein zur Brust ziehen, bis im Gesäß ein Zug entsteht. Je Seite."
 
@@ -169,7 +189,6 @@ key = "oberschenkel_vorderseite_dehnung"
 name = "Oberschenkelvorderseite dehnen"
 typen = ["Dehnung"]
 regionen = ["Bein", "Hüfte"]
-spec = "halten"
 icon_key = "accessibility"
 description = "Im Stand die Ferse zum Gesäß ziehen, die Knie zeigen nach unten, Becken aufrichten. Bei Bedarf an der Wand festhalten. Je Seite."
 
@@ -178,7 +197,6 @@ key = "oberschenkel_rueckseite_dehnung"
 name = "Oberschenkelrückseite dehnen"
 typen = ["Dehnung"]
 regionen = ["Bein"]
-spec = "halten"
 icon_key = "airline_seat_legroom_extra"
 description = "Ferse auf eine Stufe oder Stuhlkante, Bein gestreckt. Mit geradem Rücken aus der Hüfte nach vorn neigen, bis hinten im Oberschenkel ein Zug entsteht. Je Seite."
 
@@ -187,9 +205,93 @@ key = "waden_dehnung"
 name = "Wade dehnen"
 typen = ["Dehnung"]
 regionen = ["Bein", "Fuß"]
-spec = "halten"
 icon_key = "directions_walk"
 description = "Hände an der Wand, ein Bein weit nach hinten. Ferse am Boden, Knie gestreckt, Fußspitzen nach vorn. Je Seite."
+
+[[exercises]]
+key = "adduktoren_dehnung"
+name = "Oberschenkelinnenseite dehnen"
+typen = ["Dehnung"]
+regionen = ["Bein", "Hüfte"]
+icon_key = "self_improvement"
+description = "Aufrecht am Boden sitzen, die Fußsohlen aneinander, die Knie fallen nach außen. Die Fersen nah zum Körper holen und die Knie sinken lassen, bis innen an den Oberschenkeln ein Zug entsteht; nicht wippen."
+
+[[exercises]]
+key = "rumpf_seitdehnung"
+name = "Rumpf seitlich dehnen"
+typen = ["Dehnung"]
+regionen = ["Rumpf", "Rücken"]
+icon_key = "accessibility_new"
+description = "Stand, Füße hüftbreit. Einen Arm über den Kopf strecken und zur Gegenseite neigen, bis in der Flanke ein Zug entsteht; das Becken bleibt über den Füßen, der Oberkörper dreht nicht ein. Je Seite."
+
+[[exercises]]
+key = "kindhaltung"
+name = "Kindhaltung"
+typen = ["Dehnung"]
+regionen = ["Rücken", "Hüfte"]
+icon_key = "self_improvement"
+description = "Fersensitz, die Knie etwas geöffnet. Den Oberkörper nach vorn ablegen, die Arme lang nach vorn, die Stirn Richtung Boden; das Gesäß sinkt zu den Fersen, der Atem geht in den Rücken."
+
+[[exercises]]
+key = "drehdehnlage"
+name = "Drehdehnlage"
+typen = ["Dehnung"]
+regionen = ["Rücken", "Hüfte"]
+icon_key = "sync_alt"
+description = "Rückenlage, Arme seitlich ausgebreitet, Knie angewinkelt. Beide Knie zu einer Seite ablegen, der Kopf dreht zur anderen; beide Schultern bleiben am Boden. Je Seite."
+
+[[exercises]]
+key = "schulter_rueckseite_dehnung"
+name = "Schulterrückseite dehnen"
+typen = ["Dehnung"]
+regionen = ["Schulter"]
+icon_key = "accessibility"
+description = "Einen Arm gestreckt vor der Brust zur Gegenseite führen, die andere Hand zieht ihn oberhalb des Ellbogens heran. Die Schulter bleibt tief, der Oberkörper dreht nicht mit. Je Seite."
+
+[[exercises]]
+key = "unterarm_dehnung"
+name = "Unterarm dehnen"
+typen = ["Dehnung"]
+regionen = ["Arm", "Hand"]
+icon_key = "back_hand"
+description = "Einen Arm gestreckt nach vorn, Handfläche nach oben. Mit der anderen Hand die Finger nach unten und zum Körper ziehen, bis innen am Unterarm ein Zug entsteht; danach mit der Handfläche nach unten für die Außenseite. Je Seite."
+
+[[exercises]]
+key = "trizeps_dehnung"
+name = "Trizeps dehnen"
+typen = ["Dehnung"]
+regionen = ["Arm", "Schulter"]
+icon_key = "accessibility_new"
+description = "Einen Arm heben und beugen, die Hand liegt zwischen den Schulterblättern. Die andere Hand schiebt den Ellbogen sanft hinter den Kopf; der Rücken bleibt gerade, kein Hohlkreuz. Je Seite."
+
+[[exercises]]
+key = "langsitz"
+name = "Langsitz"
+typen = ["Dehnung"]
+regionen = ["Bein", "Rücken"]
+icon_key = "airline_seat_legroom_extra"
+description = "Am Boden sitzen, die Beine gestreckt nach vorn, Fußspitzen angezogen. Mit langem Rücken aus der Hüfte nach vorn neigen, bis hinten in den Beinen ein Zug entsteht. Die Variante wählt, ob beide Beine gestreckt sind oder eines."
+
+# Wie spec = "halten", dazu das Auswahlfeld für die Variante (Ben, 16.11.2026:
+# „Einbeinlangsitz ist eine Variante von Langsitz“).
+[exercises.result_spec]
+layout = "timed"
+chart_metrics = ["hold"]
+
+[[exercises.result_spec.fields]]
+key = "variant"
+type = "choice"
+label = "Variante"
+quick = ["Beidbeinig", "Einbeinig"]
+optionen = { Beidbeinig = { text = "Beide Beine gestreckt nach vorn." }, Einbeinig = { text = "Ein Bein gestreckt, die Fußsohle des anderen innen am Oberschenkel; über das gestreckte Bein neigen. Je Seite." } }
+
+[[exercises.result_spec.fields]]
+key = "hold"
+type = "set_list"
+label = "Haltezeit"
+unit = "s"
+default = [30, 30, 30]
+quick = [15, 30, 45, 60]
 
 
 # ── Kräftigung: Beine und Hüfte ─────────────────────────────────────────────
@@ -202,6 +304,12 @@ regionen = ["Bein"]
 icon_key = "accessibility_new"
 description = "Füße hüftbreit, Gewicht auf den Fersen, Knie über den Zehen. So tief, wie der Rücken gerade bleibt."
 beschleunigung = { vorlage = "kniebeuge" }
+# Animation im Fokus, aus pakete_design/standard/bewegung/kniebeuge.blend gerendert
+# (pakete_design/README.md); die Dateien liegen nur am Laptop (Regel 6)
+media = [
+  { datei = "medien/standard/kniebeuge_seite.png", title = "Von der Seite", rolle = "bewegung", license = "eigene Grafik" },
+  { datei = "medien/standard/kniebeuge_vorn.png", title = "Von vorn", rolle = "bewegung", license = "eigene Grafik" },
+]
 
 [[exercises]]
 key = "aufstehen_stuhl"
@@ -252,17 +360,25 @@ spec = "halten"
 icon_key = "airline_seat_legroom_extra"
 description = "Rücken an der Wand, Knie im rechten Winkel, Oberschenkel waagerecht. Halten — die Zeit ist der Wert."
 
+[[exercises]]
+key = "beinabduktion"
+name = "Beinabduktion"
+typen = ["Kräftigung"]
+regionen = ["Hüfte", "Bein"]
+icon_key = "accessibility"
+description = "Seitlage, das untere Bein angewinkelt. Das obere Bein gestreckt anheben, die Ferse führt, das Becken kippt nicht nach hinten; langsam senken. Je Seite."
+
 
 # ── Kräftigung: Rumpf ───────────────────────────────────────────────────────
 
 [[exercises]]
-key = "unterarmstuetz"
-name = "Unterarmstütz"
+key = "planke"
+name = "Planke"
 typen = ["Kräftigung", "Isometrie"]
 regionen = ["Rumpf"]
 spec = "halten"
 icon_key = "horizontal_rule"
-description = "Gerade Linie von Kopf bis Ferse. Lieber kürzer und sauber als lang und durchhängend."
+description = "Auf den Unterarmen, Ellbogen unter den Schultern. Gerade Linie von Kopf bis Ferse. Lieber kürzer und sauber als lang und durchhängend."
 
 [[exercises]]
 key = "seitstuetz"
@@ -280,6 +396,14 @@ typen = ["Kräftigung"]
 regionen = ["Rumpf", "Rücken"]
 icon_key = "sports_gymnastics"
 description = "Einen Arm und das gegenüberliegende Bein lang ausstrecken, ohne dass Becken oder Rücken ausweichen. Kurz halten, wechseln."
+
+[[exercises]]
+key = "situps"
+name = "Sit-ups"
+typen = ["Kräftigung"]
+regionen = ["Rumpf"]
+icon_key = "fitness_center"
+description = "Rückenlage, Beine aufgestellt, Hände an den Schläfen. Den Oberkörper Wirbel für Wirbel aufrollen und langsam wieder ablegen, ohne Zug am Kopf."
 
 
 # ── Kräftigung: Oberkörper ──────────────────────────────────────────────────
@@ -318,6 +442,14 @@ regionen = ["Schulter", "Arm"]
 icon_key = "accessibility"
 description = "Oberarm am Körper, Unterarm nach außen drehen. Bewegung aus der Schulter, nicht aus dem Rumpf."
 
+[[exercises]]
+key = "klimmzuege"
+name = "Klimmzüge"
+typen = ["Kräftigung"]
+regionen = ["Arm", "Schulter", "Rücken"]
+icon_key = "fitness_center"
+description = "An der Stange hängen, Hände etwas weiter als schulterbreit. Schulterblätter nach unten ziehen und hochziehen, bis das Kinn über der Stange ist; langsam ablassen, ohne Schwung."
+
 
 # ── Gleichgewicht ───────────────────────────────────────────────────────────
 
@@ -326,7 +458,6 @@ key = "einbeinstand"
 name = "Einbeinstand"
 typen = ["Gleichgewicht"]
 regionen = ["Bein", "Fuß"]
-spec = "halten"
 icon_key = "balance"
 description = "Frei stehen, Blick geradeaus. Steigerung: Augen schließen."
 
@@ -354,7 +485,6 @@ description = "Erreichbarer Winkel bei der Abduktion. Immer gleich messen, sonst
 key = "hrv_ruhemessung"
 name = "HRV-Ruhemessung"
 typen = ["Messung", "HRV"]
-spec = "halten"
 icon_key = "monitor_heart"
 limit_spec = { rules = [{ type = "timer", seconds = 300 }] }
 description = "Fünf Minuten ruhig sitzen oder liegen, gleichmäßig atmen, nicht sprechen. Möglichst immer zur gleichen Tageszeit."
@@ -401,7 +531,6 @@ zaehlt = false
 key = "hf_talk_test"
 name = "Talk-Test (Steigerung)"
 typen = ["Messung", "Ausdauer"]
-spec = "halten"
 icon_key = "directions_walk"
 uhr = true
 description = "Sechs Stufen zu drei Minuten, jede etwas schneller als die vorige: Gehen, zügig gehen, traben, laufen. Sprich in jeder Stufe ein paar Sätze laut. Sobald Sprechen nicht mehr bequem geht, in der Herzfrequenz-Sicht „Sprechen wird schwer“ antippen: Die Herzfrequenz davor ist dein Marker für Schwelle 1."
@@ -437,7 +566,6 @@ dauer_s = 180
 key = "hf_feld_maximaltest"
 name = "Feld-Maximaltest"
 typen = ["Messung", "Ausdauer"]
-spec = "halten"
 icon_key = "directions_run"
 uhr = true
 description = "Eine Ausbelastung — nur für Gesunde und Trainierte, nicht bei Infekt, Herz-Kreislauf-Erkrankung oder Beschwerden; im Zweifel vorher ärztlich abklären, bei Schwindel, Brustschmerz oder Luftnot sofort abbrechen. Zehn Minuten einlaufen, dann drei Stufen zu drei Minuten, jede deutlich schneller, die letzte Minute alles geben, danach 60 Sekunden ruhig stehen. Die Auswertung bietet das höchste 30-Sekunden-Mittel als HFmax an."

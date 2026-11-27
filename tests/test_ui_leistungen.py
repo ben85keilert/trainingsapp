@@ -20,7 +20,7 @@ def welt(tmp_path):
     state = AppState.starten(tmp_path / "app.db")
     plan = Plan(name="Dehnung", subject_id=state.profil.id)
     state.plaene.speichern(plan)
-    uebung = state.uebungen.laden(seed_id("nacken_dehnung"))
+    uebung = state.uebungen.laden(seed_id("wandsitz"))
     session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
     state.sitzungen.eintrag_anlegen(session, uebung, {"hold": [45, 45]}, "gut")
     state.sitzungen.eintrag_anlegen(session, uebung, {"hold": [30]}, "")

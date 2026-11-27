@@ -700,7 +700,7 @@ class AppState:
             if db_pfad is None
             else Path(db_pfad).parent / "Medien" / "Pakete",
         )
-        neu = seed_einspielen(con)
+        neu = seed_einspielen(con, ablage=ablage)
         # nur mit TRAININGSAPP_PAKETE
         paketfehler = pakete_aus_ordner(con, paketordner(), ablage)
         datenformat_aktualisieren(con)

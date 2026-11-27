@@ -115,7 +115,10 @@ nichts; Ben, 13.11.2026). Läufe mit einer Schleife über
 einem Netzaussetzer ab, obwohl der Lauf weiterläuft (Ben, 19.11.2026: beim CI-Lauf zu 0.3.98
 „error connecting to api.github.com“, der Lauf war grün). Scheitert der APK-Lauf an einem 504 von
 GitHubs Downloads, reicht `gh run rerun <id> --failed`; kein neuer Tag, keine neue Version.
-**Lokale Builds startet nur Ben.** **Vor dem Tag die offenen Dependabot-Warnungen ansehen** (Ben,
+**Lokale Builds startet nur Ben.** **Vor dem Versions-Commit
+`uv run python scripts/seed_pruefen.py`** (Ben, 27.11.2026, P232 — die App lieferte „Standard“ 5
+aus, auf dem Server lag 0.1.0): weicht der Seed vom Server ab, erst nachziehen (`--uebernehmen`,
+`docs/uebungspakete.md`); „nicht geprüft“ (kein Netz) im Bericht nennen. **Vor dem Tag die offenen Dependabot-Warnungen ansehen** (Ben,
 13.11.2026; `gh api repos/ben85keilert/trainingsapp/dependabot/alerts`): kritische und hohe zu
 Paketen, die in die APK gelangen (`uv tree --no-default-groups`), vorher beheben oder im Bericht
 nennen. Die APK löst ihre Pakete selbst auf, nicht aus `uv.lock` — was wirklich drin ist, zeigt

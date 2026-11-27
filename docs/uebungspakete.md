@@ -1124,6 +1124,17 @@ und Kommas, die beim Korrigieren brechen. Die Felder sind **dieselben** wie oben
 auf dem Handy) und gibt das Ergebnis an denselben Leser wie ein Import.
 Austauschformat (Import, Export) bleibt JSON.
 
+**Der Seed ist der veröffentlichte Stand** (Ben, 27.11.2026, P232): Gepflegt und veröffentlicht
+wird „Standard“ im Inhalte-Repo; `data/seed/standard.toml` und die Dateien unter
+`data/seed/medien/` sind eine **unveränderte Kopie** davon — hier nie von Hand ändern. So gibt es
+nach der Installation nichts zu aktualisieren, auch ohne Netz (bis dahin lieferte die App
+Version 5 aus, auf dem Server lag 0.1.0). Die Dateien (`datei = "…"`) legt der Start in die
+Paketablage, bereinigt wie bei jedem Import. `uv run python scripts/seed_pruefen.py` baut den
+Seed und vergleicht Version und SHA-256 mit dem Index der Paketquelle — vor jedem
+Versions-Commit; mit `--uebernehmen <standard.toml>` legt es eine Paketdatei samt Dateien in den
+Seed (so ruft es `veroeffentlichen.sh` des Inhalte-Repos nach dem Hochladen auf). Was im Seed
+liegt, liegt im öffentlichen Repo.
+
 ```toml
 [paket]
 id = "2c1194ea-67ba-536d-aa7d-bf74bc3c73d4"

@@ -179,12 +179,12 @@ def welt(state):
 
     plan = Plan(name="Dehnung", subject_id=state.profil.id)
     state.plaene.speichern(plan)
-    item = state.plaene.uebung_hinzufuegen(plan.id, seed_id("nacken_dehnung"), {"hold": [45, 45]})
-    state.plaene.uebung_hinzufuegen(plan.id, seed_id("unterarmstuetz"))
-    uebung = state.uebungen.laden(seed_id("nacken_dehnung"))
+    item = state.plaene.uebung_hinzufuegen(plan.id, seed_id("wandsitz"), {"hold": [45, 45]})
+    state.plaene.uebung_hinzufuegen(plan.id, seed_id("planke"))
+    uebung = state.uebungen.laden(seed_id("wandsitz"))
     session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
     eintrag = state.sitzungen.eintrag_anlegen(session, uebung, {"hold": [45, 45]}, "gut")
-    state.sitzungen.erledigt(session, state.uebungen.laden(seed_id("unterarmstuetz")))
+    state.sitzungen.erledigt(session, state.uebungen.laden(seed_id("planke")))
     return state, state.plaene.laden(plan.id), item, uebung, eintrag
 
 
@@ -1001,7 +1001,7 @@ def test_plan_bearbeiten_ordnet_um_und_nimmt_doppelt_auf(page, welt) -> None:
     assert any(isinstance(c, ft.ReorderableDragHandle) for c in _alle(liste))
     assert any(t.endswith("2. Mal im Plan") for t in _texte(liste))
 
-    # Ziehen: das letzte (die zweite Nackendehnung) nach vorn
+    # Ziehen: das letzte (der zweite Wandsitz) nach vorn
     alt = [i.id for i in plan.items]
     liste.on_reorder(SimpleNamespace(old_index=2, new_index=0))
     assert [i.id for i in state.plaene.laden(plan.id).items] == [alt[2], alt[0], alt[1]]
@@ -1021,7 +1021,7 @@ def test_zweite_stelle_wartet_auf_den_zweiten_eintrag(page, welt) -> None:
     next(
         x for x in _alle(ansicht) if isinstance(x, ft.TextButton) and x.tooltip == "Gesamtplan"
     ).on_click()
-    assert "2 von 3 heute" in _texte(dialoge[-1])  # Nackendehnung (1. Stelle) und Unterarmstütz
+    assert "2 von 3 heute" in _texte(dialoge[-1])  # Wandsitz (1. Stelle) und Planke
 
 
 def test_timer_signale_eigene_seite(page, state) -> None:
@@ -1093,7 +1093,7 @@ def test_timer_klang_und_lautstaerke(page, state) -> None:
 
 
 def test_i_symbol_holt_parameter_aus_dem_feldvorrat(page, welt) -> None:
-    """Gewicht hat die Nackendehnung nicht — die Planübung holt es trotzdem heran."""
+    """Gewicht hat der Wandsitz nicht — die Planübung holt es trotzdem heran."""
     import asyncio
 
     from trainingsapp.ui.views.plan import plan_view
@@ -1108,7 +1108,7 @@ def test_i_symbol_holt_parameter_aus_dem_feldvorrat(page, welt) -> None:
         gesprungen.append(r)
 
     page.push_route = push_route
-    block = _block(plan_view(page, state, plan), "Nackendehnung seitlich")
+    block = _block(plan_view(page, state, plan), "Wandsitz")
     assert not any("Mehr" in t for t in _texte(block))  # „Mehr …“ ist weg
     info = next(
         c for c in _alle(block) if isinstance(c, ft.IconButton) and c.icon == ft.Icons.INFO_OUTLINE
@@ -1131,7 +1131,7 @@ def test_i_symbol_holt_parameter_aus_dem_feldvorrat(page, welt) -> None:
 
     # Zurück im Plan: Gewicht steht als Ausführung im Block — Segment wählen, Satz anhängen
     plan = state.plaene.laden(plan.id)
-    block = _block(plan_view(page, state, plan), "Nackendehnung seitlich")
+    block = _block(plan_view(page, state, plan), "Wandsitz")
 
     def segment_waehlen(text: str) -> None:
         for c in _alle(block):
@@ -1144,7 +1144,7 @@ def test_i_symbol_holt_parameter_aus_dem_feldvorrat(page, welt) -> None:
         raise AssertionError(f"kein Segment {text!r}")
 
     segment_waehlen("5kg")
-    block = _block(plan_view(page, state, plan), "Nackendehnung seitlich")
+    block = _block(plan_view(page, state, plan), "Wandsitz")
     _knopf_mit_text(block, "+30").on_click()
     heute = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
     neu = [e for e in heute if e.result.get("weight") == 5]
@@ -1166,7 +1166,7 @@ def test_notiz_knopf_und_tafel_oeffnet_eintrag(page, welt) -> None:
         gesprungen.append(r)
 
     page.push_route = push_route
-    block = _block(plan_view(page, state, plan), "Nackendehnung seitlich")
+    block = _block(plan_view(page, state, plan), "Wandsitz")
     assert "„gut“" in _texte(block)  # die Notiz des Eintrags steht in der Tafel
 
     _knopf_mit_text(block, "Notiz").on_click()
@@ -1179,7 +1179,7 @@ def test_notiz_knopf_und_tafel_oeffnet_eintrag(page, welt) -> None:
 
     from trainingsapp.ui.views.plan import LEISTUNGEN_TIPP
 
-    block = _block(plan_view(page, state, plan), "Nackendehnung seitlich")
+    block = _block(plan_view(page, state, plan), "Wandsitz")
     gruppe = next(
         c for c in _alle(block) if isinstance(c, ft.Container) and c.tooltip == LEISTUNGEN_TIPP
     )
@@ -1187,7 +1187,7 @@ def test_notiz_knopf_und_tafel_oeffnet_eintrag(page, welt) -> None:
     # 18.10. als Blatt über dem Plan, ohne Seitenwechsel
     gruppe.on_click()
     assert isinstance(dialoge[-1], ft.BottomSheet) and not gesprungen
-    assert "Heute: Nackendehnung seitlich" in _texte(dialoge[-1])
+    assert "Heute: Wandsitz" in _texte(dialoge[-1])
     _knopf_mit_text(block, "Bearbeiten").on_click()
     assert isinstance(dialoge[-1], ft.BottomSheet) and not gesprungen
 

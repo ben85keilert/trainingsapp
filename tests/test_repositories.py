@@ -511,7 +511,7 @@ def test_plan_schnell_aendern(con) -> None:
     plan = Plan(name="Planke")
     plaene.speichern(plan)
 
-    item = plaene.uebung_hinzufuegen(plan.id, seed_id("unterarmstuetz"))
+    item = plaene.uebung_hinzufuegen(plan.id, seed_id("planke"))
     zweites = plaene.uebung_hinzufuegen(plan.id, seed_id("einbeinstand"))
     assert [i.order for i in plaene.laden(plan.id).items] == [0, 1]
 
@@ -875,7 +875,7 @@ def test_satz_anhaengen_an_eintrag_mit_alter_kopie(welt) -> None:
     from trainingsapp.core.result_spec import FieldType
 
     con, repo, _ich, sitzung = welt
-    uebung = ExerciseRepo(con).laden(seed_id("hueftbeuger_dehnung"))
+    uebung = ExerciseRepo(con).laden(seed_id("seitstuetz"))
     damals = replace(uebung, result_spec=_alte_halten_spec())
     repo.erledigt(sitzung, damals)  # Eintrag mit alter Kopie
 
@@ -890,7 +890,7 @@ def test_satz_anhaengen_an_eintrag_mit_alter_kopie(welt) -> None:
 def test_satz_anhaengen_uebernimmt_alte_werte(welt) -> None:
     """Alter Eintrag 2× 30s, dann +45 → 30/30/45 in der neuen Notation."""
     con, repo, _ich, sitzung = welt
-    uebung = ExerciseRepo(con).laden(seed_id("hueftbeuger_dehnung"))
+    uebung = ExerciseRepo(con).laden(seed_id("seitstuetz"))
     damals = replace(uebung, result_spec=_alte_halten_spec())
     repo.eintrag_anlegen(sitzung, damals, {"sets": 2, "hold": 30})
 
@@ -916,7 +916,7 @@ def test_datenformat_repariert_eintraege_mit_unpassender_kopie(welt) -> None:
     from trainingsapp.data.upgrade import datenformat_aktualisieren
 
     con, repo, _ich, sitzung = welt
-    uebung = ExerciseRepo(con).laden(seed_id("hueftbeuger_dehnung"))
+    uebung = ExerciseRepo(con).laden(seed_id("seitstuetz"))
     damals = replace(uebung, result_spec=_alte_halten_spec())
     alt = repo.erledigt(sitzung, damals)
     # Genau das hat die fehlerhafte Fassung geschrieben: alte Kopie, neue Werte.
@@ -1231,7 +1231,7 @@ def test_migration_037_beschleunigung(tmp_path) -> None:
 def test_plan_speichern_behaelt_ausgeblendete_uebungen(welt) -> None:
     con, _repo, ich, _sitzung = welt
     uebungen, plaene = ExerciseRepo(con), PlanRepo(con)
-    a, b = _wadenheben(con), uebungen.laden(seed_id("unterarmstuetz"))
+    a, b = _wadenheben(con), uebungen.laden(seed_id("planke"))
     plan = Plan(name="P", subject_id=ich.id)
     plaene.speichern(plan)
     plaene.uebung_hinzufuegen(plan.id, a.id)

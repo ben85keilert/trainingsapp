@@ -10,6 +10,8 @@ Oben die Karte, wie sie aussehen wird. Darunter:
 2. **Eigenes Bild** — eine Bilddatei (auf dem Handy die Auswahl des Systems); bereinigt ohne
    Ortsangabe in die Ablage der Paketdateien wie jedes Stück.
 3. **Text auf dem Bild** — liegt über dem Bild, nicht darin. **„Nur Text“** nimmt das Bild weg.
+   **Ausschnitt** — Zoom, waagrecht, senkrecht: welcher Teil des Bildes in der Karte steht
+   (nur gemerkt, das Bild bleibt ganz).
 4. **Automatisch** — zurück zur Vorgabe.
 
 Das Blatt ändert nichts selbst: „Übernehmen“ gibt ``(titelbild, titelbild_text)`` zurück, der
@@ -29,7 +31,13 @@ import flet as ft
 from trainingsapp.core import titelbild as tb
 from trainingsapp.core import videoinfo
 from trainingsapp.core.bereinigen import NichtBereinigbar
-from trainingsapp.core.models import Media, MediaKind
+from trainingsapp.core.models import (
+    TITELBILD_GANZ,
+    TITELBILD_ZOOM_MAX,
+    Media,
+    MediaKind,
+    titelbild_lage_lesen,
+)
 from trainingsapp.core.paketmedien import art_fuer, ist_paketmedium
 from trainingsapp.ui import paketdatei, standbild
 from trainingsapp.ui.components import medienkarte
@@ -37,6 +45,8 @@ from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import schliessen
 from trainingsapp.ui.components.karte import hinweis
 
+#: Der Ausschnitt des Titelbildes: Zoom, waagrecht, senkrecht (`Media.titelbild_lage`)
+Lage = tuple[float, float, float]
 #: Was unter dem Knopf „Titelbild …“ steht — je Wahl
 STAND = {tb.AUTO: "automatisch", tb.BILD: "gewähltes Bild", tb.TEXT: "nur Text"}
 
@@ -55,11 +65,15 @@ def oeffnen(
     page: Any,
     state: Any,
     medium: Media,
-    uebernehmen: Callable[[str, str], Any],
+    uebernehmen: Callable[[str, str, Lage], Any],
 ) -> None:
-    """Zeigt das Blatt für ``medium`` (mit seinem jetzigen Titelbild und Text). ``uebernehmen``
-    bekommt ``(titelbild, titelbild_text)``."""
-    entwurf = {"bild": medium.titelbild, "text": medium.titelbild_text}
+    """Zeigt das Blatt für ``medium`` (mit seinem jetzigen Titelbild, Text und Ausschnitt).
+    ``uebernehmen`` bekommt ``(titelbild, titelbild_text, titelbild_lage)``."""
+    entwurf: dict[str, Any] = {
+        "bild": medium.titelbild,
+        "text": medium.titelbild_text,
+        "lage": titelbild_lage_lesen(medium.titelbild_lage),
+    }
     ablage = state.pakete.ablage
     pfad = ablage.pfad(medium.uri) if ablage is not None and ist_paketmedium(medium) else None
     ist_video = pfad is not None and pfad.is_file() and medium.kind == MediaKind.VIDEO
@@ -97,12 +111,75 @@ def oeffnen(
             medium,
             titelbild=entwurf["bild"],
             titelbild_text=str(text_feld.value or "").strip(),
+            titelbild_lage=entwurf["lage"],
         )
+
+    # Der Ausschnitt (Ben, 27.11.2026: „für das Vorschaubild den Kasten setzen“) — drei
+    # Regler: wie weit hinein, und welcher Teil. Nur gemerkt, das Bild bleibt ganz
+    def regler(wert: float, von: float, bis: float, kennung: str) -> ft.Slider:
+        return ft.Slider(
+            value=wert,
+            min=von,
+            max=bis,
+            expand=True,
+            on_change=lage_geaendert,
+            data=("titelbild_lage", kennung),
+        )
+
+    def lage_geaendert(_e: Any = None) -> None:
+        entwurf["lage"] = titelbild_lage_lesen(
+            [zoom_regler.value or 1, x_regler.value or 0, y_regler.value or 0]
+        )
+        vorschau.content = medienkarte.flaeche(state, jetzt(), mit_knopf=False)
+        with contextlib.suppress(Exception):
+            vorschau.update()
+
+    zoom_regler = regler(entwurf["lage"][0], 1.0, TITELBILD_ZOOM_MAX, "zoom")
+    x_regler = regler(entwurf["lage"][1], -1.0, 1.0, "x")
+    y_regler = regler(entwurf["lage"][2], -1.0, 1.0, "y")
+
+    def lage_zeile(name: str, feld: ft.Slider) -> ft.Control:
+        return ft.Row(
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[ft.Container(width=84, content=ft.Text(name, size=13)), feld],
+        )
+
+    def ganzes_bild(_e: Any = None) -> None:
+        lage_zuruecksetzen()
+        zeichnen()
+
+    lage_teil = ft.Column(
+        spacing=0,
+        tight=True,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        data="titelbild_ausschnitt",
+        controls=[
+            ft.Row(
+                controls=[
+                    ft.Text(
+                        "AUSSCHNITT", size=11, weight=ft.FontWeight.BOLD, opacity=0.6, expand=True
+                    ),
+                    ft.TextButton("Ganzes Bild", on_click=ganzes_bild, data="titelbild_ganz"),
+                ]
+            ),
+            lage_zeile("Zoom", zoom_regler),
+            lage_zeile("Waagrecht", x_regler),
+            lage_zeile("Senkrecht", y_regler),
+        ],
+    )
+
+    def lage_zuruecksetzen() -> None:
+        """Ein anderes Bild beginnt mit dem ganzen Bild."""
+        entwurf["lage"] = TITELBILD_GANZ
+        zoom_regler.value, x_regler.value, y_regler.value = TITELBILD_GANZ
 
     def zeichnen() -> None:
         vorschau.content = medienkarte.flaeche(state, jetzt(), mit_knopf=False)
         nur_text.value = entwurf["bild"] == tb.NUR_TEXT
-        for c in (vorschau, nur_text):
+        # einen Ausschnitt gibt es nur, wo ein Bild steht
+        lage_teil.visible = medienkarte.titelbild_pfad(state, jetzt()) is not None
+        for c in (vorschau, nur_text, lage_teil):
             with contextlib.suppress(Exception):
                 c.update()
 
@@ -125,6 +202,7 @@ def oeffnen(
         if ablage is not None:
             ablage.entwurf_merken(name)  # bis das Formular gespeichert ist
         entwurf["bild"] = name
+        lage_zuruecksetzen()
         melden("")
         zeichnen()
 
@@ -204,6 +282,7 @@ def oeffnen(
         if ablage is not None:
             ablage.entwurf_merken(name)
         entwurf["bild"] = name
+        lage_zuruecksetzen()
         melden("")
         zeichnen()
 
@@ -213,11 +292,13 @@ def oeffnen(
 
     def automatisch(_e: Any = None) -> None:
         entwurf["bild"] = ""
+        lage_zuruecksetzen()
         zeichnen()
 
     nur_text.on_change = nur_text_umgestellt
     text_feld.on_change = lambda _e=None: zeichnen()
     vorschau.content = medienkarte.flaeche(state, jetzt(), mit_knopf=False)
+    lage_teil.visible = medienkarte.titelbild_pfad(state, jetzt()) is not None
     blatt: ft.BottomSheet
 
     async def zu() -> None:
@@ -228,7 +309,7 @@ def oeffnen(
 
     async def fertig(_e: Any = None) -> None:
         await zu()
-        uebernehmen(entwurf["bild"], str(text_feld.value or "").strip())
+        uebernehmen(entwurf["bild"], str(text_feld.value or "").strip(), entwurf["lage"])
 
     async def abbrechen(_e: Any = None) -> None:
         await zu()
@@ -240,6 +321,7 @@ def oeffnen(
             [
                 ft.Text("Titelbild", size=18, weight=ft.FontWeight.W_600),
                 vorschau,
+                lage_teil,
                 arbeitet,
                 meldung,
                 *video_teil,
@@ -282,15 +364,20 @@ def oeffnen(
 
 def fuer(
     page: Any, state: Any, medium: Callable[[], Media | None]
-) -> Callable[[str, str, Callable[[str, str], None]], None]:
+) -> Callable[[str, str, Lage, Callable[[str, str, Lage], None]], None]:
     """Der Öffner für `components.material_rolle.rollen_zeile` (``titelbild=``): ``medium``
     liefert das Stück, wie es gerade im Formular steht — ohne Adresse geht nichts auf."""
 
-    def handler(bild: str, text: str, setzen: Callable[[str, str], None]) -> None:
+    def handler(bild: str, text: str, lage: Lage, setzen: Callable[[str, str, Lage], None]) -> None:
         m = medium()
         if m is None or not m.uri:
             return
-        oeffnen(page, state, replace(m, titelbild=bild, titelbild_text=text), setzen)
+        oeffnen(
+            page,
+            state,
+            replace(m, titelbild=bild, titelbild_text=text, titelbild_lage=lage),
+            setzen,
+        )
 
     return handler
 

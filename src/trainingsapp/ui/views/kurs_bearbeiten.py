@@ -140,7 +140,7 @@ from trainingsapp.core.kurse import (
     PlanVorlage,
 )
 from trainingsapp.core.kursplan import GRUNDLAGE
-from trainingsapp.core.models import Exercise, Media, new_id
+from trainingsapp.core.models import TITELBILD_GANZ, Exercise, Media, new_id
 from trainingsapp.core.pakete import paketplan_aus
 from trainingsapp.core.paketmedien import ist_paketmedium
 from trainingsapp.core.plaene import WOCHENTAGE_KURZ, tage_text
@@ -1507,9 +1507,10 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
 
         #: Das Titelbild des Stücks (`components/titelbild_blatt.py`) — neben dem Stück
         #: gehalten, weil ein Link erst mit „Fertig“ ein Medium wird
-        titel_wahl: dict[str, str] = {
+        titel_wahl: dict[str, Any] = {
             "bild": block.medium.titelbild if block.medium else "",
             "text": block.medium.titelbild_text if block.medium else "",
+            "lage": block.medium.titelbild_lage if block.medium else TITELBILD_GANZ,
         }
         titelbild_stand = ft.Text(
             titelbild_blatt.stand_text(titel_wahl["bild"], titel_wahl["text"]),
@@ -1519,7 +1520,12 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         )
 
         def mit_titelbild(m: Media) -> Media:
-            return replace(m, titelbild=titel_wahl["bild"], titelbild_text=titel_wahl["text"])
+            return replace(
+                m,
+                titelbild=titel_wahl["bild"],
+                titelbild_text=titel_wahl["text"],
+                titelbild_lage=titel_wahl["lage"],
+            )
 
         def medium_vorschau_zeichnen() -> None:
             m = stueck["m"]
@@ -1539,8 +1545,8 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
 
         medium_vorschau_zeichnen()
 
-        def titelbild_gesetzt(bild: str, text_: str) -> None:
-            titel_wahl["bild"], titel_wahl["text"] = bild, text_
+        def titelbild_gesetzt(bild: str, text_: str, lage: tuple[float, float, float]) -> None:
+            titel_wahl["bild"], titel_wahl["text"], titel_wahl["lage"] = bild, text_, lage
             titelbild_stand.value = titelbild_blatt.stand_text(bild, text_)
             medium_vorschau_zeichnen()
             for c in (titelbild_stand, medium_vorschau):
@@ -1573,6 +1579,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         def stueck_setzen(m: Media) -> None:
             stueck["m"] = m
             titel_wahl["bild"] = m.titelbild  # ein neues Stück bringt sein eigenes Bild mit
+            titel_wahl["lage"] = m.titelbild_lage
             titelbild_stand.value = titelbild_blatt.stand_text(
                 titel_wahl["bild"], titel_wahl["text"]
             )
@@ -1900,9 +1907,12 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                     frisch(medien_spalte, medien_zeichnen)
 
                 def titelbild(_e: Any = None, n: int = n) -> None:
-                    def gesetzt(bild: str, text_: str) -> None:
+                    def gesetzt(bild: str, text_: str, lage: tuple[float, float, float]) -> None:
                         lauf_medien[n] = replace(
-                            lauf_medien[n], titelbild=bild, titelbild_text=text_
+                            lauf_medien[n],
+                            titelbild=bild,
+                            titelbild_text=text_,
+                            titelbild_lage=lage,
                         )
                         frisch(medien_spalte, medien_zeichnen)
 
@@ -2157,6 +2167,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                     text=str(beschriftung.value or "").strip(),
                     titelbild=titel_wahl["bild"],
                     titelbild_text=titel_wahl["text"],
+                    titelbild_lage=titel_wahl["lage"],
                 )
                 neuer.text = ""
             else:

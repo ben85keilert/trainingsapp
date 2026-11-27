@@ -416,3 +416,29 @@ des Editors und über dem Lauf. Ohne Vorgabe und ohne eigene Aufforderung steht 
   nicht — es wird nicht abgehakt.
 - **Nicht erfasst:** Blöcke „Medium“ im Kapitel, die an einer **anderen Antwort** hängen als
   der gegebenen — sie bleiben verborgen, wie bisher (`wenn`); die Karte nennt sie nicht.
+
+## 13. Ausschnitt des Titelbildes (Ben, 27.11.2026, Version 0.3.108)
+
+„Wie aufwendig wäre es, wenn man für das Vorschaubild den Kasten setzen könnte?“ — „ja, baue
+Stufe A“.
+
+- **Nur gemerkt, nichts beschnitten:** `Media.titelbild_lage = (Zoom, waagrecht, senkrecht)` —
+  Zoom 1 bis 4, die Lage −1 (links bzw. oben) bis 1 (rechts bzw. unten); Vorgabe (1, 0, 0) =
+  das ganze Bild, mittig (`core.models.titelbild_lage_lesen` bringt alles in seine Grenzen).
+  Das Bild bleibt ganz; der Ausschnitt lässt sich jederzeit neu setzen. Kein nativer Code —
+  Handy, Rechner und Browser gleich, für ein Bild aus dem Video wie für ein eigenes.
+- **Anzeige** (`medienkarte.bild_im_ausschnitt`): Das Bild füllt die Fläche; die Lage sagt,
+  welcher Teil stehen bleibt, wo es über sie hinausragt (ein Hochkantbild im 16:9-Feld), und
+  der Zoom vergrößert um denselben Punkt. Die Fläche schneidet ab. Gilt in der Karte, in der
+  Miniatur der Editor-Zeile und in der Vorschau des Blatts.
+- **Setzen** im Blatt „Titelbild“: unter der Vorschau drei Regler — Zoom, Waagrecht,
+  Senkrecht — und „Ganzes Bild“. Die Vorschau folgt sofort. Nur sichtbar, wo ein Bild steht
+  (nicht bei „Nur Text“). Ein anderes Bild („Dieses Bild nehmen“, „Eigenes Bild …“,
+  „Automatisch“) beginnt wieder mit dem ganzen Bild.
+- Überall, wo das Blatt steht: Kurs-Editor (Block „Medium“, Medien am Lauf), „Übung
+  bearbeiten“, „Im Plan einstellen“, Reiter „Medien“ des Plans. Im Paket das Feld
+  `titelbild_lage` (`docs/uebungspakete.md`), ältere Apps überlesen es.
+- **Nicht gebaut (Stufe B):** den Ausschnitt mit dem Finger ziehen und zoomen.
+- Geprüft: `tests/test_ui_medienkarte.py`; Web-Foto mit einem Testbild aus vier Feldern — quer
+  mit Zoom 2 links oben und rechts unten, hochkant oben und unten: jeweils der erwartete Teil,
+  sauber in der gerundeten Karte abgeschnitten; das Blatt mit den Reglern bei 412 px.

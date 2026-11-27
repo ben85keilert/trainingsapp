@@ -32,7 +32,7 @@ from trainingsapp.config import ist_aktiv
 from trainingsapp.core import titelbild as tb
 from trainingsapp.core import videoinfo
 from trainingsapp.core.linkvideos import direkt, server
-from trainingsapp.core.models import Media, MediaKind
+from trainingsapp.core.models import Media, MediaKind, titelbild_lage_lesen
 from trainingsapp.core.paketmedien import ist_paketmedium
 from trainingsapp.ui.components.bildquelle import bildquelle
 from trainingsapp.ui.components.medienliste import SYMBOLE, oeffner
@@ -112,6 +112,21 @@ def titelbild_pfad(state: Any, medium: Media) -> Path | None:
     return bilder.vorhanden(medium.uri) if bilder is not None else None
 
 
+def bild_im_ausschnitt(bild: Path, medium: Media) -> ft.Container:
+    """Das Titelbild in seinem **Ausschnitt** (`Media.titelbild_lage`: Zoom, waagrecht,
+    senkrecht — Ben, 27.11.2026: „für das Vorschaubild den Kasten setzen“). Das Bild füllt die
+    Fläche; die Lage sagt, welcher Teil stehen bleibt, wo es über sie hinausragt, und der Zoom
+    vergrößert um denselben Punkt. Nichts wird beschnitten — die Fläche darum schneidet ab."""
+    zoom, x, y = titelbild_lage_lesen(medium.titelbild_lage)
+    punkt = ft.Alignment(x, y)
+    return ft.Container(
+        expand=True,
+        image=ft.DecorationImage(src=bildquelle(bild), fit=ft.BoxFit.COVER, alignment=punkt),
+        scale=ft.Scale(scale=zoom, alignment=punkt) if zoom > 1 else None,
+        data=("medienkarte_bild", medium.uri),
+    )
+
+
 def _etikett(text: str, **lage: Any) -> ft.Control:
     return ft.Container(
         padding=ft.Padding.symmetric(horizontal=6, vertical=2),
@@ -138,14 +153,7 @@ def flaeche(
     schrift = tb.aufschrift(medium, mit_bild=bild is not None)
     schichten: list[ft.Control] = []
     if bild is not None:
-        schichten.append(
-            ft.Image(
-                src=bildquelle(bild),
-                fit=ft.BoxFit.COVER,
-                expand=True,
-                data=("medienkarte_bild", medium.uri),
-            )
-        )
+        schichten.append(bild_im_ausschnitt(bild, medium))
     else:
         schichten.append(ft.Container(expand=True, bgcolor=ft.Colors.PRIMARY_CONTAINER))
     if klein:

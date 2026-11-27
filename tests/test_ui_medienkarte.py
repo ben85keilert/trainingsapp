@@ -196,7 +196,7 @@ def test_titelbild_blatt_bild_aus_dem_video_text_und_nur_text(page, state, monke
     monkeypatch.setattr(titelbild_blatt.paketdatei, "ablegen", ablegen)
 
     ergebnis: list[tuple[str, str]] = []
-    titelbild_blatt.oeffnen(page, state, film, lambda b, t: ergebnis.append((b, t)))
+    titelbild_blatt.oeffnen(page, state, film, lambda b, t, _lage: ergebnis.append((b, t)))
     blatt = _blatt(page)
     assert _d(blatt, "titelbild_nehmen") is not None  # der Spieler mit dem Knopf steht da
     asyncio.run(_d(blatt, "titelbild_nehmen").on_click())
@@ -209,14 +209,14 @@ def test_titelbild_blatt_bild_aus_dem_video_text_und_nur_text(page, state, monke
 
     # „Nur Text“ nimmt das Bild weg, „Automatisch“ stellt zurück
     film.titelbild = ergebnis[0][0]
-    titelbild_blatt.oeffnen(page, state, film, lambda b, t: ergebnis.append((b, t)))
+    titelbild_blatt.oeffnen(page, state, film, lambda b, t, _lage: ergebnis.append((b, t)))
     blatt = _blatt(page)
     schalter = _d(blatt, "titelbild_nur_text")
     schalter.value = True
     schalter.on_change()
     asyncio.run(_d(blatt, "titelbild_fertig").on_click())
     assert ergebnis[-1] == ("text", "")
-    titelbild_blatt.oeffnen(page, state, film, lambda b, t: ergebnis.append((b, t)))
+    titelbild_blatt.oeffnen(page, state, film, lambda b, t, _lage: ergebnis.append((b, t)))
     _d(_blatt(page), "titelbild_auto").on_click()
     asyncio.run(_d(_blatt(page), "titelbild_fertig").on_click())
     assert ergebnis[-1] == ("", "")
@@ -238,3 +238,56 @@ def test_titelbild_reist_im_paket_mit_und_bleibt_beim_aufraeumen(state) -> None:
     # das Titelbild nennt nur der Zusatz des Stücks — das Aufräumen findet es dort
     state.pakete.ablage.aufraeumen()
     assert state.pakete.ablage.pfad(bild.uri).is_file()
+
+
+def test_titelbild_ausschnitt_wird_gemerkt_und_von_der_karte_gezeigt(page, state) -> None:
+    """Ben, 27.11.2026: „für das Vorschaubild den Kasten setzen“ — drei Regler im Blatt (Zoom,
+    waagrecht, senkrecht). Gemerkt werden nur die drei Zahlen; die Karte zeigt den Ausschnitt,
+    das Bild bleibt ganz."""
+    import asyncio
+
+    from trainingsapp.core.models import medium_aus_dict
+    from trainingsapp.ui.components import titelbild_blatt
+    from trainingsapp.ui.components.material_rolle import gelesen, werte_von
+
+    film = datei(state, "a", "mp4", MediaKind.VIDEO, title="Seitstütz")
+    state.titelbilder.schreiben(film.uri, b"jpeg")
+    # ohne Ausschnitt: das ganze Bild, mittig, nicht vergrößert
+    bild = teil(mk.medienkarte(page, state, film), "medienkarte_bild")
+    assert bild.scale is None and (bild.image.alignment.x, bild.image.alignment.y) == (0, 0)
+    assert "titelbild_lage" not in film.als_dict()
+
+    ergebnis: list[tuple] = []
+    titelbild_blatt.oeffnen(page, state, film, lambda b, t, lage: ergebnis.append((b, t, lage)))
+    blatt = _blatt(page)
+    assert _d(blatt, "titelbild_ausschnitt").visible is True
+    for kennung, wert in (("zoom", 2.5), ("x", -1.0), ("y", 0.4)):
+        regler = _d(blatt, ("titelbild_lage", kennung))
+        regler.value = wert
+        regler.on_change()
+    # die Vorschau im Blatt folgt sofort
+    vorschau = teil(_d(blatt, "titelbild_vorschau"), "medienkarte_bild")
+    assert vorschau.scale.scale == 2.5 and vorschau.scale.alignment.x == -1.0
+    asyncio.run(_d(blatt, "titelbild_fertig").on_click())
+    assert ergebnis == [("", "", (2.5, -1.0, 0.4))]
+
+    # gemerkt am Medium, im Paket und in den Formularen von Übung und Plan
+    film.titelbild_lage = ergebnis[0][2]
+    assert film.als_dict()["titelbild_lage"] == [2.5, -1.0, 0.4]
+    assert medium_aus_dict(film.als_dict()).titelbild_lage == (2.5, -1.0, 0.4)
+    assert gelesen(werte_von(film))["titelbild_lage"] == (2.5, -1.0, 0.4)
+    bild = teil(mk.medienkarte(page, state, film), "medienkarte_bild")
+    assert bild.scale.scale == 2.5
+    assert (bild.image.alignment.x, bild.image.alignment.y) == (-1.0, 0.4)
+    # auch die Miniatur im Editor zeigt den Ausschnitt
+    assert teil(mk.miniatur(state, film), "medienkarte_bild").scale.scale == 2.5
+
+    # „Ganzes Bild“ stellt zurück; ein anderes Bild beginnt mit dem ganzen Bild
+    titelbild_blatt.oeffnen(page, state, film, lambda b, t, lage: ergebnis.append((b, t, lage)))
+    _d(_blatt(page), "titelbild_ganz").on_click()
+    asyncio.run(_d(_blatt(page), "titelbild_fertig").on_click())
+    assert ergebnis[-1][2] == (1.0, 0.0, 0.0)
+    # nur Text: kein Bild, also auch kein Ausschnitt
+    film.titelbild = "text"
+    titelbild_blatt.oeffnen(page, state, film, lambda b, t, lage: None)
+    assert _d(_blatt(page), "titelbild_ausschnitt").visible is False

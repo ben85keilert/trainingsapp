@@ -50,6 +50,7 @@ from trainingsapp.core.models import (
     ZEITPUNKTE,
     Ereignis,
     Media,
+    titelbild_lage_lesen,
 )
 
 ERKLAERUNG = "erklaerung"
@@ -143,6 +144,7 @@ def werte_von(medium: Media | None) -> dict[str, Any]:
         "text": medium.text,
         "titelbild": medium.titelbild,
         "titelbild_text": medium.titelbild_text,
+        "titelbild_lage": medium.titelbild_lage,
     }
 
 
@@ -193,6 +195,7 @@ def gelesen(werte: dict[str, Any]) -> dict[str, Any]:
         # das Titelbild (Ben, 27.11.2026) — an jedem Stück dasselbe Blatt
         "titelbild": str(werte.get("titelbild") or ""),
         "titelbild_text": str(werte.get("titelbild_text") or "").strip(),
+        "titelbild_lage": titelbild_lage_lesen(werte.get("titelbild_lage")),
     }
 
 
@@ -219,7 +222,8 @@ def rollen_zeile(
     bewegung: bool = False,
     abschnitte: Callable[[], Sequence[str]] | None = None,
     plan: bool = False,
-    titelbild: Callable[[str, str, Callable[[str, str], None]], Any] | None = None,
+    titelbild: Callable[[str, str, tuple[float, float, float], Callable[..., None]], Any]
+    | None = None,
 ) -> ft.Control:
     """Die Zeilen unter einem Stück. ``titelbild``: öffnet das Blatt „Titelbild“
     (`components/titelbild_blatt.py`) mit dem jetzigen Bild und Text und einem Setzer — ohne
@@ -449,8 +453,10 @@ def rollen_zeile(
         data=("material_titelbild_stand", kennung),
     )
 
-    def titelbild_gesetzt(bild: str, text: str) -> None:
-        werte["titelbild"], werte["titelbild_text"] = bild, text
+    def titelbild_gesetzt(
+        bild: str, text: str, lage: tuple[float, float, float] = (1.0, 0.0, 0.0)
+    ) -> None:
+        werte["titelbild"], werte["titelbild_text"], werte["titelbild_lage"] = bild, text, lage
         titelbild_stand.value = titelbild_stand_text(werte)
         with contextlib.suppress(Exception):
             titelbild_stand.update()
@@ -461,6 +467,7 @@ def rollen_zeile(
         return titelbild(
             str(werte.get("titelbild") or ""),
             str(werte.get("titelbild_text") or ""),
+            titelbild_lage_lesen(werte.get("titelbild_lage")),
             titelbild_gesetzt,
         )
 

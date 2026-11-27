@@ -16,7 +16,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
-from typing import Any
+from typing import Any, Final
 
 from .ablauf import Ablauf
 from .bedingung import Bedingung
@@ -254,6 +254,11 @@ class Media:
     titelbild: str = ""
     #: Die **Aufschrift** auf dem Titelbild — über das Bild gesetzt, nicht hineingerechnet
     titelbild_text: str = ""
+    #: Der **Ausschnitt** des Titelbildes (Ben, 27.11.2026: „für das Vorschaubild den Kasten
+    #: setzen“): ``(Zoom, waagrecht, senkrecht)`` — Zoom 1 bis 4, die Lage −1 (links bzw. oben)
+    #: bis 1 (rechts bzw. unten). Nur gemerkt: Die Karte zeigt den Ausschnitt, das Bild bleibt
+    #: ganz (`titelbild_lage_lesen`)
+    titelbild_lage: tuple[float, float, float] = (1.0, 0.0, 0.0)
 
     @property
     def von_selbst(self) -> bool:
@@ -286,6 +291,8 @@ class Media:
             d["titelbild"] = self.titelbild
         if self.titelbild_text.strip():
             d["titelbild_text"] = self.titelbild_text.strip()
+        if titelbild_lage_lesen(self.titelbild_lage) != TITELBILD_GANZ:
+            d["titelbild_lage"] = list(titelbild_lage_lesen(self.titelbild_lage))
         return d
 
     def zusatz(self) -> dict[str, Any]:
@@ -344,6 +351,34 @@ ZEITPUNKTE = frozenset({NACHHER, BEI})
 IMMER = "immer"
 
 
+#: Das ganze Bild, mittig — kein Ausschnitt gesetzt (`Media.titelbild_lage`)
+TITELBILD_GANZ: Final[tuple[float, float, float]] = (1.0, 0.0, 0.0)
+#: So weit lässt sich in das Titelbild hineinzoomen
+TITELBILD_ZOOM_MAX: Final = 4.0
+
+
+def titelbild_lage_lesen(roh: Any) -> tuple[float, float, float]:
+    """Der Ausschnitt des Titelbildes aus dem, was gespeichert ist — in seine Grenzen gebracht
+    (Zoom 1 bis 4, Lage −1 bis 1); Unlesbares ist das ganze Bild.
+
+    >>> titelbild_lage_lesen([2, -0.5, 1]), titelbild_lage_lesen((9, -3, 0.25))
+    ((2.0, -0.5, 1.0), (4.0, -1.0, 0.25))
+    >>> titelbild_lage_lesen(None), titelbild_lage_lesen([2, "x", 0]), titelbild_lage_lesen([0.2])
+    ((1.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    """
+    try:
+        zoom, x, y = (float(w) for w in roh)
+    except (TypeError, ValueError):
+        return TITELBILD_GANZ
+    if zoom != zoom or x != x or y != y:  # NaN
+        return TITELBILD_GANZ
+    return (
+        round(min(max(zoom, 1.0), TITELBILD_ZOOM_MAX), 3),
+        round(min(max(x, -1.0), 1.0), 3),
+        round(min(max(y, -1.0), 1.0), 3),
+    )
+
+
 def medien_zusatz(roh: Any) -> dict[str, Any]:
     """Was `Media.zusatz` schreibt, als Argumente für `Media` — Unbekanntes fällt weg.
 
@@ -384,6 +419,8 @@ def zeit_zusatz_lesen(roh: Any) -> dict[str, Any]:
     ('text', 'Seitstütz')
     >>> zeit_zusatz_lesen({"titelbild": "https://x.org/b.jpg"})["titelbild"]  # nie aus dem Netz
     ''
+    >>> zeit_zusatz_lesen({"titelbild_lage": [2, -1, 0.5]})["titelbild_lage"]
+    (2.0, -1.0, 0.5)
     """
     hat = getattr(roh, "get", None)
     if hat is None:
@@ -410,6 +447,7 @@ def zeit_zusatz_lesen(roh: Any) -> dict[str, Any]:
         "text": str(hat("text") or "").strip(),
         "titelbild": bild if bild == "text" or bild.startswith("medien/") else "",
         "titelbild_text": str(hat("titelbild_text") or "").strip(),
+        "titelbild_lage": titelbild_lage_lesen(hat("titelbild_lage")),
     }
 
 

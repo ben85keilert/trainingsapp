@@ -147,7 +147,7 @@ from trainingsapp.core.result_spec import FieldSpec, ResultSpec, basis_key, ist_
 from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import TimerProfil
 from trainingsapp.ui import paketdatei
-from trainingsapp.ui.components import medienkarte, medium_dazu
+from trainingsapp.ui.components import medienkarte, medium_dazu, titelbild_blatt
 from trainingsapp.ui.components.baustein_form import baustein_blatt, timer_editor_teil
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -1499,18 +1499,77 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             data="block_vorschau",
         )
 
+        #: Das Titelbild des Stücks (`components/titelbild_blatt.py`) — neben dem Stück
+        #: gehalten, weil ein Link erst mit „Fertig“ ein Medium wird
+        titel_wahl: dict[str, str] = {
+            "bild": block.medium.titelbild if block.medium else "",
+            "text": block.medium.titelbild_text if block.medium else "",
+        }
+        titelbild_stand = ft.Text(
+            titelbild_blatt.stand_text(titel_wahl["bild"], titel_wahl["text"]),
+            size=12,
+            opacity=0.7,
+            data="block_titelbild_stand",
+        )
+
+        def mit_titelbild(m: Media) -> Media:
+            return replace(m, titelbild=titel_wahl["bild"], titelbild_text=titel_wahl["text"])
+
         def medium_vorschau_zeichnen() -> None:
             m = stueck["m"]
             medium_vorschau.controls = (
-                [medienkarte.medienkarte(page, state, m, einzug=60, mit_text=False)]
-                if m is not None and ist_paketmedium(m)
+                [
+                    medienkarte.medienkarte(
+                        page,
+                        state,
+                        replace(mit_titelbild(m), title=str(kopf.value or "").strip() or m.title),
+                        einzug=60,
+                        mit_text=False,
+                    )
+                ]
+                if m is not None and m.uri
                 else []
             )
 
         medium_vorschau_zeichnen()
 
+        def titelbild_gesetzt(bild: str, text_: str) -> None:
+            titel_wahl["bild"], titel_wahl["text"] = bild, text_
+            titelbild_stand.value = titelbild_blatt.stand_text(bild, text_)
+            medium_vorschau_zeichnen()
+            for c in (titelbild_stand, medium_vorschau):
+                with contextlib.suppress(Exception):
+                    c.update()
+
+        def titelbild_oeffnen(_e: Any = None) -> None:
+            m = entwurf().medium
+            if m is None or not m.uri:
+                meldung.value, meldung.visible = "Erst ein Medium wählen.", True
+                with contextlib.suppress(Exception):
+                    meldung.update()
+                return
+            titelbild_blatt.oeffnen(page, state, m, titelbild_gesetzt)
+
+        titelbild_zeile = ft.Row(
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.TextButton(
+                    "Titelbild …",
+                    icon=ft.Icons.IMAGE_OUTLINED,
+                    on_click=titelbild_oeffnen,
+                    data="block_titelbild",
+                ),
+                titelbild_stand,
+            ],
+        )
+
         def stueck_setzen(m: Media) -> None:
             stueck["m"] = m
+            titel_wahl["bild"] = m.titelbild  # ein neues Stück bringt sein eigenes Bild mit
+            titelbild_stand.value = titelbild_blatt.stand_text(
+                titel_wahl["bild"], titel_wahl["text"]
+            )
             if not str(kopf.value or "").strip():
                 kopf.value = m.title
             if not str(beschriftung.value or "").strip():
@@ -1834,6 +1893,15 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                     del lauf_medien[n]
                     frisch(medien_spalte, medien_zeichnen)
 
+                def titelbild(_e: Any = None, n: int = n) -> None:
+                    def gesetzt(bild: str, text_: str) -> None:
+                        lauf_medien[n] = replace(
+                            lauf_medien[n], titelbild=bild, titelbild_text=text_
+                        )
+                        frisch(medien_spalte, medien_zeichnen)
+
+                    titelbild_blatt.oeffnen(page, state, lauf_medien[n], gesetzt)
+
                 wo.on_select = gestellt
                 wie_viel.on_blur = gestellt
                 zeilen.append(
@@ -1841,13 +1909,44 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                         spacing=2,
                         tight=True,
                         controls=[
-                            ft.Text(m.title or m.uri, size=13, max_lines=1),
+                            ft.Row(
+                                spacing=8,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                controls=[
+                                    medienkarte.miniatur(state, m, breite=48),
+                                    ft.Column(
+                                        spacing=0,
+                                        tight=True,
+                                        expand=True,
+                                        controls=[
+                                            ft.Text(
+                                                m.title or m.uri,
+                                                size=13,
+                                                weight=ft.FontWeight.W_500,
+                                                max_lines=1,
+                                                overflow=ft.TextOverflow.ELLIPSIS,
+                                            ),
+                                            ft.Text(
+                                                medienkarte.eckdaten_von(state, m)[0],
+                                                size=11,
+                                                opacity=0.7,
+                                            ),
+                                        ],
+                                    ),
+                                ],
+                            ),
                             ft.Row(
                                 spacing=6,
                                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 controls=[
                                     wo,
                                     wie_viel,
+                                    ft.IconButton(
+                                        ft.Icons.IMAGE_OUTLINED,
+                                        tooltip="Titelbild …",
+                                        on_click=titelbild,
+                                        data=("lauf_medium_titelbild", n),
+                                    ),
                                     ft.IconButton(
                                         ft.Icons.CLOSE,
                                         tooltip="Medium herausnehmen",
@@ -2039,6 +2138,8 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                     uri=ziel.strip(),
                     title=wort,
                     text=str(beschriftung.value or "").strip(),
+                    titelbild=titel_wahl["bild"],
+                    titelbild_text=titel_wahl["text"],
                 )
                 neuer.text = ""
             else:
@@ -2590,6 +2691,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             MEDIUM: [
                 medium_vorschau,
                 ft.Row(controls=[medium_wege]),
+                titelbild_zeile,
                 adresse,
                 ft.Row(controls=[datei_text]),
                 kopf,

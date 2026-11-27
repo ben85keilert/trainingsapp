@@ -274,6 +274,8 @@ class _Hochladen:
             datei, bild = self.ziel, self.frontbild
             try:
                 name = await paketdatei.ablegen(self.state, datei, datei.suffix)
+                if self.art == VIDEO:  # das Frontbild der Auswahl wird das Titelbild
+                    paketdatei.titelbild_merken(self.state, name, bild)
                 medium = paketdatei.medium_mit(
                     name, self.name_feld.value or "", self.notiz.value or ""
                 )

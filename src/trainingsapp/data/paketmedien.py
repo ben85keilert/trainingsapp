@@ -38,6 +38,8 @@ ORIGINALE: Final = "medien_originale"
 #: Wo die Datenbank Paketdateien nennen kann — je Spalte eine feste Abfrage
 _ABFRAGEN: Final = (
     "SELECT uri FROM exercise_media WHERE uri LIKE 'medien/%'",
+    # das gewählte Titelbild eines Stücks der Übung (27.11.2026) steht im Zusatz
+    "SELECT zusatz_json FROM exercise_media WHERE zusatz_json LIKE '%medien/%'",
     "SELECT package_standard_json FROM exercise WHERE package_standard_json LIKE '%medien/%'",
     "SELECT media_json FROM plan_item WHERE media_json LIKE '%medien/%'",
     # die Medien des Plans selbst (Migration 069) — auch eines endgültig gelöschten: seine Zeile

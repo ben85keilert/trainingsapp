@@ -96,7 +96,7 @@ from trainingsapp.core.uebung_timer import TimerWahl, timer_fuer
 from trainingsapp.core.zaehlen import VORLAGE_AUTO, VORLAGEN_ANGEBOT, SensorWahl, vorlagen_angebot
 from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components import editor_reiter as er
-from trainingsapp.ui.components import medium_dazu
+from trainingsapp.ui.components import medium_dazu, titelbild_blatt
 from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
 from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -411,6 +411,13 @@ def plan_einstellen(
                         kennung=z["id"],
                         bewegung=medium.kind == MediaKind.IMAGE,
                         abschnitte=abschnitt_namen,
+                        titelbild=titelbild_blatt.fuer(
+                            page,
+                            state,
+                            lambda z=z, medium=medium: replace(  # type: ignore[misc]
+                                medium, title=str(z["titel"] or "")
+                            ),
+                        ),
                     )
                 )
                 continue
@@ -449,7 +456,17 @@ def plan_einstellen(
             )
             zeilen.append(
                 rollen_zeile(
-                    z["zusatz"], ersetzbar=ersetzbar, kennung=z["id"], abschnitte=abschnitt_namen
+                    z["zusatz"],
+                    ersetzbar=ersetzbar,
+                    kennung=z["id"],
+                    abschnitte=abschnitt_namen,
+                    titelbild=titelbild_blatt.fuer(
+                        page,
+                        state,
+                        lambda z=z: Media(  # type: ignore[misc]
+                            uri=str(z["uri"] or "").strip(), title=str(z["titel"] or "")
+                        ),
+                    ),
                 )
             )
         zeilen += [

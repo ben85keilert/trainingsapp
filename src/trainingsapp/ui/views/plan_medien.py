@@ -52,7 +52,7 @@ from trainingsapp.core.models import Exercise, Media, MediaSource, Plan
 from trainingsapp.core.paketmedien import dateiname, groesse_text, ist_paketmedium
 from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components import editor_reiter as er
-from trainingsapp.ui.components import medium_dazu
+from trainingsapp.ui.components import medium_dazu, titelbild_blatt
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import PLAN_MEDIEN_MD
@@ -248,6 +248,7 @@ def plan_medien_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.V
             kennung="plan",
             plan=True,
             abschnitte=lambda: [a.name for a in abschnitte(frisch().description) if a.name],
+            titelbild=titelbild_blatt.fuer(page, state, lambda: alt),
         )
         stand = {"weg": False}
 

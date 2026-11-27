@@ -1626,6 +1626,8 @@ def paketmedien_in(
             vorlagen.extend(kap.plaene)
     medien.extend(m for v in vorlagen for item in v.items for m in item.medien)
     namen = {m.uri for m in medien if ist_paketmedium(m)}
+    # ein gewähltes Titelbild ist eine Paketdatei und reist mit (27.11.2026, `core/titelbild.py`)
+    namen |= {m.titelbild for m in medien if m.titelbild.startswith("medien/")}
     for v in vorlagen:  # Dateien an den Wegen eines Ablaufs (19.11.2026)
         namen |= ab.wegdateien(v.ablauf)
     for e in ergaenzungen:  # Ergänzungen tragen Medien als Wörterbücher (U5)

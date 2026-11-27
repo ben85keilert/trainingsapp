@@ -35,6 +35,21 @@ async def ablegen(state: Any, quelle: Path | bytes, endung: str) -> str:
     return name
 
 
+def titelbild_merken(state: Any, name: str, bild: bytes | Path | None) -> None:
+    """Das Bild, das beim Aufnehmen oder Auswählen eines Videos ohnehin entsteht (das Foto vom
+    Start, das Frontbild der Fotoauswahl), als **automatisches Titelbild** der Datei ``name``
+    behalten (Ben, 27.11.2026, `data/titelbilder.py`) — gerätelokal, es reist nie mit. Geht es
+    nicht, zeigt die Karte den Titel."""
+    bilder = getattr(state, "titelbilder", None)
+    if bilder is None or bild is None:
+        return
+    try:
+        daten = bild if isinstance(bild, bytes) else Path(bild).read_bytes()
+    except OSError:
+        return
+    bilder.schreiben(name, daten)
+
+
 def anhaengen(state: Any, ziel: Ziel, medium: Media) -> bool:
     """An die Übung, die Planübung oder den Plan des Ziels — ``False``, wenn es sie nicht (mehr)
     gibt. Ein Ziel „Ablage“ legt das Stück für die Ansicht bereit, die geschickt hat

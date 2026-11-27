@@ -102,7 +102,7 @@ from trainingsapp.core.zaehlen import (
     vorlagen_angebot,
 )
 from trainingsapp.ui import paketdatei, systemdialog
-from trainingsapp.ui.components import medium_dazu, paketwechsel, stellung
+from trainingsapp.ui.components import medium_dazu, paketwechsel, stellung, titelbild_blatt
 from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
 from trainingsapp.ui.components.bewegungsbild import bewegungsbild_blatt
 from trainingsapp.ui.components.chips_wahl import chips_zeile
@@ -1179,6 +1179,13 @@ def uebung_bearbeiten(
                             kennung=m.uri,
                             bewegung=m.kind == MediaKind.IMAGE,
                             abschnitte=abschnitt_namen,
+                            titelbild=titelbild_blatt.fuer(
+                                page,
+                                state,
+                                lambda m=m: replace(  # type: ignore[misc]
+                                    m, title=(paket_titelfeld(m).value or "").strip()
+                                ),
+                            ),
                         ),
                     ],
                 )
@@ -1206,6 +1213,14 @@ def uebung_bearbeiten(
                             ersetzbar=ersetzbar_ohne((adresse.value or "").strip()),
                             kennung=(adresse.value or "").strip(),
                             abschnitte=abschnitt_namen,
+                            titelbild=titelbild_blatt.fuer(
+                                page,
+                                state,
+                                lambda titel=titel, adresse=adresse: Media(  # type: ignore[misc]
+                                    uri=(adresse.value or "").strip(),
+                                    title=(titel.value or "").strip(),
+                                ),
+                            ),
                         ),
                     ],
                 )

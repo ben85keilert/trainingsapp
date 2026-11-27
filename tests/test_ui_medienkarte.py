@@ -150,3 +150,90 @@ def test_miniatur_und_eckdaten(page, state) -> None:
     assert mk.eckdaten_von(state, film)[0] == "Video · 2 MB"
     klein = mk.miniatur(state, film)
     assert (klein.width, klein.height) == (64, 36)
+
+
+# -- Das Blatt „Titelbild“ (`components/titelbild_blatt.py`) -----------------------------------
+
+
+def _blatt(page):
+    return page.dialoge[-1]
+
+
+def _d(c, wert):
+    return next(x for x in alle_blatt(c) if getattr(x, "data", None) == wert)
+
+
+def alle_blatt(wurzel):
+    yield wurzel
+    for name in ("content", "controls"):
+        kind = getattr(wurzel, name, None)
+        for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
+            if isinstance(k, ft.BaseControl):
+                yield from alle_blatt(k)
+
+
+def test_titelbild_blatt_bild_aus_dem_video_text_und_nur_text(page, state, monkeypatch) -> None:
+    """Ben, 27.11.2026: „Man fährt durch und klickt ein Bild, kann einen Text dazusetzen.“"""
+    import asyncio
+
+    from trainingsapp.ui import standbild
+    from trainingsapp.ui.components import titelbild_blatt
+
+    film = datei(state, "a", "mp4", MediaKind.VIDEO, title="Seitstütz")
+    gefragt: list[float] = []
+
+    async def aus_video(_state, _pfad, sekunden):
+        gefragt.append(sekunden)
+        return b"\xff\xd8bild-an-der-stelle\xff\xd9"
+
+    async def ablegen(_state, daten, endung):
+        assert endung == "jpg" and daten.startswith(b"\xff\xd8")
+        return "medien/" + "9" * 64 + ".jpg"
+
+    monkeypatch.setattr(standbild, "aus_video", aus_video)
+    monkeypatch.setattr(standbild, "moeglich", lambda _s: True)
+    monkeypatch.setattr(titelbild_blatt.paketdatei, "ablegen", ablegen)
+
+    ergebnis: list[tuple[str, str]] = []
+    titelbild_blatt.oeffnen(page, state, film, lambda b, t: ergebnis.append((b, t)))
+    blatt = _blatt(page)
+    assert _d(blatt, "titelbild_nehmen") is not None  # der Spieler mit dem Knopf steht da
+    asyncio.run(_d(blatt, "titelbild_nehmen").on_click())
+    assert gefragt == [0.0]  # der Spieler antwortet im Test nicht — dann der Anfang
+    _d(blatt, "titelbild_text").value = "Hüfte hoch"
+    asyncio.run(_d(blatt, "titelbild_fertig").on_click())
+    assert ergebnis == [("medien/" + "9" * 64 + ".jpg", "Hüfte hoch")]
+    # das neue Bild ist bis zum Speichern vorgemerkt — das Aufräumen lässt es liegen
+    assert "medien/" + "9" * 64 + ".jpg" in state.pakete.ablage._entwuerfe
+
+    # „Nur Text“ nimmt das Bild weg, „Automatisch“ stellt zurück
+    film.titelbild = ergebnis[0][0]
+    titelbild_blatt.oeffnen(page, state, film, lambda b, t: ergebnis.append((b, t)))
+    blatt = _blatt(page)
+    schalter = _d(blatt, "titelbild_nur_text")
+    schalter.value = True
+    schalter.on_change()
+    asyncio.run(_d(blatt, "titelbild_fertig").on_click())
+    assert ergebnis[-1] == ("text", "")
+    titelbild_blatt.oeffnen(page, state, film, lambda b, t: ergebnis.append((b, t)))
+    _d(_blatt(page), "titelbild_auto").on_click()
+    asyncio.run(_d(_blatt(page), "titelbild_fertig").on_click())
+    assert ergebnis[-1] == ("", "")
+    assert titelbild_blatt.stand_text("text") == "nur Text"
+
+
+def test_titelbild_reist_im_paket_mit_und_bleibt_beim_aufraeumen(state) -> None:
+    from trainingsapp.core.models import Exercise
+    from trainingsapp.core.pakete import paketmedien_in
+
+    bild = datei(state, "c", "jpg", MediaKind.IMAGE)
+    film = datei(state, "a", "mp4", MediaKind.VIDEO, title="Seitstütz", titelbild=bild.uri)
+    film.titelbild_text = "Hüfte hoch"
+    uebung = Exercise(name="Seitstütz", media=[film])
+    assert paketmedien_in([uebung], [], []) == {film.uri, bild.uri}
+    state.uebungen.speichern(uebung)
+    geladen = state.uebungen.laden(uebung.id).media[0]
+    assert (geladen.titelbild, geladen.titelbild_text) == (bild.uri, "Hüfte hoch")
+    # das Titelbild nennt nur der Zusatz des Stücks — das Aufräumen findet es dort
+    state.pakete.ablage.aufraeumen()
+    assert state.pakete.ablage.pfad(bild.uri).is_file()

@@ -141,6 +141,8 @@ def werte_von(medium: Media | None) -> dict[str, Any]:
         "bei_wert": ereignis_text(medium.bei),
         "abschnitte": tuple(medium.abschnitte),
         "text": medium.text,
+        "titelbild": medium.titelbild,
+        "titelbild_text": medium.titelbild_text,
     }
 
 
@@ -188,7 +190,25 @@ def gelesen(werte: dict[str, Any]) -> dict[str, Any]:
         "abschnitte": tuple(werte.get("abschnitte") or ()) if rolle in ("", BEGLEITUNG) else (),
         # die Beschriftung (Ben, 19.11.2026) — an jedem Stück, gleich welcher Rolle
         "text": str(werte.get("text") or "").strip(),
+        # das Titelbild (Ben, 27.11.2026) — an jedem Stück dasselbe Blatt
+        "titelbild": str(werte.get("titelbild") or ""),
+        "titelbild_text": str(werte.get("titelbild_text") or "").strip(),
     }
+
+
+def titelbild_stand_text(werte: dict[str, Any]) -> str:
+    """„automatisch“, „gewähltes Bild“, „nur Text“ — was neben dem Knopf „Titelbild …“ steht.
+
+    >>> titelbild_stand_text({}), titelbild_stand_text({"titelbild": "text"})
+    ('automatisch', 'nur Text')
+    """
+    from trainingsapp.core import titelbild as tb
+
+    bild = str(werte.get("titelbild") or "")
+    art = tb.wahl(Media(uri="x", titelbild=bild)).art
+    wort = {tb.AUTO: "automatisch", tb.BILD: "gewähltes Bild", tb.TEXT: "nur Text"}[art]
+    mit_text = str(werte.get("titelbild_text") or "").strip() and art != tb.TEXT
+    return wort + (", mit Text" if mit_text else "")
 
 
 def rollen_zeile(
@@ -199,8 +219,11 @@ def rollen_zeile(
     bewegung: bool = False,
     abschnitte: Callable[[], Sequence[str]] | None = None,
     plan: bool = False,
+    titelbild: Callable[[str, str, Callable[[str, str], None]], Any] | None = None,
 ) -> ft.Control:
-    """Die Zeilen unter einem Stück. ``ersetzbar``: (Adresse, Titel) der Stücke, die dieses
+    """Die Zeilen unter einem Stück. ``titelbild``: öffnet das Blatt „Titelbild“
+    (`components/titelbild_blatt.py`) mit dem jetzigen Bild und Text und einem Setzer — ohne
+    es gibt es den Knopf nicht. ``ersetzbar``: (Adresse, Titel) der Stücke, die dieses
     ersetzen kann — ohne sie gibt es die Auswahl nicht. ``kennung`` unterscheidet die Zeilen
     für Tests (``data``). ``bewegung``: „Bewegung“ zur Wahl (eine Bilddatei aus dem Paket).
     ``abschnitte``: liefert die Namen der Abschnitte der Beschreibung — ohne sie keine
@@ -419,8 +442,49 @@ def rollen_zeile(
         on_change=beschriftet,
         data=("material_text", kennung),
     )
+    titelbild_stand = ft.Text(
+        titelbild_stand_text(werte),
+        size=12,
+        opacity=0.7,
+        data=("material_titelbild_stand", kennung),
+    )
+
+    def titelbild_gesetzt(bild: str, text: str) -> None:
+        werte["titelbild"], werte["titelbild_text"] = bild, text
+        titelbild_stand.value = titelbild_stand_text(werte)
+        with contextlib.suppress(Exception):
+            titelbild_stand.update()
+
+    def titelbild_tipp(_e: Any = None) -> Any:
+        if titelbild is None:
+            return None
+        return titelbild(
+            str(werte.get("titelbild") or ""),
+            str(werte.get("titelbild_text") or ""),
+            titelbild_gesetzt,
+        )
+
     teile: list[ft.Control] = [
         beschriftung,
+        *(
+            [
+                ft.Row(
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.TextButton(
+                            "Titelbild …",
+                            icon=ft.Icons.IMAGE_OUTLINED,
+                            on_click=titelbild_tipp,
+                            data=("material_titelbild", kennung),
+                        ),
+                        titelbild_stand,
+                    ],
+                )
+            ]
+            if titelbild is not None
+            else []
+        ),
         ft.SegmentedButton(
             selected=[str(werte.get("rolle") or "") or ERKLAERUNG],
             show_selected_icon=False,

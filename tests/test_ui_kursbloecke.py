@@ -721,6 +721,18 @@ def test_medium_block_nimmt_vorhandenes_und_behaelt_art_und_rolle(page, state) -
     assert _felder(dialog)["Titel"].value == "Film"
     assert _daten(dialog, "block_adresse").visible is False
     _daten(dialog, "block_beschriftung").value = "erst ansehen"
+    # Titelbild (27.11.2026): das Blatt öffnet sich, „Nur Text“ mit einer Aufschrift gilt
+    import asyncio
+
+    _daten(dialog, "block_titelbild").on_click()
+    blatt = page.dialoge[-1]
+    assert blatt.data == "titelbild_blatt"
+    _daten(blatt, "titelbild_text").value = "Zuerst ansehen"
+    schalter = _daten(blatt, "titelbild_nur_text")
+    schalter.value = True
+    schalter.on_change()
+    asyncio.run(_daten(blatt, "titelbild_fertig").on_click())
+    assert _daten(dialog, "block_titelbild_stand").value == "nur Text"
     _daten(dialog, "block_uebernehmen").on_click()
     _felder(ansicht)["Titel"].value = "Rumpf"
     _speichern(ansicht)
@@ -733,6 +745,7 @@ def test_medium_block_nimmt_vorhandenes_und_behaelt_art_und_rolle(page, state) -
         "Film",
         "erst ansehen",
     )
+    assert (m.titelbild, m.titelbild_text) == ("text", "Zuerst ansehen")
 
 
 def test_medium_block_nimmt_auf_wie_der_plan_und_steht_danach_wieder_offen(page, state) -> None:

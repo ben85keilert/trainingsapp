@@ -702,6 +702,41 @@ def frontbild_befehl(video: Path, ziel_pfad: Path, programm: str = "ffmpeg") -> 
     ]
 
 
+def standbild_befehl(
+    video: Path, ziel_pfad: Path, sekunden: float, programm: str = "ffmpeg"
+) -> list[str]:
+    """Das Bild an der Stelle ``sekunden`` als JPEG, kurze Seite höchstens 720 — das
+    **Titelbild** aus dem Video (Ben, 27.11.2026, `docs/plan_kurs_medien_ansicht.md` §3.3).
+
+    >>> b = standbild_befehl(Path("a.mp4"), Path("t.jpg"), 12.5)
+    >>> b[b.index("-ss") + 1], b[-1]
+    ('12.500', 't.jpg')
+    >>> standbild_befehl(Path("a.mp4"), Path("t.jpg"), -3)[6]
+    '0.000'
+    """
+    return [
+        programm,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        f"{max(sekunden, 0.0):.3f}",
+        "-y",
+        "-i",
+        str(video),
+        "-frames:v",
+        "1",
+        "-update",
+        "1",
+        "-vf",
+        "scale='if(gt(iw,ih),-2,min(720,iw))':'if(gt(iw,ih),min(720,ih),-2)'",
+        "-q:v",
+        "4",
+        str(ziel_pfad),
+    ]
+
+
 def einmal_mit_ffmpeg(befehl: list[str], ziel_pfad: Path, *, wartezeit_s: float = 120) -> None:
     """Ein kurzer Aufruf (Foto, Frontbild) — blockiert (im Thread aufrufen). Wirft
     `RuntimeError` mit der letzten Zeile von ffmpeg; die halbe Datei bleibt nie liegen."""
@@ -762,6 +797,7 @@ __all__ = [
     "frontbild_befehl",
     "mit_ffmpeg",
     "schnitt",
+    "standbild_befehl",
     "wahl",
     "zeit_lesen",
     "zeit_text",

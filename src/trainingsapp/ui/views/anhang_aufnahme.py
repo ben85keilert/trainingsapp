@@ -822,6 +822,8 @@ class _Aufnahme:
             # Eine Datei fürs Paket (U4): bereinigt in die Ablage, als Medium an die Übung
             try:
                 name = await paketdatei.ablegen(self.state, self.daten, ENDUNG[self.art])
+                if self.art == VIDEO:  # das Foto vom Start der Aufnahme wird das Titelbild
+                    paketdatei.titelbild_merken(self.state, name, self.frontbild)
                 medium = paketdatei.medium_mit(
                     name, self.name_feld.value or "", self.notiz.value or ""
                 )

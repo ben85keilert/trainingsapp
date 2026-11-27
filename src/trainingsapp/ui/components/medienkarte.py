@@ -153,9 +153,9 @@ def flaeche(
                     expand=True,
                     alignment=ft.Alignment.CENTER,
                     content=ft.Icon(
-                        SYMBOLE.get(medium.kind, ft.Icons.LINK)
-                        if ist_paketmedium(medium)
-                        else ft.Icons.LINK,
+                        ft.Icons.LINK
+                        if satz.startswith("Link")
+                        else SYMBOLE.get(medium.kind, ft.Icons.LINK),
                         size=18,
                         color=ft.Colors.ON_PRIMARY_CONTAINER,
                     ),
@@ -306,7 +306,9 @@ def medienkarte(
     )
     unter: list[ft.Control] = []
     if mit_text:
-        if medium.title.strip():
+        # steht der Titel schon als Aufschrift auf der Fläche (Titelkarte), nicht noch einmal
+        auf_der_flaeche = tb.aufschrift(medium, mit_bild=titelbild_pfad(state, medium) is not None)
+        if medium.title.strip() and auf_der_flaeche != medium.title.strip():
             unter.append(
                 ft.Text(medium.title.strip(), size=14, weight=ft.FontWeight.W_600, max_lines=2)
             )

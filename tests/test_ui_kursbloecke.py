@@ -821,7 +821,7 @@ def test_medium_block_nimmt_auf_wie_der_plan_und_steht_danach_wieder_offen(page,
     assert _felder(dialog)["Titel"].value == "Atmung"
     assert _daten(dialog, "block_beschriftung").value == "ruhig"
     assert _daten(dialog, "block_adresse").visible is False
-    assert "Ton — liegt auf dem Gerät" in _texte(dialog)
+    assert "Ton · Datei fehlt" in _texte(dialog)  # im Test liegt keine Datei in der Ablage
     # Der Entwurf bleibt liegen, bis der Block fertig ist (26.11.2026): Entsteht die Seite ein
     # zweites Mal, steht er wieder offen — mit demselben Stück
     assert kapitel.id in state.block_entwurf
@@ -874,6 +874,13 @@ def test_medium_block_aendern_kommt_von_der_aufnahme_an_seine_stelle_zurueck(pag
     page.route = route
 
     ansicht = kapitel_bearbeiten(page, state, kurs, kapitel)
+    # Die Zeile nennt zuerst, was es ist, dann die Art und was man darüber weiß (27.11.2026)
+    assert _daten(ansicht, ("block_haupt", "m")).value == "Alt"
+    assert _daten(ansicht, ("block_art", "m")).value == "Link"
+    assert _daten(ansicht, ("block_rest", "m")).value == "x.org"
+    assert _daten(ansicht, ("block_haupt", "t")).value == "Vorweg"
+    assert _daten(ansicht, ("block_art", "t")).value == "Text"
+    assert _daten(ansicht, ("medienkarte_klein", "https://x.org/alt")) is not None
     _daten(ansicht, ("block", "m")).on_click()
     dialog = _editor(ansicht)
     _weg(dialog, "ton").on_click(None)

@@ -147,7 +147,7 @@ from trainingsapp.core.result_spec import FieldSpec, ResultSpec, basis_key, ist_
 from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import TimerProfil
 from trainingsapp.ui import paketdatei
-from trainingsapp.ui.components import medium_dazu
+from trainingsapp.ui.components import medienkarte, medium_dazu
 from trainingsapp.ui.components.baustein_form import baustein_blatt, timer_editor_teil
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -375,6 +375,45 @@ def block_kurz(
     return f"{menge} · {', '.join(namen)}" if namen else f"{menge} Übungen"
 
 
+def zeilen_text(block: Block, katalog: dict[str, Exercise], kurz: str) -> tuple[str, str]:
+    """Die Zeile eines Blocks in der Liste des Editors: ``(was es ist, Rest hinter der Art)``
+    — der **Inhalt** steht fett, die Art klein darunter (Ben, 27.11.2026: „Man erkennt nicht,
+    welches Video das ist“; `docs/plan_kurs_medien_ansicht.md` §4.1). ``kurz``: der Kurztext
+    des Blocks (`block_kurz`). Ein Medium bekommt seine Eckdaten vom Aufrufer.
+
+    >>> zeilen_text(Block(TEXT, titel="Warum?", text="Darum.\\nUnd so."), {}, "Warum?")
+    ('Warum?', '2 Zeilen')
+    >>> zeilen_text(Block(TEXT, text="Nur ein Satz."), {}, "Nur ein Satz.")
+    ('Nur ein Satz.', '1 Zeile')
+    >>> zeilen_text(Block(FRAGE, titel="Wie war das?"), {}, "Wie war das? · 3 Antworten")
+    ('Wie war das?', '3 Antworten')
+    >>> zeilen_text(Block(TEST, titel="Planke halten", uebung="x"), {}, "Planke · Haltezeit")
+    ('Planke halten', 'Planke · Haltezeit')
+    >>> zeilen_text(Block(PLAN_UEBUNG, id="b", uebung="x"), {}, "Übung fehlt, ans Ende")
+    ('Übung fehlt, ans Ende', '')
+    """
+    if block.baustein:
+        return kurz, ""
+    if block.art == TEXT:
+        zeilen = len([z for z in block.text.splitlines() if z.strip()])
+        erste = next((z.strip() for z in block.text.splitlines() if z.strip()), "")
+        return (
+            block.titel or erste[:60] or "Leerer Text",
+            f"{zeilen} Zeile{'n' if zeilen != 1 else ''}" if zeilen else "leer",
+        )
+    if block.art == MEDIUM:
+        titel_ = block.medium.title.strip() if block.medium else ""
+        return titel_ or "Medium ohne Titel", ""
+    if block.art == FRAGE:
+        rest = kurz.split(" · ", 1)[1] if " · " in kurz else ""
+        return block.titel or "Frage ohne Text", rest
+    if block.art == TEST:
+        uebung = katalog.get(block.uebung)
+        name = uebung.name if uebung is not None else ("die gewählte" if block.aus else "")
+        return block.titel or name or "Übung wählen", kurz
+    return block.titel or "Auswahl", kurz
+
+
 def block_schluessel(kapitel_id: str) -> str:
     """Unter diesem Schlüssel wartet ein neu aufgenommenes Stück für den Block „Medium“, der
     im Kapitel gerade offen war (`core.anhaenge.Ziel.fuer_ablage`).
@@ -419,20 +458,6 @@ def block_mit_stueck(block: Block, neues: Media | None) -> Block:
             text=(alt.text if alt is not None and alt.text else neues.text),
         ),
     )
-
-
-def datei_satz(medium: Media | None) -> str:
-    """Die Zeile unter dem Titel, wenn das Stück eine Datei ist: was für eine.
-
-    >>> datei_satz(Media(uri="medien/" + "a" * 64 + ".mp4", kind="video"))
-    'Video — liegt auf dem Gerät'
-    >>> datei_satz(None)
-    'Datei'
-    """
-    art = {"image": "Foto", "video": "Video", "audio": "Ton", "pdf": "PDF"}.get(
-        str(getattr(medium, "kind", "") or ""), "Datei"
-    )
-    return f"{art} — liegt auf dem Gerät" if medium is not None else art
 
 
 def block_fehler(block: Block) -> str | None:
@@ -1448,7 +1473,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             data="block_adresse",
         )
         datei_text = ft.Text(
-            datei_satz(block.medium),
+            medienkarte.eckdaten_von(state, block.medium)[0] if block.medium else "",
             size=12,
             opacity=0.7,
             visible=ist_datei(),
@@ -1465,6 +1490,25 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             data="block_beschriftung",
         )
 
+        #: Das Stück, wie es im Kurs aussieht — dieselbe Medienkarte wie im Kapitel, abspielbar
+        #: (Ben, 27.11.2026: „besser erkenntlich, was denn überhaupt geladen wurde“)
+        medium_vorschau = ft.Column(
+            spacing=6,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            data="block_vorschau",
+        )
+
+        def medium_vorschau_zeichnen() -> None:
+            m = stueck["m"]
+            medium_vorschau.controls = (
+                [medienkarte.medienkarte(page, state, m, einzug=60, mit_text=False)]
+                if m is not None and ist_paketmedium(m)
+                else []
+            )
+
+        medium_vorschau_zeichnen()
+
         def stueck_setzen(m: Media) -> None:
             stueck["m"] = m
             if not str(kopf.value or "").strip():
@@ -1473,8 +1517,9 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 beschriftung.value = m.text
             adresse.value = "" if ist_datei() else m.uri
             adresse.visible, datei_text.visible = not ist_datei(), ist_datei()
-            datei_text.value = datei_satz(m)
-            for c in (kopf, beschriftung, adresse, datei_text):
+            datei_text.value = medienkarte.eckdaten_von(state, m)[0]
+            medium_vorschau_zeichnen()
+            for c in (kopf, beschriftung, adresse, datei_text, medium_vorschau):
                 with contextlib.suppress(Exception):
                     c.update()
 
@@ -1496,7 +1541,8 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             """Zurück zur Adresse — auch von einer Datei, die schon gewählt war."""
             stueck["m"] = None
             adresse.visible, datei_text.visible = True, False
-            for c in (adresse, datei_text):
+            medium_vorschau_zeichnen()
+            for c in (adresse, datei_text, medium_vorschau):
                 with contextlib.suppress(Exception):
                     c.update()
             with contextlib.suppress(Exception):
@@ -2542,6 +2588,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             TEXT: [kopf, text, wenn_feld],
             # erst das Stück, dann sein Titel — er kommt vom Stück, wenn er leer ist
             MEDIUM: [
+                medium_vorschau,
                 ft.Row(controls=[medium_wege]),
                 adresse,
                 ft.Row(controls=[datei_text]),
@@ -2765,19 +2812,51 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         return handler
 
     def zeile(b: Block, n: int, letzte: int) -> ft.Control:
-        """Eine Zeile wie in Skizze K5: Symbol, die Art fett, darunter der Kurztext blass —
+        """Eine Zeile der Liste: links das Symbol der Art — bei einem Medium sein Titelbild
+        klein —, **der Inhalt fett**, darunter die Art und was man über den Block weiß
+        („Video · 0:42 · 3 MB“; Ben, 27.11.2026, `docs/plan_kurs_medien_ansicht.md` §4.1).
         Bausteine farbig abgesetzt; rechts verschieben und entfernen."""
         am_plan = b.baustein
         farbe = ft.Colors.ON_SECONDARY_CONTAINER if am_plan else None
         haengt = sicht().haengt(b)
+        kurz = block_kurz(b, katalog_alle, sicht(), kapitelplan=not baut_plan and bool(plaene))
+        haupt, rest = zeilen_text(b, katalog_alle, kurz)
+        art_wort_ = art_name(b)
+        if b.art == MEDIUM and b.medium is not None:
+            # das Stück selbst: seine Art und seine Eckdaten statt „Medium“
+            eck = medienkarte.eckdaten_von(state, b.medium)[0]
+            art_wort_, rest = [*eck.split(" · ", 1), ""][:2]
         unter: list[ft.Control] = [
-            ft.Text(
-                block_kurz(b, katalog_alle, sicht(), kapitelplan=not baut_plan and bool(plaene)),
-                size=12,
-                color=farbe,
-                opacity=0.75,
-                max_lines=2,
-                overflow=ft.TextOverflow.ELLIPSIS,
+            ft.Row(
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+                controls=[
+                    ft.Text(
+                        art_wort_,
+                        size=12,
+                        color=farbe,
+                        weight=ft.FontWeight.W_600,
+                        opacity=0.75,
+                        data=("block_art", b.id),
+                    ),
+                    *(
+                        [
+                            ft.Text("·", size=12, color=farbe, opacity=0.75),
+                            ft.Text(
+                                rest,
+                                size=12,
+                                color=farbe,
+                                opacity=0.75,
+                                max_lines=2,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                                expand=True,  # der Rest bricht neben der Art um, nicht darunter
+                                data=("block_rest", b.id),
+                            ),
+                        ]
+                        if rest
+                        else []
+                    ),
+                ],
             )
         ]
         if b.wenn:  # die Bedingung steht an der Zeile (Skizze A3, Ben 26.11.2026)
@@ -2833,14 +2912,33 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 spacing=6,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
-                    ft.Icon(ART_SYMBOL.get(b.art, ft.Icons.NOTES), size=22, color=farbe),
-                    ft.Container(width=4),
+                    medienkarte.miniatur(state, b.medium)
+                    if b.art == MEDIUM and b.medium is not None
+                    else ft.Container(
+                        width=36,
+                        height=36,
+                        border_radius=8,
+                        bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
+                        alignment=ft.Alignment.CENTER,
+                        content=ft.Icon(
+                            ART_SYMBOL.get(b.art, ft.Icons.NOTES), size=20, color=farbe
+                        ),
+                    ),
+                    ft.Container(width=2),
                     ft.Column(
                         spacing=2,
                         tight=True,
                         expand=True,
                         controls=[
-                            ft.Text(art_name(b), size=14, weight=ft.FontWeight.W_600, color=farbe),
+                            ft.Text(
+                                haupt,
+                                size=14,
+                                weight=ft.FontWeight.W_600,
+                                color=farbe,
+                                max_lines=2,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                                data=("block_haupt", b.id),
+                            ),
                             *unter,
                         ],
                     ),

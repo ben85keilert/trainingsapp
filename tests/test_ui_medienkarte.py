@@ -70,7 +70,8 @@ def test_video_ohne_bild_zeigt_die_titelkarte_und_spielt_in_der_karte(page, stat
     # Titelkarte: die Aufschrift ist der Titel; oben links die Art
     assert teil(halter, "medienkarte_aufschrift").value == "So geht der Seitstütz"
     assert "VIDEO" in texte(halter)
-    assert texte(karte)[-2:] == ["So geht der Seitstütz", "Hüfte!"]
+    # der Titel steht auf der Fläche — darunter nur noch die Beschriftung
+    assert texte(karte)[-1] == "Hüfte!" and texte(karte).count("So geht der Seitstütz") == 1
     assert halter.height == round((412 - 32) * 9 / 16)
 
     gesehen: list[int] = []

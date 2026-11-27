@@ -6,14 +6,15 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import flet as ft
 import pytest
 
+# die erste Stufe der CI läuft ohne flet (Importregel) — dort fällt die Datei aus
+ft = pytest.importorskip("flet")
 pytest.importorskip("flet_video")
 
-from trainingsapp.core.models import Media, MediaKind, MediaSource
-from trainingsapp.ui.components import medienkarte as mk
-from trainingsapp.ui.state import AppState
+from trainingsapp.core.models import Media, MediaKind, MediaSource  # noqa: E402
+from trainingsapp.ui.components import medienkarte as mk  # noqa: E402
+from trainingsapp.ui.state import AppState  # noqa: E402
 
 
 @pytest.fixture

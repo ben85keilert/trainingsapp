@@ -56,6 +56,7 @@ keine freie Formel (nie aus Messwerten).
 from __future__ import annotations
 
 import contextlib
+import copy
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from typing import Any
@@ -139,7 +140,7 @@ from trainingsapp.core.kurse import (
     PlanVorlage,
 )
 from trainingsapp.core.kursplan import GRUNDLAGE
-from trainingsapp.core.models import Exercise, Media
+from trainingsapp.core.models import Exercise, Media, new_id
 from trainingsapp.core.pakete import paketplan_aus
 from trainingsapp.core.paketmedien import ist_paketmedium
 from trainingsapp.core.plaene import WOCHENTAGE_KURZ, tage_text
@@ -1358,6 +1359,8 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
     #: Der Block, der gerade an Ort und Stelle offen ist (`block_editor`) — leer: keiner.
     #: ``stelle`` (der Block der Liste, ``None`` = neu), ``karte``, ``uebernehmen``, ``geaendert``
     offen: dict[str, Any] = {}
+    #: Hinter welcher Zeile gerade die Arten zum Einfügen aufgeklappt sind (`einfuege_stelle`)
+    einfuegen: dict[str, Block | None] = {"nach": None}
     #: die Karte „So wächst der Plan“ (`components/kursplan_bild.py`) — nur mit Kursplan
     bild_spalte = ft.Column(
         spacing=0, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH
@@ -1416,6 +1419,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         neu: bool,
         *,
         stelle: Block | None = None,
+        hinter: Block | None = None,
         fokus: bool = False,
         zeichnen: bool = True,
     ) -> None:
@@ -1425,7 +1429,9 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         „Abbrechen“ lässt sie, wie sie war; offen ist immer nur einer — ein Tipp auf eine
         andere Zeile übernimmt ihn vorher. ``stelle``: der Block der Liste, den „Fertig“
         ersetzt, wenn ``block`` ein Entwurf von ihm ist (zurück von Kamera, Rekorder oder
-        Fotoauswahl). ``fokus``: die Schreibmarke ins erste Feld. ``zeichnen``: die Listen
+        Fotoauswahl). ``hinter``: Ein neuer Block kommt hinter diesen (Einfügen an der Stelle,
+        eine Folge hinter ihrer Frage) — sonst ans Ende. ``fokus``: die Schreibmarke ins erste
+        Feld. ``zeichnen``: die Listen
         gleich neu — beim Aufbau der Seite zeichnet sie der Aufrufer."""
         if not editor_fertig():
             return
@@ -2642,7 +2648,9 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 with contextlib.suppress(Exception):
                     meldung.update()
                 return grund
-            if am_platz is None:
+            if am_platz is None and hinter is not None and hinter in bloecke:
+                bloecke.insert(bloecke.index(hinter) + 1, neuer)
+            elif am_platz is None:
                 bloecke.append(neuer)
             elif am_platz in bloecke:  # sonst ist er inzwischen gelöscht — dann bleibt er weg
                 bloecke[bloecke.index(am_platz)] = neuer
@@ -2787,6 +2795,16 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         def geaendert() -> bool:
             return neu or stelle is not None or entwurf().to_dict() != block.to_dict()
 
+        def verdoppeln(_e: Any = None) -> None:
+            """Übernimmt den Block und öffnet eine Kopie dahinter (G6) — mit eigener ID; eine
+            Frage darin fragt damit für sich, ihre Antwort steht unter der neuen ID."""
+
+            def kopie(fertig: Block) -> None:
+                neu_ = replace(copy.deepcopy(fertig), id=new_id())
+                block_editor(neu_, neu=True, hinter=fertig)
+
+            uebernehmen(danach=kopie)
+
         inhalt = ft.Column(
             tight=True,
             spacing=10,
@@ -2827,6 +2845,21 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                         alignment=ft.MainAxisAlignment.END,
                         spacing=8,
                         controls=[
+                            *(
+                                [
+                                    ft.TextButton(
+                                        "Verdoppeln",
+                                        icon=ft.Icons.CONTENT_COPY,
+                                        tooltip="Übernimmt den Block und legt eine Kopie "
+                                        "dahinter — sie steht dann offen",
+                                        on_click=verdoppeln,
+                                        data="block_verdoppeln",
+                                    ),
+                                    ft.Container(expand=True),
+                                ]
+                                if am_platz is not None
+                                else []
+                            ),
                             ft.TextButton("Abbrechen", on_click=abbrechen, data="block_abbrechen"),
                             ft.FilledButton(
                                 "Fertig", on_click=uebernehmen, data="block_uebernehmen"
@@ -2836,7 +2869,14 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 ],
             ),
         )
-        offen.update(stelle=am_platz, karte=karte_, uebernehmen=uebernehmen, geaendert=geaendert)
+        offen.update(
+            stelle=am_platz,
+            nach=hinter if am_platz is None else None,
+            karte=karte_,
+            uebernehmen=uebernehmen,
+            geaendert=geaendert,
+        )
+        einfuegen["nach"] = None
         if zeichnen:
             listen_frisch()
         if fokus and zeichnen:
@@ -3006,6 +3046,8 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
 
         return ft.Container(
             data=("baustein" if am_plan else "block", b.id),
+            # was an einer Antwort hängt, steht eingerückt (Plan P231 G1) — an seiner Stelle
+            margin=ft.Margin.only(left=18) if b.wenn and not am_plan else None,
             border_radius=12,
             bgcolor=ft.Colors.SECONDARY_CONTAINER if am_plan else ft.Colors.SURFACE_CONTAINER_HIGH,
             padding=ft.Padding.only(left=12, right=2, top=6, bottom=6),
@@ -3053,11 +3095,19 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
 
     def bloecke_zeichnen() -> None:
         gruppe = [b for b in bloecke if not b.baustein]
-        zeilen: list[ft.Control] = [
-            offen["karte"] if offen and offen["stelle"] is b else zeile(b, n, len(gruppe) - 1)
-            for n, b in enumerate(gruppe)
-        ]
-        if offen and offen["stelle"] is None:  # ein neuer Block: am Ende der Liste
+        neu_nach = offen.get("nach") if offen and offen["stelle"] is None else None
+        gesetzt = False
+        zeilen: list[ft.Control] = []
+        for n, b in enumerate(gruppe):
+            zeilen.append(
+                offen["karte"] if offen and offen["stelle"] is b else zeile(b, n, len(gruppe) - 1)
+            )
+            if neu_nach is b:  # ein neuer Block hinter diesem
+                zeilen.append(offen["karte"])
+                gesetzt = True
+            elif not offen and n < len(gruppe) - 1:
+                zeilen.extend(einfuege_stelle(b))  # „+“ zwischen zwei Zeilen (G2)
+        if offen and offen["stelle"] is None and not gesetzt:  # sonst am Ende der Liste
             zeilen.append(offen["karte"])
         block_spalte.controls = zeilen or [
             hinweis("Noch kein Block — das Kapitel zeigt nur seinen Titel.")
@@ -3081,12 +3131,49 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             with contextlib.suppress(Exception):
                 reihe.update()
 
-    def block_neu(art: str) -> Callable[..., None]:
+    def block_neu(art: str, nach: Block | None = None) -> Callable[..., None]:
         def handler(_e: Any = None) -> None:
             dazu_zeigen("")
-            block_editor(Block(art), neu=True, fokus=art != MEDIUM)
+            block_editor(Block(art), neu=True, hinter=nach, fokus=art != MEDIUM)
 
         return handler
+
+    def einfuege_stelle(b: Block) -> list[ft.Control]:
+        """Das kleine „+“ hinter der Zeile von ``b`` (Ben, 27.11.2026, Plan P231 G2: einfügen
+        an der Stelle statt ans Ende legen und hochschieben) — ein Tipp klappt dort die Arten
+        auf, die Wahl öffnet den neuen Block an dieser Stelle."""
+
+        def umschalten(_e: Any = None) -> None:
+            einfuegen["nach"] = None if einfuegen["nach"] is b else b
+            frisch(block_spalte, bloecke_zeichnen)
+
+        punkt = ft.Container(
+            height=16,
+            alignment=ft.Alignment.CENTER,
+            on_click=umschalten,
+            tooltip="Hier einfügen",
+            data=("block_einfuegen", b.id),
+            content=ft.Icon(ft.Icons.ADD, size=14, opacity=0.45),
+        )
+        if einfuegen["nach"] is not b:
+            return [punkt]
+        return [
+            punkt,
+            ft.Row(
+                wrap=True,
+                spacing=8,
+                run_spacing=4,
+                controls=[
+                    ft.OutlinedButton(
+                        name.split(",")[0],
+                        icon=ART_SYMBOL[art],
+                        on_click=block_neu(art, b),
+                        data=("block_neu_an", art, b.id),
+                    )
+                    for art, name in ARTEN.items()
+                ],
+            ),
+        ]
 
     def folge_dialog(name: str) -> None:
         """„Was soll folgen?“ — nach „+ Folge“ an einer Frage (Ben, 23.11.2026: „Es wird etwas
@@ -3105,7 +3192,8 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                         stein.wenn = [Wenn(name)]
                         baustein_oeffnen(stein, neu=True)
                     else:
-                        block_editor(Block(art, wenn=[Wenn(name)]), neu=True)
+                        quelle = next((b for b in bloecke if b.id == name.split(".f:")[0]), None)
+                        block_editor(Block(art, wenn=[Wenn(name)]), neu=True, hinter=quelle)
 
                 nachher.danach(oeffnen)
                 schliessen(dialog)
@@ -3655,6 +3743,53 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         state.block_entwurf.pop(kapitel.id, None)  # „Abbrechen“ verwirft auch den Entwurf
         await page.push_route(f"/kurse/{kurs.id}/bearbeiten")
 
+    def kapitel_wechsel() -> ft.Control:
+        """„‹ Kapitel 2 von 5 ›“ (Ben, 27.11.2026, Plan P231 G5): zum Nachbarkapitel, ohne
+        Umweg über die Kursseite. Der Wechsel **speichert** dieses Kapitel — fehlt etwas,
+        bleibt man hier und sieht, was."""
+
+        def nachbar(um: int) -> Kapitel | None:
+            ziel = nummer - 1 + um
+            return kurs.kapitel[ziel] if 0 <= ziel < len(kurs.kapitel) else None
+
+        def gehen(um: int) -> Callable[..., Any]:
+            async def handler(_e: Any = None) -> None:
+                ziel = nachbar(um)
+                if ziel is None or speichern() is not None:
+                    return
+                state.block_entwurf.pop(kapitel.id, None)
+                await page.push_route(f"/kurse/{kurs.id}/{ziel.id}/bearbeiten")
+
+            return handler
+
+        return ft.Row(
+            alignment=ft.MainAxisAlignment.CENTER,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=4,
+            controls=[
+                ft.IconButton(
+                    ft.Icons.CHEVRON_LEFT,
+                    tooltip="Speichern und zum Kapitel davor",
+                    disabled=nachbar(-1) is None,
+                    on_click=gehen(-1),
+                    data=("kapitel_wechsel", -1),
+                ),
+                ft.Text(
+                    f"Kapitel {nummer} von {len(kurs.kapitel)}",
+                    size=13,
+                    opacity=0.75,
+                    data="kapitel_nummer",
+                ),
+                ft.IconButton(
+                    ft.Icons.CHEVRON_RIGHT,
+                    tooltip="Speichern und zum nächsten Kapitel",
+                    disabled=nachbar(1) is None,
+                    on_click=gehen(1),
+                    data=("kapitel_wechsel", 1),
+                ),
+            ],
+        )
+
     async def speichern_und_gehen(_e: Any = None) -> None:
         if speichern() is None:
             page.show_dialog(ft.SnackBar(ft.Text("Gespeichert")))
@@ -3706,6 +3841,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                     spacing=14,
                     horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                     controls=[
+                        kapitel_wechsel(),
                         titel_feld,
                         fehler,
                         titel("Im Kapitel — was man liest und tut"),

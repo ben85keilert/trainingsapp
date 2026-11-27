@@ -463,3 +463,88 @@ def test_foto_am_lauf_kommt_zu_den_medien(page, state) -> None:
     _speichern(ansicht)
     lauf = state.kurse.laden(kurs.id).kapitel[0].bloecke[0]
     assert [(m.uri, m.title, m.wann) for m in lauf.medien] == [(datei, "Von der Seite", "")]
+
+
+# -- Editor übersichtlicher (Ben, 27.11.2026, `docs/plan_kurs_medien_ansicht.md` §4.3) ----------
+
+
+def test_editor_einfuegen_an_der_stelle_verdoppeln_und_folge_hinter_der_frage(page, state) -> None:
+    """G2: das „+“ zwischen zwei Zeilen fügt dort ein. G6: „Verdoppeln“ legt eine Kopie mit
+    eigener ID dahinter. G1: Was an einer Antwort hängt, steht eingerückt; eine neue Folge
+    kommt gleich hinter ihre Frage."""
+    import asyncio
+
+    from trainingsapp.ui.views.kurs_bearbeiten import kapitel_bearbeiten
+
+    kurs, _ = _lauf_kurs(state, kursplan=False)
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    # eingerückt ist, was eine Bedingung trägt
+    assert _d(ansicht, ("block", "lob")).margin is not None
+    assert _d(ansicht, ("block", "lauf")).margin is None
+
+    # „+“ hinter dem Lauf: die Arten klappen dort auf, der Text entsteht an der Stelle
+    _d(ansicht, ("block_einfuegen", "lauf")).on_click()
+    _d(ansicht, ("block_neu_an", TEXT, "lauf")).on_click()
+    karte = _editor(ansicht)
+    _felder(karte)["Überschrift"].value = "Dazwischen"
+    _d(karte, "block_uebernehmen").on_click()
+    _speichern(ansicht)
+    bloecke = state.kurse.laden(kurs.id).kapitel[0].bloecke
+    assert bloecke[0].id == "lauf" and bloecke[1].titel == "Dazwischen"
+    assert [b.id for b in bloecke][2:] == ["lob", "hilfe"]
+
+    # Verdoppeln: die Kopie steht offen hinter dem Original, mit eigener ID
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    _d(ansicht, ("block", "lob")).on_click()
+    _d(_editor(ansicht), "block_verdoppeln").on_click()
+    kopie = _editor(ansicht)
+    assert _felder(kopie)["Text (Markdown)"].value == "Weiter so."
+    _felder(kopie)["Überschrift"].value = "Gut 2"
+    _speichern(ansicht)  # „Speichern“ übernimmt die offene Kopie
+    bloecke = state.kurse.laden(kurs.id).kapitel[0].bloecke
+    titel = [b.titel for b in bloecke]
+    assert titel[titel.index("Gut") + 1] == "Gut 2"
+    assert len({b.id for b in bloecke}) == len(bloecke)
+
+    # „+ Folge“ an der Frage des Laufs: der neue Block steht hinter dem Lauf, nicht am Ende
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    _d(ansicht, ("block", "lauf")).on_click()
+    folge = next(
+        x
+        for x in _alle_dialog(_editor(ansicht))
+        if isinstance(x, ft.TextButton) and x.content == "Folge"
+    )
+    folge.on_click()
+    wahl = page.dialoge[-1]
+    _d(wahl, ("folge_neu", TEXT)).on_click()
+    asyncio.run(wahl.on_dismiss())
+    liste = next(
+        x for x in _alle_dialog(ansicht) if _editor(ansicht) in (getattr(x, "controls", None) or [])
+    )
+    assert liste.controls.index(_editor(ansicht)) == 1  # gleich hinter der Zeile des Laufs
+
+
+def test_editor_kapitel_wechseln_speichert(page, state) -> None:
+    """G5: „‹ Kapitel 1 von 2 ›“ — der Wechsel speichert und führt ins Nachbarkapitel."""
+    import asyncio
+
+    from trainingsapp.ui.views.kurs_bearbeiten import kapitel_bearbeiten
+
+    kurs, _ = _lauf_kurs(state, kursplan=False)
+    kurs = state.kurse.laden(kurs.id)
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    assert _d(ansicht, "kapitel_nummer").value == "Kapitel 1 von 2"
+    assert _d(ansicht, ("kapitel_wechsel", -1)).disabled is True
+    _felder(ansicht)["Titel"].value = "Umbenannt"
+    asyncio.run(_d(ansicht, ("kapitel_wechsel", 1)).on_click())
+    assert page.route == f"/kurse/{kurs.id}/{kurs.kapitel[1].id}/bearbeiten"
+    assert state.kurse.laden(kurs.id).kapitel[0].titel == "Umbenannt"
+    # ohne Titel bleibt man im Kapitel
+    ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
+    page.route = "hier"
+    _felder(ansicht)["Titel"].value = ""
+    asyncio.run(_d(ansicht, ("kapitel_wechsel", 1)).on_click())
+    assert page.route == "hier"

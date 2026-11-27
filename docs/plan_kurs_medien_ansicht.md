@@ -12,8 +12,7 @@ erkennen, was Audio-Video-Bild ist. … Mache weitere Vorschläge, wie man Kursg
 übersichtlicher machen kann. Der Ablauf genauso direkter, weniger Rumgeklicke, direkteres
 Starten.“
 
-**Stand: Plan mit Skizzen, nichts gebaut.** Bens Antworten vom 27.11.2026 stehen in §9;
-offen sind noch f und g (welche der Vorschläge G1–G8 und D1–D7).
+**Stand: gebaut in Version 0.3.105 (27.11.2026) — was gilt, steht in §10.** Bens Antworten in §9.
 
 Gesucht im Katalog: `frontbild`, `titelbild`, `vorschaubild`, `thumbnail`, `medienvorschau`,
 `eingebettet` — kein Treffer zur Sache (nur P44, P175 am Wort). Gelesen: P225, P227, P229,
@@ -233,5 +232,84 @@ ist gut.“
 | c | **„am besten wählen können. Man fährt durch und klickt ein Bild, kann einen Text dazusetzen“** | Das Blatt beginnt mit dem Video und dem Regler; ein Tipp nimmt das Bild. **Dazu ein Text auf dem Bild** (neu): `Media.titelbild_text`, über dem Bild gesetzt (unten links, auf dunklem Verlauf) — nicht ins Bild gerechnet, damit er sich ändern lässt und in jeder Größe scharf ist. „Nur Titel“ ist dann der Fall „Text ohne Bild“. Bis man wählt, gilt das automatische Bild (§3.1) |
 | d | **nein** | kein Bild aus dem Netz; ein Link zeigt die Titelkarte oder ein eigenes Bild |
 | e | **„probieren wir“** | Zeilen nach §4.1 bauen, am Web-Foto und am Gerät ansehen |
-| f, g | offen — die Listen G1–G8 (§4.3) und D1–D7 (§5) standen nur im Plan, nicht in der Antwort | noch einmal vorgelegt |
+| f, g | **„wie empfohlen, fang an zu bauen“** (nach der zweiten Vorlage der Listen) | G1, G2, G5 zuerst, danach G3 und G6; D2, D4, D6 zuerst, danach D1 und D3 — Stand in §10 |
 | h | **„wie es am sinnvollsten ist“** | Reihenfolge wie §7: K0 → K1 → K2 → K3; K3 mit Text auf dem Bild und an allen Stellen (b) |
+
+## 10. Gebaut (27.11.2026, Version 0.3.105) — das gilt
+
+### 10.1 Medienkarte (K1)
+
+- `ui/components/medienkarte.py` ersetzt die Zeile im **Kapitel** (Block „Medium“, Medien des
+  Kapitels), im **Lauf** (vorher · nachher) und im **Ergebnis** (Folgen einer Antwort).
+- Video (Datei): Fläche 16:9 (`aspect_ratio`, nicht aus der Breite der Seite gerechnet), Art
+  oben links, Dauer unten rechts. Ein Tipp setzt den Spieler in die Karte
+  (`components/videospieler.py`, mit Zeitleiste und Vollbild), ✕ macht sie wieder zum Bild.
+  **Es spielt immer nur eines** (`AppState.medienkarte_aktiv`).
+- Bild: im Kapitel (4:3, beschnitten), Tipp öffnet groß. Ton: schmale Karte mit ▶ und Regler;
+  sie hält an, wenn sie aus dem Bild geht. PDF und Link: flache Titelkarte, der Tipp tut, was
+  die Zeile tat (`medienliste.oeffner`). Fehlt die Datei, steht das da.
+- **K0 entfiel:** Ein Spieler in einer scrollenden Ansicht läuft schon in „Verkleinern“ und im
+  Material-Blatt — der Versuch vorab war nicht nötig. Am Gerät bleibt T158.
+- Übung, Plan und Fokus zeigen Medien weiter als Zeile bzw. im Material-Blatt.
+
+### 10.2 Titelbild (K3)
+
+- `Media.titelbild` (leer · `text` · `medien/<sha256>.jpg`) und `Media.titelbild_text`;
+  Rechnung `core/titelbild.py`. Kein Bild aus dem Netz — der Import verwirft eine Adresse.
+- **Blatt „Titelbild“** (`components/titelbild_blatt.py`), überall dasselbe: am Block „Medium“
+  und an den Medien am Lauf im Kurs-Editor, in „Übung bearbeiten“, „Im Plan einstellen“ und im
+  Reiter „Medien“ des Plans (über `material_rolle.rollen_zeile`). Darin: der Spieler mit
+  „Anfang · Mitte · Ende“ und **„Dieses Bild nehmen“**, „Eigenes Bild …“ (eine Bilddatei),
+  „Text auf dem Bild“, „Nur Text“, „Automatisch“.
+- Das Bild aus dem Video (`ui/standbild.py`): am Rechner ffmpeg; **auf Android wird eine halbe
+  Sekunde ab der Stelle „verkleinert“ und nur das Frontbild behalten** — kein neuer Aufruf in
+  der Erweiterung. Am Gerät ungeprüft (T158). Im Browser und ohne beides sagt das Blatt, dass
+  es nicht geht.
+- **Automatisch** (`data/titelbilder.py`, `Medien/Titelbilder/`, reist nie mit): das Foto vom
+  Start einer Aufnahme in der App, das Frontbild der Fotoauswahl. **Eine Datei aus der
+  Dateiauswahl bekommt kein automatisches Bild** — bis man eines wählt, zeigt die Karte den
+  Titel (Abweichung von §9 c „Mitte des Videos“: Das Bild entstünde erst beim Zeichnen der
+  Karte, im Hintergrund; nicht gebaut).
+- Ein gewähltes Bild ist eine Paketdatei: Es reist im Paket mit (`core.pakete.
+  paketmedien_in`) und bleibt beim Aufräumen (`data/paketmedien._ABFRAGEN`). Keine neue
+  Formatversion (`docs/uebungspakete.md`).
+
+### 10.3 Kurs-Editor (K2, K4)
+
+- **Zeilen** (§4.1): der Inhalt fett, darunter Art und Eckdaten; ein Medium zeigt sein
+  Titelbild klein und „Video · 0:42 · 3 MB“ statt „Medium“ (`zeilen_text`,
+  `medienkarte.miniatur`).
+- **Karte „Medium“**: oben die Medienkarte selbst (abspielbar), „Medium wählen“, „Titelbild …“.
+- **G1**: Was eine Bedingung trägt, steht eingerückt — **an seiner Stelle** (die Reihenfolge
+  der Liste ist die des Kapitels; nicht unter die Frage gezogen). Eine neue Folge („+ Folge“)
+  kommt gleich hinter ihren Lauf bzw. ihre Frage.
+- **G2**: ein „+“ zwischen zwei Zeilen klappt dort die Arten auf; der neue Block entsteht an
+  der Stelle. **G5**: „‹ Kapitel 2 von 5 ›“ oben — der Wechsel speichert. **G6**: „Verdoppeln“
+  in der offenen Karte (Kopie mit eigener ID, dahinter, offen).
+- **Nicht gebaut:** G3 (ziehen statt Pfeile), G4 (Vorschau), G7 (Bausteine an Ort und Stelle),
+  G8.
+
+### 10.4 Durchspielen (K5)
+
+Nachgestellt am Code (`views/kurse.py`, `views/kurs_testlauf.py`), bevor gebaut wurde:
+
+- **D6 gab es schon:** „Weiter“ führt direkt ins nächste Kapitel (`abschliessen`).
+- **D4 gab es schon:** Ergebnis, Fragen „nachher“ und die Folgen der Antwort stehen auf einer
+  Seite; „Eintragen“ führt ins Kapitel zurück. Neu ist nur, dass dort der Fußknopf gleich den
+  nächsten Schritt nennt.
+- **D2 gebaut:** Fußknopf im Kapitel, das dran ist (`core/kursschritt.naechster`): der erste
+  Lauf ohne Wert → die erste unbeantwortete Frage → „Plan ansehen — N Änderungen“ → „Weiter“.
+  Ein Lauf mit fester Übung startet mit dem Tipp; sonst rollt die Ansicht zur Stelle. Bei
+  einem freiwilligen Lauf steht „Weiter“ daneben. **Er übernimmt nichts** — am Plan ändert
+  sich weiter nur etwas mit dem Tipp in der Sammelkarte.
+- **Nicht gebaut:** D1 („Weiter machen“ unter Heute), D3 (Lauf ohne Vorseite), D5, D7.
+
+### 10.5 Prüfung
+
+Tests: `tests/test_ui_medienkarte.py` (Karte je Art, nur eines spielt, Titelbild-Blatt, Paket
+und Aufräumen), `tests/test_ui_kurs_fragen.py` (Einfügen, Verdoppeln, Folge-Stelle,
+Kapitelwechsel, Fußknopf), `tests/test_ui_kursbloecke.py` (Zeilen, Titelbild im Block),
+Doctests in `core/titelbild.py`, `core/kursschritt.py`. Web-Fotos bei 412 px: Kapitel mit
+Video-, Ton- und Link-Karte, Editor-Liste, offene Karte, Fußknopf. **Nicht am Foto prüfbar**
+(der Web-Server liefert keine lokalen Dateien, Videos spielen dort nicht): das Bild auf der
+Karte, das Abspielen in der Karte, das Bild aus dem Video — T158.

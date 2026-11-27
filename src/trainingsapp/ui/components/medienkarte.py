@@ -41,6 +41,8 @@ from trainingsapp.ui.components.medienliste import SYMBOLE, oeffner
 BREITE = 380.0
 #: Seitenverhältnis der Fläche
 FORMAT = 16 / 9
+#: … und der flachen Titelkarte für PDF und Link (sie zeigt nur Schrift)
+FLACH = 16 / 5
 WEISS = ft.Colors.WHITE
 
 
@@ -210,14 +212,16 @@ def flaeche(
                 ft.Container(
                     expand=True,
                     alignment=ft.Alignment.CENTER,
-                    padding=ft.Padding.symmetric(horizontal=20, vertical=26),
+                    # schmal genug für die flache Karte; oben und unten bleibt Platz für die
+                    # Etiketten in den Ecken
+                    padding=ft.Padding.symmetric(horizontal=20, vertical=8),
                     content=ft.Text(
                         schrift,
                         size=18,
                         weight=ft.FontWeight.BOLD,
                         color=ft.Colors.ON_PRIMARY_CONTAINER,
                         text_align=ft.TextAlign.CENTER,
-                        max_lines=3,
+                        max_lines=2,
                         overflow=ft.TextOverflow.ELLIPSIS,
                         data=("medienkarte_aufschrift", medium.uri),
                     ),
@@ -299,8 +303,9 @@ def medienkarte(
     der Fläche (im Editor stehen sie in den Feldern darunter). ``browser``, ``uebergeben``,
     ``beim_oeffnen`` wie an der Zeile (`components/medienliste.py`)."""
     satz, _dauer, pfad = eckdaten_von(state, medium)
-    breite = _breite(page, einzug)
-    hoehe = round(breite / FORMAT)
+    # Die Fläche hält ihr Seitenverhältnis selbst (`aspect_ratio`) — die Breite der Seite ist
+    # beim Aufbau nicht verlässlich (Web-Foto 27.11.2026: die Karte war halb so hoch). Feste
+    # Maße braucht erst der Spieler, und die liest er beim Tipp
     tipp = oeffner(
         page, state, medium, browser=browser, uebergeben=uebergeben, beim_oeffnen=beim_oeffnen
     )
@@ -383,7 +388,7 @@ def medienkarte(
         return ft.Column(spacing=4, tight=True, controls=[tonkarte, unter[-1]])
 
     halter = ft.Container(
-        height=hoehe,
+        aspect_ratio=FORMAT,
         border_radius=12,
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
         data=("medienkarte_halter", medium.uri),
@@ -394,7 +399,7 @@ def medienkarte(
 
         def als_bild() -> None:
             halter.content = flaeche(state, medium)
-            halter.height = hoehe
+            halter.aspect_ratio = FORMAT
             halter.on_click = spielen
             halter.ink = True
 
@@ -409,6 +414,8 @@ def medienkarte(
             from trainingsapp.ui.components.videospieler import Videospieler
 
             anhalten(state)
+            breite = _breite(page, einzug)
+            hoehe = round(breite / FORMAT)
             try:
                 spieler = Videospieler(
                     [str(pfad)],
@@ -427,7 +434,7 @@ def medienkarte(
                 beim_oeffnen()
             state.medienkarte_aktiv = zu
             halter.content = spieler.control
-            halter.height = None  # die Knopfzeile des Spielers steht unter dem Bild
+            halter.aspect_ratio = None  # die Knopfzeile des Spielers steht unter dem Bild
             halter.on_click = None
             halter.ink = False
             with contextlib.suppress(Exception):
@@ -449,10 +456,10 @@ def medienkarte(
     else:
         halter.opacity = 0.6
     if ist_paketmedium(medium) and medium.kind == MediaKind.IMAGE and pfad is not None:
-        halter.height = round(breite * 3 / 4)  # ein Bild darf höher sein als ein Video
+        halter.aspect_ratio = 4 / 3  # ein Bild darf höher sein als ein Video
     elif not (ist_paketmedium(medium) and medium.kind == MediaKind.VIDEO):
         # PDF, Link: eine flachere Titelkarte — sie zeigt nur Schrift
-        halter.height = round(hoehe * 0.55) if titelbild_pfad(state, medium) is None else hoehe
+        halter.aspect_ratio = FLACH if titelbild_pfad(state, medium) is None else FORMAT
     if pfad is None and ist_paketmedium(medium):
         unter.append(ft.Text("Datei fehlt — das Paket neu importieren.", size=12, opacity=0.7))
     return karte(halter)

@@ -306,6 +306,10 @@ Vertragsdokument); Einzelheiten gehören in `.claude/rules/<thema>.md` mit `path
   „von selbst“ beim ersten Start, nie beim Aufbau einer Ansicht (Geister-Dialog).
   **Verkleinern** (`core/verkleinern.py`, `views/verkleinern.py`): nur auf Tipp, eine Kopie — das
   Original bleibt gerätelokal vermerkt (`medien_originale`), reist nie mit; ffmpeg nur aufrufen.
+- **Medienkarte und Titelbild** (Ben, 27.11.2026, Vertrag `docs/plan_kurs_medien_ansicht.md` §10): Im
+  Kurs steht ein Medium als Karte (`components/medienkarte.py`) — ein Video spielt **in der Karte**,
+  immer nur eines. Titelbild an jedem Medium über ein Blatt (`components/titelbild_blatt.py`),
+  **nie aus dem Netz**; das automatische Bild bleibt gerätelokal (`data/titelbilder.py`).
 - **Medien einheitlich** (Ben, 19.11.2026, Vertrag `docs/plan_medien_einheitlich.md` §5): **ein**
   Menü „Medium hinzufügen“ (`components/medium_dazu.py`) für jede Stelle, Stellen im Ablauf aus
   `core/medien_stellen.py`; im Fokus wird Fälliges eingeblendet, Späteres bleibt verborgen.

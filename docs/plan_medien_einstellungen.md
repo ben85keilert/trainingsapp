@@ -132,7 +132,9 @@ Person sieht.
 - `ui/views/einstellungen_medien.py`: zeichnet; die Liste der Paketdateien baut sich erst beim
   Aufklappen (viele Dateien, `stat` je Datei).
 - Videos laufen weiter nur in `/anhang/<id>` und `…/paketmedium/…`; die Seite zeigt Frontbilder
-  und Zeilen.
+  und Zeilen. (Seit 27.11.2026 spielt ein Video im **Kurs** auch in seiner
+  Medienkarte, `plan_kurs_medien_ansicht.md` §10.1 — für diese Seite ändert das nichts; sie
+  kann für Paketdateien dieselbe Miniatur zeigen, `medienkarte.miniatur`.)
 
 ## 3. Stufen
 

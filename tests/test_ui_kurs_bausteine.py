@@ -422,9 +422,9 @@ def test_kurs_mit_bausteinen_oeffnet_ohne_fehler(page, state) -> None:
     ):
         assert erwartet in texte, erwartet
     assert not [t for t in texte if t.startswith("Verweis fehlt")]
-    # Jede Zeile öffnet ihr Formular: Blöcke den Dialog, Bausteine das Blatt
+    # Jede Zeile öffnet ihr Formular: Blöcke an Ort und Stelle, Bausteine das Blatt
     _daten(ansicht, ("block", "w")).on_click()
-    assert isinstance(page.dialoge[-1], ft.AlertDialog)
+    assert page.dialoge == [] and _daten(ansicht, "block_editor") is not None
     for block_id, titel in (
         ("b2", "Übung in den Plan"),
         ("b3", "Weg im Plan"),
@@ -498,7 +498,7 @@ def test_kurs_ohne_kursplan_wie_vorher(page, state) -> None:
     assert arten.visible is True
     _daten(ansicht, ("block_neu", TEST)).on_click()
     assert arten.visible is False
-    dialog = page.dialoge[-1]
+    dialog = _daten(ansicht, "block_editor")
     felder = {str(x.label): x for x in _alle(dialog) if isinstance(x, ft.TextField | ft.Dropdown)}
     assert "Ziel in % des Tests" in felder  # der Test wird Ziel im Kapitelplan
     felder["Übung"].value = u["Planke"].id
@@ -518,7 +518,7 @@ def test_im_kursplan_kurs_brauchen_test_und_tage_keinen_kapitelplan(page, state)
     _daten(ansicht, ("block", "t")).on_click()
     felder = {
         str(x.label): x
-        for x in _alle(page.dialoge[-1])
+        for x in _alle(_daten(ansicht, "block_editor"))
         if isinstance(x, ft.TextField | ft.Dropdown)
     }
     assert "Ziel in % des Tests" not in felder
@@ -871,7 +871,7 @@ def test_test_misst_die_gewaehlte(page, state) -> None:
 
     # Eine weitere Auswahl, noch ungespeichert: Planke oder Käfer — ohne gemeinsames Feld
     _daten(ansicht, ("block_neu", AUSWAHL)).on_click()
-    dialog = page.dialoge[-1]
+    dialog = _daten(ansicht, "block_editor")
     dazu = _felder(dialog)["Übung zur Auswahl hinzufügen"]
     for name in ("Planke", "Käfer"):
         dazu.value = u[name].id
@@ -882,7 +882,7 @@ def test_test_misst_die_gewaehlte(page, state) -> None:
 
     # Der Test-Dialog: die Übungen des Katalogs — davor „die gewählte aus …“, beide Auswahlen
     _daten(ansicht, ("block", "t")).on_click()
-    dialog = page.dialoge[-1]
+    dialog = _daten(ansicht, "block_editor")
     uebung = _felder(dialog)["Übung"]
     assert uebung.value == u["Käfer"].id
     angebot = {o.key: o.text for o in uebung.options}
@@ -930,8 +930,8 @@ def test_test_misst_die_gewaehlte(page, state) -> None:
     # Wieder öffnen: „die gewählte“ steht
     ansicht = kapitel_bearbeiten(page, state, kurs, zwei)
     _daten(ansicht, ("block", "t")).on_click()
-    assert _felder(page.dialoge[-1])["Übung"].value == "aus:w"
-    assert _felder(page.dialoge[-1])["Was wird gemessen"].value == "reps"
+    assert _felder(_daten(ansicht, "block_editor"))["Übung"].value == "aus:w"
+    assert _felder(_daten(ansicht, "block_editor"))["Was wird gemessen"].value == "reps"
 
     # Paketprüfung und Rundreise (ein Test mit „aus“ braucht Formatversion 6)
     assert _paketpruefung(state, kurs) == ([], [])
@@ -968,7 +968,12 @@ def test_test_misst_die_gewaehlte(page, state) -> None:
     for z in karte[:2]:
         assert z.titel in vorschau and z.unter in vorschau
 
-    # Die Auswahl löschen: Die Rückfrage nennt den Test — ohne sie hätte er keine Übung
+    # Die Auswahl löschen: Die Rückfrage nennt den Test — ohne sie hätte er keine Übung.
+    # Solange ein Block offen ist, bleibt die Liste, wie sie ist — erst zu, dann löschen
+    zeile = _daten(ansicht, ("block", "w"))
+    entfernen = next(x for x in _alle(zeile) if getattr(x, "tooltip", None) == "Entfernen")
+    assert entfernen.disabled is True
+    _daten(_daten(ansicht, "block_editor"), "block_abbrechen").on_click()
     zeile = _daten(ansicht, ("block", "w"))
     next(x for x in _alle(zeile) if getattr(x, "tooltip", None) == "Entfernen").on_click()
     frage = page.dialoge[-1]
@@ -998,7 +1003,7 @@ def test_test_misst_die_gewaehlte_auch_mit_kapitelplan(page, state) -> None:
     kurs = state.kurse.laden(kurs.id)
     ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
     _daten(ansicht, ("block_neu", TEST)).on_click()
-    dialog = page.dialoge[-1]
+    dialog = _daten(ansicht, "block_editor")
     _daten(dialog, "block_uebernehmen").on_click()
     assert "Ein Test braucht eine Übung." in _texte(dialog)
     felder = _felder(dialog)
@@ -1024,10 +1029,11 @@ def test_test_misst_die_gewaehlte_auch_mit_kapitelplan(page, state) -> None:
 
 
 def _test_oeffnen(page, ansicht, block_id: str = "t"):
-    """Der Dialog des Tests ``block_id`` im Kapitel-Formular."""
+    """Der Test ``block_id`` im Kapitel-Formular, offen an Ort und Stelle (seit 27.11.2026
+    eine Karte in der Liste, kein Dialog)."""
     _daten(ansicht, ("block", block_id)).on_click()
-    dialog = page.dialoge[-1]
-    assert isinstance(dialog, ft.AlertDialog) and dialog.title.value == "Übung machen"
+    dialog = _daten(ansicht, "block_editor")
+    assert "Übung machen" in _texte(dialog)
     return dialog
 
 
@@ -1211,7 +1217,7 @@ def test_test_mit_vorgabe_einstellen_speichern_wieder_oeffnen(page, state) -> No
     assert any("braucht eine Zahl" in t for t in _texte(_daten(dialog, "test_vorschau")))
     _daten(dialog, "block_uebernehmen").on_click()  # ohne Zahl wird nichts übernommen
     assert "Die Vorgabe „Menge“ braucht eine Zahl von Wiederholungen." in _texte(dialog)
-    assert "Käfer: zwischen Anstrengung 3 und 9 · Wiederholungen" in _texte(ansicht)
+    assert _daten(ansicht, "block_editor") is dialog  # der Block bleibt offen
     menge.value = "12"
     menge.on_blur()
     texte = _texte(_daten(dialog, "test_vorschau"))
@@ -1240,7 +1246,9 @@ def test_test_mit_vorgabe_einstellen_speichern_wieder_oeffnen(page, state) -> No
     ansicht, dialog = oeffnen()
     assert _gewaehlt(dialog, "test_vorgabe") == [ZEIT]
     assert _daten(dialog, "test_zeit").content == "1:30"
+    _daten(dialog, "block_abbrechen").on_click()  # zu: Die Zeile nennt die Vorgabe wieder
     assert "Käfer: 1:30 Minuten · Wiederholungen" in _texte(ansicht)
+    ansicht, dialog = oeffnen()
 
     # -- als Paket hinaus und wieder herein: Die Vorgabe reist mit ------------------------
     frisch = state.kurse.laden(kurs.id)
@@ -1260,6 +1268,7 @@ def test_test_mit_vorgabe_einstellen_speichern_wieder_oeffnen(page, state) -> No
     assert sichern(ansicht, dialog).vorgabe is None
     ansicht, dialog = oeffnen()
     assert _gewaehlt(dialog, "test_vorgabe") == [OHNE]
+    _daten(dialog, "block_abbrechen").on_click()
     assert "Käfer · Wiederholungen" in _texte(ansicht)
 
 
@@ -1272,7 +1281,7 @@ def test_umschalten_der_vorgabe_belegt_ins_ziel_kommt_vor(page, state) -> None:
 
     def neuer_test(uebung: str) -> ft.AlertDialog:
         _daten(ansicht, ("block_neu", TEST)).on_click()
-        dialog = page.dialoge[-1]
+        dialog = _daten(ansicht, "block_editor")
         wahl = _felder(dialog)["Übung"]
         wahl.value = u[uebung].id
         wahl.on_select()
@@ -1891,7 +1900,7 @@ def test_ausfuehrung_bei_der_gewaehlten(page, state) -> None:
     # ein neuer Test, noch ohne Übung: kein Angebot, ein Hinweis
     ansicht = kapitel_bearbeiten(page, state, state.kurse.laden(kurs.id), kurs.kapitel[1])
     _daten(ansicht, ("block_neu", TEST)).on_click()
-    dialog = page.dialoge[-1]
+    dialog = _daten(ansicht, "block_editor")
     assert _lauf(dialog) == (STANDARD,) * 3
     _waehlen(dialog, "test_ausfuehrung", EIGENE_ANGABE)
     blatt = page.dialoge[-1]

@@ -415,6 +415,16 @@ def _felder(dialog) -> dict[str, object]:
     }
 
 
+def _editor(ansicht):
+    """Der Block, der im Kapitel gerade an Ort und Stelle offen ist (seit 27.11.2026 kein
+    Dialog mehr) — die Karte in der Liste „Im Kapitel“."""
+    return _daten(ansicht, "block_editor")
+
+
+def _editor_offen(ansicht) -> bool:
+    return any(getattr(x, "data", None) == "block_editor" for x in _alle(ansicht))
+
+
 def _weg(dialog, weg: str):
     """Der Eintrag ``weg`` im Menü „Medium wählen“ des Blocks (`components/medium_dazu.py`)."""
     return next(i for i in _daten(dialog, "block_medium_dazu").items if i.data[1] == weg)
@@ -528,13 +538,15 @@ def test_kapitel_bearbeiten_bloecke_plan_und_bedingung(page, state) -> None:
 
     # Ein Textblock
     _daten(ansicht, ("block_neu", TEXT)).on_click()
-    felder = _felder(page.dialoge[-1])
+    assert page.dialoge == []  # kein Popup: Der Block steht offen in der Liste
+    felder = _felder(_editor(ansicht))
     felder["Überschrift"].value = "Warum?"
     felder["Text (Markdown)"].value = "Darum."
-    _daten(page.dialoge[-1], "block_uebernehmen").on_click()
-    # Eine Frage ohne Antworten bleibt im Dialog
+    _daten(_editor(ansicht), "block_uebernehmen").on_click()
+    assert not _editor_offen(ansicht)
+    # Eine Frage ohne Antworten bleibt offen
     _daten(ansicht, ("block_neu", FRAGE)).on_click()
-    dialog = page.dialoge[-1]
+    dialog = _editor(ansicht)
     _felder(dialog)["Frage"].value = "Was macht sie schwerer?"
     _daten(dialog, "block_uebernehmen").on_click()
     assert "Eine Frage braucht einen Text und mindestens eine Antwort." in _texte(dialog)
@@ -542,13 +554,13 @@ def test_kapitel_bearbeiten_bloecke_plan_und_bedingung(page, state) -> None:
     _daten(dialog, "block_uebernehmen").on_click()
     # Ein Test auf die Planke, Ziel 80 %
     _daten(ansicht, ("block_neu", TEST)).on_click()
-    dialog = page.dialoge[-1]
+    dialog = _editor(ansicht)
     felder = _felder(dialog)
     felder["Übung"].value = planke.id
     felder["Übung"].on_select()
     assert felder["Was wird gemessen"].value == "hold"
     felder["Ziel in % des Tests"].value = "80"
-    _daten(dialog, "block_uebernehmen").on_click()
+    # „Speichern“ in der Titelleiste übernimmt den offenen Block mit — ohne „Fertig“
 
     # Test ohne Plan: geht (Ben, 26.11.2026: „ein Kurs soll auch ohne Plan klappen“) — der
     # Lauf ist dann freiwillig
@@ -689,11 +701,19 @@ def test_medium_block_nimmt_vorhandenes_und_behaelt_art_und_rolle(page, state) -
     kurs = kurs_anlegen(state)
     ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
     _daten(ansicht, ("block_neu", MEDIUM)).on_click()
-    dialog = page.dialoge[-1]
-    # Ohne Adresse und ohne Datei bleibt der Dialog
+    dialog = _editor(ansicht)
+    # Ein neuer Block zeigt keine Adresse (Ben, 27.11.2026: „Medien in den Kapiteln haben
+    # standardmäßig einen Link. Warum?“) — der Link ist ein Weg im Menü wie die anderen
+    assert _daten(dialog, "block_adresse").visible is False
+    # Ohne Adresse und ohne Datei bleibt der Block offen
     _daten(dialog, "block_uebernehmen").on_click()
-    assert "Ein Medium braucht eine https-Adresse oder eine Datei." in _texte(dialog)
+    assert (
+        "Wähle ein Medium: einen Link mit https-Adresse, eine Aufnahme oder eine Datei."
+        in _texte(dialog)
+    )
     menue = _daten(dialog, "block_medium_dazu")
+    menue.items[0].on_click(None)  # „Link“ öffnet das Feld für die Adresse
+    assert _daten(dialog, "block_adresse").visible is True
     # dieselbe Reihe wie am Plan; Kamera und Fotoauswahl fehlen nur, wo das Gerät sie nicht hat
     assert [i.data[1] for i in menue.items] == ["link", "datei", "ton", "vorhandenes"]
     menue.items[-1].on_click(None)
@@ -718,8 +738,10 @@ def test_medium_block_nimmt_vorhandenes_und_behaelt_art_und_rolle(page, state) -
 def test_medium_block_nimmt_auf_wie_der_plan_und_steht_danach_wieder_offen(page, state) -> None:
     """Ben, 23.11.2026: „In Kurse sollen die gleichen Medientypen wie in Pläne bereitgestellt
     werden können.“ Der Block „Medium“ bietet Kamera, Rekorder und Fotoauswahl; das Kapitel
-    speichert, der Dialog geht zu, und beim Zurückkommen steht der Block wieder offen — mit dem
-    neuen Stück und dem Titel, der schon im Dialog stand."""
+    speichert, und beim Zurückkommen steht der Block wieder offen — mit dem neuen Stück und dem
+    Titel, der schon dastand. Seit 27.11.2026 ohne Dialog: Der Block ist eine Karte der Seite,
+    beim Aufbau geht nichts auf (Geister-Dialog; Ben: „das Speichern von Photos/Videos in den
+    Kursen klappt immer noch nicht“)."""
     import asyncio
 
     from trainingsapp.core.anhaenge import AUDIO, Ziel
@@ -756,7 +778,7 @@ def test_medium_block_nimmt_auf_wie_der_plan_und_steht_danach_wieder_offen(page,
         am_plan = [e[0] for e in medium_dazu.eintraege(page, state, wege, vorhandene=lambda: [])]
         ansicht = kapitel_bearbeiten(page, state, kurs, kapitel)
         _daten(ansicht, ("block_neu", MEDIUM)).on_click()
-        im_block = [i.data[1] for i in _daten(page.dialoge[-1], "block_medium_dazu").items]
+        im_block = [i.data[1] for i in _daten(_editor(ansicht), "block_medium_dazu").items]
     finally:
         anhang_aufnahme.kamera_moeglich, state.hochladen = alt_kamera, alt_hochladen
     assert im_block == am_plan
@@ -765,50 +787,50 @@ def test_medium_block_nimmt_auf_wie_der_plan_und_steht_danach_wieder_offen(page,
 
     ansicht = kapitel_bearbeiten(page, state, kurs, kapitel)
     _daten(ansicht, ("block_neu", MEDIUM)).on_click()
-    dialog = page.dialoge[-1]
-    dialog.open = True
+    dialog = _editor(ansicht)
     _felder(dialog)["Titel"].value = "Atmung"
     ton = _weg(dialog, "ton")
+    kapitel_titel = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Titel"
+    )
 
-    # Ohne Titel speichert das Kapitel nicht — der Dialog bleibt und sagt, warum
-    _felder(ansicht)["Titel"].value = ""
+    # Ohne Titel speichert das Kapitel nicht — der Block bleibt offen und sagt, warum
+    kapitel_titel.value = ""
     ton.on_click(None)
-    assert page.route == route and dialog.open
+    assert page.route == route and _editor_offen(ansicht)
     assert any("Das Kapitel braucht einen Titel." in t for t in _texte(dialog))
 
-    _felder(ansicht)["Titel"].value = "Rumpf"
+    kapitel_titel.value = "Rumpf"
     ton.on_click(None)
     ziel = Ziel.fuer_ablage(block_schluessel(kapitel.id))
     assert page.route == aufnahme_route(route, ziel, AUDIO)
-    assert dialog.open is False
     gespeichert = state.kurse.laden(kurs.id)
     assert gespeichert.kapitel[0].titel == "Rumpf" and gespeichert.kapitel[0].bloecke == []
 
     # Unter dem Rekorder entsteht die Seite auch — dort bleibt der Entwurf liegen
-    page.dialoge.clear()
-    kapitel_bearbeiten(page, state, gespeichert, gespeichert.kapitel[0])
-    assert page.dialoge == [] and kapitel.id in state.block_entwurf
+    unten = kapitel_bearbeiten(page, state, gespeichert, gespeichert.kapitel[0])
+    assert not _editor_offen(unten) and kapitel.id in state.block_entwurf
 
     # Der Rekorder legt das Stück bereit; zurück auf der Seite steht der Block wieder offen
     datei = "medien/" + "a" * 64 + ".m4a"
     assert paketdatei.anhaengen(state, ziel, paketdatei.medium_mit(datei, "Aufnahme", "ruhig"))
     page.route = route
     ansicht = kapitel_bearbeiten(page, state, gespeichert, gespeichert.kapitel[0])
-    (dialog,) = page.dialoge
+    assert page.dialoge == []  # beim Aufbau der Seite geht kein Dialog auf
+    dialog = _editor(ansicht)
     assert _felder(dialog)["Titel"].value == "Atmung"
     assert _daten(dialog, "block_beschriftung").value == "ruhig"
     assert _daten(dialog, "block_adresse").visible is False
-    # Der Entwurf bleibt liegen, bis der Dialog endet (26.11.2026): Entsteht die Seite ein
-    # zweites Mal, geht der alte Dialog zu und ein neuer auf — mit demselben Stück
+    assert "Ton — liegt auf dem Gerät" in _texte(dialog)
+    # Der Entwurf bleibt liegen, bis der Block fertig ist (26.11.2026): Entsteht die Seite ein
+    # zweites Mal, steht er wieder offen — mit demselben Stück
     assert kapitel.id in state.block_entwurf
-    dialog.open = True
     ansicht = kapitel_bearbeiten(page, state, gespeichert, gespeichert.kapitel[0])
-    assert dialog.open is False and len(page.dialoge) == 2
-    dialog = page.dialoge[-1]
+    dialog = _editor(ansicht)
     assert _felder(dialog)["Titel"].value == "Atmung"
     assert _daten(dialog, "block_adresse").visible is False
     _daten(dialog, "block_uebernehmen").on_click()
-    assert state.block_entwurf == {} and state.block_dialog == {}
+    assert state.block_entwurf == {} and not _editor_offen(ansicht) and page.dialoge == []
     _speichern(ansicht)
     (block,) = state.kurse.laden(kurs.id).kapitel[0].bloecke
     m = block.medium
@@ -823,7 +845,7 @@ def test_medium_block_nimmt_auf_wie_der_plan_und_steht_danach_wieder_offen(page,
 
 def test_medium_block_aendern_kommt_von_der_aufnahme_an_seine_stelle_zurueck(page, state) -> None:
     """Ein Block, den es schon gibt: Das neue Stück ersetzt das alte an derselben Stelle, erst
-    mit „Übernehmen“ — „Abbrechen“ lässt den Block, wie er war. „Link …“ führt von der Datei
+    mit „Fertig“ — „Abbrechen“ lässt den Block, wie er war. „Link …“ führt von der Datei
     zurück zur Adresse."""
     import asyncio
 
@@ -853,8 +875,7 @@ def test_medium_block_aendern_kommt_von_der_aufnahme_an_seine_stelle_zurueck(pag
 
     ansicht = kapitel_bearbeiten(page, state, kurs, kapitel)
     _daten(ansicht, ("block", "m")).on_click()
-    dialog = page.dialoge[-1]
-    dialog.open = True
+    dialog = _editor(ansicht)
     _weg(dialog, "ton").on_click(None)
     assert page.route != route
 
@@ -865,12 +886,17 @@ def test_medium_block_aendern_kommt_von_der_aufnahme_an_seine_stelle_zurueck(pag
     page.dialoge.clear()
     kurs = state.kurse.laden(kurs.id)
     ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
-    (dialog,) = page.dialoge
+    dialog = _editor(ansicht)
+    # die Karte steht an der Stelle des Blocks, nicht am Ende
+    liste = next(x for x in _alle(ansicht) if dialog in (getattr(x, "controls", None) or []))
+    assert liste.controls.index(dialog) == 1 and len(liste.controls) == 2
     assert _felder(dialog)["Titel"].value == "Alt"  # der Titel, der schon dastand, bleibt
     # „Link …“ führt zurück zur Adresse
     _weg(dialog, "link").on_click(None)
     assert _daten(dialog, "block_adresse").visible is True
-    # ohne „Übernehmen“ bleibt der Block, wie er war
+    # „Abbrechen“ lässt den Block, wie er war
+    _daten(dialog, "block_abbrechen").on_click()
+    assert state.block_entwurf == {}
     _speichern(ansicht)
     bloecke = state.kurse.laden(kurs.id).kapitel[0].bloecke
     assert [b.id for b in bloecke] == ["t", "m"] and bloecke[1].medium.uri == "https://x.org/alt"
@@ -880,15 +906,14 @@ def test_medium_block_aendern_kommt_von_der_aufnahme_an_seine_stelle_zurueck(pag
     kurs = state.kurse.laden(kurs.id)
     ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
     _daten(ansicht, ("block", "m")).on_click()
-    dialog = page.dialoge[-1]
-    dialog.open = True
+    dialog = _editor(ansicht)
     _weg(dialog, "ton").on_click(None)
     paketdatei.anhaengen(state, ziel, paketdatei.medium_mit(datei, "Aufnahme"))
     page.route = route
     page.dialoge.clear()
     kurs = state.kurse.laden(kurs.id)
     ansicht = kapitel_bearbeiten(page, state, kurs, kurs.kapitel[0])
-    _daten(page.dialoge[-1], "block_uebernehmen").on_click()
+    _daten(_editor(ansicht), "block_uebernehmen").on_click()
     _speichern(ansicht)
     bloecke = state.kurse.laden(kurs.id).kapitel[0].bloecke
     assert [b.id for b in bloecke] == ["t", "m"]

@@ -421,13 +421,27 @@ def block_mit_stueck(block: Block, neues: Media | None) -> Block:
     )
 
 
+def datei_satz(medium: Media | None) -> str:
+    """Die Zeile unter dem Titel, wenn das Stück eine Datei ist: was für eine.
+
+    >>> datei_satz(Media(uri="medien/" + "a" * 64 + ".mp4", kind="video"))
+    'Video — liegt auf dem Gerät'
+    >>> datei_satz(None)
+    'Datei'
+    """
+    art = {"image": "Foto", "video": "Video", "audio": "Ton", "pdf": "PDF"}.get(
+        str(getattr(medium, "kind", "") or ""), "Datei"
+    )
+    return f"{art} — liegt auf dem Gerät" if medium is not None else art
+
+
 def block_fehler(block: Block) -> str | None:
     """Was einem Block zum Speichern fehlt — ``None`` = vollständig."""
     if block.art == MEDIUM and (
         block.medium is None
         or not (ist_paketmedium(block.medium) or links.erlaubt(block.medium.uri))
     ):
-        return "Ein Medium braucht eine https-Adresse oder eine Datei."
+        return "Wähle ein Medium: einen Link mit https-Adresse, eine Aufnahme oder eine Datei."
     if block.art == FRAGE and (not block.titel or not (block.antworten or block.frage)):
         return "Eine Frage braucht einen Text und mindestens eine Antwort."
     if block.art == TEST and not block.uebung and not block.aus:
@@ -1316,6 +1330,9 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
     plan_spalte = ft.Column(spacing=6)
     bedingung_spalte = ft.Column(spacing=8, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
     fehler = ft.Text("", size=13, color=ft.Colors.ERROR, visible=False)
+    #: Der Block, der gerade an Ort und Stelle offen ist (`block_editor`) — leer: keiner.
+    #: ``stelle`` (der Block der Liste, ``None`` = neu), ``karte``, ``uebernehmen``, ``geaendert``
+    offen: dict[str, Any] = {}
     #: die Karte „So wächst der Plan“ (`components/kursplan_bild.py`) — nur mit Kursplan
     bild_spalte = ft.Column(
         spacing=0, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH
@@ -1364,23 +1381,33 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
 
     # -- Blöcke ---------------------------------------------------------------------------
 
-    def block_dialog(
-        block: Block, neu: bool, *, stelle: Block | None = None, wartend: bool = False
+    def editor_fertig() -> bool:
+        """Übernimmt den Block, der gerade offen ist — ``False``, wenn ihm etwas fehlt (er
+        bleibt dann offen und sagt, was)."""
+        return not offen or offen["uebernehmen"]() is None
+
+    def block_editor(
+        block: Block,
+        neu: bool,
+        *,
+        stelle: Block | None = None,
+        fokus: bool = False,
+        zeichnen: bool = True,
     ) -> None:
-        """Die Felder zur Art des Blocks; „Übernehmen“ schreibt in die Liste des Formulars.
-        ``stelle``: der Block der Liste, den „Übernehmen“ ersetzt, wenn ``block`` ein Entwurf
-        von ihm ist (zurück von Kamera, Rekorder oder Fotoauswahl). ``wartend``: Der Block
-        liegt als Entwurf bereit (`block_fortsetzen`) — er bleibt liegen, bis dieser Dialog
-        mit „Übernehmen“ oder „Abbrechen“ endet."""
-        #: ``an``: Der Dialog geht zu, ohne dass der Block fertig ist — für eine Aufnahme oder
-        #: weil die Seite neu entsteht. Der Entwurf bleibt dann liegen
-        gehalten = {"an": False}
+        """Der Block **an Ort und Stelle** (Ben, 27.11.2026: „nicht mehr über Popups, sondern
+        direkt in der View“): Seine Zeile in der Liste wird zur Karte mit den Feldern seiner
+        Art, ein neuer steht am Ende der Liste. „Fertig“ schreibt in die Liste des Formulars,
+        „Abbrechen“ lässt sie, wie sie war; offen ist immer nur einer — ein Tipp auf eine
+        andere Zeile übernimmt ihn vorher. ``stelle``: der Block der Liste, den „Fertig“
+        ersetzt, wenn ``block`` ein Entwurf von ihm ist (zurück von Kamera, Rekorder oder
+        Fotoauswahl). ``fokus``: die Schreibmarke ins erste Feld. ``zeichnen``: die Listen
+        gleich neu — beim Aufbau der Seite zeichnet sie der Aufrufer."""
+        if not editor_fertig():
+            return
 
         def entwurf_fertig() -> None:
-            """Der wartende Entwurf ist verbraucht: übernommen oder verworfen."""
-            if wartend and not gehalten["an"]:
-                state.block_entwurf.pop(kapitel.id, None)
-                state.block_dialog.pop(kapitel.id, None)
+            """Ein wartender Entwurf ist verbraucht: übernommen oder verworfen."""
+            state.block_entwurf.pop(kapitel.id, None)
 
         kopf = ft.TextField(
             label={TEXT: "Überschrift", FRAGE: "Frage", MEDIUM: "Titel"}.get(
@@ -1398,7 +1425,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             ),
             value=block.text,
             multiline=True,
-            min_lines=4 if block.art == TEXT else 1,
+            min_lines=6 if block.art == TEXT else 1,
             data="block_text",
         )
         # Das Stück des Blocks — ein Link (Adresse), eine Datei, eine Aufnahme oder ein Stück,
@@ -1410,15 +1437,18 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         def ist_datei() -> bool:
             return stueck["m"] is not None and ist_paketmedium(stueck["m"])
 
+        # Die Adresse steht nur da, wenn das Stück ein Link ist (Ben, 27.11.2026: „Medien in
+        # den Kapiteln haben standardmäßig einen Link. Warum?“) — ein neuer Block zeigt nur
+        # das Menü; „Link“ darin öffnet das Feld
         adresse = ft.TextField(
             label="Adresse (https://…)",
             value=block.medium.uri if block.medium and not ist_datei() else "",
             keyboard_type=ft.KeyboardType.URL,
-            visible=not ist_datei(),
+            visible=block.medium is not None and not ist_datei(),
             data="block_adresse",
         )
         datei_text = ft.Text(
-            "Datei aus dem Paket",
+            datei_satz(block.medium),
             size=12,
             opacity=0.7,
             visible=ist_datei(),
@@ -1443,6 +1473,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 beschriftung.value = m.text
             adresse.value = "" if ist_datei() else m.uri
             adresse.visible, datei_text.visible = not ist_datei(), ist_datei()
+            datei_text.value = datei_satz(m)
             for c in (kopf, beschriftung, adresse, datei_text):
                 with contextlib.suppress(Exception):
                     c.update()
@@ -1474,15 +1505,16 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         async def block_aufnehmen(art: str | None) -> None:
             """Zur Kamera, zum Rekorder (``art``) oder in die Fotoauswahl (``None``), wie am
             Plan (Ben, 23.11.2026: „In Kurse sollen die gleichen Medientypen wie in Pläne
-            bereitgestellt werden können“). Der Dialog überlebt den Wechsel nicht — darum
-            speichert das Kapitel erst (wie „Im Plan einstellen“ vor der Kamera am Weg), der
-            Block wartet als Entwurf (`AppState.block_entwurf`), und das Formular öffnet ihn
-            beim Zurückkommen wieder, mit dem neuen Stück (`block_fortsetzen`)."""
+            bereitgestellt werden können“). Die Seite entsteht beim Zurückkommen neu — darum
+            speichert das Kapitel erst (wie „Im Plan einstellen“ vor der Kamera am Weg; der
+            offene Block bleibt dabei draußen), der Block wartet als Entwurf
+            (`AppState.block_entwurf`), und das Formular zeigt ihn beim Zurückkommen wieder
+            offen, mit dem neuen Stück (`block_fortsetzen`)."""
             from trainingsapp.core.anhaenge import Ziel
             from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
             from trainingsapp.ui.views.anhang_hochladen import hochladen_route
 
-            grund = speichern()
+            grund = speichern(mit_editor=False)
             if grund is not None:
                 meldung.value = f"Vor der Aufnahme speichert das Kapitel — {grund}"
                 meldung.visible = True
@@ -1491,8 +1523,6 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 return
             state.block_entwurf[kapitel.id] = (entwurf(), neu)
             ziel = Ziel.fuer_ablage(block_schluessel(kapitel.id))
-            gehalten["an"] = True  # der Entwurf wartet weiter — auch über dieses Schließen
-            schliessen(dialog)
             await page.push_route(
                 hochladen_route(route, ziel) if art is None else aufnahme_route(route, ziel, art)
             )
@@ -1510,7 +1540,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 fotoauswahl=block_fotoauswahl,
                 vorhandenes=stueck_setzen,
             ),
-            text="Medium wählen",
+            text="Medium wählen" if block.medium is None else "Anderes Medium wählen",
             tooltip="Link, Foto, Video, Ton oder Datei — oder eines, das es schon gibt",
             vorhandene=lambda: medium_dazu.vorrat_von(state),
             kennung="block_medium_dazu",
@@ -1656,7 +1686,10 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             }
 
             def zur_folge(ziel: Block) -> Callable[..., None]:
-                return lambda _e=None: uebernehmen(danach=lambda _fertig: oeffnen(ziel)())
+                def handler(_e: Any = None) -> None:
+                    uebernehmen(danach=lambda _fertig: oeffnen(ziel)())
+
+                return handler
 
             zeilen: list[FolgeZeile] = []
             for was, b in sicht().folgen_der_frage(name):
@@ -1910,7 +1943,6 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         wahl_reihe = ft.Row(wrap=True, spacing=6, run_spacing=6)
         dazu = uebung_wahl("", "Übung zur Auswahl hinzufügen")
         meldung = ft.Text("", size=12, color=ft.Colors.ERROR, visible=False)
-        dialog: ft.AlertDialog
         inhalt: ft.Column
 
         def gemessen() -> list[str]:
@@ -2443,11 +2475,15 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             kopf.on_blur = vorschau_neu  # die Aufforderung ist die Überschrift der Testkarte
             test_zeichnen()
 
-        nach_dem_block = Nachher()
+        #: der Block der Liste, an dessen Stelle die Karte steht — ``None`` bei einem neuen
+        am_platz = None if neu else (stelle if stelle is not None else block)
 
-        def uebernehmen(_e: Any = None, *, danach: Callable[[Block], Any] | None = None) -> None:
-            """„Übernehmen“. ``danach``: läuft mit dem übernommenen Block, sobald der Dialog
-            zu ist („+ Folge“ öffnet dann die Wahl, was folgen soll)."""
+        def uebernehmen(
+            _e: Any = None, *, danach: Callable[[Block], Any] | None = None
+        ) -> str | None:
+            """„Fertig“ — was dem Block fehlt, oder ``None``: Er steht in der Liste, die Karte
+            ist wieder eine Zeile. ``danach``: läuft dann mit dem übernommenen Block („+ Folge“
+            öffnet die Wahl, was folgen soll)."""
             neuer = entwurf()
             grund = block_fehler(neuer) or next(iter(lesefehler.values()), None)
             grund = grund or wenn_fehler(neuer.wenn)
@@ -2458,16 +2494,17 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                 meldung.visible = True
                 with contextlib.suppress(Exception):
                     meldung.update()
-                return
-            if neu:
+                return grund
+            if am_platz is None:
                 bloecke.append(neuer)
-            else:
-                bloecke[bloecke.index(stelle if stelle is not None else block)] = neuer
-            if danach is not None:
-                nach_dem_block.danach(lambda: danach(neuer))
+            elif am_platz in bloecke:  # sonst ist er inzwischen gelöscht — dann bleibt er weg
+                bloecke[bloecke.index(am_platz)] = neuer
             entwurf_fertig()
-            schliessen(dialog)
+            offen.clear()
             listen_frisch()
+            if danach is not None:
+                danach(neuer)
+            return None
 
         def folge_von(frage_id: str = "") -> None:
             """„+ Folge“ an einer Frage: Der Block wird übernommen, dann fragt ein Dialog, was
@@ -2503,11 +2540,12 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         )
         felder: dict[str, list[ft.Control]] = {
             TEXT: [kopf, text, wenn_feld],
+            # erst das Stück, dann sein Titel — er kommt vom Stück, wenn er leer ist
             MEDIUM: [
-                kopf,
+                ft.Row(controls=[medium_wege]),
                 adresse,
                 ft.Row(controls=[datei_text]),
-                medium_wege,
+                kopf,
                 beschriftung,
                 wenn_feld,
             ],
@@ -2594,40 +2632,67 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
 
         def abbrechen(_e: Any = None) -> None:
             entwurf_fertig()
-            schliessen(dialog)
+            offen.clear()
+            listen_frisch()
 
-        async def dialog_zu(e: Any = None) -> None:
-            entwurf_fertig()  # daneben getippt: wie „Abbrechen“
-            await nach_dem_block.bei_schliessen(e)
+        def geaendert() -> bool:
+            return neu or stelle is not None or entwurf().to_dict() != block.to_dict()
 
         inhalt = ft.Column(
             tight=True,
             spacing=10,
-            scroll=ft.ScrollMode.AUTO,
-            # im breiteren Dialog des Tests füllen die Textfelder die Breite (sonst 300 px)
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH
-            if block.art == TEST
-            else ft.CrossAxisAlignment.START,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             controls=[*felder.get(block.art, []), meldung],
         )
-        dialog = ft.AlertDialog(
-            title=ft.Text(art_name(block)),
-            content=inhalt,
-            # Der Test braucht die Breite: Die vier Knöpfe der Vorgabe passten bei 412 px sonst
-            # um 3 px nicht in eine Zeile (Web-Foto, 16.11.2026) — sein Dialog rückt darum
-            # näher an den Rand (Vorgabe des Dialogs: 40 je Seite)
-            inset_padding=ft.Padding.symmetric(horizontal=24, vertical=24)
-            if block.art == TEST
-            else None,
-            on_dismiss=dialog_zu,
-            actions=[
-                ft.TextButton("Abbrechen", on_click=abbrechen, data="block_abbrechen"),
-                ft.FilledButton("Übernehmen", on_click=uebernehmen, data="block_uebernehmen"),
-            ],
+        # Die Karte in der Liste: oben, was es ist, unten die zwei Knöpfe — „Speichern“ in der
+        # Titelleiste übernimmt einen offenen Block mit
+        karte_ = ft.Container(
+            data="block_editor",
+            border_radius=12,
+            border=ft.Border.all(2, ft.Colors.PRIMARY),
+            padding=ft.Padding.only(left=12, right=12, top=10, bottom=6),
+            content=ft.Column(
+                spacing=10,
+                tight=True,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                controls=[
+                    ft.Row(
+                        spacing=10,
+                        controls=[
+                            ft.Icon(
+                                ART_SYMBOL.get(block.art, ft.Icons.NOTES),
+                                size=22,
+                                color=ft.Colors.PRIMARY,
+                            ),
+                            ft.Text(
+                                art_name(block) + (" — neu" if neu else ""),
+                                size=14,
+                                weight=ft.FontWeight.W_600,
+                                color=ft.Colors.PRIMARY,
+                                expand=True,
+                            ),
+                        ],
+                    ),
+                    inhalt,
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.END,
+                        spacing=8,
+                        controls=[
+                            ft.TextButton("Abbrechen", on_click=abbrechen, data="block_abbrechen"),
+                            ft.FilledButton(
+                                "Fertig", on_click=uebernehmen, data="block_uebernehmen"
+                            ),
+                        ],
+                    ),
+                ],
+            ),
         )
-        if wartend:
-            state.block_dialog[kapitel.id] = (dialog, gehalten)
-        page.show_dialog(dialog)
+        offen.update(stelle=am_platz, karte=karte_, uebernehmen=uebernehmen, geaendert=geaendert)
+        if zeichnen:
+            listen_frisch()
+        if fokus and zeichnen:
+            with contextlib.suppress(Exception):
+                page.run_task(kopf.focus)
 
     def block_schieben(block: Block, um: int) -> Callable[..., None]:
         """Innerhalb seines Abschnitts („Im Kapitel“ bzw. „Am Plan“) nach oben oder unten."""
@@ -2695,7 +2760,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             if block.baustein:
                 baustein_oeffnen(block, neu=False)
             else:
-                block_dialog(block, neu=False)
+                block_editor(block, neu=False)
 
         return handler
 
@@ -2749,9 +2814,10 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             return ft.IconButton(
                 icon,
                 icon_size=20,
-                icon_color=farbe,
+                icon_color=None if aus or offen else farbe,  # gesperrt sieht gesperrt aus
                 tooltip=tooltip,
-                disabled=aus,
+                # solange ein Block offen ist, bleibt die Liste, wie sie ist
+                disabled=aus or bool(offen),
                 on_click=handler,
                 padding=4,
                 visual_density=ft.VisualDensity.COMPACT,
@@ -2787,7 +2853,13 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
 
     def bloecke_zeichnen() -> None:
         gruppe = [b for b in bloecke if not b.baustein]
-        block_spalte.controls = [zeile(b, n, len(gruppe) - 1) for n, b in enumerate(gruppe)] or [
+        zeilen: list[ft.Control] = [
+            offen["karte"] if offen and offen["stelle"] is b else zeile(b, n, len(gruppe) - 1)
+            for n, b in enumerate(gruppe)
+        ]
+        if offen and offen["stelle"] is None:  # ein neuer Block: am Ende der Liste
+            zeilen.append(offen["karte"])
+        block_spalte.controls = zeilen or [
             hinweis("Noch kein Block — das Kapitel zeigt nur seinen Titel.")
         ]
 
@@ -2812,7 +2884,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
     def block_neu(art: str) -> Callable[..., None]:
         def handler(_e: Any = None) -> None:
             dazu_zeigen("")
-            block_dialog(Block(art), neu=True)
+            block_editor(Block(art), neu=True, fokus=art != MEDIUM)
 
         return handler
 
@@ -2833,7 +2905,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                         stein.wenn = [Wenn(name)]
                         baustein_oeffnen(stein, neu=True)
                     else:
-                        block_dialog(Block(art, wenn=[Wenn(name)]), neu=True)
+                        block_editor(Block(art, wenn=[Wenn(name)]), neu=True)
 
                 nachher.danach(oeffnen)
                 schliessen(dialog)
@@ -2887,6 +2959,9 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         return marken
 
     def baustein_oeffnen(block: Block, neu: bool) -> None:
+        if not editor_fertig():  # ein offener Block wird vorher übernommen
+            return
+
         def uebernehmen(fertig: Block) -> None:
             stelle = next((n for n, b in enumerate(bloecke) if b.id == block.id), None)
             if stelle is None:
@@ -3330,7 +3405,12 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
 
     ausgang = {"stand": stand()}
 
-    def speichern() -> str | None:
+    def speichern(*, mit_editor: bool = True) -> str | None:
+        """Schreibt das Kapitel — was fehlt, oder ``None``. Ein Block, der gerade offen ist,
+        wird vorher übernommen (``mit_editor``; vor einer Aufnahme nicht: Er wartet dann als
+        Entwurf, `block_aufnehmen`)."""
+        if mit_editor and offen and (fehlt := offen["uebernehmen"]()) is not None:
+            return str(fehlt)
         name = " ".join((titel_feld.value or "").split())
         b = bedingung_lesen()
         grund: str | None = None
@@ -3372,6 +3452,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         return None
 
     async def zurueck(_e: Any = None) -> None:
+        state.block_entwurf.pop(kapitel.id, None)  # „Abbrechen“ verwirft auch den Entwurf
         await page.push_route(f"/kurse/{kurs.id}/bearbeiten")
 
     async def speichern_und_gehen(_e: Any = None) -> None:
@@ -3380,18 +3461,16 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
             await zurueck()
 
     def block_fortsetzen() -> None:
-        """Zurück von Kamera, Rekorder oder Fotoauswahl: Der Block, dessen Dialog dafür zuging,
-        steht wieder offen — mit dem neuen Stück, wenn eines entstand (`block_aufnehmen`).
-        Nur wenn diese Seite oben liegt: Unter der Kamera entsteht sie auch, dort bliebe der
-        Dialog ungesehen.
+        """Zurück von Kamera, Rekorder oder Fotoauswahl: Der Block, der dafür wartete, steht
+        wieder offen in der Liste — mit dem neuen Stück, wenn eines entstand
+        (`block_aufnehmen`). Nur wenn diese Seite oben liegt: Unter der Kamera entsteht sie
+        auch, dort bliebe der Entwurf liegen.
 
-        **Der Entwurf bleibt liegen, bis sein Dialog mit „Übernehmen“ oder „Abbrechen“ endet**
-        (26.11.2026) — entsteht die Seite ein zweites Mal, während er offen ist, geht der alte
-        Dialog zu und ein neuer auf, der in die Liste **dieser** Seite schreibt. Vorher war
-        der Entwurf mit dem ersten Aufbau verbraucht; ein zweiter Aufbau ließ den Dialog an
-        einer Seite hängen, die es nicht mehr gab. Anlass: Ben meldete, am Pixel 10 kämen
-        Bilder und Videos nicht am Kurs an — ob das die Ursache war, ist am Gerät nicht
-        nachgestellt (im Browser blieb der Dialog einmal aus, wiederholen ließ es sich nicht)."""
+        **Kein Dialog mehr** (Ben, 27.11.2026: „das Speichern von Photos/Videos in den Kursen
+        klappt immer noch nicht“): Bis dahin ging hier beim Aufbau der Seite ein Dialog auf —
+        über der Meldung „Fürs Paket gespeichert“ und bevor die Seite stand; das ist der
+        Geister-Dialog, den CLAUDE.md nennt. Jetzt ist der Block eine Karte der Seite selbst;
+        entsteht sie noch einmal, steht er wieder da, bis „Fertig“ oder „Abbrechen“."""
         if str(getattr(page, "route", route) or route).rstrip("/") != route:
             return
         wartet = state.block_entwurf.get(kapitel.id)
@@ -3402,22 +3481,18 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
         if neues is not None:
             entwurf_block = block_mit_stueck(entwurf_block, neues)
             state.block_entwurf[kapitel.id] = (entwurf_block, war_neu)
-        alt = state.block_dialog.pop(kapitel.id, None)
-        if alt is not None:  # der Dialog eines früheren Aufbaus dieser Seite
-            alt[1]["an"] = True
-            schliessen(alt[0])
         stelle = None if war_neu else next((b for b in bloecke if b.id == entwurf_block.id), None)
         if not war_neu and stelle is None:
             state.block_entwurf.pop(kapitel.id, None)
             return  # den Block gibt es nicht mehr
-        block_dialog(entwurf_block, war_neu, stelle=stelle, wartend=True)
+        block_editor(entwurf_block, war_neu, stelle=stelle, zeichnen=False)
 
+    block_fortsetzen()
     bloecke_zeichnen()
     bausteine_zeichnen()
     bild_zeichnen()
     plaene_zeichnen()
     bedingung_zeichnen()
-    block_fortsetzen()
     ansicht = ft.View(
         route=route,
         appbar=formular_leiste(
@@ -3435,37 +3510,40 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
                         fehler,
                         titel("Im Kapitel — was man liest und tut"),
                         block_spalte,
-                        titel("Am Plan — was sich ändert"),
-                        baustein_spalte,
+                        # Jeder Knopf steht unter seiner Liste (27.11.2026): Ein neuer Block
+                        # geht dort auf, wo man getippt hat
                         ft.Row(
-                            spacing=8,
                             controls=[
                                 ft.OutlinedButton(
                                     "Im Kapitel",
                                     icon=ft.Icons.ADD,
-                                    expand=True,
                                     on_click=lambda: dazu_zeigen("lesen"),
                                     data="block_dazu",
-                                ),
-                                # „+ Am Plan“ nur, wenn der Kurs einen Plan baut — sonst steht
-                                # im Abschnitt darüber der Weg dorthin (`KEIN_KURSPLAN`)
-                                *(
-                                    [
+                                )
+                            ]
+                        ),
+                        dazu_lesen,
+                        titel("Am Plan — was sich ändert"),
+                        baustein_spalte,
+                        # „+ Am Plan“ nur, wenn der Kurs einen Plan baut — sonst steht im
+                        # Abschnitt darüber der Weg dorthin (`KEIN_KURSPLAN`)
+                        *(
+                            [
+                                ft.Row(
+                                    controls=[
                                         ft.OutlinedButton(
                                             "Am Plan",
                                             icon=ft.Icons.ADD,
-                                            expand=True,
                                             on_click=lambda: dazu_zeigen("plan"),
                                             data="baustein_dazu",
                                         )
                                     ]
-                                    if baut_plan
-                                    else []
                                 ),
-                            ],
+                                dazu_plan,
+                            ]
+                            if baut_plan
+                            else []
                         ),
-                        dazu_lesen,
-                        *([dazu_plan] if baut_plan else []),
                         bild_spalte,
                         karte(
                             titel("Pläne dieses Kapitels"),
@@ -3498,7 +3576,7 @@ def kapitel_bearbeiten(page: Any, state: Any, kurs: Kurs, kapitel: Kapitel) -> f
     return zurueck_speichert(
         page,
         ansicht,
-        geaendert=lambda: stand() != ausgang["stand"],
+        geaendert=lambda: stand() != ausgang["stand"] or bool(offen and offen["geaendert"]()),
         speichern=speichern,
         danach=zurueck,
     )

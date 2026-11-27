@@ -175,6 +175,12 @@ def _felder(dialog) -> dict[str, object]:
     }
 
 
+def _editor(ansicht):
+    """Der Block, der im Kapitel gerade an Ort und Stelle offen ist (seit 27.11.2026 kein
+    Dialog mehr)."""
+    return _d(ansicht, "block_editor")
+
+
 def _speichern(ansicht) -> None:
     import asyncio
 
@@ -205,21 +211,20 @@ def test_editor_frage_mit_folge_und_uebung_machen(page, state) -> None:
 
     # Eine Frage in der Art „Auswahl“ — dann „+ Folge“
     _d(ansicht, ("block_neu", FRAGE)).on_click()
-    dialog = page.dialoge[-1]
+    dialog = _editor(ansicht)
     _felder(dialog)["Frage"].value = "Wie war das?"
     art = _d(dialog, ("block_frage", "art"))
     art.value = "auswahl"
     art.on_select()
     _d(dialog, ("block_frage", "antworten")).value = "leicht\nschwer"
-    _d(dialog, "block_frage_folge").on_click()
-    asyncio.run(dialog.on_dismiss())  # der Dialog ist zu — „Was soll folgen?“ geht auf
+    _d(dialog, "block_frage_folge").on_click()  # die Frage ist übernommen — die Wahl geht auf
     wahl = page.dialoge[-1]
     assert wahl.title.value == "Was soll folgen?"
     arten = [x.data[1] for x in _alle_dialog(wahl) if isinstance(x, ft.ListTile)]
     assert arten[:2] == ["text", "medium"] and "plan_tauschen" in arten  # mit Kursplan
     _d(wahl, ("folge_neu", TEXT)).on_click()
     asyncio.run(wahl.on_dismiss())
-    folge = page.dialoge[-1]
+    folge = _editor(ansicht)
     _felder(folge)["Text (Markdown)"].value = "Dann geht es weiter."
     # „Nur wenn“ nennt die Frage schon — die Antwort fehlt noch
     _d(folge, "block_uebernehmen").on_click()
@@ -233,7 +238,7 @@ def test_editor_frage_mit_folge_und_uebung_machen(page, state) -> None:
 
     # Übung machen: Sensor, Medium nachher, eine Frage am Lauf mit festem Ziel
     _d(ansicht, ("block_neu", TEST)).on_click()
-    dialog = page.dialoge[-1]
+    dialog = _editor(ansicht)
     felder = _felder(dialog)
     felder["Übung"].value = planke.id
     felder["Übung"].on_select()
@@ -350,9 +355,7 @@ def test_kurs_ohne_plan_laeuft(page, state) -> None:
 
 def test_editor_zeigt_folgen_an_der_frage(page, state) -> None:
     """Skizze A3: Die Kapitelliste nennt an jedem Block seine Bedingung und am Lauf die Zahl
-    der Folgen; im Dialog stehen sie unter der Frage, der Tipp öffnet die Folge."""
-    import asyncio
-
+    der Folgen; im offenen Block stehen sie unter der Frage, der Tipp öffnet die Folge."""
     from trainingsapp.ui.views.kurs_bearbeiten import kapitel_bearbeiten
 
     kurs, _ = _lauf_kurs(state)
@@ -365,7 +368,7 @@ def test_editor_zeigt_folgen_an_der_frage(page, state) -> None:
     assert _d(ansicht, ("block_wenn_zeile", "uebung-1")).value.endswith("= leicht")
 
     _d(ansicht, ("block", "lauf")).on_click()
-    dialog = page.dialoge[-1]
+    dialog = _editor(ansicht)
     zeilen = [
         x
         for x in _alle_dialog(dialog)
@@ -381,8 +384,14 @@ def test_editor_zeigt_folgen_an_der_frage(page, state) -> None:
         str(t.value) for t in _alle_dialog(_d(dialog, "test_wirkung")) if isinstance(t, ft.Text)
     )
     zeilen[0].on_click()  # übernimmt den Lauf und öffnet danach die Folge
-    asyncio.run(dialog.on_dismiss())
-    assert _felder(page.dialoge[-1])["Text (Markdown)"].value == "Weiter so."
+    assert _felder(_editor(ansicht))["Text (Markdown)"].value == "Weiter so."
+    # ein Tipp auf eine andere Zeile übernimmt den offenen Block und öffnet den nächsten
+    _felder(_editor(ansicht))["Text (Markdown)"].value = "Sehr gut."
+    _d(ansicht, ("block", "hilfe")).on_click()
+    assert _felder(_editor(ansicht))["Titel"].value == "Leichter"
+    assert page.dialoge == []
+    _speichern(ansicht)
+    assert state.kurse.laden(kurs.id).kapitel[0].bloecke[1].text == "Sehr gut."
 
 
 def test_editor_speichert_lauf_ohne_plan(page, state) -> None:
@@ -401,7 +410,7 @@ def test_editor_speichert_lauf_ohne_plan(page, state) -> None:
     _d(ansicht, ("block", "lauf")).on_click()
     wirkung = " ".join(
         str(t.value)
-        for t in _alle_dialog(_d(page.dialoge[-1], "test_wirkung"))
+        for t in _alle_dialog(_d(_editor(ansicht), "test_wirkung"))
         if isinstance(t, ft.Text)
     )
     assert "Dieses Kapitel hat keinen Plan — der Lauf ist freiwillig" in wirkung
@@ -432,23 +441,22 @@ def test_foto_am_lauf_kommt_zu_den_medien(page, state) -> None:
         # die Liste nennt im Kapitel ohne Plan kein Ziel
         assert "wird Ziel im Plan" not in " ".join(_texte(ansicht))
         _d(ansicht, ("block", "lauf")).on_click()
-        dialog = page.dialoge[-1]
-        dialog.open = True
+        dialog = _editor(ansicht)
         wege = {i.data[1]: i for i in _d(dialog, "lauf_medium_dazu").items}
     finally:
         anhang_aufnahme.kamera_moeglich = alt_kamera
     assert {"foto", "video", "datei", "ton", "vorhandenes"} <= set(wege)
     wege["foto"].on_click(None)
     ziel = Ziel.fuer_ablage(block_schluessel(kapitel.id))
-    assert page.route == aufnahme_route(route, ziel, BILD) and dialog.open is False
+    assert page.route == aufnahme_route(route, ziel, BILD)
 
     datei = "medien/" + "b" * 64 + ".jpg"
     assert paketdatei.anhaengen(state, ziel, paketdatei.medium_mit(datei, "Von der Seite"))
     page.route = route
-    page.dialoge.clear()
     neu = state.kurse.laden(kurs.id)
     ansicht = kapitel_bearbeiten(page, state, neu, neu.kapitel[0])
-    (dialog,) = page.dialoge
+    assert page.dialoge == []  # kein Dialog beim Aufbau der Seite
+    dialog = _editor(ansicht)
     assert kapitel.id in state.block_entwurf
     _d(dialog, "block_uebernehmen").on_click()
     assert state.block_entwurf == {}

@@ -6,7 +6,9 @@ PDFs, usw.) (Unnützes weglassen) und nimm die Medien aus der App dort mit auf. 
 Videos sollen sich löschen lassen, bei Bedarf kann man wieder downloaden. Eigene Videos
 (Tagesnotizen und Co.) löschen mit Rückfrage.“
 
-**Stand: Plan, nichts gebaut.** Fragen an Ben in §5 (Katalog P230).
+**Stand: Plan, nichts gebaut.** Fragen an Ben in §5 (Katalog P230). **Nachgezogen am
+27.11.2026** auf den Stand nach Version 0.3.103 und dem Umbau des Kapitel-Editors
+(`plan_kurs_uebungen.md` §14.6, §15) — §1.1; die Fragen in §5 sind weiter offen.
 
 Gesucht im Katalog: `medien`, `speicher`, `herunterlad`, `download`, „anhänge verwalten“.
 Gelesen: P225, P227 (Entscheidungszeilen), `plan_medien_reiter.md` §1, `plan_medien_einheitlich.md`
@@ -53,6 +55,31 @@ Was für das Löschen zählt:
 - „Einstellungen → Anhänge“ steht als Text in acht Quelldateien (`anhang.py`, `verkleinern.py`,
   `anhang_aufnahme.py` …), die Route in `ui/app.py`, Tests in `test_ui_anhaenge.py`,
   `test_linkvideos.py`.
+
+### 1.1 Was sich seit dem 20.11. geändert hat (27.11.2026)
+
+Am Code nachgesehen: `data/paketmedien.py` (`_ABFRAGEN`), `ui/paketdatei.py`,
+`ui/views/kurs_bearbeiten.py` (`block_editor`, `block_aufnehmen`, `block_mit_stueck`).
+
+- **Kurse nehmen eigene Aufnahmen an zwei Stellen:** am Block „Medium“ (seit 23.11.) und als
+  **Medien am Lauf** eines Blocks „Übung machen“ (seit 26.11., `Block.medien`) — Kamera,
+  Rekorder, Fotoauswahl, Datei. Beides steht in `course_chapter.blocks_json`, das die Ablage
+  schon liest; für „wo genannt“ muss `nennungen()` darin **zwei Orte** unterscheiden
+  („Kurs Rumpf · Kapitel 2 · Medium“ und „… · Übung machen: Seitstütz“).
+- **Eigene Kurse haben keinen Paketstand** — ihre Dateien gelten nach §2.3 als „selbst
+  hinzugefügt“. Das Herausnehmen an allen Stellen (M3) braucht darum auch den Kursblock
+  „Medium“ (der Block fällt dann ganz weg — er hat ohne Stück keinen Inhalt; die Rückfrage
+  nennt das) und die Liste `medien` am Lauf (nur das Stück fällt weg).
+- **Ein neues Stück ist bis zum Speichern des Kapitels nur vorgemerkt**
+  (`Paketablage.entwurf_merken`, gilt bis zum Ende des Laufs der App). Die Seite „Medien“
+  zeigt es dann unter „Aufräumen“ als „nichts nennt es“ — der Abschnitt lässt Dateien dieses
+  Laufs darum aus (dieselbe Menge, die `aufraeumen` behält).
+- **Bearbeitet wird im Kapitel an Ort und Stelle** (§15 dort): „wo genannt“ führt bei einem
+  eigenen Kurs zu `/kurse/<id>/<kapitel>/bearbeiten`; den Block dort gleich zu öffnen ist ein
+  eigener Schritt (heute öffnet die Seite nur einen wartenden Entwurf).
+- **Private Pakete und Pakete per Link im Browser** (23.11.) ändern an der Ablage nichts; im
+  Browser liegt sie im Browserspeicher — die Seite „Medien“ gilt dort genauso, „Geladene
+  Videos“ gibt es dort nicht (**ungeprüft**, vor M1 im Web-Profil `config.WEB` nachsehen).
 
 ## 2. Vorschlag
 
@@ -113,7 +140,7 @@ Person sieht.
 |---|---|---|
 | **M1** | Umbenennen: Zeile, Titel, Route mit Umleitung, alle Verweistexte; Unnützes weg; Chips nach Art über die Anhänge; Gesamtgröße über alle Ablagen | `test_ui_anhaenge.py` → `test_ui_medien_einstellungen.py`, Route alt → neu |
 | **M2** | Abschnitt „In Übungen, Plänen und Kursen“ **zum Ansehen**: Liste, Herkunft, „wo genannt“, Öffnen; „Alle löschen“ bei geladenen Videos; Paketdateien ohne Nennung unter Aufräumen | `test_paketmedien.py` (`nennungen`, `aus_paket`), `core`-Doctests |
-| **M3** | Löschen nach §2.3: Paketdatei (Datei weg), eigene Datei (überall herausnehmen), Original | je Stelle ein Test: Übung, Planübung, Plan, Weg, Kursblock; Papierkorb-Übung; Paketstand bleibt unberührt |
+| **M3** | Löschen nach §2.3: Paketdatei (Datei weg), eigene Datei (überall herausnehmen), Original | je Stelle ein Test: Übung, Planübung, Plan, Weg, Kursblock „Medium“, Medium am Lauf; Papierkorb-Übung; Paketstand bleibt unberührt |
 | **M4** | Web-Foto der Seite in Handybreite (Skill `web-fotos`), Gerätetest in `docs/offene_fragen.md` Abschnitt 2 | — |
 
 Keine Migration, kein neues Paketformat, keine neue Netzverbindung.
@@ -138,3 +165,6 @@ c) **Symbole und Bilder der Bewegung mit aufnehmen?** Empfehlung: nein — klein
 d) **Ordnung:** Abschnitte nach Herkunft, Chips nach Art (wie oben) — oder umgekehrt Abschnitte
    Fotos · Videos · Audio · PDFs? Empfehlung: wie oben, weil die Löschregel an der Herkunft hängt.
 e) **„Anhang“ bleibt** das Wort an Eintrag und Notiz; nur die Seite heißt „Medien“. Recht so?
+f) (27.11.) **Eigene Datei löschen, die ein Kursblock „Medium“ zeigt:** Der Block fällt mit
+   weg. Empfehlung: ja, die Rückfrage nennt ihn; Folgen an Antworten, die nur ihn zeigten,
+   entfallen damit.

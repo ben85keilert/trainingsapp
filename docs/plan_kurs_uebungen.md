@@ -670,3 +670,52 @@ danach.
   „Medium“ und am Lauf. **Nicht am Foto:** Fotoauswahl und Dateiwahl (gibt es im Browser
   nicht), Video am Kurs, „Ausprobieren“ in ein früheres Kapitel — und nichts am Gerät (T156).
 - Probekurs zum Durchklicken: `trainingsapp-inhalte/pakete/privat/probe_kurs/`.
+
+## 15. Fünfte Runde (Ben, 27.11.2026) — Blöcke an Ort und Stelle, das gilt
+
+Ben: „neue Einträge in den Kapiteln der Kurse sollen nicht mehr über Popups laufen, sondern
+direkt in der View bearbeitet werden können“ · „Medien in den Kapiteln haben standardmäßig
+einen Link. Warum? Link ist doch genauso über Medium hinzufügen verfügbar“ · „das Speichern von
+Photos/Videos in den Kursen klappt immer noch nicht“.
+
+### 15.1 Der Block ist eine Karte in der Liste
+
+- Ein Tipp auf eine Zeile unter „Im Kapitel“ macht sie **an ihrer Stelle** zur Karte mit den
+  Feldern ihrer Art (Text, Medium, Frage, Übung machen, Auswahl); ein neuer Block steht am
+  Ende der Liste, direkt über dem Knopf „+ Im Kapitel“ (`kapitel_bearbeiten.block_editor`).
+  Die Knöpfe „+ Im Kapitel“ und „+ Am Plan“ stehen darum je unter ihrer Liste.
+- **„Fertig“** schreibt in die Liste des Formulars, **„Abbrechen“** lässt sie, wie sie war.
+  Gespeichert ist wie bisher erst mit „Speichern“ des Kapitels — das einen offenen Block
+  **mit übernimmt** (fehlt ihm etwas, sagt die Karte, was, und das Kapitel speichert nicht).
+- **Offen ist immer nur einer.** Ein Tipp auf eine andere Zeile, auf einen Baustein oder auf
+  „+“ übernimmt den offenen vorher; fehlt ihm etwas, bleibt er offen. Solange einer offen ist,
+  sind Verschieben und Entfernen der Zeilen gesperrt.
+- Kleine Blätter über der Karte bleiben: die Zeit der Vorgabe, Timer und Ausführung des Laufs,
+  „Was soll folgen?“, die Rückfrage beim Löschen. **Bausteine „Am Plan“ öffnen weiter ihr
+  Blatt** — nicht gefragt, nicht geändert.
+
+### 15.2 Medium ohne vorbelegten Link
+
+Ein neuer Block „Medium“ zeigt nur „Medium wählen“ (dasselbe Menü wie überall,
+`components/medium_dazu.py`), darunter Titel und Beschriftung. Das Feld für die Adresse
+erscheint erst mit „Link“ aus dem Menü — oder wenn der Block schon ein Link ist. Ist das
+Stück eine Datei, steht dort, was für eine („Foto — liegt auf dem Gerät“).
+
+### 15.3 Fotos und Videos am Kurs
+
+**Befund am Code, am Gerät nicht nachgestellt:** Zurück von Kamera, Rekorder oder Fotoauswahl
+öffnete das Formular den Block als **Dialog, während die Seite entstand** — über der Meldung
+„Fürs Paket gespeichert“. Das ist der Geister-Dialog, den CLAUDE.md für jede Ansicht
+verbietet; im Browser blieb er einmal aus (§14.6). Mit 15.1 gibt es den Dialog nicht mehr:
+Der wartende Block (`AppState.block_entwurf`) ist beim Zurückkommen eine Karte der Seite, mit
+dem neuen Stück; er bleibt liegen bis „Fertig“ oder „Abbrechen“ (auch „Abbrechen“ des
+Kapitels verwirft ihn). Das Kapitel speichert vor der Aufnahme wie bisher — ohne den offenen
+Block. Ob es am Pixel 10 damit geht, zeigt T157.
+
+### 15.4 Prüfung
+
+Tests: `tests/test_ui_kursbloecke.py` (Karte statt Dialog, kein Dialog beim Aufbau, Karte an
+der Stelle des Blocks, Medium ohne Adresse), `tests/test_ui_kurs_fragen.py` (Tipp auf eine
+andere Zeile übernimmt, Folge öffnet die nächste Karte), `tests/test_ui_kurs_bausteine.py`
+(Lauf an Ort und Stelle, Sperre der Zeilen). Web-Fotos bei 412 px: Text, Medium (neu und
+Link), Frage. **Nicht am Foto prüfbar:** Tastatur über der Karte, Kamera — T157.

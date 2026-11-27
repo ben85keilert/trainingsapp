@@ -151,7 +151,7 @@ from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.kursblock import feld_von
 from trainingsapp.ui.components.kursfrage import frage_karte
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.medienliste import medium_zeile
+from trainingsapp.ui.components.medienkarte import medienkarte
 from trainingsapp.ui.components.planwert import planwert_karte
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.timer_takt import TICK_S, ton_spielen
@@ -1040,7 +1040,7 @@ def kurs_test_view(
         return karte(titel(wie), spalte, abstand=8)
 
     def medien_karte(stelle: str, ueberschrift: str) -> list[ft.Control]:
-        """Die Medien des Laufs an einer Stelle (vorher · nachher) als Zeilen zum Öffnen —
+        """Die Medien des Laufs an einer Stelle (vorher · nachher) als Medienkarten —
         nie von selbst beim Aufbau der Ansicht (Geister-Dialog)."""
         stuecke = medien_an(block, stelle)
         if not stuecke:
@@ -1048,8 +1048,8 @@ def kurs_test_view(
         return [
             karte(
                 titel(ueberschrift),
-                *(medium_zeile(page, state, m) for m in stuecke),
-                abstand=4,
+                *(medienkarte(page, state, m, einzug=64) for m in stuecke),
+                abstand=12,
             )
         ]
 
@@ -1089,7 +1089,7 @@ def kurs_test_view(
         karten: list[ft.Control] = []
         for b, grund in folgen(antworten):
             if b.art == MEDIUM and b.medium is not None:
-                inhalt: list[ft.Control] = [medium_zeile(page, state, b.medium)]
+                inhalt: list[ft.Control] = [medienkarte(page, state, b.medium, einzug=64)]
             else:
                 inhalt = [
                     *([ft.Text(b.titel, size=15, weight=ft.FontWeight.W_600)] if b.titel else []),

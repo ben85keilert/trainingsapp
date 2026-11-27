@@ -247,6 +247,13 @@ class Media:
     #: oder zwei unter dem Titel — was zu sehen ist, worauf man achten soll. Gezeigt unter dem
     #: Stück; ältere Apps übergehen das Feld
     text: str = ""
+    #: Das **Titelbild** (Ben, 27.11.2026, `docs/plan_kurs_medien_ansicht.md` §3): leer =
+    #: automatisch (das Bild vom Hinzufügen, sonst die Titelkarte), ``"text"`` = nur die
+    #: Aufschrift auf einer Fläche, ``medien/<sha256>.jpg`` = ein Bild aus der Ablage der
+    #: Paketdateien (reist im Paket mit). Rechnung: `core/titelbild.py`
+    titelbild: str = ""
+    #: Die **Aufschrift** auf dem Titelbild — über das Bild gesetzt, nicht hineingerechnet
+    titelbild_text: str = ""
 
     @property
     def von_selbst(self) -> bool:
@@ -275,6 +282,10 @@ class Media:
             d["abschnitte"] = list(self.abschnitte)
         if self.text.strip():
             d["text"] = self.text.strip()
+        if self.titelbild:
+            d["titelbild"] = self.titelbild
+        if self.titelbild_text.strip():
+            d["titelbild_text"] = self.titelbild_text.strip()
         return d
 
     def zusatz(self) -> dict[str, Any]:
@@ -363,10 +374,16 @@ def zeit_zusatz_lesen(roh: Any) -> dict[str, Any]:
     >>> z = zeit_zusatz_lesen({"wann": "bei", "bei": {"art": "satz", "n": 2}, "oft": "immer"})
     >>> z["wann"], z["oft"], z["bei"].text(), z["abschnitte"]
     ('bei', 'immer', 'wenn Satz 2 beginnt', ())
-    >>> zeit_zusatz_lesen({"wann": "bei", "abschnitte": ["Ausführung", "", "Ausführung"]})
-    {'wann': '', 'oft': '', 'bei': None, 'abschnitte': ('Ausführung',), 'text': ''}
-    >>> zeit_zusatz_lesen({"wann": "morgen", "oft": "nie", "abschnitte": "Hinweise"})
-    {'wann': '', 'oft': '', 'bei': None, 'abschnitte': ('Hinweise',), 'text': ''}
+    >>> z = zeit_zusatz_lesen({"wann": "bei", "abschnitte": ["Ausführung", "", "Ausführung"]})
+    >>> z["wann"], z["bei"], z["abschnitte"], z["text"]
+    ('', None, ('Ausführung',), '')
+    >>> zeit_zusatz_lesen({"wann": "morgen", "oft": "nie", "abschnitte": "Hinweise"})["abschnitte"]
+    ('Hinweise',)
+    >>> z = zeit_zusatz_lesen({"titelbild": "text", "titelbild_text": " Seitstütz "})
+    >>> z["titelbild"], z["titelbild_text"]
+    ('text', 'Seitstütz')
+    >>> zeit_zusatz_lesen({"titelbild": "https://x.org/b.jpg"})["titelbild"]  # nie aus dem Netz
+    ''
     """
     hat = getattr(roh, "get", None)
     if hat is None:
@@ -384,12 +401,15 @@ def zeit_zusatz_lesen(roh: Any) -> dict[str, Any]:
         name = str(x).strip()
         if name and name not in namen:
             namen.append(name)
+    bild = str(hat("titelbild") or "").strip()
     return {
         "wann": wann,
         "oft": IMMER if str(hat("oft") or "") == IMMER else "",
         "bei": ereignis,
         "abschnitte": tuple(namen),
         "text": str(hat("text") or "").strip(),
+        "titelbild": bild if bild == "text" or bild.startswith("medien/") else "",
+        "titelbild_text": str(hat("titelbild_text") or "").strip(),
     }
 
 

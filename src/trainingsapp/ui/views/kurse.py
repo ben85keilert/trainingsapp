@@ -80,7 +80,7 @@ from trainingsapp.ui.components.kursplan_karte import KursplanKarte, kursplan_ka
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
 from trainingsapp.ui.components.linkvideo import alle_laden, videolinks
-from trainingsapp.ui.components.medienliste import medium_zeile
+from trainingsapp.ui.components.medienkarte import medienkarte
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.wartet import im_kapitel as wartet_im_kapitel
 from trainingsapp.ui.state import AppState
@@ -965,8 +965,9 @@ def kapitel_view(
         bloecke.append(
             karte(
                 titel("Zum Ansehen und Anhören"),
-                # Links und Dateien aus dem Paket (U3) — eine Zeile wie überall
-                *[medium_zeile(page, state, m, browser=browser) for m in medien],
+                # Links und Dateien aus dem Paket (U3) — als Medienkarten (27.11.2026)
+                *[medienkarte(page, state, m, browser=browser, einzug=64) for m in medien],
+                abstand=12,
             )
         )
 

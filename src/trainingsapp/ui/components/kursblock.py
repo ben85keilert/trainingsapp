@@ -70,7 +70,7 @@ from trainingsapp.core.result_spec import FieldSpec, basis_key, vorrat_feld
 from trainingsapp.core.tagesbilanz import menge_text
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.kursfrage import frage_karte
-from trainingsapp.ui.components.medienliste import medium_zeile
+from trainingsapp.ui.components.medienkarte import medienkarte
 from trainingsapp.ui.components.planwert import planwert_karte
 
 #: Die Aufforderung eines Tests „der gewählten“ ohne eigenen Titel, solange keine oder mehr
@@ -820,7 +820,8 @@ def kapitel_bloecke(
                     text_bauen(block.text) if text_bauen is not None else ft.Markdown(block.text)
                 )
         elif block.art == MEDIUM and block.medium is not None:
-            ergebnis.controls.append(medium_zeile(page, state, block.medium, browser=browser))
+            # die Medienkarte (Ben, 27.11.2026): im Kapitel eingebunden, nicht hinter einer Zeile
+            ergebnis.controls.append(medienkarte(page, state, block.medium, browser=browser))
         elif block.art == FRAGE and block.frage is not None:
             ergebnis.controls.append(
                 frage_karte(

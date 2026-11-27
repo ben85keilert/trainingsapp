@@ -142,7 +142,8 @@ async def test_link_im_kapiteltext_oeffnet_nur_https(page, state) -> None:
         c
         for v in ansicht.controls
         for c in alle(v)
-        if isinstance(c, ft.ListTile) and c.title.value in ("x", "y")
+        # seit 27.11.2026 Medienkarten statt Zeilen (`components/medienkarte.py`)
+        if isinstance(getattr(c, "data", None), tuple) and c.data[0] == "medienkarte_halter"
     ]
     assert len(kacheln) == 2
     for kachel in kacheln:

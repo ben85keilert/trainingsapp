@@ -131,6 +131,7 @@ from trainingsapp.data.repositories import (
 from trainingsapp.data.seed import pakete_aus_ordner, seed_einspielen
 from trainingsapp.data.strecken import verwaiste as strecken_verwaiste
 from trainingsapp.data.tagesfelder import TagesfeldRepo, TageswertRepo
+from trainingsapp.data.titelbilder import Titelbilder
 from trainingsapp.data.uebungsbilder import BewegungsbildRepo, UebungsbildRepo
 from trainingsapp.data.upgrade import datenformat_aktualisieren
 from trainingsapp.devices.bekannte import (
@@ -284,6 +285,8 @@ class AppState:
     anhaenge: AnhangRepo
     #: Eigene Bilder als Symbol einer Übung (`data/uebungsbilder.py`, Ben 2.11.2026)
     uebungsbilder: UebungsbildRepo
+    #: Bilder, die zu einer Paketdatei von selbst entstehen (`data/titelbilder.py`)
+    titelbilder: Titelbilder
     #: Das Bild der Bewegung einer Übung (Taktgeber Teil 2 T6, `core/bewegungsbild.py`)
     bewegungsbilder: BewegungsbildRepo
     #: Tagesfelder und ihre Werte (Migration 027, `core/tagesfelder.py`) — je Profil
@@ -517,6 +520,9 @@ class AppState:
     #: Formular des Kapitels zeigt ihn beim Zurückkommen wieder offen
     #: (`views/kurs_bearbeiten.py`). Er bleibt liegen bis „Fertig“ oder „Abbrechen“
     block_entwurf: dict[str, Any] = field(default_factory=dict)
+    #: Was gerade in einer Medienkarte spielt — sein „Anhalten“ (`components/medienkarte.py`:
+    #: es spielt immer nur eines)
+    medienkarte_aktiv: Callable[[], None] | None = None
     #: Die Uhr, die für das Material angehalten ist, während eine Paketdatei offen ist — sie
     #: läuft weiter, wenn man aus der Ansicht zurückgeht (`components/material.py`)
     material_lauf: Any = None
@@ -751,6 +757,7 @@ class AppState:
             kurse=KursRepo(con),
             anhaenge=AnhangRepo(con, anhaengeverzeichnis()),
             uebungsbilder=UebungsbildRepo(con, medienverzeichnis()),
+            titelbilder=Titelbilder(ablage.ordner.parent / "Titelbilder"),
             bewegungsbilder=BewegungsbildRepo(con, medienverzeichnis()),
             tagesfelder=TagesfeldRepo(con),
             tageswerte=TageswertRepo(con),

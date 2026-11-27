@@ -337,14 +337,11 @@ def kapitel_bloecke(
         uebung = eine(uebungen)
         profil = kurstest.uhr_fuer(block, uebung)
         zaehlt_wdh = not da or any(kurstest.felder(block, u).wdh is not None for u in da)
-        text = block.text or kurstest.anleitung(
-            kurstest.vorgabe_fuer(block, profil), zaehlt_wdh=zaehlt_wdh, timer=profil
-        )
-        wie = kurstest.lauf_satz(block, uebung)
-        return [
-            ft.Text(text, size=13),
-            *([ft.Text(wie, size=13, opacity=0.85, data=("test_wie", block.id))] if wie else []),
-        ]
+        # Nur der Text des Kurses (Ben, 27.11.2026: „diese automatischen Texte müssten alle
+        # raus. Beim Kursaufbau muss man eh die Texte eingeben“) — kein Satz der App darüber,
+        # was sie misst oder wie der Lauf läuft; das steht im Lauf selbst
+        del da, uebung, profil, zaehlt_wdh
+        return [ft.Text(block.text, size=13)] if block.text else []
 
     def neben(block: Block, uid: str) -> str:
         """Was der Lauf neben dem Wert des Tests gemessen hat — „in 1:12 · Anstrengung 7“ —
@@ -602,15 +599,10 @@ def kapitel_bloecke(
                         f"{satzende(menge_text(feld, ziel_im_plan(block, wert, gewaehlt)))}"
                     )
                 )
-            else:
+            elif not als_lauf:
+                # ohne Lauf sagt die Karte, wo der Wert herkommt — an einem Lauf sagt es der Knopf
                 teile.append(
-                    hinweis(
-                        "Noch nicht gemacht, seit du dieses Kapitel öffnest."
-                        if als_lauf and freiwillig(block)
-                        else "Noch kein Test, seit du dieses Kapitel öffnest."
-                        if als_lauf
-                        else f"Noch kein Eintrag bei „{name}“, seit du dieses Kapitel öffnest."
-                    )
+                    hinweis(f"Noch kein Eintrag bei „{name}“, seit du dieses Kapitel öffnest.")
                 )
             knoepfe: list[ft.Control] = []
             if (oeffnen := zur_uebung_knopf(block, uid, wert is not None)) is not None:

@@ -198,3 +198,31 @@ def test_werkzeug_baut_zip_aus_toml_und_bereinigt(tmp_path) -> None:
     toml.write_text(toml.read_text("utf-8").replace("beuge.jpg", "fehlt.jpg"), "utf-8")
     with pytest.raises(PaketFehler, match="fehlt"):
         bauen(toml, tmp_path / "dist3")
+
+
+def test_paketdatei_behaelt_die_ausrichtung_eines_fotos(tmp_path) -> None:
+    """Ben, 27.11.2026: „Photos werden 90° gedreht eingeblendet.“ Ein Hochkantfoto der Kamera
+    trägt seine Drehung nur im Exif — das Bereinigen nahm sie mit dem Ort weg. Jetzt bleibt
+    die Ausrichtung als winziges Exif, der Ort nicht; ein zweites Bereinigen ändert nichts."""
+    from trainingsapp.core.bereinigen import (
+        _exif_testsegment,
+        bereinigen,
+        datei_bereinigen,
+        exif_nur_ausrichtung,
+    )
+
+    jfif = b"\xff\xe0\x00\x06JFIF"
+    scan = b"\xff\xda\x00\x02\x12\xff\x00\x34\xff\xd9"
+    foto = b"\xff\xd8" + jfif + _exif_testsegment(6, b"GPS!!!") + scan
+    rein = bereinigen(foto, "jpg")
+    assert b"GPS" not in rein
+    assert rein == b"\xff\xd8" + jfif + exif_nur_ausrichtung(6) + scan
+    assert bereinigen(rein, "jpg") == rein
+    # der Weg der Ablage (Datei → Datei) ebenso
+    quelle, ziel = tmp_path / "foto.jpg", tmp_path / "rein.jpg"
+    quelle.write_bytes(foto)
+    datei_bereinigen(quelle, ziel, "jpg")
+    assert ziel.read_bytes() == rein
+    # ein aufrechtes Foto bekommt kein Exif
+    aufrecht = b"\xff\xd8" + jfif + _exif_testsegment(1, b"GPS!!!") + scan
+    assert bereinigen(aufrecht, "jpg") == b"\xff\xd8" + jfif + scan

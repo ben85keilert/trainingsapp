@@ -228,11 +228,9 @@ async def test_karte_mit_vorgabe_startet_den_testlauf(umgebung) -> None:
     ansicht = _kapitel(u, kurs, kapitel)
     texte = _texte(ansicht)
     assert "Käfer: 30 Wiederholungen" in texte
-    assert (
-        "Mach 30 am Stück. Die App misst die Zeit, du sagst danach, wie anstrengend es war."
-        in texte
-    )
-    assert "Noch nicht gemacht, seit du dieses Kapitel öffnest." in texte
+    # keine automatischen Sätze der App (Ben, 27.11.2026) — nur, was der Kurs schreibt
+    assert not any("Die App misst" in t for t in texte)
+    assert not any("seit du dieses Kapitel öffnest" in t for t in texte)
     knopf = _daten(ansicht, ("test_starten", "test"))
     assert knopf.content == "Übung starten" and not _hat(ansicht, ("test_oeffnen", "test"))
     # Auch die Ansicht des Testlaufs startet nichts: Sie ist bereit
@@ -558,7 +556,7 @@ async def test_verwerfen_traegt_nichts_ein(umgebung) -> None:
     assert lauf.abgebrochen and lauf.eintrag_id is None and not lauf.offen
     assert lauf.nachtragbar and [z.sekunden for z in lauf.zeiten] == [50.0]
     texte = _texte(_kapitel(u, kurs, kapitel))
-    assert "Noch nicht gemacht, seit du dieses Kapitel öffnest." in texte
+    assert not any("seit du dieses Kapitel öffnest" in t for t in texte)
 
 
 async def test_kreuz_im_lauf_bricht_ab_und_nochmal_ist_bereit(umgebung) -> None:
@@ -638,7 +636,7 @@ async def test_zeit_laeuft_rueckwaerts_und_endet_von_selbst(umgebung, monkeypatc
     kurs, kapitel, block, planke = _kurs(state, Vorgabe(ZEIT, 60), uebung="Planke", feld="hold")
     karte = _texte(_kapitel(u, kurs, kapitel))
     assert "Planke: 1 Minute" in karte
-    assert "Die Uhr läuft 1 Minute. Danach sagst du, wie anstrengend es war." in karte
+    assert not any(t.startswith("Die Uhr läuft") for t in karte)
     await _starten(u, kurs, kapitel)
     stand = state.kurs_test
     await _sekunden(u, 20)
@@ -865,11 +863,9 @@ async def test_gestalteter_test_oeffnet_sich_bereit_und_zeigt_wie_er_laeuft(umge
     karte = _kapitel(u, kurs, kapitel)
     texte = _texte(karte)
     assert "Käfer: was schaffst du?" in texte and "Mach dich vorher 5 Minuten warm." in texte
-    assert _daten(karte, ("test_wie", "test")).value == (
-        "Läuft mit dem Timer „Intervall“ (1:00) und im Takt Kniebeuge 2-1-2. "
-        "Ausführung: links. Gewicht wählst du vor dem Start."
-    )
-    assert "Noch nicht gemacht, seit du dieses Kapitel öffnest." in texte
+    # wie der Lauf läuft, steht im Lauf selbst — die Karte sagt nur, was der Kurs schreibt
+    assert not _hat(karte, ("test_wie", "test"))
+    assert not any("seit du dieses Kapitel öffnest" in t for t in texte)
     knopf = _daten(karte, ("test_starten", "test"))
     assert knopf.content == "Übung starten" and not _hat(karte, ("test_oeffnen", "test"))
     await klick(knopf)
@@ -879,10 +875,8 @@ async def test_gestalteter_test_oeffnet_sich_bereit_und_zeigt_wie_er_laeuft(umge
     texte = _texte(bereit)
     assert bereit.data is None and bereit.appbar.leading is None
     assert "TIMER" in texte and _daten(bereit, "test_vorgabe").value == "Intervall · 1:00"
-    assert (
-        "Der Timer läuft 1 Minute. Danach sagst du, wie viele es waren und wie anstrengend "
-        "es war." in texte
-    )
+    assert not any(t.startswith("Der Timer läuft") for t in texte)
+    assert "Käfer" in texte  # die Übung in der Mitte: Symbol und Name
     assert _daten(bereit, "test_hinweis").value == "Mach dich vorher 5 Minuten warm."
     assert "SO MACHST DU DIE ÜBUNG" in texte
     assert _daten(bereit, ("test_fest", "side")).value == "links" and "vorgegeben" in texte
@@ -1140,10 +1134,7 @@ async def test_wie_die_uebung_nimmt_ihren_timer_takt_und_ihre_parameter(umgebung
     )
     karte = _kapitel(u, kurs, kapitel)
     assert "Planke: was schaffst du?" in _texte(karte)  # nicht „Planke: 1 Minute“
-    assert _daten(karte, ("test_wie", "test")).value == (
-        "Läuft mit dem Timer „Halten“ (0:45) und im Takt Atmung 4-6. "
-        "Gewicht wählst du vor dem Start."
-    )
+    assert not _hat(karte, ("test_wie", "test"))
     await _starten(u, kurs, kapitel)
     bereit = _ansicht(u, kurs, kapitel, block, planke)
     assert _daten(bereit, "test_vorgabe").value == "Halten · 0:45"
@@ -1185,11 +1176,9 @@ async def test_vorgegebene_ausfuehrung_ohne_vorgabe_endet_mit_fertig(umgebung) -
     await _starten(u, kurs, kapitel)
     bereit = _ansicht(u, kurs, kapitel, block, planke)
     texte = _texte(bereit)
-    assert "ÜBUNG" in texte and _daten(bereit, "test_vorgabe").value == "Probier es aus"
-    assert (
-        "Die App misst die Zeit, bis du „Fertig“ tippst. Danach sagst du, wie anstrengend es "
-        "war." in texte
-    )
+    # oben steht, was gemacht wird — kein „Probier es aus“, kein „Die App misst …“
+    assert "ÜBUNG" in texte and _daten(bereit, "test_vorgabe").value == "Planke"
+    assert not any("Die App misst" in t or "läuft mit dem Tipp" in t for t in texte)
     assert _daten(bereit, ("test_fest", "angle")).value == "90°"
     assert not _hat(bereit, "test_timer") and not _hat(bereit, "test_takt")
     await klick(_daten(bereit, "test_start"))
@@ -1235,9 +1224,7 @@ async def test_vorgabe_mit_timer_und_takt_der_timer_kann_eher_durch_sein(umgebun
     bereit = _ansicht(u, kurs, kapitel, block, kaefer)
     assert _daten(bereit, "test_vorgabe").value == "Bis Anstrengung 7"
     assert _daten(bereit, "test_timer").value == "Timer: Intervall · 1:00"
-    assert any(
-        t.endswith("Ist der Timer vorher durch (1 Minute), endet der Test.") for t in _texte(bereit)
-    )
+    assert not any("Ist der Timer vorher durch" in t for t in _texte(bereit))
     await klick(_daten(bereit, "test_start"))
     await _sekunden(u, 35)  # 20 s „Los“, 10 s Pause, 5 s „Los“
     ansicht = _ansicht(u, kurs, kapitel, block, kaefer)
@@ -1657,7 +1644,7 @@ async def test_folge_der_antwort_steht_im_ergebnis(umgebung) -> None:
     block, seit = kapitel.bloecke[0], state.uebungen.laden(seit.id)
 
     bereit = _ansicht(u, kurs, kapitel, block, seit)
-    assert _daten(bereit, "test_vorgabe").value == "Probier es aus"  # kein Test: andere Worte
+    assert _daten(bereit, "test_vorgabe").value == "Seitstütz"  # der Name, kein Satz der App
     await klick(_daten(bereit, "test_start"))
     await _sekunden(u, 12)
     await klick(_daten(_ansicht(u, kurs, kapitel, block, seit), "test_fertig"))

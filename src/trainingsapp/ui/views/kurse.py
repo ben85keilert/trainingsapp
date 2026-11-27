@@ -257,11 +257,6 @@ def _deine_werte(
                     data=("kurswert", z.block_id, z.antwort),
                 )
             )
-    teile.append(
-        hinweis(
-            "Nur auf diesem Gerät. „Von vorn beginnen“ leert die Karte — deine Einträge bleiben."
-        )
-    )
     return karte(*teile, abstand=4)
 
 

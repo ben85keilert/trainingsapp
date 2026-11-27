@@ -8,7 +8,8 @@ Bildbibliothek:
 
 - **JPEG:** alle APP1 (Exif mit GPS, XMP), APP13 (IPTC), Kommentare und unbekannte APPn fallen
   weg, ebenso alles hinter dem Bildende (eingebettete Zweitbilder, Herstellerblöcke); ICC-Profil
-  (APP2) und JFIF/Adobe bleiben.
+  (APP2) und JFIF/Adobe bleiben. Nur die **Ausrichtung** (Exif-Tag 0x0112) kommt als
+  eigenes, winziges Exif zurück — sonst steht ein Hochkantfoto quer (`_mit_ausrichtung`).
 - **PNG:** nur bekannte Bildblöcke bleiben (``IHDR``, ``IDAT``, Farbangaben …) — ``eXIf``,
   ``tEXt``/``iTXt``/``zTXt`` (XMP) und Unbekanntes fallen weg.
 - **WebP:** ``EXIF`` und ``XMP `` fallen weg, die Schalter in ``VP8X`` mit.
@@ -49,7 +50,7 @@ import re
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import BinaryIO, Final
+from typing import BinaryIO, Final, Literal
 
 
 class NichtBereinigbar(Exception):
@@ -96,7 +97,7 @@ def _jpeg(d: bytes) -> bytes:
             continue
         if m == 0xD9:  # Bildende — was danach kommt, fällt weg
             aus += b"\xff\xd9"
-            return bytes(aus)
+            return _mit_ausrichtung(bytes(aus), _jpeg_ausrichtung(d))
         if i + 4 > n:
             raise NichtBereinigbar("JPEG ohne Ende")
         laenge = int.from_bytes(d[i + 2 : i + 4], "big")
@@ -107,6 +108,105 @@ def _jpeg(d: bytes) -> bytes:
         i += 2 + laenge
         im_scan = m == 0xDA
     raise NichtBereinigbar("JPEG ohne Ende")
+
+
+def _mit_ausrichtung(rein: bytes, wert: int | None) -> bytes:
+    """Das bereinigte JPEG mit seiner **Ausrichtung** (Ben, 7.11.2026 für Anhänge, 27.11.2026
+    für Paketdateien: „Photos werden 90° gedreht eingeblendet“): Die Kamera speichert das Bild
+    so, wie der Sensor liegt, und die Drehung nur im Exif-Tag 0x0112 — ohne ihn steht ein
+    Hochkantfoto quer. Er kommt als eigenes, winziges Exif zurück (`exif_nur_ausrichtung`,
+    gleich hinter JFIF) — ohne Ort, Gerät oder Zeit. Aufrecht (1) braucht keinen Tag."""
+    if wert is None:
+        return rein
+    i = 2
+    while rein[i : i + 2] == b"\xff\xe0":  # JFIF steht gleich hinter dem Anfang
+        i += 2 + int.from_bytes(rein[i + 2 : i + 4], "big")
+    return rein[:i] + exif_nur_ausrichtung(wert) + rein[i:]
+
+
+def _jpeg_ausrichtung(daten: bytes) -> int | None:
+    """Die Ausrichtung aus dem ersten Exif des Kopfs, das eine trägt — ``None`` für aufrecht
+    (1 braucht keinen Tag) oder ohne Angabe. Nur für ein JPEG, das `bereinigen` ablaufen
+    konnte (die Längen stimmen)."""
+    i = 2
+    while i + 4 <= len(daten) and daten[i] == 0xFF:
+        marker = daten[i + 1]
+        if marker == 0xFF:  # Füllbyte vor einem Marker
+            i += 1
+            continue
+        if marker in (0xDA, 0xD9):  # ab hier Bilddaten
+            break
+        if 0xD0 <= marker <= 0xD7 or marker == 0x01:  # Marker ohne Länge
+            i += 2
+            continue
+        ende = i + 2 + int.from_bytes(daten[i + 2 : i + 4], "big")
+        if marker == 0xE1:
+            wert = exif_ausrichtung(daten[i + 4 : ende])
+            if wert is not None and wert != 1:
+                return wert
+        i = ende
+    return None
+
+
+def exif_ausrichtung(inhalt: bytes) -> int | None:
+    r"""Die Ausrichtung (Exif-Tag 0x0112, 1–8) aus dem Inhalt eines APP1-Segments (ab
+    ``Exif\0\0``) — ``None`` ohne Exif, ohne den Tag oder bei kaputten Versätzen.
+
+    >>> exif_ausrichtung(_exif_testsegment(6)[4:]), exif_ausrichtung(b"Exif\x00\x00GPS")
+    (6, None)
+    >>> exif_ausrichtung(exif_nur_ausrichtung(8)[4:]), exif_ausrichtung(b"http://ns.adobe")
+    (8, None)
+    """
+    if not inhalt.startswith(b"Exif\x00\x00"):
+        return None
+    tiff = inhalt[6:]
+    folge: Literal["little", "big"]
+    if tiff[:4] == b"II*\x00":
+        folge = "little"
+    elif tiff[:4] == b"MM\x00*":
+        folge = "big"
+    else:
+        return None
+    ifd = int.from_bytes(tiff[4:8], folge)
+    if len(tiff) < 8 or ifd + 2 > len(tiff):
+        return None
+    for k in range(int.from_bytes(tiff[ifd : ifd + 2], folge)):
+        e = ifd + 2 + 12 * k
+        if e + 12 > len(tiff):
+            return None
+        if int.from_bytes(tiff[e : e + 2], folge) == 0x0112:
+            wert = int.from_bytes(tiff[e + 8 : e + 10], folge)  # SHORT, linksbündig
+            return wert if 1 <= wert <= 8 else None
+    return None
+
+
+def exif_nur_ausrichtung(wert: int) -> bytes:
+    """Ein APP1-Segment, das nur die Ausrichtung trägt (`jpeg_ohne_metadaten`) — ein IFD mit
+    einem Eintrag, Big Endian, 34 Bytes."""
+    tiff = (
+        b"MM\x00*"
+        + (8).to_bytes(4, "big")  # IFD0 gleich hinter dem Kopf
+        + (1).to_bytes(2, "big")  # ein Eintrag
+        + (0x0112).to_bytes(2, "big")
+        + (3).to_bytes(2, "big")  # SHORT
+        + (1).to_bytes(4, "big")
+        + wert.to_bytes(2, "big")
+        + b"\x00\x00"
+        + (0).to_bytes(4, "big")  # kein weiteres IFD
+    )
+    inhalt = b"Exif\x00\x00" + tiff
+    return b"\xff\xe1" + (len(inhalt) + 2).to_bytes(2, "big") + inhalt
+
+
+def _exif_testsegment(wert: int, rest: bytes = b"") -> bytes:
+    """Für die Doctests: ein Exif wie aus einer Kamera (Little Endian, zwei Einträge vor dem
+    Ort), die Ausrichtung als zweiter Eintrag."""
+    eintraege = [(0x010F, 2, 4, b"Cam\x00"), (0x0112, 3, 1, wert.to_bytes(2, "little") + b"\0\0")]
+    tiff = b"II*\x00" + (8).to_bytes(4, "little") + len(eintraege).to_bytes(2, "little")
+    for tag, typ, n, w in eintraege:
+        tiff += tag.to_bytes(2, "little") + typ.to_bytes(2, "little") + n.to_bytes(4, "little") + w
+    inhalt = b"Exif\x00\x00" + tiff + (0).to_bytes(4, "little") + rest
+    return b"\xff\xe1" + (len(inhalt) + 2).to_bytes(2, "big") + inhalt
 
 
 # -- PNG ------------------------------------------------------------------------------------

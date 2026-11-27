@@ -127,7 +127,7 @@ def _oeffner(page: Any, state: AppState, teil: Any) -> Callable[[], Any] | None:
                 await page.push_route("/")
 
         return zur_messung
-    route = ablauf.teil_route(teil)
+    route = ablauf.teil_route(teil, state)
     if route is None:
         return None
 
@@ -138,11 +138,11 @@ def _oeffner(page: Any, state: AppState, teil: Any) -> Callable[[], Any] | None:
     return oeffnen
 
 
-def _timer_oeffner(page: Any, e: Any) -> Callable[[], Any]:
+def _timer_oeffner(page: Any, e: Any, state: Any = None) -> Callable[[], Any]:
     """Der Timer der Einheit: gehört er zu einer Übung oder zum Plan-Ablauf, dorthin."""
 
     async def oeffnen() -> None:
-        await page.push_route(ablauf.timer_route(e))
+        await page.push_route(ablauf.timer_route(e, state))
 
     return oeffnen
 
@@ -1014,7 +1014,7 @@ def _uebersicht(
         )
         # Antippen: der Timer — bzw. die Übung oder der Ablauf, zu dem er gehört
         timer_karte.ink = True
-        timer_karte.on_click = _timer_oeffner(page, e)
+        timer_karte.on_click = _timer_oeffner(page, e, state)
         karten.append(timer_karte)
     eigener = e.teil("timer")
     if isinstance(eigener, TimerBaustein) and not eigener.lauf.fertig and len(e.teile) > 1:

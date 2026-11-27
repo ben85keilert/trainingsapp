@@ -313,3 +313,61 @@ Doctests in `core/titelbild.py`, `core/kursschritt.py`. Web-Fotos bei 412 px: Ka
 Video-, Ton- und Link-Karte, Editor-Liste, offene Karte, Fußknopf. **Nicht am Foto prüfbar**
 (der Web-Server liefert keine lokalen Dateien, Videos spielen dort nicht): das Bild auf der
 Karte, das Abspielen in der Karte, das Bild aus dem Video — T158.
+
+## 11. Nachträge nach dem ersten Durchspielen am Gerät (Ben, 27.11.2026, Version 0.3.106)
+
+„Eine Kursübung, die gerade läuft und weggeklickt wird, lässt sich nicht vollständig wieder
+herholen. … per Heute in die aktuelle Übung … ohne die entsprechenden begleitenden Videos.“ ·
+„Video danach auch erst nach der Übung anbieten.“ · „diese automatischen Texte müssten alle
+raus“ · „Photos werden 90° gedreht eingeblendet.“
+
+### 11.1 Zurück in den laufenden Lauf
+
+**Ursache:** „Heute“ (Reiter „Einheit“) und die Laufleiste führten zur laufenden Übung über
+`ui.einheit.teil_route` in den **Timer der Übung** — der kennt die Medien, Fragen und die
+Vorgabe des Kurses nicht. Jetzt: Läuft die Übung als Lauf eines Kurses
+(`AppState.kurs_test`, dieselbe Einheit, dieselbe Übung), führt der Weg in den Lauf des Kurses
+(`kurs_lauf_route`). Nicht geändert: Wer die Adresse des Übungs-Timers noch im Verlauf hat und
+dorthin zurückgeht, sieht ihn weiter ohne die Medien des Kurses.
+
+### 11.2 Medien an ihrer Stufe
+
+- **Beim ersten Mal:** Vor dem Start steht nur, was „vorher“ ist. Im Lauf gibt es nur „dabei“
+  und „bei …“ (`material_item` reicht dem Fokus nichts anderes mehr — bis dahin lagen dort
+  alle Medien des Blocks, auch „nachher“). „Nachher“ steht im Ergebnis.
+- **Ist der Lauf in diesem Durchlauf schon gemacht** (es gibt seinen Wert,
+  `KursRepo.testwerte`): Die Vorseite zeigt alles in der Reihenfolge des Laufs — vorher · die
+  **Übung** (Symbol, Name, „Zuletzt: …“) und darin „dabei“ und „bei …“ mit ihrer Bedingung ·
+  danach. Der Knopf heißt „Nochmal“.
+- **„✓ gesehen“** steht unter einem Stück, das geöffnet wurde (`material.gesehen_setzen`, nur
+  auf dem Gerät, wie überall).
+- Die Übung steht auch beim ersten Mal in der Mitte (Symbol und Name), noch ohne die Medien
+  des Laufs.
+
+### 11.3 Automatische Texte heraus
+
+Weg sind: „Probier es aus“ (oben steht jetzt der Titel des Blocks bzw. der Name der Übung),
+der Satz der App darunter („Die App misst …“, „Die Uhr läuft …“, „Ist der Timer vorher durch
+…“) im Lauf und in der Karte des Kapitels, der Satz „Läuft mit dem Timer … Ausführung …“ in
+der Karte, „Die Uhr läuft mit dem Tipp los.“, „Eingetragen wird ein gewöhnlicher Eintrag …“
+im Ergebnis, „Noch nicht gemacht / Noch kein Test, seit du dieses Kapitel öffnest.“ und
+„Nur auf diesem Gerät. ‚Von vorn beginnen‘ leert die Karte — deine Einträge bleiben.“
+
+**Geblieben** (bewusst, zur Entscheidung): die Überschrift „<Übung>: was schaffst du?“ an
+einem Lauf ohne Vorgabe **und ohne eigene Aufforderung** (`kurstest.OHNE_VORGABE` — sie steht
+auch im Editor und in den Vorschauen); Sätze, die sagen, was fehlt („Es fehlt noch: …“, „Dazu
+fehlt deine Antwort …“); „Nichts ändert sich ohne deinen Tipp“ in der Sammelkarte; ohne Lauf
+„Noch kein Eintrag bei …“.
+
+### 11.4 Fotos standen quer
+
+**Ursache:** Eine Datei für Übung, Plan oder Kurs wird ohne Ortsangaben abgelegt
+(`core/bereinigen.py`) — dabei fiel das ganze Exif weg, auch die **Ausrichtung** (Tag
+0x0112). Die Kamera speichert ein Hochkantfoto so, wie der Sensor liegt; ohne den Tag steht
+es quer. Für Anhänge an Einträgen war das seit 7.11. behoben, für Paketdateien nicht. Jetzt
+erhält der Bereiniger selbst die Ausrichtung als winziges Exif (`_mit_ausrichtung`) — kein
+Ort, kein Gerät, keine Zeit; aufrecht braucht keinen Tag; ein zweites Bereinigen ändert nichts.
+
+**Schon abgelegte Fotos bleiben quer** — ihre Ausrichtung ist verloren. Noch einmal
+hinzufügen. Ein Paket, das mit dieser Fassung gebaut wird, trägt für solche Fotos andere
+Dateinamen (die Prüfsumme) als ein älterer Bau.

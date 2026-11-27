@@ -604,3 +604,100 @@ def test_fussknopf_fuehrt_zur_sammelkarte(page, state) -> None:
         asyncio.run(_daten(ansicht.bottom_appbar, "kurs_schritt_knopf").on_click())
         nachher = state.kurse.kursplan(kurs, profil)
         assert (nachher.items if nachher else []) == (plan_vorher.items if plan_vorher else [])
+
+
+# -- Medien an ihrer Stufe, Rückweg in den Lauf (Ben, 27.11.2026) ------------------------------
+
+
+def _medien_kurs(state: AppState):
+    """Ein Kapitel mit einem Lauf, der vorher, dabei, nach 10 Sekunden und nachher je ein
+    Medium hat."""
+    from trainingsapp.core.kursbau import medium_an_stelle
+    from trainingsapp.core.kursbloecke import TEST
+    from trainingsapp.core.models import Media
+
+    seit = Exercise(name="Seitstütz", result_spec=ResultSpec(fields=[vorrat_feld("hold")]))
+    state.uebungen.speichern(seit)
+
+    def link(titel: str) -> Media:
+        return Media(uri=f"https://example.org/{titel}", title=titel)
+
+    lauf = Block(
+        TEST,
+        id="lauf",
+        uebung=seit.id,
+        feld="hold",
+        wie_uebung=["uhr"],
+        medien=[
+            medium_an_stelle(link("vorher"), "vorher"),
+            medium_an_stelle(link("dabei"), "dabei"),
+            medium_an_stelle(link("spaeter"), "zeit", 10),
+            medium_an_stelle(link("danach"), "nachher"),
+        ],
+    )
+    kurs = Kurs(name="Medien-Kurs", kapitel=[Kapitel(titel="Seitlich", bloecke=[lauf])])
+    state.kurse.speichern(kurs)
+    kurs = state.kurse.laden(kurs.id)
+    state.kurse.starten(kurs, state.profil.id)
+    return kurs, kurs.kapitel[0], kurs.kapitel[0].bloecke[0], seit
+
+
+def test_lauf_zeigt_medien_erst_an_ihrer_stufe(page, state) -> None:
+    """„Video danach auch erst nach der Übung anbieten.“ Beim ersten Mal steht vor dem Start
+    nur „vorher“; im Lauf gibt es nur „dabei“ und „bei …“. Ist der Lauf gemacht, zeigt die
+    Vorseite alles in der Reihenfolge des Laufs: vorher, die Übung mit dem, was im Lauf kam
+    (mit seiner Bedingung), danach — und „Nochmal“."""
+    from trainingsapp.core.models import Session
+    from trainingsapp.ui.views import kurs_testlauf
+
+    kurs, kapitel, block, seit = _medien_kurs(state)
+    # im Lauf: nur, was zum Lauf gehört
+    im_lauf = kurs_testlauf.material_item(block, seit)
+    assert sorted(m.title for m in im_lauf.media) == ["dabei", "spaeter"]
+
+    def karten(ansicht) -> list[str]:
+        return [
+            x.data[1].rsplit("/", 1)[-1]
+            for x in _alle_dialog(ansicht)
+            if isinstance(getattr(x, "data", None), tuple) and x.data[0] == "medienkarte"
+        ]
+
+    bereit = kurs_testlauf.kurs_test_view(page, state, kurs, kapitel, block, seit)
+    assert karten(bereit) == ["vorher"]
+    assert _d(bereit, "test_start").content == "Start"
+    assert _d(bereit, "test_vorgabe").value == "Seitstütz"
+    assert not any(
+        "läuft mit dem Tipp" in str(t.value) for t in _alle_dialog(bereit) if isinstance(t, ft.Text)
+    )
+
+    # der Lauf ist gemacht: ein gewöhnlicher Eintrag der Übung seit dem Öffnen des Kapitels
+    session = Session(subject_id=state.profil.id)
+    state.sitzungen.anlegen(session)
+    state.sitzungen.eintrag_anlegen(session, seit, {"hold": [34]})
+    bereit = kurs_testlauf.kurs_test_view(page, state, kurs, kapitel, block, seit)
+    assert karten(bereit) == ["vorher", "dabei", "spaeter", "danach"]
+    assert _d(bereit, "test_start").content == "Nochmal"
+    assert _d(bereit, "test_zuletzt").value.startswith("Zuletzt: ")
+    texte = [str(t.value) for t in _alle_dialog(bereit) if isinstance(t, ft.Text)]
+    assert "läuft dabei mit" in texte and any("10" in t for t in texte)
+
+
+def test_heute_fuehrt_in_den_kurs_lauf_zurueck(state) -> None:
+    """„Wenn man … per Heute in die aktuelle Übung geht, kommt die Übung ohne die
+    entsprechenden begleitenden Videos.“ — der Weg zur laufenden Übung führt in den Lauf des
+    Kurses, nicht in den Timer der Übung."""
+    from trainingsapp.devices.einheit import UebungKontext
+    from trainingsapp.ui import einheit as einheit_ui
+
+    teil = einheit_ui.UebungBaustein(UebungKontext("u1", "Seitstütz"))
+    assert einheit_ui.teil_route(teil) == "/training/u1/timer/uebung/u1"
+    lauf = SimpleNamespace(
+        kurs_id="k", kapitel_id="c", block=SimpleNamespace(id="b"), uebung_id="u1", einheit_id="e"
+    )
+    im_kurs = SimpleNamespace(kurs_test=lauf, einheit=SimpleNamespace(id="e"))
+    assert einheit_ui.teil_route(teil, im_kurs) == "/kurse/k/c/test/b/u1"
+    # eine andere Übung oder kein Lauf: wie bisher
+    anders = einheit_ui.UebungBaustein(UebungKontext("u2", "Planke"))
+    assert einheit_ui.teil_route(anders, im_kurs) == "/training/u2/timer/uebung/u2"
+    ohne = SimpleNamespace(kurs_test=None, einheit=SimpleNamespace(id="e"))
+    assert einheit_ui.teil_route(teil, ohne) == "/training/u1/timer/uebung/u1"

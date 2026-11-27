@@ -998,8 +998,40 @@ def uhr_fortsetzen(page: Any, state: Any, lauf: TimerLauf) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def teil_route(teil: Any) -> str | None:
+def kurs_lauf_route(state: Any, uebung_id: str = "") -> str | None:
+    """Die Route des **Kurs-Laufs**, der gerade läuft (`AppState.kurs_test`,
+    `views/kurs_testlauf.py`) — ``None``, wenn keiner läuft, er zu einer anderen Einheit gehört
+    oder (mit ``uebung_id``) eine andere Übung macht.
+
+    Ben, 27.11.2026: „Wenn man die Reiter/Views/Stacks wechselt und per Heute in die aktuelle
+    Übung geht, kommt die Übung ohne die entsprechenden begleitenden Videos.“ — der Weg führte
+    in den Timer der Übung; der kennt die Medien des Kurses nicht.
+
+    >>> from types import SimpleNamespace as NS
+    >>> lauf = NS(kurs_id="k", kapitel_id="c", block=NS(id="b"), uebung_id="u", einheit_id="e1")
+    >>> state = NS(kurs_test=lauf, einheit=NS(id="e1", beendet=False))
+    >>> kurs_lauf_route(state), kurs_lauf_route(state, "anders")
+    ('/kurse/k/c/test/b/u', None)
+    >>> kurs_lauf_route(NS(kurs_test=None, einheit=None)) is None
+    True
+    >>> kurs_lauf_route(NS(kurs_test=lauf, einheit=NS(id="e2", beendet=False))) is None
+    True
+    """
+    lauf = getattr(state, "kurs_test", None)
+    e = getattr(state, "einheit", None)
+    if lauf is None or e is None or getattr(e, "beendet", False):
+        return None
+    if getattr(e, "id", None) != getattr(lauf, "einheit_id", ""):
+        return None
+    if uebung_id and uebung_id != lauf.uebung_id:
+        return None
+    return f"/kurse/{lauf.kurs_id}/{lauf.kapitel_id}/test/{lauf.block.id}/{lauf.uebung_id}"
+
+
+def teil_route(teil: Any, state: Any = None) -> str | None:
     """Wo man einen Teil bedient — ``None`` für die HRV: Sie hat den Reiter „Messung“.
+    ``state``: Läuft die Übung als **Lauf eines Kurses**, führt der Weg dorthin zurück
+    (`kurs_lauf_route`) — mit den Medien und Fragen des Kurses.
 
     Ben, 18.10.2026: „Klick auf den Plan öffnet aber nicht das entsprechende Menü“ — im
     Reiter „Einheit“ führt jede Zeile dorthin, wo ihr Teil gestartet wird: der Plan ins
@@ -1035,6 +1067,8 @@ def teil_route(teil: Any) -> str | None:
         return f"/plan/{teil.plan_id}/workout"
     if isinstance(teil, UebungBaustein):
         k = teil.kontext
+        if state is not None and (im_kurs := kurs_lauf_route(state, k.uebung_id)) is not None:
+            return im_kurs
         if k.plan_id and k.item_id:
             return f"/plan/{k.plan_id}/timer/uebung/{k.uebung_id}/{k.item_id}"
         return f"/training/{k.uebung_id}/timer/uebung/{k.uebung_id}"
@@ -1067,10 +1101,11 @@ def ziel_merken(state: Any, teil: Any) -> None:
         state.plan_ziel = teil.kontext.item_id
 
 
-def timer_route(e: Einheitslauf) -> str:
+def timer_route(e: Einheitslauf, state: Any = None) -> str:
     """Wohin ein Tipp auf den Timer der Einheit führt: Gehört er zu einer Übung oder zum
-    Plan-Ablauf, dorthin (`teil_route`) — sonst zum Timer selbst."""
-    return teil_route(e.teil("plan")) or "/timer"
+    Plan-Ablauf, dorthin (`teil_route`) — sonst zum Timer selbst. ``state``: ein Lauf im Kurs
+    führt in den Kurs zurück."""
+    return teil_route(e.teil("plan"), state) or "/timer"
 
 
 # ---------------------------------------------------------------------------

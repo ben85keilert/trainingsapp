@@ -125,6 +125,7 @@ from trainingsapp.core.models import (
     lokaler_tag,
 )
 from trainingsapp.core.result_spec import FieldSpec, vorrat_feld, wert_text
+from trainingsapp.core.tagesbilanz import menge_text
 from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import (
     COUNTDOWN,
@@ -142,6 +143,7 @@ from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.einheit import Einheitslauf
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
+from trainingsapp.ui.components import material as material_ui
 from trainingsapp.ui.components import zaehl_stand, zaehlen
 from trainingsapp.ui.components.dialoge import meldung
 from trainingsapp.ui.components.fokus import FOKUS_ANSICHT, Fokus, steuerzeile
@@ -153,6 +155,7 @@ from trainingsapp.ui.components.kursfrage import frage_karte
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.medienkarte import medienkarte
 from trainingsapp.ui.components.planwert import planwert_karte
+from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.timer_takt import TICK_S, ton_spielen
 
@@ -367,9 +370,12 @@ def sensor_hinweis(state: Any, block: Block) -> str:
 def material_item(block: Block, uebung: Exercise) -> PlanItem | None:
     """Die Medien am Lauf als die einer gedachten Planübung — so kommen sie zu denen der
     Übung dazu wie die einer Planübung (`core.material.material_von`). ``None`` ohne."""
-    if not block.medien:
+    # Nur „dabei“ und „bei …“ (Ben, 27.11.2026: „Video danach auch erst nach der Übung
+    # anbieten“) — vorher und nachher stehen an ihrer Stufe, nicht im Material des Laufs
+    im_lauf = [m for m in block.medien if m.rolle == BEGLEITUNG or m.wann == BEI]
+    if not im_lauf:
         return None
-    return PlanItem(exercise_id=uebung.id, media=list(block.medien))
+    return PlanItem(exercise_id=uebung.id, media=im_lauf)
 
 
 def medien_an(block: Block, stelle: str) -> list[Media]:
@@ -809,24 +815,17 @@ def _kopf(
     *,
     ausfuehrung: str = "",
     gebraucht: bool = True,
+    name: str = "",
 ) -> ft.Control:
     """„VORGABE“, die Vorgabe groß, darunter der Satz der Anleitung — ohne Vorgabe der Timer
     bzw. die Aufforderung (`core.kurstest.kopf`). ``ausfuehrung``: im Lauf steht statt der
     Anleitung, wie der Test gemacht wird („auf Knien · beide · 10 kg“, Skizze F3)."""
     klein, gross = kurstest.kopf(v, timer, f.skala_name)
-    if not gebraucht and klein.casefold() == "test":
-        # „nur ausprobieren“: derselbe Lauf, kein Test (23.11.2026) — auch die Aufforderung
-        # fragt dann nicht, was man schafft (26.11.2026)
-        klein, gross = "Übung", "Probier es aus"
-    darunter = (
-        ft.Text(ausfuehrung, size=15, weight=ft.FontWeight.W_600, data="test_ausfuehrung")
-        if ausfuehrung
-        else ft.Text(
-            kurstest.anleitung(v, zaehlt_wdh=f.wdh is not None, timer=timer),
-            size=14,
-            opacity=0.85,
-        )
-    )
+    if klein.casefold() == "test":
+        # Ohne Vorgabe und ohne Timer steht da, was gemacht wird — der Titel des Blocks bzw.
+        # die Übung. Keine automatischen Sätze („Probier es aus“, „Die App misst …“): Was die
+        # Person lesen soll, schreibt der Kurs (Ben, 27.11.2026: „doppelt gemoppelt“)
+        klein, gross = ("Test" if gebraucht else "Übung"), (name or "Übung")
     return ft.Column(
         spacing=4,
         tight=True,
@@ -834,7 +833,11 @@ def _kopf(
         controls=[
             titel(klein),
             ft.Text(gross, size=24, weight=ft.FontWeight.W_700, data="test_vorgabe"),
-            darunter,
+            *(
+                [ft.Text(ausfuehrung, size=15, weight=ft.FontWeight.W_600, data="test_ausfuehrung")]
+                if ausfuehrung
+                else []
+            ),
         ],
     )
 
@@ -977,6 +980,18 @@ def kurs_test_view(
         block, [b for k in kurs.kapitel for b in k.bloecke], bool(kapitel.plaene)
     )
 
+    #: Der Wert des Laufs, wenn er in diesem Durchlauf schon gemacht ist — sonst ``None``.
+    #: Daran hängt, ob die Vorseite alles zeigt oder nur, was vor dem ersten Mal dran ist
+    letzter: float | None = None
+    with contextlib.suppress(Exception):
+        erreicht = state.kurse.staende(state.profil.id, kurs.id).get(kapitel.id)
+        if erreicht is not None:
+            letzter = state.kurse.testwerte(kapitel, state.profil.id, erreicht.erreicht).get(
+                wert_schluessel(block, uebung.id)
+            )
+    #: was das Profil schon angesehen hat (nur auf dem Gerät)
+    schon_gesehen: set[str] = material_ui.gesehen(state)
+
     def neu_zeichnen() -> None:
         with contextlib.suppress(Exception):
             state.neu_zeichnen()
@@ -1045,13 +1060,82 @@ def kurs_test_view(
         stuecke = medien_an(block, stelle)
         if not stuecke:
             return []
-        return [
-            karte(
-                titel(ueberschrift),
-                *(medienkarte(page, state, m, einzug=64) for m in stuecke),
-                abstand=12,
-            )
-        ]
+        return [karte(titel(ueberschrift), *(medium_mit_haken(m) for m in stuecke), abstand=12)]
+
+    def medium_mit_haken(m: Media, darunter: str = "") -> ft.Control:
+        """Die Medienkarte eines Stücks — sie merkt, dass es angesehen wurde
+        (`components.material.gesehen_setzen`, nur auf dem Gerät), und sagt es beim nächsten
+        Mal. ``darunter``: wann es im Lauf kommt („nach 10 Sekunden“)."""
+        haken = ft.Text(
+            "✓ gesehen" + (f" · {darunter}" if darunter else ""),
+            size=12,
+            opacity=0.7,
+            data=("medium_gesehen", m.uri),
+        )
+        haken.visible = m.uri in schon_gesehen
+        wann = ft.Text(darunter, size=12, opacity=0.7, visible=bool(darunter) and not haken.visible)
+
+        def geoeffnet() -> None:
+            material_ui.gesehen_setzen(state, m.uri, True)
+            schon_gesehen.add(m.uri)
+            haken.visible, wann.visible = True, False
+            for c in (haken, wann):
+                with contextlib.suppress(Exception):
+                    c.update()
+
+        return ft.Column(
+            spacing=4,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            controls=[
+                medienkarte(page, state, m, einzug=64, beim_oeffnen=geoeffnet),
+                wann,
+                haken,
+            ],
+        )
+
+    def uebung_karte() -> list[ft.Control]:
+        """Die Übung in der Mitte (Ben, 27.11.2026): Symbol und Name — und, **wenn der Lauf
+        schon einmal gemacht ist**, sein Ergebnis und darin, was beim ersten Mal erst im Lauf
+        kam: die Medien „dabei“ und die zu einem Ereignis, mit ihrer Bedingung. Beim ersten
+        Durcharbeiten kommen sie an ihrer Stufe und stehen hier noch nicht."""
+        kopfzeile = ft.Row(
+            spacing=12,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                uebungsbild(
+                    state, uebung.icon_key, uebung.image_path, groesse=36, medien=uebung.media
+                ),
+                ft.Column(
+                    spacing=0,
+                    tight=True,
+                    expand=True,
+                    controls=[
+                        ft.Text(uebung.name, size=16, weight=ft.FontWeight.W_600),
+                        *(
+                            [
+                                ft.Text(
+                                    f"Zuletzt: {menge_text(feld_von(uebung, block.feld), letzter)}",
+                                    size=13,
+                                    opacity=0.75,
+                                    data="test_zuletzt",
+                                )
+                            ]
+                            if letzter is not None
+                            else []
+                        ),
+                    ],
+                ),
+            ],
+        )
+        im_lauf: list[ft.Control] = []
+        if letzter is not None:
+            for m in block.medien:
+                if m.rolle == BEGLEITUNG:
+                    im_lauf.append(medium_mit_haken(m, "läuft dabei mit"))
+                elif m.wann == BEI and m.bei is not None:
+                    im_lauf.append(medium_mit_haken(m, m.bei.text()))
+        return [karte(kopfzeile, *im_lauf, abstand=12)]
 
     def fragen_karten(wann_vorher: bool, antworten: dict[str, Gegeben]) -> list[ft.Control]:
         """Die Fragen am Lauf — vor dem Start oder im Ergebnis (`Block.fragen_vorher`). Die
@@ -1129,7 +1213,7 @@ def kurs_test_view(
         geraet_ohne = sensor_hinweis(state, block)
         return _seite(
             [
-                _kopf(v, f, timer, gebraucht=gebraucht),
+                _kopf(v, f, timer, gebraucht=gebraucht, name=block.titel or uebung.name),
                 # der Hinweis des Kurses vor dem Start (`Block.text`)
                 *(
                     [
@@ -1143,6 +1227,7 @@ def kurs_test_view(
                 ),
                 # Vorher (Ben, 23.11.2026): erst die Medien, dann die Fragen, dann „Start“
                 *medien_karte("", "Vorher ansehen"),
+                *uebung_karte(),
                 *fragen_karten(True, _antworten(state, block, uebung)),
                 *([] if aus.leer else [ausfuehrung_karte()]),
                 *([_timer_karte(timer, im_kopf=v is None)] if timer is not None else []),
@@ -1164,6 +1249,9 @@ def kurs_test_view(
                     if block.braucht
                     else []
                 ),
+                # „Danach“ steht hier erst, wenn der Lauf schon einmal gemacht ist — beim
+                # ersten Mal kommt es im Ergebnis (Ben, 27.11.2026)
+                *(medien_karte(NACHHER, "Danach ansehen") if letzter is not None else []),
             ],
             [
                 *(
@@ -1180,8 +1268,8 @@ def kurs_test_view(
                     else []
                 ),
                 ft.FilledButton(
-                    "Start",
-                    icon=ft.Icons.PLAY_ARROW,
+                    "Nochmal" if letzter is not None else "Start",
+                    icon=ft.Icons.REPLAY if letzter is not None else ft.Icons.PLAY_ARROW,
                     height=64,
                     style=_GROSS,
                     on_click=start,
@@ -1191,10 +1279,11 @@ def kurs_test_view(
                 ft.Text(
                     f"Es fehlt noch: {', '.join(fehlt)}. Verbinde den Sensor unter „Messung“."
                     if fehlt
-                    else "Die Uhr läuft mit dem Tipp los.",
+                    else "",
                     size=12,
                     opacity=0.65,
                     text_align=ft.TextAlign.CENTER,
+                    visible=bool(fehlt),
                 ),
             ],
         )
@@ -1718,17 +1807,6 @@ def kurs_test_view(
                     else []
                 ),
                 *medien_karte(NACHHER, "Danach ansehen"),
-                ft.Text(
-                    f"Eingetragen wird ein gewöhnlicher Eintrag bei „{uebung.name}“ — er steht "
-                    "auch unter Heute. "
-                    + (
-                        "Was der Kurs daraus für deinen Plan vorschlägt, zeigt das Kapitel."
-                        if gebraucht
-                        else "Der Kurs merkt sich, was du eingetragen hast."
-                    ),
-                    size=12,
-                    opacity=0.65,
-                ),
             ],
             [
                 fehlt_text,

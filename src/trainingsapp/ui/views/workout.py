@@ -58,6 +58,8 @@ from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.medienliste import medium_zeile
 from trainingsapp.ui.components.modus_wahl import WORKOUT, modus_wahl
+from trainingsapp.ui.components.skala_linie import SkalaLinie
+from trainingsapp.ui.components.skala_linie import skala_feld as linien_feld
 from trainingsapp.ui.components.srpe import workout_srpe_zeile
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uhr import schluessel as uhr_schluessel
@@ -706,40 +708,80 @@ def workout_view(
         return next((f for f in u.result_spec.fields if f.type == FieldType.SCALE), None)
 
     def skala_auswahl(
-        e: Einheitslauf, teil: PlanAblaufBaustein, u: Exercise | None, titel: str, lo: int, hi: int
+        e: Einheitslauf,
+        teil: PlanAblaufBaustein,
+        u: Exercise | None,
+        titel: str,
+        lo: int,
+        hi: int,
+        *,
+        bestaetigen: bool,
     ) -> ft.Control:
         """Die Skala im Schritt (E6): die Frage eines Entscheidungsknotens, eine Skala-Bedingung
-        oder -Kante, sonst das Skalenfeld der Übung. Die Wahl geht an den Baustein (`antworten`)
-        und — bei einer Übung — als ``person/skala`` in die Zeitleiste und mit dem Schritt in
-        den Eintrag."""
+        oder -Kante, sonst das Skalenfeld der Übung — als Linie mit Wertefenster
+        (`components/skala_linie.py`, Ben, 28.11.2026; vorher Chips). Die Wahl geht an den
+        Baustein (`antworten`) und — bei einer Übung — als ``person/skala`` in die Zeitleiste
+        und mit dem Schritt in den Eintrag.
+
+        ``bestaetigen``: Die Antwort kann einen Weg im Ablauf wählen — dann gilt sie erst mit
+        dem Knopf „Weiter“ (beim Ziehen rutscht man leichter daneben als beim Tipp auf ein
+        Kästchen); bis dahin ist der Wert der Linie ein Entwurf. Sonst trägt das Loslassen
+        ein."""
         feld = skala_feld(u)
-        gewaehlt = teil.skala_wert
+        gegeben = int(teil.skala_wert) if teil.skala_wert is not None else None
+        stelle = (teil.schritt.name, teil.schritt.item_id, teil.durchlauf)
+        gemerkt = stand.get("skala_entwurf")
+        entwurf: dict[str, int | None] = {
+            "wert": gemerkt[1] if gemerkt is not None and gemerkt[0] == stelle else gegeben
+        }
 
-        def ist(wert: int) -> bool:
-            return gewaehlt is not None and int(gewaehlt) == wert
-
-        def waehler(wert: int) -> Callable[[], None]:
-            def handler() -> None:
-                if u is not None and e.t0 is not None:
-                    e.nachtragen(
-                        Ereignis(
-                            max(0.0, e.uhr() - e.t0),
-                            "person",
-                            "skala",
-                            f"{teil.schritt.name}: Skala {wert}",
-                            {
-                                "planuebung": teil.schritt.item_id,
-                                "feld": feld.key if feld is not None else "",
-                                "wert": wert,
-                            },
-                        )
+        def antworten(wert: int) -> None:
+            stand["skala_entwurf"] = None
+            if u is not None and e.t0 is not None:
+                e.nachtragen(
+                    Ereignis(
+                        max(0.0, e.uhr() - e.t0),
+                        "person",
+                        "skala",
+                        f"{teil.schritt.name}: Skala {wert}",
+                        {
+                            "planuebung": teil.schritt.item_id,
+                            "feld": feld.key if feld is not None else "",
+                            "wert": wert,
+                        },
                     )
-                teil.antworten(float(wert))
-                einheit_ui.melden(state)
-                auffrischen()
+                )
+            teil.antworten(float(wert))
+            einheit_ui.melden(state)
+            auffrischen()
 
-            return handler
+        def gemeldet(x: float | int | None) -> None:
+            if x is None:  # Fenster geleert: eine Antwort nimmt man nicht zurück
+                entwurf["wert"] = gegeben
+                stand["skala_entwurf"] = None
+                linie.setzen(gegeben)
+            else:
+                entwurf["wert"] = int(x)
+                stand["skala_entwurf"] = (stelle, int(x))
+                if not bestaetigen:
+                    antworten(int(x))
+                    return
+            weiter.disabled = entwurf["wert"] is None or entwurf["wert"] == gegeben
+            with contextlib.suppress(Exception):
+                weiter.update()
 
+        def bestaetigt(_e: Any = None) -> None:
+            if entwurf["wert"] is not None:
+                antworten(entwurf["wert"])
+
+        linie = SkalaLinie(linien_feld(lo, hi), entwurf["wert"], gemeldet, data=("skala",))
+        weiter = ft.FilledButton(
+            "Weiter",
+            icon=ft.Icons.ARROW_FORWARD,
+            disabled=entwurf["wert"] is None or entwurf["wert"] == gegeben,
+            on_click=bestaetigt,
+            data=("skala_weiter",),
+        )
         return ft.Container(
             padding=ft.Padding.symmetric(horizontal=12, vertical=10),
             border_radius=12,
@@ -754,29 +796,11 @@ def workout_view(
                             ft.Text(titel, size=14, weight=ft.FontWeight.W_600, expand=True),
                         ],
                     ),
-                    ft.Row(
-                        wrap=True,
-                        spacing=6,
-                        run_spacing=6,
-                        controls=[
-                            ft.Chip(
-                                label=ft.Text(
-                                    str(w),
-                                    weight=ft.FontWeight.W_700 if ist(w) else None,
-                                    color=ft.Colors.ON_SECONDARY if ist(w) else None,
-                                ),
-                                selected=ist(w),
-                                show_checkmark=False,
-                                # die gewählte Antwort kräftig: Die Vorgabe des Chips ist die
-                                # Farbe der Karte — der Wert war nicht zu erkennen (Web-Foto
-                                # 17.11.2026; bei einer Frage, die nur vorschlägt, bleibt er
-                                # stehen)
-                                selected_color=ft.Colors.SECONDARY,
-                                on_select=waehler(w),
-                                data=("skala", w),
-                            )
-                            for w in range(lo, hi + 1)
-                        ],
+                    linie.control,
+                    *(
+                        [ft.Row(alignment=ft.MainAxisAlignment.END, controls=[weiter])]
+                        if bestaetigen
+                        else []
                     ),
                 ],
             ),
@@ -1382,7 +1406,11 @@ def workout_view(
         if s.frage is not None and s.frage.wahl:
             teile.append(antwort_auswahl(teil, s.frage))
         elif s.frage is not None:
-            teile.append(skala_auswahl(e, teil, None, s.frage.text, s.frage.min, s.frage.max))
+            teile.append(
+                skala_auswahl(
+                    e, teil, None, s.frage.text, s.frage.min, s.frage.max, bestaetigen=True
+                )
+            )
         elif teil.phase == PAUSE:
             teile.append(karte(ft.Text("Pause", size=15, weight=ft.FontWeight.W_600), abstand=4))
         elif teil.timer is not None and u is not None:
@@ -1482,7 +1510,7 @@ def workout_view(
                     ) + f" — ab {b.n} geht es weiter"
                 else:
                     titel = feld.label if feld is not None else "Skala"
-                teile.append(skala_auswahl(e, teil, u, titel, lo, hi))
+                teile.append(skala_auswahl(e, teil, u, titel, lo, hi, bestaetigen=skala_gefragt))
             wdh_arten = (bd.WDH, bd.WDH_IN_ZEIT)
             wdh_ziel = (
                 b.n

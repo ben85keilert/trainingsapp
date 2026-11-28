@@ -156,6 +156,7 @@ from trainingsapp.ui.components.kursfrage import frage_karte
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.medienkarte import medienkarte
 from trainingsapp.ui.components.planwert import planwert_karte
+from trainingsapp.ui.components.skala_linie import SkalaLinie, skala_feld
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.timer_takt import TICK_S, ton_spielen
@@ -169,8 +170,6 @@ ERGEBNIS = "ergebnis"
 BEOBACHTER = "kurs_test"
 #: Der Balken der Anstrengung hat die Stufen 1 bis hier
 STUFEN = 10
-#: So viele Stufen der Skala stehen im Ergebnis in einer Zeile (T3)
-JE_ZEILE = 6
 #: Unter diesem Namen hält die Sitzung, was vor dem Start gewählt ist (`_wahl`)
 _WAHL = "kurs_test_wahl"
 #: … und was auf die Fragen **vor** dem Start geantwortet ist (`_antworten`)
@@ -1771,52 +1770,21 @@ def kurs_test_view(
                 )
             )
 
-        # Die Skala: Stufen als Raster, die gewählte gefüllt; noch einmal tippen nimmt sie zurück
+        # Die Skala: Linie mit Wertefenster (`components/skala_linie.py`, Ben, 28.11.2026 —
+        # vorher ein Raster aus Zellen); das Fenster leeren nimmt den Wert zurück
         stufen = kurstest.skala_stufen(uebung.result_spec)
         frage, unterzeile = kurstest.skala_frage(f.skala_name, stufen)
-        zellen: dict[int, ft.Container] = {}
 
-        def stil(zelle: ft.Container, w: int) -> None:
-            gewaehlt = s.skala == w
-            zelle.bgcolor = ft.Colors.PRIMARY if gewaehlt else None
-            zelle.border = None if gewaehlt else ft.Border.all(1.5, ft.Colors.OUTLINE)
-            zelle.content = ft.Text(
-                str(w),
-                size=15,
-                weight=ft.FontWeight.W_700 if gewaehlt else None,
-                color=ft.Colors.ON_PRIMARY if gewaehlt else None,
-            )
+        def skala_gesetzt(x: float | int | None) -> None:
+            s.skala = None if x is None else int(x)
+            stand_zeigen()
 
-        def waehlen(w: int) -> Callable[..., None]:
-            def handler(_e: Any = None) -> None:
-                s.skala = None if s.skala == w else w
-                for k, zelle in zellen.items():
-                    stil(zelle, k)
-                stand_zeigen()
-                with contextlib.suppress(Exception):
-                    raster.update()
-
-            return handler
-
-        for w in stufen:
-            zellen[w] = ft.Container(
-                expand=1,
-                height=44,
-                border_radius=10,
-                alignment=ft.Alignment.CENTER,
-                ink=True,
-                on_click=waehlen(w),
-                data=("test_skala", w),
-            )
-            stil(zellen[w], w)
-        werte = list(stufen)
-        reihen: list[ft.Control] = []
-        for i in range(0, len(werte), JE_ZEILE):
-            reihe: list[ft.Control] = [zellen[w] for w in werte[i : i + JE_ZEILE]]
-            # die letzte Zeile auffüllen: Die Stufen stehen in Spalten untereinander
-            reihe.extend(ft.Container(expand=1) for _ in range(JE_ZEILE - len(reihe)))
-            reihen.append(ft.Row(spacing=8, controls=reihe))
-        raster = ft.Column(spacing=8, tight=True, controls=reihen, data="test_raster")
+        raster = SkalaLinie(
+            skala_feld(stufen.start, stufen.stop - 1),
+            s.skala,
+            skala_gesetzt,
+            data="test_skala",
+        ).control
 
         stand_zeigen(aktualisieren=False)
         return _seite(

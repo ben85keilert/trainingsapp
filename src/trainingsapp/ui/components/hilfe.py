@@ -53,9 +53,9 @@ oben: `3x30`, `45/60/30`. `0` oder leer = ohne Zeit — gemacht, aber kein Punkt
 meldet das Feld einen Fehler.
 
 **Einzelwerte**: Gewicht `40` oder `40kg`, Strecke `500` (m) oder `2km`, Winkel `45`,
-Skala `0` bis `10` — im Plan ein Schiebebalken (Loslassen trägt ein), im Formular
-Regler oder Zahl mit dem Haken. Dezimal mit Punkt oder Komma (`12,5`); in Satzlisten
-trennt das Komma Sätze, also dort `12.5`.
+Skala `0` bis `10` — eine Linie mit Wertefenster: ziehen, tippen oder die Zahl
+eingeben; im Plan trägt das Loslassen ein, im Formular der Haken. Dezimal mit Punkt
+oder Komma (`12,5`); in Satzlisten trennt das Komma Sätze, also dort `12.5`.
 
 **Menge oder Ausprägung**: Wiederholungen und Zeiten werden addiert (3 × 50 = 150).
 Winkel, Gewicht und Seite wählst du vorher aus — sie trennen: Wandsitz 45° ist

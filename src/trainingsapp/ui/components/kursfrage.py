@@ -18,6 +18,7 @@ import flet as ft
 from trainingsapp.core import ablauf as ab
 from trainingsapp.core.kursbloecke import Gegeben, antwort_als_text
 from trainingsapp.ui.components.karte import karte
+from trainingsapp.ui.components.skala_linie import SkalaLinie, skala_feld
 
 
 def frage_karte(
@@ -29,14 +30,16 @@ def frage_karte(
     unter: str = "",
     gesperrt: bool = False,
 ) -> ft.Control:
-    """Die Karte einer Frage mit ihren Antworten zum Antippen.
+    """Die Karte einer Frage mit ihren Antworten zum Antippen — die Skala als Linie mit
+    Wertefenster (`components/skala_linie.py`, Ben, 28.11.2026).
 
     Args:
         frage: Wortlaut und Art.
         gegeben: was schon geantwortet ist — steht als gewählt da; ``None``: noch nichts.
         bei_antwort: bekommt die Antwort (`Gegeben`: die Zahl einer Skala in ``wert``, eine
             oder mehrere gewählte Antworten in ``text``). Bei „mehrere“ erst mit „Fertig“.
-        kennung: für ``data`` der Knöpfe — ``("antwort", kennung, <antwort>)``.
+        kennung: für ``data`` der Knöpfe — ``("antwort", kennung, <antwort>)``; die Linie
+            der Skala trägt ``("antwort", kennung)``.
         unter: ein Satz unter der Frage.
         gesperrt: nur lesen (das Kapitel ist nicht dran).
     """
@@ -47,18 +50,21 @@ def frage_karte(
 
     def zeigen() -> None:
         for wert, chip in knoepfe.items():
-            chip.selected = wert in gewaehlt or wert == zahl
+            chip.selected = wert in gewaehlt
         with contextlib.suppress(Exception):
             spalte.update()
 
-    def skala(n: int) -> Callable[..., None]:
-        def handler(_e: Any = None) -> None:
-            nonlocal zahl
-            zahl = n
-            zeigen()
-            bei_antwort(Gegeben(float(n)))
-
-        return handler
+    def skala(x: float | int | None) -> None:
+        """Die Linie meldet beim Loslassen, beim Verlassen des Fensters und bei Enter. Ohne
+        Wert (Fenster geleert) bleibt die gegebene Antwort — eine Antwort nimmt man nicht
+        zurück, man gibt eine andere."""
+        nonlocal zahl
+        if x is None:
+            if linie is not None:
+                linie.setzen(zahl)
+            return
+        zahl = int(x)
+        bei_antwort(Gegeben(float(zahl)))
 
     def eine(antwort: str) -> Callable[..., None]:
         def handler(_e: Any = None) -> None:
@@ -81,16 +87,15 @@ def frage_karte(
         bei_antwort(Gegeben(text=antwort_als_text(liste, mehrfach=True)))
 
     unten: list[ft.Control] = []
+    linie: SkalaLinie | None = None
     if frage.art == ab.F_SKALA:
-        for n in range(frage.min, frage.max + 1):
-            knoepfe[n] = ft.Chip(
-                label=ft.Text(str(n)),
-                selected=n == zahl,
-                disabled=gesperrt,
-                show_checkmark=False,
-                on_select=skala(n),
-                data=("antwort", kennung, n),
-            )
+        linie = SkalaLinie(
+            skala_feld(frage.min, frage.max),
+            zahl,
+            skala,
+            gesperrt=gesperrt,
+            data=("antwort", kennung),
+        )
     else:
         for a in frage.wahl:
             knoepfe[a] = ft.Chip(
@@ -117,7 +122,9 @@ def frage_karte(
     spalte = karte(
         ft.Text(frage.text, weight=ft.FontWeight.W_600),
         *([ft.Text(unter, size=13)] if unter else []),
-        ft.Row(wrap=True, spacing=8, run_spacing=8, controls=list(knoepfe.values())),
+        linie.control
+        if linie is not None
+        else ft.Row(wrap=True, spacing=8, run_spacing=8, controls=list(knoepfe.values())),
         *unten,
     )
     return spalte

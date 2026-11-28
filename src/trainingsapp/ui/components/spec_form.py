@@ -13,9 +13,9 @@ Zahlen bekommen die Zahlentastatur, Zeiten die für Uhrzeiten (Ziffern und
 „:“) — Text nur für Textfelder (Ben, 14.10.2026). Auf der Zahlentastatur
 gibt es kein „x“: Sätze trennt dort das Komma (``15,15,20``).
 
-Die Skala ist ein Regler mit Zahlenfeld in einer Zeile, ihr Name darüber.
-Der Regler schreibt ins Feld, getippte Zahlen stellen den Regler; gelesen
-wird das Feld — leer heißt „ohne Wert“, auch wenn der Regler am Anfang steht.
+Die Skala ist eine Linie mit Wertefenster (`components/skala_linie.py`, Ben, 28.11.2026),
+ihr Name darüber. Die Linie schreibt ins Fenster, getippte Zahlen stellen die Linie; gelesen
+wird das Fenster — leer heißt „ohne Wert“, auch wenn der Punkt am Anfang steht.
 
 Jedes Feld steht in voller Breite, seine Chips **darunter** — nebeneinander
 quetschten sich Feld und Chips am Handy, und welcher Chip zu welchem Feld
@@ -28,7 +28,6 @@ nicht die Segmente einer gewöhnlichen Auswahl, die vier lange Namen nicht fasse
 
 from __future__ import annotations
 
-import contextlib
 from collections.abc import Callable
 from typing import Any
 
@@ -43,8 +42,6 @@ from trainingsapp.core.result_spec import (
     geordnet,
     ist_leer,
     skala_titel,
-    skala_wert,
-    stellen,
 )
 from trainingsapp.core.units import (
     format_dauer,
@@ -54,7 +51,7 @@ from trainingsapp.core.units import (
     parse_sets,
 )
 from trainingsapp.ui.components.hilfe import hilfe_knopf
-from trainingsapp.ui.components.layout import ohne_auto_update
+from trainingsapp.ui.components.skala_linie import SkalaLinie
 from trainingsapp.ui.components.varianten import Variantenwahl, zeilenbreite
 
 ZAHLENARTIG = {
@@ -90,7 +87,8 @@ class SpecForm:
         self._quick = quick or {}
         self._widgets: dict[str, ft.Control] = {}
         self._chips: dict[str, list[ft.Chip]] = {}
-        #: Skala: der Regler neben dem Zahlenfeld (das Feld ist das Widget)
+        #: Skala: Linie und Wertefenster (das Fenster ist das Widget), `_regler` die Linie allein
+        self._linien: dict[str, SkalaLinie] = {}
         self._regler: dict[str, ft.Slider] = {}
         #: Die Variantenwahl je Variantenfeld (das Widget ist ihre Spalte)
         self._varianten: dict[str, Variantenwahl] = {}
@@ -122,14 +120,12 @@ class SpecForm:
         if f.type == FieldType.BOOL:
             return ft.Switch(label=f.label, value=bool(wert))
         if f.type == FieldType.SCALE:
-            # Das Zahlenfeld ist das Widget; den Regler daneben baut `_zeile`.
-            return ft.TextField(
-                value="" if wert is None else self._anzeige(f, wert),
-                width=80,
-                dense=True,
-                keyboard_type=ft.KeyboardType.NUMBER,
-                text_align=ft.TextAlign.CENTER,
-            )
+            # Linie und Wertefenster (`components/skala_linie.py`); das Fenster ist das Widget,
+            # die Zeile dazu baut `_zeile`.
+            linie = SkalaLinie(f, wert if isinstance(wert, int | float) else None)
+            self._linien[f.key] = linie
+            self._regler[f.key] = linie.regler
+            return linie.fenster
         if f.type == FieldType.CHOICE:
             return ft.SegmentedButton(
                 selected=[str(wert)] if wert not in (None, "") else [],
@@ -197,11 +193,7 @@ class SpecForm:
                 spacing=0,
                 controls=[
                     ft.Text(skala_titel(f), size=12, opacity=0.7),
-                    ft.Row(
-                        spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        controls=[self._skala_regler(f, widget), widget],
-                    ),
+                    self._linien[f.key].control,
                 ],
             )
 
@@ -259,44 +251,6 @@ class SpecForm:
                 ),
             ],
         )
-
-    def _skala_regler(self, f: FieldSpec, feld: ft.Control) -> ft.Slider:
-        """Der Regler zur Skala — jeder Bereich, auch negativ und mit Kommastellen."""
-        lo = f.min if f.min is not None else 0
-        hi = f.max if f.max is not None else 10
-        schritt = f.step or 1
-        wert = self._lesen(f, feld)
-        start = float(wert) if wert is not None else float(lo)
-        regler = ft.Slider(
-            min=lo,
-            max=hi,
-            divisions=max(1, round((hi - lo) / schritt)),
-            value=min(max(start, lo), hi),
-            label="{value}",
-            round=stellen(schritt),
-            expand=True,
-        )
-
-        def gezogen(e: ft.Event[ft.Slider]) -> None:
-            ohne_auto_update()  # kommt beim Ziehen dauernd — nur das Feld neu zeichnen
-            neu = skala_wert(f, float(e.control.value or 0))
-            feld.value = "" if neu is None else str(neu)  # type: ignore[attr-defined]
-            feld.error = None  # type: ignore[attr-defined]
-            with contextlib.suppress(RuntimeError):
-                feld.update()
-
-        def getippt(_: ft.Event[ft.TextField]) -> None:
-            ohne_auto_update()
-            neu = self._lesen(f, feld)
-            if neu is not None:
-                regler.value = float(neu)
-                with contextlib.suppress(RuntimeError):
-                    regler.update()
-
-        regler.on_change = gezogen
-        feld.on_change = getippt  # type: ignore[attr-defined]
-        self._regler[f.key] = regler
-        return regler
 
     def _chips_abgleichen(self, f: FieldSpec) -> None:
         """Bei Einzelwerten erscheint der Chip mit dem aktuellen Wert ausgewählt."""
@@ -378,9 +332,7 @@ class SpecForm:
             if f.type == FieldType.BOOL:
                 widget.value = bool(werte[f.key])  # type: ignore[attr-defined]
             elif f.type == FieldType.SCALE:
-                widget.value = self._anzeige(f, werte[f.key])  # type: ignore[attr-defined]
-                if (regler := self._regler.get(f.key)) is not None and werte[f.key] is not None:
-                    regler.value = min(max(float(werte[f.key]), regler.min), regler.max)
+                self._linien[f.key].setzen(werte[f.key], aktualisieren=False)
             elif f.type == FieldType.CHOICE:
                 widget.selected = [str(werte[f.key])] if werte[f.key] else []  # type: ignore[attr-defined]
             else:

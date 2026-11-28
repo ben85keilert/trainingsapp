@@ -645,7 +645,7 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
             return [
                 kasten(
                     "Bereich",
-                    "der Schiebebalken unter Heute",
+                    "die Linie unter Heute",
                     ft.Row(
                         controls=[
                             textfeld("von", "von", width=90, keyboard_type=ft.KeyboardType.NUMBER),

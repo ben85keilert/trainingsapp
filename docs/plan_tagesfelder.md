@@ -16,7 +16,8 @@ Umgesetzt:
 - **Platz**: Der Block „Zum Tag“ (Notiz zum Tag + Felder) steht ganz unten unter Heute,
   hinter „Gemacht“ und den Plannotizen. In der Zeitleiste stehen die Felder unten ohne die
   Notiz, denn die steht dort schon an ihrer Uhrzeit.
-- **Skalen** als Schiebebalken (`ui/components/skala_regler.py`), statt des Rasters aus A3.
+- **Skalen** als Schiebebalken, statt des Rasters aus A3 — seit 28.11.2026 die Linie mit
+  Wertefenster (`ui/components/skala_linie.py`, P233).
   Die Sitzung „Nachtragen in Übungen“ nimmt dieselbe Komponente, falls Übungen sie bekommen.
 - **E1**: eigener Reiter „Zum Tag“ im Verlauf. **F**: Tagebuch wie beschrieben, „Übungen
   und Felder“.

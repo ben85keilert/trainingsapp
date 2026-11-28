@@ -28,12 +28,14 @@ from trainingsapp.core import zaehlen as zl
 from trainingsapp.core.einheit import AUSFUEHRUNG_SCHLUESSEL, Ereignis
 from trainingsapp.core.models import Exercise, PlanItem
 from trainingsapp.core.plaene import einzel_plan
-from trainingsapp.core.result_spec import FieldSpec, FieldType, wert_text
+from trainingsapp.core.result_spec import FieldSpec, FieldType, skala_titel, wert_text
 from trainingsapp.core.standards import chips_fuer, mit_plan_spec, ziel_von
+from trainingsapp.core.tagesfelder import zahl
 from trainingsapp.core.timer_eintrag import eingaben, gelaufene_zeiten, satz_nummer, stelle
 from trainingsapp.core.uebung_timer import ausfuehrungsfelder
 from trainingsapp.devices.einheit import Einheitslauf
 from trainingsapp.ui.components import zaehl_stand
+from trainingsapp.ui.components.skala_linie import skala_linie
 
 #: Der Satz der Wiederholungen im Workout — der Text bleibt, wie die Tests ihn kennen
 WDH_TITEL = "Wiederholungen — niemand zählt, trag sie hier ein"
@@ -266,30 +268,19 @@ def auspraegung_zeilen(
 
 
 def skala_zeile(
-    feld: FieldSpec, gewaehlt: Any, waehlen: Callable[[int], Callable[..., None]]
+    feld: FieldSpec, gewaehlt: Any, melden: Callable[[float | int | None], Any]
 ) -> ft.Control:
-    """Die Skala der Übung als Chips (wie im Workout)."""
-    lo = int(feld.min) if feld.min is not None else 0
-    hi = int(feld.max) if feld.max is not None else 10
-    if hi - lo > 20:
-        lo, hi = 0, 10
+    """Die Skala der Übung als Linie mit Wertefenster (`components/skala_linie.py`, Ben,
+    28.11.2026 — vorher Chips). Jede Skala, wie die Übung sie hat (Bereich, Schritt)."""
     return ft.Column(
         spacing=4,
         controls=[
-            ft.Text(feld.label or "Skala", size=13),
-            ft.Row(
-                wrap=True,
-                spacing=4,
-                run_spacing=4,
-                controls=[
-                    ft.Chip(
-                        label=ft.Text(str(w)),
-                        selected=gewaehlt is not None and str(gewaehlt) == str(w),
-                        show_checkmark=False,
-                        on_select=waehlen(w),
-                    )
-                    for w in range(lo, hi + 1)
-                ],
+            ft.Text(skala_titel(feld), size=13),
+            skala_linie(
+                feld,
+                gewaehlt if isinstance(gewaehlt, int | float) else None,
+                melden,
+                data=("skala", feld.key),
             ),
         ],
     )
@@ -428,14 +419,11 @@ class EintragenKarte:
             {"feld": self.wdh_feld or "", "wert": None, "dazu": True},
         )
 
-    def _skala(self, wert: int) -> Callable[..., None]:
-        def handler(_e: Any = None) -> None:
-            feld = self.skala.key if self.skala is not None else ""
-            self._schreiben(
-                "skala", f"{self.uebung.name}: Skala {wert}", {"feld": feld, "wert": wert}
-            )
-
-        return handler
+    def _skala(self, wert: float | int | None) -> None:
+        """Die Linie meldet ihren Wert — ``None``: das Fenster ist geleert, der Wert weg."""
+        feld = self.skala.key if self.skala is not None else ""
+        text = "ohne Wert" if wert is None else f"Skala {zahl(wert)}"
+        self._schreiben("skala", f"{self.uebung.name}: {text}", {"feld": feld, "wert": wert})
 
     def _auspraegung(self, key: str, wert: Any) -> Callable[..., None]:
         def handler(_e: Any = None) -> None:

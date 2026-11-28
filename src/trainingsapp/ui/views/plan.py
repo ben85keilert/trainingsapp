@@ -153,7 +153,7 @@ from trainingsapp.ui.components.planpfeile import halter as pfeile_platz
 from trainingsapp.ui.components.planpfeile import pfeilzeile
 from trainingsapp.ui.components.planstand import nur_hier, wie_die_uebung
 from trainingsapp.ui.components.scroll import scroll_merken
-from trainingsapp.ui.components.skala_regler import skala_regler
+from trainingsapp.ui.components.skala_linie import skala_linie
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uhr import UhrTeile, laufende, uhr_teile, zaehlt_symbol
 from trainingsapp.ui.components.uhr_blatt import uhr_blatt
@@ -1783,7 +1783,7 @@ def plan_view(
     ) -> ft.Control:
         """Eine Zeile der Ausführung für den offenen Eintrag: zeigt seinen Wert und ändert ihn
         (`SessionRepo.wert_setzen`, `text_setzen`) — wie die Notiz; ohne markierten Eintrag
-        beginnt der erste Wert einen. Die Skala ist der Schiebebalken der Tagesfelder."""
+        beginnt der erste Wert einen. Die Skala ist die Linie mit Wertefenster."""
         wert = ziel.result.get(f.key) if ziel is not None else None
         name = ft.Text(basis_label(f), size=12, width=62, opacity=0.8)
         if f.type == FieldType.SCALE:
@@ -1794,7 +1794,7 @@ def plan_view(
                 wert_setzer(item, f, x)
 
             zahl = float(wert) if isinstance(wert, int | float) else None
-            return einstellungs_zeile(name, skala_regler(f, zahl, skala))
+            return einstellungs_zeile(name, skala_linie(f, zahl, skala))
         if f.type == FieldType.BOOL:
 
             def gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:

@@ -12,6 +12,7 @@ import pytest
 ft = pytest.importorskip("flet")
 
 from trainingsapp.core import tagesfelder as tf  # noqa: E402
+from trainingsapp.core import workout_eintrag as we  # noqa: E402
 from trainingsapp.core.einheit import Ereignis  # noqa: E402
 from trainingsapp.core.models import Plan  # noqa: E402
 from trainingsapp.data.seed import seed_id  # noqa: E402
@@ -183,13 +184,8 @@ def test_seite_zeigt_verlauf_und_traegt_die_anstrengung_am_workout_ein(page, sta
     assert "3 Sätze · 12 · 12 · 12" in texte and "4:00" in texte
     assert "Notiz zum Workout" in texte
 
-    # Tipp auf die 6: am Workout, nicht im Tagesfeld
-    sechs = next(
-        x
-        for x in _alle(ansicht)
-        if isinstance(x, ft.Container) and isinstance(x.content, ft.Text) and x.content.value == "6"
-    )
-    sechs.on_click(None)
+    # Die Linie auf 6: am Workout, nicht im Tagesfeld
+    _stufe(ansicht, "srpe", 6)
     assert state.einheiten.workout_wert("e-1").srpe == 6
     feld = tf.standardfeld(state.tagesfelder.alle(state.profil.id), tf.STANDARD_SRPE)
     werte = state.tageswerte.am_tag(state.profil.id, state.heute())
@@ -243,20 +239,19 @@ def _knopf(wurzel, text: str):
     return next(x for x in _alle(wurzel) if isinstance(x, ft.TextButton) and x.content == text)
 
 
-def _stufe(wurzel, titel: str, stufe: int):
-    """Der Knopf ``stufe`` in der Skalen-Zeile mit diesem Titel."""
-    zeile = next(
-        x
-        for x in _alle(wurzel)
-        if isinstance(x, ft.Column) and _texte(x)[:1] == [titel] and len(_texte(x)) == 13
-    )
-    return next(
-        x
-        for x in _alle(zeile)
-        if isinstance(x, ft.Container)
-        and isinstance(x.content, ft.Text)
-        and x.content.value == str(stufe)
-    )
+def _stufe(wurzel, key: str, stufe: int | None) -> None:
+    """Die Skala ``key`` (Linie mit Wertefenster, `components/skala_linie.py`) auf ``stufe``
+    setzen und loslassen — ``None``: das Wertefenster leeren."""
+    if stufe is None:
+        fenster = next(
+            x for x in _alle(wurzel) if getattr(x, "data", None) == ("fenster", ("stufe", key))
+        )
+        fenster.value = ""
+        fenster.on_blur(None)
+        return
+    linie = next(x for x in _alle(wurzel) if getattr(x, "data", None) == ("stufe", key))
+    linie.value = stufe
+    linie.on_change_end(None)
 
 
 def test_eigene_skalen_am_workout_gelten_fuer_alle_durchlaeufe(state) -> None:
@@ -286,14 +281,14 @@ def test_eigene_skalen_am_workout_gelten_fuer_alle_durchlaeufe(state) -> None:
 
     # Sie steht bei jedem Durchlauf dieses Workouts; der Wert gehört zum Durchlauf
     eins = workout_eintrag_view(page, state, "e-1")
-    _stufe(eins, "Schmerz danach", 3).on_click(None)
-    _stufe(eins, "Anstrengung (sRPE)", 7).on_click(None)
+    _stufe(eins, we.feld_key("Schmerz danach"), 3)
+    _stufe(eins, "srpe", 7)
     assert state.einheiten.workout_wert("e-1").werte_text() == "Anstrengung 7 · Schmerz danach 3"
     assert "Schmerz danach" in _texte(workout_eintrag_view(page, state, "e-2"))
     assert state.einheiten.workout_wert("e-2").leer
 
-    # Noch einmal auf den gewählten Wert: zurückgenommen
-    _stufe(workout_eintrag_view(page, state, "e-1"), "Anstrengung (sRPE)", 7).on_click(None)
+    # Das Wertefenster leeren: zurückgenommen (Ben, 28.11.2026 — vorher ein zweiter Tipp)
+    _stufe(workout_eintrag_view(page, state, "e-1"), "srpe", None)
     assert state.einheiten.workout_wert("e-1").srpe is None
 
     # Die Skala entfernen: der eingetragene Wert bleibt sichtbar, am anderen Durchlauf ist sie weg

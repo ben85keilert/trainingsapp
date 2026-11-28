@@ -60,6 +60,18 @@ def _texte(c) -> list[str]:
     return [x.value for x in _alle(c) if isinstance(x, ft.Text) and isinstance(x.value, str)]
 
 
+def _skala_antworten(ansicht, wert: int) -> None:
+    """Die Skala im Schritt: den Punkt der Linie setzen und loslassen — kann die Antwort
+    einen Weg wählen, gilt sie erst mit „Weiter“ (Ben, 28.11.2026)."""
+    linie = next(c for c in _alle(ansicht) if isinstance(c, ft.Slider) and c.data == ("skala",))
+    linie.value = wert
+    linie.on_change_end(None)
+    weiter = [c for c in _alle(ansicht) if getattr(c, "data", None) == ("skala_weiter",)]
+    if weiter:
+        assert not weiter[0].disabled
+        weiter[0].on_click(None)
+
+
 def _knoepfe(c) -> dict[str, ft.Control]:
     arten = ft.FilledButton | ft.OutlinedButton | ft.FilledTonalButton | ft.TextButton
     out = {}
@@ -160,9 +172,7 @@ async def test_workout_folgt_den_kanten_mit_einschub_und_zurueck(umgebung) -> No
     # Weich: auch ein unerfüllter Weg ist wählbar (Bedingungen sind Vorschläge) — nur nicht betont
     assert isinstance(dehnung, ft.FilledTonalButton) and not dehnung.disabled
     # Skala 7 wählen → die Dehnung wird angeboten (betont), die Kniebeuge bleibt als Weg
-    chips = [c for c in _alle(laufend) if isinstance(c, ft.Chip) and c.label.value == "7"]
-    assert chips, "die Skala-Chips der Kante fehlen"
-    chips[0].on_select()
+    _skala_antworten(laufend, 7)
     assert teil.skala_wert == 7
     laufend = workout_view(seite, state, plan, route=route)
     knoepfe = _knoepfe(laufend)
@@ -223,16 +233,21 @@ async def test_frage_im_workout_und_pflicht_wartet(umgebung) -> None:
     assert teil.schritt.frage == frage
     frage_bild = workout_view(seite, state, plan, route=route)
     assert "Wie viel Druck?" in _texte(frage_bild)
-    chips = [c for c in _alle(frage_bild) if isinstance(c, ft.Chip)]
-    assert [c.label.value for c in chips] == [str(n) for n in range(11)]
-    chips[8].on_select()  # 8: keine Kante passt (nur 0–6) → die Frage bleibt, die Kante gesperrt
+    (linie,) = [c for c in _alle(frage_bild) if isinstance(c, ft.Slider)]
+    assert (linie.min, linie.max, linie.divisions) == (0, 10, 10)
+    # ohne Wert kein „Weiter“; der Wert der Linie allein ist noch keine Antwort
+    weiter = next(c for c in _alle(frage_bild) if c.data == ("skala_weiter",))
+    assert weiter.disabled and teil.skala_wert is None
+    linie.value = 8
+    linie.on_change_end(None)
+    assert not weiter.disabled and teil.skala_wert is None
+    weiter.on_click(None)  # 8: keine Kante passt (nur 0–6) → die Frage bleibt, die Kante gesperrt
     await _sekunden(state, uhr, gurt, 1)
     assert teil.phase == UEBUNG and teil.schritt.frage == frage and teil.skala_wert == 8
     warten = workout_view(seite, state, plan, route=route)
     knopf = _knoepfe(warten)["Weiter: Kniebeuge (Skala 0–6)"]
     assert knopf.disabled
-    chips = [c for c in _alle(warten) if isinstance(c, ft.Chip)]
-    chips[3].on_select()
+    _skala_antworten(warten, 3)
     await _sekunden(state, uhr, gurt, 1)
     assert teil.schritt.name == "Kniebeuge"
     antworten = [x for x in state.einheit.ereignisse if (x.quelle, x.art) == ("plan", "antwort")]
@@ -285,9 +300,7 @@ async def test_frage_geht_von_selbst_weiter_oder_schlaegt_nur_vor(umgebung) -> N
         ]
 
     def antwort(bild, wert: int) -> None:
-        next(
-            c for c in _alle(bild) if isinstance(c, ft.Chip) and c.data == ("skala", wert)
-        ).on_select()
+        _skala_antworten(bild, wert)
 
     await zur_frage()
     # Vor der Antwort: kein Weg wählbar, kein Satz
@@ -309,7 +322,7 @@ async def test_frage_geht_von_selbst_weiter_oder_schlaegt_nur_vor(umgebung) -> N
     assert texte.index("Bei 7–10 schlägt der Plan vor:") < texte.index("Oder:")
     assert wege(weich) == [(ab.ENDE, "vorschlag", True, False), (iw, "", False, False)]
     assert "Workout beenden — Für heute reicht es" in _knoepfe(weich)
-    gewaehlt = [c.data[1] for c in _alle(weich) if isinstance(c, ft.Chip) and c.selected]
+    gewaehlt = [c.value for c in _alle(weich) if isinstance(c, ft.Slider)]
     assert gewaehlt == [8]  # die Antwort bleibt sichtbar
     # Hart: der andere Weg ist nicht erfüllt — gesperrt; der Vorschlag bleibt zu tippen
     teil.uebergang_setzen("hart")

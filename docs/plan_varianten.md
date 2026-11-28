@@ -197,8 +197,8 @@ https://claude.ai/artifact/7JzRndHG41e3ZfeCm7huCH):
   Zahlenfeld gleich in der Zeile.
 - Ja/Nein, Skala und Freitext werden **keine** Wert-Knöpfe (anders als oben „für alle
   drei“): Sie stehen in der Ausführung unter „gilt für den offenen Eintrag“, zeigen und
-  ändern dessen Wert und trennen keine Einträge. Die Skala ist der Schiebebalken der
-  Tagesfelder (`ui/components/skala_regler.py`).
+  ändern dessen Wert und trennen keine Einträge. Die Skala ist die Linie mit Wertefenster
+  (`ui/components/skala_linie.py`, seit 28.11.2026, P233).
 
 ## G. Nachträglich, Uhr/Ablauf, Ziel (A6)
 

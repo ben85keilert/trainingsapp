@@ -44,6 +44,18 @@ async def umgebung(tmp_path, monkeypatch):
     state.schliessen()
 
 
+def _skala_antworten(ansicht, wert: int) -> None:
+    """Die Skala im Schritt: den Punkt der Linie setzen und loslassen — kann die Antwort
+    einen Weg wählen, gilt sie erst mit „Weiter“ (Ben, 28.11.2026)."""
+    linie = next(c for c in _alle(ansicht) if isinstance(c, ft.Slider) and c.data == ("skala",))
+    linie.value = wert
+    linie.on_change_end(None)
+    weiter = [c for c in _alle(ansicht) if getattr(c, "data", None) == ("skala_weiter",)]
+    if weiter:
+        assert not weiter[0].disabled
+        weiter[0].on_click(None)
+
+
 def _alle(c):
     yield c
     for name in ("content", "controls", "label", "leading", "appbar", "actions", "title"):
@@ -281,14 +293,7 @@ async def test_skala_weich_fertig_bleibt_trotzdem_weiter_oder_noch_einmal(umgebu
     laufend = workout_view(seite, state, plan, route=route)
     assert "Wie fühlt es sich an? — Skala ≥ 6" in _texte(laufend)
 
-    def chip(ansicht, wert: str):
-        return next(
-            x
-            for x in _alle(ansicht)
-            if isinstance(x, ft.Chip) and isinstance(x.label, ft.Text) and x.label.value == wert
-        )
-
-    chip(laufend, "4").on_select()
+    _skala_antworten(laufend, 4)
     laufend = workout_view(seite, state, plan, route=route)
     _knopf(laufend, "Fertig").on_click()
     await _sekunden(state, uhr, gurt, 1)
@@ -304,7 +309,7 @@ async def test_skala_weich_fertig_bleibt_trotzdem_weiter_oder_noch_einmal(umgebu
     starts = [x for x in e.ereignisse if (x.quelle, x.art) == ("plan", "uebung_start")]
     assert len(starts) == 2  # derselbe Schritt zum zweiten Mal
     laufend = workout_view(seite, state, plan, route=route)
-    chip(laufend, "7").on_select()
+    _skala_antworten(laufend, 7)
     laufend = workout_view(seite, state, plan, route=route)
     _knopf(laufend, "Fertig").on_click()
     await _sekunden(state, uhr, gurt, 1)

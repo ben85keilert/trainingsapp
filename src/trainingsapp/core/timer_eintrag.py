@@ -327,6 +327,12 @@ def eingaben(ereignisse: Iterable[Ereignis], zeiten: Sequence[Gelaufen]) -> Eing
     >>> e.wdh, e.skala, e.auspraegung
     ({'reps': [(0, 12), (0, 8)]}, {'scale': {1: 6}}, {'weight': 12})
 
+    Die Skala ohne Wert (das Wertefenster geleert, Ben 28.11.2026) nimmt ihn zurück:
+
+    >>> leer = Ereignis(75.0, "person", "skala", "", {"feld": "scale", "wert": None})
+    >>> eingaben([*ev, leer], zeiten).skala
+    {}
+
     Bis 0.3.68 (ohne ``dazu``) war der Wert der Stand des Abschnitts — der letzte gilt:
 
     >>> alt = [Ereignis(10.0, "person", "wdh", "", {"feld": "reps", "wert": w}) for w in (1, 2, 3)]
@@ -355,8 +361,13 @@ def eingaben(ereignisse: Iterable[Ereignis], zeiten: Sequence[Gelaufen]) -> Eing
                 saetze[:] = sorted(
                     [(j, w) for j, w in saetze if j != i] + [(i, max(0, ganzzahl_lesen(d["wert"])))]
                 )
-        elif x.art == "skala" and feld and d.get("wert") is not None:
-            e.skala.setdefault(feld, {})[stelle(zeiten, x.t_s)] = d["wert"]
+        elif x.art == "skala" and feld:
+            if d.get("wert") is None:  # Wertefenster geleert: der Wert der Stelle ist weg
+                e.skala.get(feld, {}).pop(stelle(zeiten, x.t_s), None)
+                if feld in e.skala and not e.skala[feld]:
+                    del e.skala[feld]
+            else:
+                e.skala.setdefault(feld, {})[stelle(zeiten, x.t_s)] = d["wert"]
     return e
 
 

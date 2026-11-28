@@ -1,7 +1,8 @@
 """Ein Tagesfeld eintragen — das Blatt von unten (Ben, 21.10.2026, Skizzen A3–A5).
 
-- **Skala** als Schiebebalken (Ben: „Skalen sollen als Schiebebalken dargestellt
-  werden“, `components/skala_regler.py`). Einmal am Tag schreibt das Loslassen den Wert
+- **Skala** als Linie mit Wertefenster (Ben, 21.10.2026: „Skalen sollen als Schiebebalken
+  dargestellt werden“; seit 28.11.2026 `components/skala_linie.py`). Einmal am Tag schreibt
+  das Loslassen — oder die getippte Zahl beim Verlassen des Fensters — den Wert
   (eine Korrektur, wenn es schon einen gab); mehrmals trägt „Eintragen“ ihn mit Uhrzeit ein.
 - **Anzahl, Menge, Dauer**: die Schnellknöpfe („+1 · 400“, „+250“), dazu ein freier Wert.
   Mehrmals ist jeder Tipp ein eigener Eintrag; einmal am Tag zählen sie zum Wert des Tags.
@@ -38,7 +39,7 @@ from trainingsapp.core.tag import uhrzeit_lesen
 from trainingsapp.core.verlauf import WOCHENTAGE
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
-from trainingsapp.ui.components.skala_regler import skala_regler
+from trainingsapp.ui.components.skala_linie import skala_linie
 from trainingsapp.ui.state import AppState
 
 
@@ -381,7 +382,7 @@ def tagesfeld_blatt(
                     einmal(x)
 
             return [
-                skala_regler(f, alt.wert if alt else None, gesetzt),
+                skala_linie(f, alt.wert if alt else None, gesetzt),
                 ft.Text(
                     "Einmal am Tag: Ein neuer Wert ändert den von "
                     f"{tag_text(tag, heute)}"
@@ -398,12 +399,12 @@ def tagesfeld_blatt(
 
         def los(_e: object = None) -> None:
             if gewaehlt["x"] is None:
-                melden("Erst den Wert am Balken wählen.")
+                melden("Erst den Wert auf der Linie wählen.")
                 return
             eintragen(gewaehlt["x"])
 
         return [
-            skala_regler(f, None, bewegt, loeschbar=False),
+            skala_linie(f, None, bewegt),
             ft.Row(
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[

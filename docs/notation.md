@@ -62,11 +62,12 @@ Dezimalzahlen mit Punkt oder Komma, `12,5` wird 12.5.
 **Skala:** Standard `0` bis `10`; jeder Bereich geht, auch negativ (`-5 - 5`)
 oder mit Kommastellen — die schreibt man im Bereich als solche: `0.0 - 10.0`
 erlaubt `3.5`, `0 - 10` nur ganze Zahlen. Die Skala hat einen Namen (Vorgabe
-„Skala“, im Übungs-Editor änderbar: „Anstrengung“, „Schmerz“ …). Im Plan ist
-sie ein Schiebebalken wie bei den Tagesfeldern (Ben, 21.10.2026, P71): Bewegen zeigt
-den Wert, Loslassen trägt ihn in den offenen Eintrag ein, ✕ nimmt ihn heraus. Im
-Formular (Leistungen, Korrektur) stehen Regler und Zahlenfeld in einer Zeile, der Name
-darüber: Der Regler schreibt seine Zahl ins Feld, abgeschickt wird mit dem Haken. Ein
+„Skala“, im Übungs-Editor änderbar: „Anstrengung“, „Schmerz“ …). Überall
+ist sie eine Linie mit Wertefenster (Ben, 28.11.2026, P233, `ui/components/skala_linie.py`;
+vorher Schiebebalken, P71, oder Kästchen): Ziehen oder Tippen setzt die Zahl im Fenster,
+eine getippte Zahl stellt den Punkt. Im Plan trägt das Loslassen (oder das Verlassen des
+Fensters) in den offenen Eintrag ein, das geleerte Fenster nimmt den Wert heraus. Im
+Formular (Leistungen, Korrektur) steht der Name darüber, abgeschickt wird mit dem Haken. Ein
 leeres Feld heißt „ohne Wert“ — auch dort, wo der Regler am Anfang steht.
 In Satzlisten trennt das Komma Sätze. **Sätze zählen ganze Wiederholungen** (Ben, 11.11.2026,
 N94): `0,5`, `15/0/20` (ein 0-Satz zwischen anderen) und `12.5` sind ungültig — das Feld zeigt

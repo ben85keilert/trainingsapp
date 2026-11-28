@@ -14,7 +14,7 @@ import pytest
 ft = pytest.importorskip("flet")
 
 from trainingsapp.core import tagesfelder as tf  # noqa: E402
-from trainingsapp.ui.components.skala_regler import skala_regler  # noqa: E402
+from trainingsapp.ui.components.skala_linie import SkalaLinie  # noqa: E402
 from trainingsapp.ui.components.tagesfeld_blatt import tagesfeld_blatt  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 
@@ -213,13 +213,15 @@ def test_skala_als_schiebebalken(page, state) -> None:
     assert w2.wert == 5 and w2.ersetzt == w.id
 
 
-def test_skala_regler_loescht_mit_x() -> None:
+def test_skala_fenster_leeren_loescht() -> None:
+    """Das Wertefenster leeren nimmt den Wert weg (vorher: der Knopf ✕)."""
     gemeldet: list = []
     f = tf.spec_bauen(tf.SKALA).fields[0]
-    regler = skala_regler(f, 4, gemeldet.append)
-    (loeschen,) = [x for x in _alle(regler) if isinstance(x, ft.IconButton)]
-    loeschen.on_click(None)
-    assert gemeldet == [None]
+    linie = SkalaLinie(f, 4, gemeldet.append)
+    assert not [x for x in _alle(linie.control) if isinstance(x, ft.IconButton)]
+    linie.fenster.value = ""
+    linie.fenster.on_blur(None)
+    assert gemeldet == [None] and linie.wert is None
 
 
 def test_notiz_speichert_beim_schliessen(page, state) -> None:

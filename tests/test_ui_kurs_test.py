@@ -132,6 +132,22 @@ def _daten(c, wert):
     return gefunden[0]
 
 
+def _skala(ergebnis):
+    """Die Linie der Skala im Ergebnis (`components/skala_linie.py`)."""
+    return _daten(ergebnis, "test_skala")
+
+
+def _skala_setzen(ergebnis, wert: int) -> None:
+    linie = _skala(ergebnis)
+    linie.value = wert
+    linie.on_change_end(None)
+
+
+def _skala_wert(ergebnis) -> str:
+    """Was im Wertefenster steht — leer: kein Wert."""
+    return _daten(ergebnis, ("fenster", "test_skala")).value
+
+
 def _hat(c, wert) -> bool:
     return any(getattr(x, "data", None) == wert for x in _alle(c))
 
@@ -427,12 +443,11 @@ async def test_menge_von_hand_ein_eintrag_mit_zeit_und_skala(umgebung) -> None:
     assert _daten(ergebnis, "zeit").value == "1:05" and "von der Uhr" in texte
     assert "Wie anstrengend war es?" in texte and "0 = gar nicht · 10 = mehr geht nicht" in texte
     assert not _hat(ergebnis, "test_wdh")  # die Wiederholungen sind die Vorgabe
-    zellen = [x.data[1] for x in _alle(ergebnis) if isinstance(getattr(x, "data", None), tuple)]
-    assert zellen == list(range(11))
-    assert all(_daten(ergebnis, ("test_skala", w)).bgcolor is None for w in range(11))
+    assert (_skala(ergebnis).min, _skala(ergebnis).max, _skala(ergebnis).divisions) == (0, 10, 10)
+    assert _skala_wert(ergebnis) == ""
     assert not _daten(ergebnis, "test_eintragen").disabled
-    await klick(_daten(ergebnis, ("test_skala", 6)))
-    assert _daten(ergebnis, ("test_skala", 6)).bgcolor == ft.Colors.PRIMARY
+    _skala_setzen(ergebnis, 6)
+    assert _skala_wert(ergebnis) == "6"
     assert not _eintraege(state, kaefer)  # bis hier ist nichts eingetragen
     await klick(_daten(ergebnis, "test_eintragen"))
     assert u.seite.route == f"/kurse/{kurs.id}/{kapitel.id}" and state.kurs_test is None
@@ -516,15 +531,15 @@ async def test_anstrengung_bis_7_belegt_die_skala_vor_und_fragt_die_wiederholung
     assert knopf.content == "Bei 7 angekommen"
     await klick(knopf)
     ergebnis = _ansicht(u, kurs, kapitel, block, kaefer)
-    assert _daten(ergebnis, ("test_skala", 7)).bgcolor == ft.Colors.PRIMARY  # vorbelegt
+    assert _skala_wert(ergebnis) == "7" and _skala(ergebnis).value == 7  # vorbelegt
     assert _daten(ergebnis, "zeit").value == "1:12"
     assert not _daten(ergebnis, "test_eintragen").disabled  # freiwillig: kein Wert nötig
     feld = _daten(ergebnis, "test_wdh")
     feld.value = "22"
     feld.on_change(SimpleNamespace(control=feld))
     assert not _daten(ergebnis, "test_eintragen").disabled
-    await klick(_daten(ergebnis, ("test_skala", 8)))  # änderbar
-    assert _daten(ergebnis, ("test_skala", 7)).bgcolor is None
+    _skala_setzen(ergebnis, 8)  # änderbar
+    assert _skala_wert(ergebnis) == "8"
     await klick(_daten(ergebnis, "test_eintragen"))
     await _bis_vorbei(u)
     (eintrag,) = _eintraege(state, kaefer)
@@ -666,7 +681,7 @@ async def test_zeit_laeuft_rueckwaerts_und_endet_von_selbst(umgebung, monkeypatc
     assert _daten(ergebnis, "zeit").value == "1:00" and "die Vorgabe" in texte
     assert "Wiederholungen" not in texte and not _hat(ergebnis, "test_wdh")
     assert not _daten(ergebnis, "test_eintragen").disabled
-    await klick(_daten(ergebnis, ("test_skala", 5)))
+    _skala_setzen(ergebnis, 5)
     await klick(_daten(ergebnis, "test_eintragen"))
     await _bis_vorbei(u)
     (eintrag,) = _eintraege(state, planke)
@@ -1254,7 +1269,7 @@ async def test_vorgabe_mit_timer_und_takt_der_timer_kann_eher_durch_sein(umgebun
     texte = _texte(ergebnis)
     assert _daten(ergebnis, "test_ende").value == "Der Timer ist durch"
     assert "Der Takt lief 8 Runden. Stimmt die Zahl?" in texte and "vom Timer" in texte
-    assert all(_daten(ergebnis, ("test_skala", w)).bgcolor is None for w in range(11))
+    assert _skala_wert(ergebnis) == ""
     await klick(_daten(ergebnis, "test_eintragen"))
     await _bis_vorbei(u)
     (eintrag,) = _eintraege(state, kaefer)
@@ -1676,10 +1691,13 @@ async def test_eintragen_im_lauf_steht_im_ergebnis(umgebung) -> None:
     for wert in ("8", "6"):
         feld.value = wert
         feld.on_submit(SimpleNamespace(control=feld))
-    chip = next(
-        c for c in _alle(ansicht) if isinstance(c, ft.Chip) and getattr(c.label, "value", "") == "7"
+    linie = next(
+        c
+        for c in _alle(ansicht)
+        if isinstance(c, ft.Slider) and isinstance(c.data, tuple) and c.data[:1] == ("skala",)
     )
-    chip.on_select()
+    linie.value = 7
+    linie.on_change_end(None)
     await _sekunden(u, 21)
     kurs_test.pruefen(u.seite, state)  # der Wächter tut dasselbe
     stand = state.kurs_test
